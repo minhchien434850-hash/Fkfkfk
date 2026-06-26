@@ -58,7 +58,7 @@ struct MainTabView: View {
                 .tabItem { Label("Video", systemImage: "play.rectangle.on.rectangle.fill") }
                 .tag(14)
             StoreView() // App bán hàng (sản phẩm · key · tải game)
-                .tabItem { Label("Ứng dụng", systemImage: "bag.fill") }
+                .tabItem { Label("Cửa hàng", systemImage: "bag.fill") }
                 .tag(15)
             FriendsView()
                 .tabItem { Label("Bạn bè", systemImage: "person.2.fill") }
@@ -111,7 +111,7 @@ struct MainTabView: View {
         case 12: return "Trò chơi"
         case 13: return "GitHub"
         case 14: return "Video"
-        case 15: return "Ứng dụng"
+        case 15: return "Cửa hàng"
         case 16: return "Khám phá"
         case 5: return "Cài đặt"
         case 6: return "Quản trị"

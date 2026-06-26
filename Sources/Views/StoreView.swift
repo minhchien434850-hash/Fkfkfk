@@ -147,6 +147,8 @@ struct StoreView: View {
     @State private var downloads: [StoreDownloadItem] = []
     @State private var contacts: StoreContacts?
     @State private var search = ""
+    @State private var allProducts: [StoreProduct] = []
+    @State private var loadingProducts = false
 
     private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -166,6 +168,10 @@ struct StoreView: View {
 
                     if !downloads.isEmpty {
                         downloadsSection
+                    }
+
+                    if !allProducts.isEmpty {
+                        allProductsSection
                     }
 
                     if !categories.isEmpty {
@@ -199,7 +205,7 @@ struct StoreView: View {
                 }
                 .padding()
             }
-            .navigationTitle(config?.logoName ?? "Ứng dụng")
+            .navigationTitle(config?.logoName ?? "Cửa hàng")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -311,6 +317,63 @@ struct StoreView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
+    // Toàn bộ sản phẩm — hiện ngay khi vào cửa hàng
+    private var allProductsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Tất cả sản phẩm", systemImage: "bag.fill")
+                    .font(.headline)
+                Spacer()
+                Text("\(allProducts.count) sản phẩm")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(allProducts) { product in
+                        NavigationLink { StoreProductDetailView(product: product) } label: {
+                            allProductCard(product)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+    }
+
+    private func allProductCard(_ p: StoreProduct) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            StoreThumb(media: p.media, height: 100)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(p.name)
+                    .font(.caption.bold())
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !p.prices.isEmpty {
+                    Text(kFormatVND(p.prices[0].amount))
+                        .font(.caption2.bold())
+                        .foregroundStyle(Theme.accent)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 11))
+                    Text("Tải xuống")
+                        .font(.caption2.bold())
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(Theme.accent.opacity(0.13))
+                .foregroundStyle(Theme.accent)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .padding(8)
+        }
+        .frame(width: 150)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+    }
+
     private var searchField: some View {
         HStack {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -384,7 +447,6 @@ struct StoreView: View {
 
     private func reload() async {
         loading = true; error = nil
-        // Xoá cache để luôn lấy dữ liệu mới nhất từ server
         URLCache.shared.removeAllCachedResponses()
         async let cfgTask = store.api.storeConfig()
         async let dlTask  = store.api.storeDownloads()
@@ -396,6 +458,36 @@ struct StoreView: View {
         do { categories = try await catTask }
         catch { self.error = error.localizedDescription }
         loading = false
+        // Tải toàn bộ sản phẩm ngay sau khi có danh sách danh mục
+        if !categories.isEmpty { await loadAllProducts() }
+    }
+
+    private func loadAllProducts() async {
+        guard !loadingProducts else { return }
+        loadingProducts = true
+        var seen = Set<Int>()
+        var products: [StoreProduct] = []
+        await withTaskGroup(of: [StoreProduct].self) { group in
+            for cat in categories {
+                group.addTask {
+                    let folders = (try? await self.store.api.storeFolders(categoryId: cat.id)) ?? []
+                    var catProducts: [StoreProduct] = []
+                    for folder in folders {
+                        let prods = (try? await self.store.api.storeProducts(folderId: folder.id)) ?? []
+                        catProducts.append(contentsOf: prods)
+                    }
+                    return catProducts
+                }
+            }
+            for await batch in group {
+                for p in batch where !seen.contains(p.id) {
+                    seen.insert(p.id)
+                    products.append(p)
+                }
+            }
+        }
+        allProducts = products
+        loadingProducts = false
     }
 }
 
