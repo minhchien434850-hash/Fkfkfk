@@ -64,6 +64,11 @@ struct StoreAdminView: View {
                         Label("Giao diện cửa hàng (logo, banner)", systemImage: "paintpalette")
                     }
                     NavigationLink {
+                        StoreContactsEditor()
+                    } label: {
+                        Label("Liên hệ admin & Nhóm cộng đồng", systemImage: "bubble.left.and.text.bubble.right")
+                    }
+                    NavigationLink {
                         StoreTopupBonusEditor()
                     } label: {
                         Label("Khuyến mãi nạp ví (%)", systemImage: "percent")

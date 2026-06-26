@@ -303,6 +303,19 @@ struct StoreDownloadItem: Identifiable, Decodable, Hashable {
 
 struct StoreTopupBonus: Decodable { let percent: Int }
 
+// ---- Liên hệ admin & Nhóm cộng đồng (mạng xã hội) ----
+struct SocialLink: Identifiable, Decodable, Hashable {
+    var id: String { platform }
+    let platform: String
+    let url: String
+    let enabled: Bool
+}
+
+struct StoreContacts: Decodable {
+    let contact: [SocialLink]
+    let groups: [SocialLink]
+}
+
 struct StoreCategory: Identifiable, Decodable, Hashable {
     let id: Int
     let name: String

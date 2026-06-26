@@ -4534,6 +4534,59 @@ def admin_set_topup_bonus(b: TopupBonusIn, admin=Depends(get_admin)) -> dict[str
     return {"message": f"Đã đặt khuyến mãi nạp ví {p}%.", "percent": p}
 
 
+# -------------------- Liên hệ admin & Nhóm cộng đồng (mạng xã hội) --------------------
+class SocialLink(BaseModel):
+    platform: str
+    url: str = ""
+    enabled: bool = False
+
+class StoreContactsIn(BaseModel):
+    contact: list[SocialLink] = []   # Liên hệ admin
+    groups: list[SocialLink] = []    # Nhóm cộng đồng
+
+def _load_links(key: str) -> list:
+    try:
+        v = json.loads(get_setting(key, "[]") or "[]")
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+def _dump_links(items) -> str:
+    out = []
+    for m in (items or []):
+        if isinstance(m, SocialLink):
+            d = {"platform": m.platform, "url": (m.url or "").strip(), "enabled": bool(m.enabled)}
+        elif isinstance(m, dict):
+            d = {"platform": m.get("platform", ""), "url": (m.get("url", "") or "").strip(),
+                 "enabled": bool(m.get("enabled"))}
+        else:
+            continue
+        if d["platform"]:
+            out.append(d)
+    return json.dumps(out, ensure_ascii=False)
+
+@app.get("/store/contacts")
+def store_contacts() -> dict[str, Any]:
+    """Công khai: chỉ trả các liên kết đã BẬT và có link (cho khách xem)."""
+    def enabled_only(key: str) -> list:
+        return [x for x in _load_links(key)
+                if x.get("enabled") and (x.get("url") or "").strip()]
+    return {"contact": enabled_only("store_contact_links"),
+            "groups": enabled_only("store_group_links")}
+
+@app.get("/admin/store/contacts")
+def admin_get_contacts(admin=Depends(get_admin)) -> dict[str, Any]:
+    """Admin: trả full (cả mục tắt) để chỉnh sửa."""
+    return {"contact": _load_links("store_contact_links"),
+            "groups": _load_links("store_group_links")}
+
+@app.post("/admin/store/contacts")
+def admin_set_contacts(b: StoreContactsIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    set_setting("store_contact_links", _dump_links(b.contact))
+    set_setting("store_group_links", _dump_links(b.groups))
+    return {"message": "Đã lưu liên hệ admin & nhóm cộng đồng."}
+
+
 # -------------------- Admin: danh mục --------------------
 class StoreCategoryIn(BaseModel):
     id: Optional[int] = None

@@ -99,6 +99,7 @@ struct StoreView: View {
     @State private var showMyOrders = false
     @State private var showWallet = false
     @State private var downloads: [StoreDownloadItem] = []
+    @State private var contacts: StoreContacts?
     @State private var search = ""
 
     private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
@@ -140,6 +141,10 @@ struct StoreView: View {
                                 .buttonStyle(.plain)
                             }
                         }
+                    }
+
+                    if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
+                        StoreContactsBlock(contacts: c)
                     }
 
                     if let error {
@@ -304,6 +309,7 @@ struct StoreView: View {
         loading = true; error = nil
         config = try? await store.api.storeConfig()
         downloads = (try? await store.api.storeDownloads()) ?? []
+        contacts = try? await store.api.storeContacts()
         do { categories = try await store.api.storeCategories() }
         catch { self.error = error.localizedDescription }
         loading = false

@@ -369,6 +369,17 @@ struct APIClient {
     func adminSetTopupBonus(percent: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/store/topup-bonus", method: "POST", json: ["percent": percent]))
     }
+    // Liên hệ admin & nhóm cộng đồng
+    func storeContacts() async throws -> StoreContacts {
+        try decode(try await send("/store/contacts", auth: false))
+    }
+    func adminGetContacts() async throws -> StoreContacts {
+        try decode(try await send("/admin/store/contacts"))
+    }
+    func adminSetContacts(contact: [[String: Any]], groups: [[String: Any]]) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/contacts", method: "POST",
+                                  json: ["contact": contact, "groups": groups]))
+    }
 
     // -- Admin: giao diện store --
     func adminStoreSetConfig(logoName: String, logoUrl: String,
