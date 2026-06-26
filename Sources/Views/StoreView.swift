@@ -265,9 +265,13 @@ struct StoreProductListView: View {
                     Text("Từ \(kFormatVND(cheapest))").font(.subheadline).foregroundStyle(Theme.accent)
                 }
                 HStack(spacing: 8) {
-                    Text(p.availableKeys > 0 ? "Còn \(p.availableKeys) key" : "Tạm hết key")
+                    Text(p.availableKeys > 0 ? "Còn \(p.availableKeys) \(p.stockLabel)" : "Tạm hết hàng")
                         .font(.caption2)
                         .foregroundStyle(p.availableKeys > 0 ? .green : .red)
+                    if p.isAcc {
+                        Label("Acc game", systemImage: "gamecontroller")
+                            .font(.caption2).foregroundStyle(.purple)
+                    }
                     if p.hasDownload {
                         Label("Có bản tải", systemImage: "arrow.down.circle")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -340,7 +344,7 @@ struct StoreProductDetailView: View {
                 .font(.headline).foregroundStyle(.green)
             if let key = m.key, !key.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("KEY của bạn").font(.caption).foregroundStyle(.secondary)
+                    Text("\(product?.itemLabel ?? "KEY") của bạn").font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Text(key).font(.body.monospaced()).textSelection(.enabled)
                         Spacer()
@@ -368,7 +372,7 @@ struct StoreProductDetailView: View {
             }
         } else if let fileId {
             StoreFileDownloadButton(fileId: fileId)
-        } else {
+        } else if !(product?.isAcc ?? false) {
             Text("Sản phẩm chưa có bản tải. Liên hệ admin.")
                 .font(.caption).foregroundStyle(.secondary)
         }

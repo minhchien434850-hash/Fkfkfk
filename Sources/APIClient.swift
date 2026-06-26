@@ -375,10 +375,10 @@ struct APIClient {
     }
     func adminStoreSaveProduct(id: Int?, folderId: Int, name: String, description: String,
                                media: [[String: String]], downloadUrl: String,
-                               downloadFileId: Int?) async throws -> IdResponse {
+                               downloadFileId: Int?, kind: String) async throws -> IdResponse {
         var body: [String: Any] = ["folder_id": folderId, "name": name,
                                     "description": description, "media": media,
-                                    "download_url": downloadUrl]
+                                    "download_url": downloadUrl, "kind": kind]
         if let id { body["id"] = id }
         if let downloadFileId { body["download_file_id"] = downloadFileId }
         return try decode(try await send("/admin/store/products", method: "POST", json: body))
@@ -407,6 +407,9 @@ struct APIClient {
     }
     func adminStoreOrders() async throws -> [StoreAdminOrder] {
         try decode(try await send("/admin/store/orders"))
+    }
+    func adminStoreKeysBackup() async throws -> StoreKeysBackup {
+        try decode(try await send("/admin/store/keys-backup"))
     }
 
     // ---- Admin API keys (server-side) ----

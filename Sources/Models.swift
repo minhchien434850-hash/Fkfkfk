@@ -280,6 +280,12 @@ struct StoreProduct: Identifiable, Decodable, Hashable {
     let prices: [StorePrice]
     let availableKeys: Int
     let hasDownload: Bool
+    let kind: String?   // "app" (key/ứng dụng) | "acc" (acc game)
+
+    var isAcc: Bool { (kind ?? "app") == "acc" }
+    /// Nhãn cho phần "key/acc" tuỳ loại sản phẩm
+    var itemLabel: String { isAcc ? "Tài khoản" : "KEY" }
+    var stockLabel: String { isAcc ? "acc" : "key" }
 }
 
 struct StoreProductMine: Decodable, Hashable {
@@ -334,6 +340,23 @@ struct StoreAdminOrder: Identifiable, Decodable, Hashable {
     let createdAt: Int?
     let productName: String
     let username: String
+}
+
+struct StoreKeyBackupEntry: Identifiable, Decodable, Hashable {
+    var id: String { "\(orderId)-\(time)" }
+    let time: Int
+    let orderId: Int
+    let productName: String
+    let kind: String?
+    let username: String
+    let publicId: String?
+    let amount: Int
+    let key: String
+}
+
+struct StoreKeysBackup: Decodable {
+    let total: Int
+    let entries: [StoreKeyBackupEntry]
 }
 
 struct IdResponse: Decodable { let message: String; let id: Int? }

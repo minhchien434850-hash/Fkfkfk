@@ -70,6 +70,9 @@ KENIOS_AI_KEY    = os.getenv("KENIOS_AI_KEY", "ollama")   # Ollama bỏ qua, ch�
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# File backup các KEY / ACC đã bán (mỗi dòng 1 JSON). Admin xem trong cài đặt cửa hàng.
+STORE_KEYS_BACKUP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "store_sold_keys_backup.jsonl")
+
 # Kích thước tệp giới hạn (1KB - 4GB)
 MIN_FILE_SIZE = 1024
 MAX_FILE_SIZE = 4_294_967_296  # 4GB
@@ -529,6 +532,7 @@ def init_db() -> None:
                 media TEXT DEFAULT '[]',
                 download_url TEXT DEFAULT '',
                 download_file_id INTEGER,
+                kind TEXT DEFAULT 'app',     -- app (key/ứng dụng) | acc (acc game)
                 sort INTEGER DEFAULT 0,
                 created_at INTEGER
             );
@@ -555,6 +559,7 @@ def init_db() -> None:
                 product_id INTEGER NOT NULL,
                 price_id INTEGER,
                 key_id INTEGER,
+                key_text TEXT,                   -- lưu key/acc đã giao (key gốc bị xoá khỏi kho)
                 amount INTEGER NOT NULL,
                 status TEXT DEFAULT 'pending',   -- pending | completed
                 ref TEXT,
@@ -719,6 +724,9 @@ def _migrate() -> None:
         ("conversations", "share_token", "TEXT"),
         ("messages", "tokens_used", "INTEGER"),
         ("mailboxes", "phone", "TEXT"),
+        # App bán hàng: loại sản phẩm (app/key vs acc game) + lưu key trực tiếp vào đơn
+        ("store_products", "kind", "TEXT DEFAULT 'app'"),   # app | acc
+        ("store_orders", "key_text", "TEXT"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -3656,22 +3664,24 @@ def payment_packages() -> list[dict[str, Any]]:
 def payment_create(b: PaymentIn, user=Depends(get_user)) -> dict[str, Any]:
     # Mọi đơn đều là nâng cấp PRO (bỏ qua tên gói client gửi lên).
     pkg = _pro_package()
-    ref = secrets.token_urlsafe(16)
+    ref = secrets.token_urlsafe(12)
     with db() as c:
+        # Nội dung chuyển khoản = ID khách hàng → hệ thống tự dò ID để xác nhận.
+        cid = _ensure_public_id(c, user["id"])
         cur = c.execute(
             "INSERT INTO payments(user_id,amount,credits,status,ref,created_at) "
             "VALUES(?,?,?,'pending',?,?)",
             (user["id"], pkg["amount"], pkg["credits"], ref, int(time.time())),
         )
         pid = cur.lastrowid
-    bank = bank_info(amount=pkg["amount"], note=f"KENIOS {ref}")
+    bank = bank_info(amount=pkg["amount"], note=cid)
     return {
         "payment_id": pid,
-        "ref": ref,
+        "ref": cid,
         "amount": pkg["amount"],
         "credits": pkg["credits"],
         "label": pkg["label"],
-        "message": "Quét mã QR hoặc chuyển khoản theo thông tin bên dưới.",
+        "message": f"Chuyển khoản với nội dung là ID của bạn: {cid}. Hệ thống tự xác nhận sau khi nhận tiền.",
         "bank_info": bank,
         "qr_url": bank["qr_url"],
     }
@@ -3762,6 +3772,97 @@ def _determine_plan_from_credits(credits: int) -> str:
     return "free"
 
 
+def _finalize_payment_row(c, pay) -> None:
+    """Hoàn tất 1 đơn PRO/credits (đã chắc chắn pending)."""
+    c.execute("UPDATE payments SET status='completed' WHERE id=?", (pay["id"],))
+    if pay["credits"] and pay["credits"] > 0:
+        c.execute("UPDATE users SET credits=credits+? WHERE id=?", (pay["credits"], pay["user_id"]))
+        new_plan = _determine_plan_from_credits(pay["credits"])
+        if new_plan != "free":
+            c.execute("UPDATE users SET plan=? WHERE id=? AND plan IN ('free','pro','ultra')",
+                      (new_plan, pay["user_id"]))
+    else:
+        c.execute("UPDATE users SET plan='pro' WHERE id=?", (pay["user_id"],))
+
+
+def _backup_sold_key(c, order, key_text: str) -> None:
+    """Ghi 1 dòng JSON sao lưu key/acc đã bán vào file backup (admin xem được)."""
+    prod = c.execute("SELECT name,kind FROM store_products WHERE id=?", (order["product_id"],)).fetchone()
+    usr = c.execute("SELECT username,public_id FROM users WHERE id=?", (order["user_id"],)).fetchone()
+    entry = {
+        "time": int(time.time()), "order_id": order["id"], "product_id": order["product_id"],
+        "product_name": prod["name"] if prod else "", "kind": (prod["kind"] if prod else "app"),
+        "user_id": order["user_id"], "username": usr["username"] if usr else "",
+        "public_id": usr["public_id"] if usr else "", "amount": order["amount"], "key": key_text,
+    }
+    try:
+        with open(STORE_KEYS_BACKUP, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        log.error("Backup key lỗi: %s", e)
+
+
+def _finalize_store_order_row(c, order) -> None:
+    """Hoàn tất 1 đơn mua sản phẩm: cấp 1 key khả dụng, sao lưu rồi XOÁ key khỏi kho."""
+    key = c.execute("SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
+                    "ORDER BY id ASC LIMIT 1", (order["product_id"],)).fetchone()
+    if not key:
+        c.execute("UPDATE store_orders SET status='completed' WHERE id=?", (order["id"],))
+        log.warning("Store: đơn #%d đã thanh toán nhưng HẾT key (product=%d)",
+                    order["id"], order["product_id"])
+        return
+    _backup_sold_key(c, order, key["key_text"])
+    c.execute("UPDATE store_orders SET status='completed', key_id=?, key_text=? WHERE id=?",
+              (key["id"], key["key_text"], order["id"]))
+    # Khách đã nhận key → tự động xoá key khỏi kho (không bao giờ bán lại)
+    c.execute("DELETE FROM store_keys WHERE id=?", (key["id"],))
+    log.info("Store xác nhận: đơn #%d, user=%d, product=%d (đã xoá key khỏi kho)",
+             order["id"], order["user_id"], order["product_id"])
+
+
+def _match_amount(rows, amount: int):
+    """Chọn đơn pending khớp số tiền: ưu tiên khớp đúng, sau đó đơn có giá ≤ số tiền nhận."""
+    rows = list(rows)
+    if not rows:
+        return None
+    if amount and amount > 0:
+        for r in rows:
+            if r["amount"] == amount:
+                return r
+        for r in rows:
+            if r["amount"] <= amount:
+                return r
+        return None
+    return rows[0]
+
+
+def _confirm_by_customer_id(cid: str, amount: int) -> bool:
+    """Xác nhận chuyển khoản dựa trên ID khách hàng trong nội dung CK + số tiền."""
+    try:
+        with db() as c:
+            u = c.execute("SELECT id FROM users WHERE public_id=?", (cid,)).fetchone()
+            if not u:
+                return False
+            uid = u["id"]
+            pays = c.execute("SELECT * FROM payments WHERE user_id=? AND status='pending' "
+                             "ORDER BY id ASC", (uid,)).fetchall()
+            pay = _match_amount(pays, amount)
+            if pay:
+                _finalize_payment_row(c, pay)
+                log.info("Xác nhận theo ID=%s: đơn PRO #%d", cid, pay["id"])
+                return True
+            orders = c.execute("SELECT * FROM store_orders WHERE user_id=? AND status='pending' "
+                               "ORDER BY id ASC", (uid,)).fetchall()
+            order = _match_amount(orders, amount)
+            if order:
+                _finalize_store_order_row(c, order)
+                return True
+        return False
+    except Exception as e:
+        log.error("Lỗi xác nhận theo ID=%s: %s", cid, e)
+        return False
+
+
 @app.post("/payment/confirm/{pid}")
 def payment_confirm(pid: int, admin=Depends(get_admin)) -> dict[str, Any]:
     with db() as c:
@@ -3770,18 +3871,9 @@ def payment_confirm(pid: int, admin=Depends(get_admin)) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="Không tìm thấy đơn thanh toán.")
         if pay["status"] == "completed":
             raise HTTPException(status_code=400, detail="Đơn đã được xác nhận trước đó.")
-        c.execute("UPDATE payments SET status='completed' WHERE id=?", (pid,))
-        if pay["credits"] and pay["credits"] > 0:
-            # Đơn cũ theo credits (giữ tương thích)
-            c.execute("UPDATE users SET credits=credits+? WHERE id=?",
-                      (pay["credits"], pay["user_id"]))
-            new_plan = _determine_plan_from_credits(pay["credits"])
-            if new_plan != "free":
-                c.execute("UPDATE users SET plan=? WHERE id=? AND plan IN ('free','pro','ultra')",
-                          (new_plan, pay["user_id"]))
-            return {"message": f"Đã cộng {pay['credits']} credits cho user {pay['user_id']}."}
-        # Đơn nâng cấp PRO (không credits) → nâng tài khoản lên PRO
-        c.execute("UPDATE users SET plan='pro' WHERE id=?", (pay["user_id"],))
+        _finalize_payment_row(c, pay)
+    if pay["credits"] and pay["credits"] > 0:
+        return {"message": f"Đã cộng {pay['credits']} credits cho user {pay['user_id']}."}
     return {"message": f"Đã nâng cấp tài khoản user {pay['user_id']} lên PRO."}
 
 
@@ -3808,113 +3900,78 @@ async def payment_webhook(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Body JSON không hợp lệ.")
 
     confirmed = 0
-    data_list = body.get("data", [])
-    if isinstance(data_list, list):
-        for item in data_list:
-            desc = item.get("description", "") or item.get("content", "")
-            amount = item.get("amount", 0) or item.get("transferAmount", 0)
-            ref = _extract_ref(desc)
-            if ref:
-                if _auto_confirm_payment(ref, amount):
-                    confirmed += 1
-
-    if not data_list:
-        desc = body.get("content", "") or body.get("description", "")
-        amount = body.get("transferAmount", 0) or body.get("amount", 0)
-        ref = _extract_ref(desc)
-        if ref:
-            if _auto_confirm_payment(ref, amount):
-                confirmed += 1
+    items = body.get("data", []) if isinstance(body.get("data"), list) else [body]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        desc = (item.get("description", "") or item.get("content", "")
+                or item.get("transactionContent", ""))
+        amount = item.get("amount", 0) or item.get("transferAmount", 0) or item.get("creditAmount", 0)
+        try:
+            amount = int(float(str(amount).replace(",", "")))
+        except (TypeError, ValueError):
+            amount = 0
+        if _confirm_from_description(desc, amount):
+            confirmed += 1
 
     return {"success": True, "confirmed": confirmed}
+
+
+def _extract_customer_id(description: str) -> Optional[str]:
+    """Lấy ID khách hàng (dạng KEN + chữ số) trong nội dung chuyển khoản."""
+    if not description:
+        return None
+    m = re.search(r"(KEN\d{6,})", description, re.IGNORECASE)
+    return m.group(1).upper() if m else None
 
 
 def _extract_ref(description: str) -> Optional[str]:
     if not description:
         return None
     match = re.search(r"KENIOS\s+(\S+)", description, re.IGNORECASE)
-    if match:
-        return match.group(1)
-    return None
+    return match.group(1) if match else None
+
+
+def _confirm_from_description(desc: str, amount: int) -> bool:
+    """Ưu tiên dò theo ID khách hàng; nếu không có thì thử theo mã ref cũ."""
+    cid = _extract_customer_id(desc)
+    if cid and _confirm_by_customer_id(cid, amount):
+        return True
+    ref = _extract_ref(desc)
+    if ref and _auto_confirm_payment(ref, amount):
+        return True
+    return False
 
 
 def _auto_confirm_payment(ref: str, amount: int) -> bool:
+    """Tương thích cũ: xác nhận theo mã ref (token) cho đơn PRO hoặc đơn cửa hàng."""
     try:
         with db() as c:
             pay = c.execute(
-                "SELECT id,user_id,credits,amount,status FROM payments WHERE ref=? AND status='pending'",
-                (ref,)
+                "SELECT * FROM payments WHERE ref=? AND status='pending'", (ref,)
             ).fetchone()
-            if not pay:
-                # Không phải đơn nâng cấp PRO → thử đơn mua sản phẩm trong app bán hàng
-                return _confirm_store_order_by_ref(ref, amount)
-            if amount > 0 and abs(amount - pay["amount"]) > pay["amount"] * 0.05:
-                log.warning("Webhook: ref=%s amount mismatch (expected=%d, got=%d)",
-                           ref, pay["amount"], amount)
-                if amount < pay["amount"]:
+            if pay:
+                if amount > 0 and amount < pay["amount"]:
                     return False
-            c.execute("UPDATE payments SET status='completed' WHERE id=?", (pay["id"],))
-            if pay["credits"] and pay["credits"] > 0:
-                c.execute("UPDATE users SET credits=credits+? WHERE id=?",
-                          (pay["credits"], pay["user_id"]))
-                new_plan = _determine_plan_from_credits(pay["credits"])
-                if new_plan != "free":
-                    c.execute("UPDATE users SET plan=? WHERE id=? AND plan IN ('free','pro','ultra')",
-                              (new_plan, pay["user_id"]))
-            else:
-                # Đơn nâng cấp PRO (không credits)
-                c.execute("UPDATE users SET plan='pro' WHERE id=?", (pay["user_id"],))
-            log.info("Webhook xác nhận: ref=%s, user=%d, credits=%d",
-                    ref, pay["user_id"], pay["credits"])
-        return True
-    except Exception as e:
-        log.error("Webhook lỗi xác nhận ref=%s: %s", ref, e)
-        return False
-
-
-def _confirm_store_order_by_ref(ref: str, amount: int) -> bool:
-    """Xác nhận đơn mua sản phẩm (app bán hàng) khi nhận được chuyển khoản khớp ref + số tiền.
-
-    Khi khớp: cấp 1 key khả dụng của sản phẩm cho khách, đánh dấu key đã bán và đơn hoàn tất.
-    """
-    try:
-        with db() as c:
-            order = c.execute(
-                "SELECT id,user_id,product_id,price_id,amount,status FROM store_orders "
-                "WHERE ref=? AND status='pending'", (ref,)
-            ).fetchone()
-            if not order:
-                return False
-            if amount > 0 and amount < order["amount"]:
-                log.warning("Store: ref=%s chuyển thiếu (cần=%d, nhận=%d)",
-                            ref, order["amount"], amount)
-                return False
-            key = c.execute(
-                "SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
-                "ORDER BY id ASC LIMIT 1", (order["product_id"],)
-            ).fetchone()
-            if not key:
-                # Hết key — vẫn đánh dấu đã thanh toán để admin xử lý tay
-                c.execute("UPDATE store_orders SET status='completed' WHERE id=?", (order["id"],))
-                log.warning("Store: ref=%s đã thanh toán nhưng HẾT key (product=%d)",
-                            ref, order["product_id"])
+                _finalize_payment_row(c, pay)
                 return True
-            now = int(time.time())
-            c.execute("UPDATE store_keys SET status='sold', owner_uid=?, price_id=?, sold_at=? WHERE id=?",
-                      (order["user_id"], order["price_id"], now, key["id"]))
-            c.execute("UPDATE store_orders SET status='completed', key_id=? WHERE id=?",
-                      (key["id"], order["id"]))
-            log.info("Store xác nhận: ref=%s, user=%d, product=%d, key=%d",
-                     ref, order["user_id"], order["product_id"], key["id"])
-        return True
+            order = c.execute(
+                "SELECT * FROM store_orders WHERE ref=? AND status='pending'", (ref,)
+            ).fetchone()
+            if order:
+                if amount > 0 and amount < order["amount"]:
+                    return False
+                _finalize_store_order_row(c, order)
+                return True
+        return False
     except Exception as e:
-        log.error("Store lỗi xác nhận ref=%s: %s", ref, e)
+        log.error("Lỗi xác nhận ref=%s: %s", ref, e)
         return False
 
 
 # ======================== Nạp tiền tự động qua thueapibank.vn (ACB) ========================
 async def _acb_fetch_and_confirm() -> int:
-    """Gọi API lịch sử giao dịch ACB của thueapibank.vn, dò nội dung CK chứa ref rồi tự xác nhận."""
+    """Gọi API lịch sử giao dịch ACB của thueapibank.vn, dò ID khách trong nội dung CK rồi tự xác nhận."""
     token = get_setting("acb_api_token", "").strip()
     if not token:
         return 0
@@ -3952,8 +4009,7 @@ async def _acb_fetch_and_confirm() -> int:
             amount = int(float(str(amt_raw).replace(",", "").replace(".", "") or 0))
         except (TypeError, ValueError):
             amount = 0
-        ref = _extract_ref(desc)
-        if ref and _auto_confirm_payment(ref, amount):
+        if _confirm_from_description(desc, amount):
             confirmed += 1
     if confirmed:
         log.info("ACB tự động xác nhận %d giao dịch.", confirmed)
@@ -4022,12 +4078,19 @@ def _product_prices(c, pid: int) -> list:
                      "ORDER BY sort ASC, amount ASC", (pid,)).fetchall()
     return [{"id": r["id"], "label": r["label"], "amount": r["amount"]} for r in rows]
 
+def _row_kind(row) -> str:
+    try:
+        return row["kind"] or "app"
+    except (IndexError, KeyError):
+        return "app"
+
 def _product_public(c, row) -> dict:
     avail = c.execute("SELECT COUNT(*) AS n FROM store_keys WHERE product_id=? AND status='available'",
                       (row["id"],)).fetchone()["n"]
     return {
         "id": row["id"], "folder_id": row["folder_id"],
         "name": row["name"], "description": row["description"] or "",
+        "kind": _row_kind(row),
         "media": _load_media(row["media"]),
         "prices": _product_prices(c, row["id"]),
         "available_keys": avail,
@@ -4082,13 +4145,15 @@ def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
         prod = c.execute("SELECT * FROM store_products WHERE id=?", (pid,)).fetchone()
         if not prod:
             raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
-        key = c.execute("SELECT key_text FROM store_keys WHERE product_id=? AND owner_uid=? "
-                        "ORDER BY sold_at DESC LIMIT 1", (pid, user["id"])).fetchone()
-        if not key:
+        # Key đã được giao lưu trong đơn (key gốc đã bị xoá khỏi kho sau khi bán)
+        order = c.execute("SELECT key_text FROM store_orders WHERE product_id=? AND user_id=? "
+                          "AND status='completed' ORDER BY id DESC LIMIT 1",
+                          (pid, user["id"])).fetchone()
+        if not order:
             return {"owned": False}
         return {
             "owned": True,
-            "key": key["key_text"],
+            "key": order["key_text"] or "",
             "download_url": prod["download_url"] or "",
             "download_file_id": prod["download_file_id"],
         }
@@ -4116,18 +4181,19 @@ def store_create_order(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any
         avail = c.execute("SELECT COUNT(*) AS n FROM store_keys WHERE product_id=? AND status='available'",
                           (b.product_id,)).fetchone()["n"]
         if avail <= 0:
-            raise HTTPException(status_code=400, detail="Sản phẩm tạm hết key. Vui lòng quay lại sau.")
+            raise HTTPException(status_code=400, detail="Sản phẩm tạm hết hàng. Vui lòng quay lại sau.")
         ref = secrets.token_urlsafe(10)
+        cid = _ensure_public_id(c, user["id"])   # nội dung CK = ID khách
         cur = c.execute(
             "INSERT INTO store_orders(user_id,product_id,price_id,amount,status,ref,created_at) "
             "VALUES(?,?,?,?,'pending',?,?)",
             (user["id"], b.product_id, price["id"], price["amount"], ref, int(time.time())))
         oid = cur.lastrowid
-    bank = bank_info(amount=price["amount"], note=f"KENIOS {ref}")
+    bank = bank_info(amount=price["amount"], note=cid)
     return {
-        "order_id": oid, "ref": ref, "amount": price["amount"],
+        "order_id": oid, "ref": cid, "amount": price["amount"],
         "label": price["label"], "product_name": prod["name"],
-        "message": "Chuyển khoản đúng số tiền & nội dung. Hệ thống tự xác nhận và cấp key trong giây lát.",
+        "message": f"Chuyển khoản với nội dung là ID của bạn: {cid}. Hệ thống tự xác nhận & giao hàng trong giây lát.",
         "bank_info": bank, "qr_url": bank["qr_url"],
     }
 
@@ -4135,16 +4201,14 @@ def store_create_order(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any
 def store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
     with db() as c:
         rows = c.execute(
-            "SELECT o.id,o.product_id,o.amount,o.status,o.ref,o.created_at,o.key_id,"
+            "SELECT o.id,o.product_id,o.amount,o.status,o.ref,o.created_at,o.key_text,"
             "p.name AS product_name,p.download_url,p.download_file_id "
             "FROM store_orders o LEFT JOIN store_products p ON p.id=o.product_id "
             "WHERE o.user_id=? ORDER BY o.id DESC", (user["id"],)).fetchall()
         out = []
         for r in rows:
-            key_text = None
-            if r["key_id"]:
-                k = c.execute("SELECT key_text FROM store_keys WHERE id=?", (r["key_id"],)).fetchone()
-                key_text = k["key_text"] if k else None
+            # key đã giao lưu thẳng trong đơn (store_keys gốc đã bị xoá sau khi bán)
+            key_text = r["key_text"] if r["status"] == "completed" else None
             out.append({
                 "id": r["id"], "product_id": r["product_id"],
                 "product_name": r["product_name"] or "(đã xoá)",
@@ -4254,6 +4318,7 @@ class StoreProductIn(BaseModel):
     media: list[MediaItem] = []
     download_url: str = ""
     download_file_id: Optional[int] = None
+    kind: str = "app"   # app (key/ứng dụng) | acc (acc game)
 
 @app.post("/admin/store/products")
 def admin_store_save_product(b: StoreProductIn, admin=Depends(get_admin)) -> dict[str, Any]:
@@ -4261,17 +4326,19 @@ def admin_store_save_product(b: StoreProductIn, admin=Depends(get_admin)) -> dic
     if not name:
         raise HTTPException(status_code=400, detail="Tên sản phẩm không được để trống.")
     media = _dump_media(b.media)
+    kind = "acc" if b.kind == "acc" else "app"
     with db() as c:
         if b.id:
-            c.execute("UPDATE store_products SET name=?,description=?,media=?,download_url=?,download_file_id=? "
-                      "WHERE id=?", (name, b.description or "", media, b.download_url or "",
-                                     b.download_file_id, b.id))
+            c.execute("UPDATE store_products SET name=?,description=?,media=?,download_url=?,"
+                      "download_file_id=?,kind=? WHERE id=?",
+                      (name, b.description or "", media, b.download_url or "",
+                       b.download_file_id, kind, b.id))
             pid = b.id
         else:
             cur = c.execute("INSERT INTO store_products(folder_id,name,description,media,download_url,"
-                            "download_file_id,created_at) VALUES(?,?,?,?,?,?,?)",
+                            "download_file_id,kind,created_at) VALUES(?,?,?,?,?,?,?,?)",
                             (b.folder_id, name, b.description or "", media, b.download_url or "",
-                             b.download_file_id, int(time.time())))
+                             b.download_file_id, kind, int(time.time())))
             pid = cur.lastrowid
     return {"message": "Đã lưu sản phẩm.", "id": pid}
 
@@ -4359,6 +4426,37 @@ def admin_store_orders(admin=Depends(get_admin)) -> list[dict[str, Any]]:
     return [{"id": r["id"], "amount": r["amount"], "status": r["status"], "ref": r["ref"],
              "created_at": r["created_at"], "product_name": r["product_name"] or "(đã xoá)",
              "username": r["username"] or "-"} for r in rows]
+
+
+# -------------------- Admin: sao lưu key/acc đã bán --------------------
+@app.get("/admin/store/keys-backup")
+def admin_store_keys_backup(admin=Depends(get_admin)) -> dict[str, Any]:
+    """Đọc file backup các key/acc đã bán (mỗi dòng 1 JSON), trả về danh sách mới nhất trước."""
+    entries: list[dict[str, Any]] = []
+    if os.path.exists(STORE_KEYS_BACKUP):
+        try:
+            with open(STORE_KEYS_BACKUP, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entries.append(json.loads(line))
+                    except Exception:
+                        pass
+        except Exception as e:
+            log.error("Đọc backup key lỗi: %s", e)
+    entries.reverse()
+    return {"total": len(entries), "entries": entries[:500]}
+
+
+@app.get("/admin/store/keys-backup/download")
+def admin_store_keys_backup_download(admin=Depends(get_admin)):
+    from fastapi.responses import FileResponse, PlainTextResponse
+    if not os.path.exists(STORE_KEYS_BACKUP):
+        return PlainTextResponse("", media_type="text/plain")
+    return FileResponse(STORE_KEYS_BACKUP, media_type="application/x-ndjson",
+                        filename="store_sold_keys_backup.jsonl")
 
 
 # ======================== Prompt Templates ========================

@@ -68,6 +68,11 @@ struct StoreAdminView: View {
                     } label: {
                         Label("Đơn hàng đã bán", systemImage: "list.bullet.rectangle")
                     }
+                    NavigationLink {
+                        StoreKeysBackupView()
+                    } label: {
+                        Label("Sao lưu KEY / ACC đã bán", systemImage: "externaldrive.badge.checkmark")
+                    }
                 }
 
                 Section("Danh mục (\(categories.count))") {
@@ -357,6 +362,7 @@ struct StoreProductEditor: View {
     @State private var savedId: Int?
     @State private var name = ""
     @State private var desc = ""
+    @State private var kind = "app"   // app (key/ứng dụng) | acc (acc game)
     @State private var media: [EditMedia] = []
     @State private var downloadUrl = ""
     @State private var downloadFileId: Int?
@@ -371,8 +377,16 @@ struct StoreProductEditor: View {
         NavigationStack {
             Form {
                 Section("Thông tin sản phẩm") {
+                    Picker("Loại", selection: $kind) {
+                        Text("Ứng dụng / Key").tag("app")
+                        Text("Acc game").tag("acc")
+                    }.pickerStyle(.segmented)
                     TextField("Tên sản phẩm", text: $name)
                     TextField("Mô tả (tuỳ chọn)", text: $desc, axis: .vertical).lineLimit(1...4)
+                    Text(kind == "acc"
+                         ? "Acc game: mỗi dòng trong kho là 1 tài khoản (vd user|pass). Khách mua xong tự nhận 1 acc."
+                         : "Ứng dụng/Key: mỗi dòng trong kho là 1 key. Khách mua xong tự nhận 1 key + bản tải.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 MediaEditor(media: $media)
                 Section("Bản tải (link hoặc file)") {
@@ -415,6 +429,7 @@ struct StoreProductEditor: View {
             .onAppear {
                 if let p = product {
                     name = p.name; desc = p.description; media = mediaToEdit(p.media)
+                    kind = p.kind ?? "app"
                 }
             }
             .fileImporter(isPresented: $showImporter,
@@ -432,7 +447,7 @@ struct StoreProductEditor: View {
             let r = try await store.api.adminStoreSaveProduct(
                 id: productId, folderId: folderId, name: name, description: desc,
                 media: editMediaToPayload(media), downloadUrl: downloadUrl,
-                downloadFileId: downloadFileId)
+                downloadFileId: downloadFileId, kind: kind)
             savedId = r.id ?? savedId
             isError = false; message = "Đã lưu sản phẩm."
             onDone()
@@ -633,5 +648,50 @@ struct StoreAdminOrdersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { orders = (try? await store.api.adminStoreOrders()) ?? [] }
         .refreshable { orders = (try? await store.api.adminStoreOrders()) ?? [] }
+    }
+}
+
+// ---- Sao lưu KEY/ACC đã bán (admin) ----
+struct StoreKeysBackupView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var backup: StoreKeysBackup?
+
+    var body: some View {
+        List {
+            if let b = backup {
+                Section("Đã bán: \(b.total)") {
+                    if b.entries.isEmpty {
+                        Text("Chưa có key/acc nào được bán.").foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(b.entries) { e in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text(e.productName).font(.subheadline.bold())
+                            if (e.kind ?? "app") == "acc" {
+                                Text("acc").font(.caption2).foregroundStyle(.purple)
+                            }
+                            Spacer()
+                            Text(kFormatVND(e.amount)).font(.caption).foregroundStyle(Theme.accent)
+                        }
+                        Text(e.key).font(.caption.monospaced()).textSelection(.enabled)
+                        Text("@\(e.username) · ID \(e.publicId ?? "-") · \(timeText(e.time))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            } else {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            }
+        }
+        .navigationTitle("Sao lưu KEY/ACC")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { backup = try? await store.api.adminStoreKeysBackup() }
+        .refreshable { backup = try? await store.api.adminStoreKeysBackup() }
+    }
+
+    private func timeText(_ ts: Int) -> String {
+        let f = DateFormatter(); f.dateFormat = "dd/MM HH:mm"
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
     }
 }
