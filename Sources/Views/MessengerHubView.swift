@@ -301,12 +301,15 @@ struct MessengerHubView: View {
     // ── UI ──────────────────────────────────
     @State private var activeTab: Int = 0
 
-    // Mỗi dòng kết thúc bằng dấu chấm (.) = 1 tin nhắn.
-    // Dòng không có dấu chấm ở cuối = chưa hoàn thành, bỏ qua.
+    // Quy tắc: dòng kết thúc bằng đúng 1 dấu chấm (.) + xuống dòng = 1 tin nhắn.
+    // "..." hoặc ".." ở cuối = KHÔNG tính. Dấu chấm giữa chữ không ảnh hưởng.
     private var messages: [String] {
         rawLines.components(separatedBy: "\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && $0.hasSuffix(".") }
+            .filter { line in
+                guard !line.isEmpty, line.hasSuffix(".") else { return false }
+                return !line.hasSuffix("..")   // loại "..." và ".."
+            }
     }
     private var manualPlatform: ManualPlatform {
         kManualPlatforms.first { $0.id == manualPlatformId } ?? kManualPlatforms[0]
@@ -360,7 +363,7 @@ struct MessengerHubView: View {
                             .foregroundStyle(store.accentColor)
                     }
                 } footer: {
-                    Text("Mỗi dòng kết thúc bằng dấu chấm (.) = 1 tin nhắn. Dòng chưa có dấu chấm sẽ bị bỏ qua.\nVí dụ:\nTôi là kenios.\nBạn tên là gì.")
+                    Text("Dấu chấm (.) ở cuối dòng + xuống dòng = 1 tin nhắn. Dấu chấm giữa chữ không tính. Dấu \"...\" không tính.\nVí dụ:\nTôi là kenios.\nBạn tên là gì.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
