@@ -1,5 +1,33 @@
 import SwiftUI
 import AVKit
+import WebKit
+
+// ============================ GIF động (dùng WKWebView, không cần thư viện ngoài) ============================
+struct GIFWebView: UIViewRepresentable {
+    let url: URL
+    var contentMode: String = "cover"   // "cover" | "contain"
+
+    func makeUIView(context: Context) -> WKWebView {
+        let cfg = WKWebViewConfiguration()
+        let w = WKWebView(frame: .zero, configuration: cfg)
+        w.scrollView.isScrollEnabled = false
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.scrollView.backgroundColor = .clear
+        return w
+    }
+
+    func updateUIView(_ w: WKWebView, context: Context) {
+        let html = """
+        <html>
+        <head><meta name='viewport' content='width=device-width,initial-scale=1'>
+        <style>body{margin:0;padding:0;background:transparent;}
+        img{width:100%;height:100vh;object-fit:\(contentMode);display:block;}</style></head>
+        <body><img src='\(url.absoluteString)'></body></html>
+        """
+        w.loadHTMLString(html, baseURL: nil)
+    }
+}
 
 // ============================ Tiện ích chung ============================
 func kFormatVND(_ amount: Int) -> String {
@@ -9,7 +37,7 @@ func kFormatVND(_ amount: Int) -> String {
     return (f.string(from: NSNumber(value: amount)) ?? "\(amount)") + "đ"
 }
 
-// Carousel ảnh/video (link) — tối đa 5
+// Carousel ảnh/video (link) — tối đa 5, hỗ trợ GIF động
 struct StoreMediaCarousel: View {
     let media: [StoreMedia]
     var height: CGFloat = 200
@@ -28,21 +56,34 @@ struct StoreMediaCarousel: View {
                             .frame(height: height)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                     } else if let url = URL(string: m.url) {
-                        AsyncImage(url: url) { img in
-                            img.resizable().scaledToFill()
-                        } placeholder: {
-                            ProgressView().frame(maxWidth: .infinity)
-                        }
-                        .frame(height: height)
-                        .frame(maxWidth: .infinity)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        storeImage(url: url, height: height)
                     }
                 }
             }
             .frame(height: height)
             .tabViewStyle(.page(indexDisplayMode: .automatic))
         }
+    }
+}
+
+// Hiển thị ảnh từ link — tự động dùng GIFWebView khi là .gif
+@ViewBuilder
+private func storeImage(url: URL, height: CGFloat) -> some View {
+    if url.absoluteString.lowercased().contains(".gif") {
+        GIFWebView(url: url)
+            .frame(height: height)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+    } else {
+        AsyncImage(url: url) { img in
+            img.resizable().scaledToFill()
+        } placeholder: {
+            ProgressView().frame(maxWidth: .infinity)
+        }
+        .frame(height: height)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -56,10 +97,14 @@ struct StoreThumb: View {
     var body: some View {
         ZStack {
             if let m = first, m.type != "video", let url = URL(string: m.url) {
-                AsyncImage(url: url) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: {
-                    Color(.tertiarySystemBackground)
+                if m.url.lowercased().contains(".gif") {
+                    GIFWebView(url: url)
+                } else {
+                    AsyncImage(url: url) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: {
+                        Color(.tertiarySystemBackground)
+                    }
                 }
             } else if first?.type == "video" {
                 Color.black.opacity(0.85)
@@ -98,6 +143,7 @@ struct StoreView: View {
     @State private var showAdmin = false
     @State private var showMyOrders = false
     @State private var showWallet = false
+    @State private var showSearch = false
     @State private var downloads: [StoreDownloadItem] = []
     @State private var contacts: StoreContacts?
     @State private var search = ""
@@ -157,8 +203,13 @@ struct StoreView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showMyOrders = true } label: {
-                        Image(systemName: "bag.badge.questionmark")
+                    HStack(spacing: 4) {
+                        Button { showMyOrders = true } label: {
+                            Image(systemName: "bag.badge.questionmark")
+                        }
+                        Button { showSearch = true } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -176,6 +227,7 @@ struct StoreView: View {
             }
             .sheet(isPresented: $showMyOrders) { StoreMyOrdersView() }
             .sheet(isPresented: $showWallet) { StoreWalletView() }
+            .sheet(isPresented: $showSearch) { StoreGlobalSearchView(categories: categories) }
             .task {
                 await reload()
                 // Polling mỗi 30 giây để cập nhật sản phẩm mới real-time
@@ -293,9 +345,15 @@ struct StoreView: View {
             }
             HStack(spacing: 12) {
                 if let c = config, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
-                    AsyncImage(url: url) { img in img.resizable().scaledToFill() }
-                    placeholder: { Color(.secondarySystemBackground) }
-                        .frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 10))
+                    Group {
+                        if c.logoUrl.lowercased().contains(".gif") {
+                            GIFWebView(url: url, contentMode: "cover")
+                        } else {
+                            AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                            placeholder: { Color(.secondarySystemBackground) }
+                        }
+                    }
+                    .frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 10))
                 } else {
                     Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
                         .frame(width: 48, height: 48)
@@ -495,9 +553,20 @@ struct StoreProductDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let p = product {
                     StoreMediaCarousel(media: p.media, height: 220)
-                    Text(p.name).font(.title2.bold())
-                    if !p.description.isEmpty {
-                        Text(p.description).font(.subheadline).foregroundStyle(.secondary)
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(p.name).font(.title2.bold())
+                            if !p.description.isEmpty {
+                                Text(p.description).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        ShareLink(item: "\(p.name)\n\(p.description)") {
+                            Image(systemName: "square.and.arrow.up")
+                                .padding(8)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(Circle())
+                        }
                     }
 
                     if let m = mine, m.owned {
@@ -795,6 +864,124 @@ struct AppearanceMenu: View {
         } label: {
             Image(systemName: "paintbrush")
         }
+    }
+}
+
+// ============================ Tìm kiếm toàn cục trong cửa hàng ============================
+struct StoreGlobalSearchView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) var dismiss
+    let categories: [StoreCategory]
+
+    @State private var query = ""
+    @State private var folders: [StoreFolder] = []
+    @State private var products: [StoreProduct] = []
+    @State private var loading = false
+
+    private var matchingCategories: [StoreCategory] {
+        guard !query.isEmpty else { return [] }
+        return categories.filter { $0.name.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if loading {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                }
+
+                if !matchingCategories.isEmpty {
+                    Section("Danh mục (\(matchingCategories.count))") {
+                        ForEach(matchingCategories) { cat in
+                            NavigationLink(cat.name) {
+                                StoreFolderListView(category: cat)
+                            }
+                        }
+                    }
+                }
+
+                let matchFolders = folders.filter { $0.name.localizedCaseInsensitiveContains(query) }
+                if !matchFolders.isEmpty {
+                    Section("Thư mục (\(matchFolders.count))") {
+                        ForEach(matchFolders) { f in
+                            NavigationLink(f.name) {
+                                StoreProductListView(folder: f)
+                            }
+                        }
+                    }
+                }
+
+                let matchProducts = products.filter { p in
+                    p.name.localizedCaseInsensitiveContains(query) ||
+                    p.description.localizedCaseInsensitiveContains(query)
+                }
+                if !matchProducts.isEmpty {
+                    Section("Sản phẩm (\(matchProducts.count))") {
+                        ForEach(matchProducts) { p in
+                            NavigationLink {
+                                StoreProductDetailView(productId: p.id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(p.name).font(.subheadline.bold())
+                                    if let cheapest = p.prices.map(\.amount).min() {
+                                        Text("Từ \(kFormatVND(cheapest))")
+                                            .font(.caption).foregroundStyle(Theme.accent)
+                                    }
+                                    HStack {
+                                        Text(p.availableKeys > 0 ? "Còn \(p.availableKeys)" : "Hết hàng")
+                                            .font(.caption2)
+                                            .foregroundStyle(p.availableKeys > 0 ? .green : .red)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !loading && !query.isEmpty && matchingCategories.isEmpty &&
+                    folders.filter({ $0.name.localizedCaseInsensitiveContains(query) }).isEmpty &&
+                    products.filter({ $0.name.localizedCaseInsensitiveContains(query) }).isEmpty {
+                    Text("Không tìm thấy kết quả nào cho \"\(query)\".")
+                        .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
+                }
+
+                if query.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Nhập tên sản phẩm, danh mục hoặc thư mục để tìm kiếm.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+                    .listRowBackground(Color.clear)
+                }
+            }
+            .navigationTitle("Tìm kiếm")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Tìm sản phẩm, danh mục...")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .task { await loadAll() }
+            .onChange(of: query) { _ in }
+        }
+    }
+
+    private func loadAll() async {
+        loading = true
+        var allFolders: [StoreFolder] = []
+        var allProducts: [StoreProduct] = []
+        for cat in categories {
+            let flds = (try? await store.api.storeFolders(categoryId: cat.id)) ?? []
+            allFolders.append(contentsOf: flds)
+            for f in flds {
+                let prods = (try? await store.api.storeProducts(folderId: f.id)) ?? []
+                allProducts.append(contentsOf: prods)
+            }
+        }
+        folders = allFolders
+        products = allProducts
+        loading = false
     }
 }
 
