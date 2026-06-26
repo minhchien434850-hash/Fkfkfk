@@ -29,6 +29,8 @@ final class AppStore: ObservableObject {
     @Published var activeConversation: Conversation?
 
     @Published var isDark: Bool
+    /// Chế độ giao diện: "system" (tự động/cân bằng) · "light" (sáng) · "dark" (tối)
+    @Published var themeMode: String
     @Published var language: String
     @Published var systemPrompt: String
 
@@ -57,6 +59,7 @@ final class AppStore: ObservableObject {
         credits = d.integer(forKey: "credits")
         publicId = d.string(forKey: "publicId") ?? ""
         isDark = d.object(forKey: "isDark") as? Bool ?? true
+        themeMode = d.string(forKey: "themeMode") ?? ((d.object(forKey: "isDark") as? Bool ?? true) ? "dark" : "light")
         language = d.string(forKey: "language") ?? "vi"
         systemPrompt = d.string(forKey: "systemPrompt") ?? ""
         biometricsEnabled = d.bool(forKey: "biometricsEnabled")
@@ -71,6 +74,21 @@ final class AppStore: ObservableObject {
     var isLoggedIn: Bool { token != nil }
 
     func setDark(_ v: Bool) { isDark = v; d.set(v, forKey: "isDark") }
+    /// Đổi chế độ giao diện. mode ∈ {"system","light","dark"}
+    func setThemeMode(_ mode: String) {
+        themeMode = mode
+        d.set(mode, forKey: "themeMode")
+        if mode == "light" { isDark = false; d.set(false, forKey: "isDark") }
+        else if mode == "dark" { isDark = true; d.set(true, forKey: "isDark") }
+    }
+    /// ColorScheme áp cho toàn app: nil = theo hệ thống (cân bằng).
+    var preferredScheme: ColorScheme? {
+        switch themeMode {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
+    }
     func setLanguage(_ v: String) { language = v; d.set(v, forKey: "language") }
     func setSystemPrompt(_ v: String) { systemPrompt = v; d.set(v, forKey: "systemPrompt") }
     func setBiometrics(_ v: Bool) { biometricsEnabled = v; d.set(v, forKey: "biometricsEnabled") }

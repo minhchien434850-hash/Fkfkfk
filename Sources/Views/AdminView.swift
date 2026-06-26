@@ -421,7 +421,7 @@ struct BankSettingsSheet: View {
     @Environment(\.dismiss) var dismiss
     @State private var s = BankSettings(bankCode: "970416", bankShort: "ACB",
                                         bankAccount: "23252921", bankName: "TRAN MINH CHIEN",
-                                        bankWebhook: "", bankApikey: "")
+                                        bankWebhook: "", bankApikey: "", acbApiToken: "")
     @State private var message: String?
     @State private var isError = false
 
@@ -439,10 +439,16 @@ struct BankSettingsSheet: View {
                     TextField("Webhook (tuỳ chọn)", text: $s.bankWebhook)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
-                Section("Tự động xác nhận giao dịch (tuỳ chọn)") {
+                Section("Nạp tiền tự động — ACB (thueapibank.vn)") {
+                    TextField("API token ACB (thueapibank.vn)", text: $s.acbApiToken)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Text("Dán API token ACB từ thueapibank.vn. Hệ thống tự đọc lịch sử giao dịch mỗi ~20 giây, khớp nội dung 'KENIOS <mã>' + số tiền để tự cộng PRO / cấp key sản phẩm. Để trống thì admin xác nhận tay.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Tự động xác nhận giao dịch (tuỳ chọn khác)") {
                     TextField("API key giao dịch (Casso / Sepay...)", text: $s.bankApikey)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Nhập API key của dịch vụ đọc biến động số dư (vd Casso, Sepay) để tự động cộng credits khi khách chuyển khoản. Để trống thì admin xác nhận tay.")
+                    Text("Dùng webhook của Casso/Sepay nếu muốn. Để trống nếu đã dùng token ACB ở trên.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section { Button("Lưu") { Task { await save() } } }

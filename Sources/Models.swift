@@ -188,6 +188,7 @@ struct BankSettings: Decodable, Hashable {
     var bankName: String
     var bankWebhook: String
     var bankApikey: String = ""
+    var acbApiToken: String = ""
 }
 
 // ---- Đính kèm (Attachment) ----
@@ -237,6 +238,105 @@ struct ProPriceSettings: Decodable, Hashable {
     let price: Int
     let label: String
 }
+
+// ============================ APP BÁN HÀNG (STORE) ============================
+struct StoreMedia: Decodable, Hashable {
+    let type: String   // image | video
+    let url: String
+}
+
+struct StoreAppConfig: Decodable, Hashable {
+    let logoName: String
+    let logoUrl: String
+    let bannerType: String   // image | video
+    let bannerUrl: String
+}
+
+struct StoreCategory: Identifiable, Decodable, Hashable {
+    let id: Int
+    let name: String
+    let media: [StoreMedia]
+}
+
+struct StoreFolder: Identifiable, Decodable, Hashable {
+    let id: Int
+    let categoryId: Int
+    let name: String
+    let media: [StoreMedia]
+}
+
+struct StorePrice: Identifiable, Decodable, Hashable {
+    let id: Int
+    let label: String
+    let amount: Int
+}
+
+struct StoreProduct: Identifiable, Decodable, Hashable {
+    let id: Int
+    let folderId: Int
+    let name: String
+    let description: String
+    let media: [StoreMedia]
+    let prices: [StorePrice]
+    let availableKeys: Int
+    let hasDownload: Bool
+}
+
+struct StoreProductMine: Decodable, Hashable {
+    let owned: Bool
+    let key: String?
+    let downloadUrl: String?
+    let downloadFileId: Int?
+}
+
+struct StoreOrderCreateResponse: Decodable {
+    let orderId: Int
+    let ref: String
+    let amount: Int
+    let label: String
+    let productName: String
+    let message: String
+    let bankInfo: BankInfo
+    let qrUrl: String?
+}
+
+struct StoreOrder: Identifiable, Decodable, Hashable {
+    let id: Int
+    let productId: Int
+    let productName: String
+    let amount: Int
+    let status: String
+    let ref: String?
+    let createdAt: Int?
+    let key: String?
+    let downloadUrl: String?
+    let downloadFileId: Int?
+}
+
+struct StoreKeyItem: Identifiable, Decodable, Hashable {
+    let id: Int
+    let keyText: String
+    let status: String
+    let soldAt: Int?
+}
+
+struct StoreKeysInfo: Decodable {
+    let available: Int
+    let total: Int
+    let keys: [StoreKeyItem]
+}
+
+struct StoreAdminOrder: Identifiable, Decodable, Hashable {
+    let id: Int
+    let amount: Int
+    let status: String
+    let ref: String?
+    let createdAt: Int?
+    let productName: String
+    let username: String
+}
+
+struct IdResponse: Decodable { let message: String; let id: Int? }
 
 // ---- Admin thống kê ----
 // Decode "khoan dung": thiếu trường nào thì mặc định 0 / [] để không bao giờ

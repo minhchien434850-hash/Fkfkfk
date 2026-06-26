@@ -73,11 +73,17 @@ struct SettingsView: View {
                     Picker("Ngôn ngữ", selection: Binding(
                         get: { store.language },
                         set: { store.setLanguage($0) })) {
-                        Text("Tiếng Việt").tag("vi")
-                        Text("English").tag("en")
+                        ForEach(kAppLanguages, id: \.0) { code, name in
+                            Text(name).tag(code)
+                        }
                     }
-                    Toggle("Giao diện tối", isOn: Binding(
-                        get: { store.isDark }, set: { store.setDark($0) }))
+                    Picker("Giao diện", selection: Binding(
+                        get: { store.themeMode },
+                        set: { store.setThemeMode($0) })) {
+                        Text("Sáng").tag("light")
+                        Text("Tối").tag("dark")
+                        Text("Tự động (cân bằng)").tag("system")
+                    }
                 }
 
                 Section("Dung lượng & Dọn dẹp") {

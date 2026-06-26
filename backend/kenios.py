@@ -504,6 +504,62 @@ def init_db() -> None:
                 content TEXT,
                 created_at INTEGER
             );
+
+            -- ==================== App bán hàng (Store) ====================
+            CREATE TABLE IF NOT EXISTS store_categories(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                media TEXT DEFAULT '[]',     -- JSON: [{"type":"image|video","url":"..."}] tối đa 5
+                sort INTEGER DEFAULT 0,
+                created_at INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS store_folders(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                media TEXT DEFAULT '[]',
+                sort INTEGER DEFAULT 0,
+                created_at INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS store_products(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                folder_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                media TEXT DEFAULT '[]',
+                download_url TEXT DEFAULT '',
+                download_file_id INTEGER,
+                sort INTEGER DEFAULT 0,
+                created_at INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS store_prices(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                label TEXT NOT NULL,         -- "1 giờ" / "1 ngày" / "1 tuần" / "1 tháng" ...
+                amount INTEGER NOT NULL,     -- VND
+                sort INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS store_keys(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                key_text TEXT NOT NULL,
+                status TEXT DEFAULT 'available',  -- available | sold
+                owner_uid INTEGER,
+                price_id INTEGER,
+                sold_at INTEGER,
+                created_at INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS store_orders(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                price_id INTEGER,
+                key_id INTEGER,
+                amount INTEGER NOT NULL,
+                status TEXT DEFAULT 'pending',   -- pending | completed
+                ref TEXT,
+                created_at INTEGER
+            );
         """)
     _migrate()
 
@@ -526,6 +582,13 @@ def init_db() -> None:
     _seed_setting("bank_name", os.getenv("BANK_NAME", "TRAN MINH CHIEN"))
     _seed_setting("bank_webhook", "")
     _seed_setting("bank_apikey", "")
+    # Nạp tiền tự động qua thueapibank.vn (ACB)
+    _seed_setting("acb_api_token", os.getenv("ACB_API_TOKEN", ""))
+    # Giao diện app bán hàng (chỉ admin chỉnh)
+    _seed_setting("store_logo_name", os.getenv("STORE_LOGO_NAME", "KENIOS Store"))
+    _seed_setting("store_logo_url", "")
+    _seed_setting("store_banner_type", "image")   # image | video
+    _seed_setting("store_banner_url", "")
     _seed_prompt_templates()
     log.info("DB sẵn sàng: %s", DB_PATH)
 
@@ -1266,6 +1329,11 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 def _startup() -> None:
     init_db()
     start_mail_smtp()
+    try:
+        asyncio.create_task(_acb_autopay_loop())
+    except RuntimeError:
+        # Không có event loop (vd chạy test) → bỏ qua
+        pass
 
 
 # ======================== Pydantic Models ========================
@@ -2149,9 +2217,7 @@ def db_cleanup(b: CleanupIn, user=Depends(get_user)) -> dict[str, Any]:
     }
 
 
-# ======================== Quản lý File (Giới hạn 1KB - 4GB) ========================
-MAX_FILE_B64 = 150_000_000
-
+# ======================== Quản lý File (không giới hạn dung lượng) ========================
 class FileIn(BaseModel):
     name: str
     category: Optional[str] = None
@@ -2161,8 +2227,7 @@ class FileIn(BaseModel):
 
 @app.post("/files")
 def upload_file(b: FileIn, user=Depends(get_user)) -> dict[str, Any]:
-    if len(b.data_base64) > MAX_FILE_B64:
-        raise HTTPException(status_code=413, detail="File quá lớn để truyền qua JSON (giới hạn ~75MB binary).")
+    # Không giới hạn dung lượng file/link gửi lên theo yêu cầu.
     size = (len(b.data_base64) * 3) // 4
     
     with db() as c:
@@ -2193,27 +2258,15 @@ async def upload_file_raw(
     category: Optional[str] = None,
     user = Depends(get_user)
 ) -> dict[str, Any]:
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            cl = int(content_length)
-            if cl > MAX_FILE_SIZE:
-                raise HTTPException(status_code=413, detail="File quá lớn (giới hạn tối đa là 4GB).")
-            if cl < MIN_FILE_SIZE:
-                raise HTTPException(status_code=400, detail="File quá nhỏ (giới hạn tối thiểu là 1KB).")
-        except ValueError:
-            pass
-
+    # Không giới hạn dung lượng file gửi lên theo yêu cầu.
     temp_filename = f"tmp_{secrets.token_hex(8)}"
     temp_path = os.path.join(UPLOAD_DIR, temp_filename)
-    
+
     total_size = 0
     try:
         with open(temp_path, "wb") as f:
             async for chunk in request.stream():
                 total_size += len(chunk)
-                if total_size > MAX_FILE_SIZE:
-                    raise HTTPException(status_code=413, detail="File vượt quá giới hạn 4GB.")
                 f.write(chunk)
     except Exception as e:
         if os.path.exists(temp_path):
@@ -3650,6 +3703,7 @@ class BankSettingsIn(BaseModel):
     bank_name: Optional[str] = None
     bank_webhook: Optional[str] = None
     bank_apikey: Optional[str] = None
+    acb_api_token: Optional[str] = None
 
 @app.get("/admin/payment/settings")
 def admin_get_bank(admin=Depends(get_admin)) -> dict[str, Any]:
@@ -3660,11 +3714,13 @@ def admin_get_bank(admin=Depends(get_admin)) -> dict[str, Any]:
         "bank_name": get_setting("bank_name", "TRAN MINH CHIEN"),
         "bank_webhook": get_setting("bank_webhook", ""),
         "bank_apikey": get_setting("bank_apikey", ""),
+        "acb_api_token": get_setting("acb_api_token", ""),
     }
 
 @app.post("/admin/payment/settings")
 def admin_set_bank(b: BankSettingsIn, admin=Depends(get_admin)) -> dict[str, Any]:
-    for field in ["bank_code", "bank_short", "bank_account", "bank_name", "bank_webhook", "bank_apikey"]:
+    for field in ["bank_code", "bank_short", "bank_account", "bank_name",
+                  "bank_webhook", "bank_apikey", "acb_api_token"]:
         val = getattr(b, field)
         if val is not None:
             set_setting(field, val)
@@ -3790,7 +3846,8 @@ def _auto_confirm_payment(ref: str, amount: int) -> bool:
                 (ref,)
             ).fetchone()
             if not pay:
-                return False
+                # Không phải đơn nâng cấp PRO → thử đơn mua sản phẩm trong app bán hàng
+                return _confirm_store_order_by_ref(ref, amount)
             if amount > 0 and abs(amount - pay["amount"]) > pay["amount"] * 0.05:
                 log.warning("Webhook: ref=%s amount mismatch (expected=%d, got=%d)",
                            ref, pay["amount"], amount)
@@ -3815,6 +3872,105 @@ def _auto_confirm_payment(ref: str, amount: int) -> bool:
         return False
 
 
+def _confirm_store_order_by_ref(ref: str, amount: int) -> bool:
+    """Xác nhận đơn mua sản phẩm (app bán hàng) khi nhận được chuyển khoản khớp ref + số tiền.
+
+    Khi khớp: cấp 1 key khả dụng của sản phẩm cho khách, đánh dấu key đã bán và đơn hoàn tất.
+    """
+    try:
+        with db() as c:
+            order = c.execute(
+                "SELECT id,user_id,product_id,price_id,amount,status FROM store_orders "
+                "WHERE ref=? AND status='pending'", (ref,)
+            ).fetchone()
+            if not order:
+                return False
+            if amount > 0 and amount < order["amount"]:
+                log.warning("Store: ref=%s chuyển thiếu (cần=%d, nhận=%d)",
+                            ref, order["amount"], amount)
+                return False
+            key = c.execute(
+                "SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
+                "ORDER BY id ASC LIMIT 1", (order["product_id"],)
+            ).fetchone()
+            if not key:
+                # Hết key — vẫn đánh dấu đã thanh toán để admin xử lý tay
+                c.execute("UPDATE store_orders SET status='completed' WHERE id=?", (order["id"],))
+                log.warning("Store: ref=%s đã thanh toán nhưng HẾT key (product=%d)",
+                            ref, order["product_id"])
+                return True
+            now = int(time.time())
+            c.execute("UPDATE store_keys SET status='sold', owner_uid=?, price_id=?, sold_at=? WHERE id=?",
+                      (order["user_id"], order["price_id"], now, key["id"]))
+            c.execute("UPDATE store_orders SET status='completed', key_id=? WHERE id=?",
+                      (key["id"], order["id"]))
+            log.info("Store xác nhận: ref=%s, user=%d, product=%d, key=%d",
+                     ref, order["user_id"], order["product_id"], key["id"])
+        return True
+    except Exception as e:
+        log.error("Store lỗi xác nhận ref=%s: %s", ref, e)
+        return False
+
+
+# ======================== Nạp tiền tự động qua thueapibank.vn (ACB) ========================
+async def _acb_fetch_and_confirm() -> int:
+    """Gọi API lịch sử giao dịch ACB của thueapibank.vn, dò nội dung CK chứa ref rồi tự xác nhận."""
+    token = get_setting("acb_api_token", "").strip()
+    if not token:
+        return 0
+    url = f"https://thueapibank.vn/historyapiacb/{token}"
+    confirmed = 0
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(url, headers={"User-Agent": "KENIOS-Server"})
+        if r.status_code != 200:
+            log.warning("ACB API trả về HTTP %d", r.status_code)
+            return 0
+        data = r.json()
+    except Exception as e:
+        log.warning("ACB API lỗi: %s", e)
+        return 0
+
+    # API thường trả {"status": true, "transactions": [{"description"/"content","amount"/"creditAmount", ...}]}
+    txs = []
+    if isinstance(data, dict):
+        for key in ("transactions", "data", "result", "history"):
+            if isinstance(data.get(key), list):
+                txs = data[key]
+                break
+    elif isinstance(data, list):
+        txs = data
+
+    for tx in txs:
+        if not isinstance(tx, dict):
+            continue
+        desc = (tx.get("description") or tx.get("content") or tx.get("transactionContent")
+                or tx.get("addDescription") or tx.get("comment") or "")
+        amt_raw = (tx.get("amount") or tx.get("creditAmount") or tx.get("transferAmount")
+                   or tx.get("money") or 0)
+        try:
+            amount = int(float(str(amt_raw).replace(",", "").replace(".", "") or 0))
+        except (TypeError, ValueError):
+            amount = 0
+        ref = _extract_ref(desc)
+        if ref and _auto_confirm_payment(ref, amount):
+            confirmed += 1
+    if confirmed:
+        log.info("ACB tự động xác nhận %d giao dịch.", confirmed)
+    return confirmed
+
+
+async def _acb_autopay_loop() -> None:
+    """Vòng lặp nền: cứ ~20 giây kiểm tra giao dịch ACB mới để tự cộng tiền / cấp key."""
+    while True:
+        try:
+            if get_setting("acb_api_token", "").strip():
+                await _acb_fetch_and_confirm()
+        except Exception as e:
+            log.error("ACB autopay loop lỗi: %s", e)
+        await asyncio.sleep(20)
+
+
 @app.get("/payment/history")
 def payment_history(user=Depends(get_user)) -> list[dict[str, Any]]:
     with db() as c:
@@ -3828,6 +3984,381 @@ def payment_history(user=Depends(get_user)) -> list[dict[str, Any]]:
 @app.get("/me/credits")
 def my_credits(user=Depends(get_user)) -> dict[str, Any]:
     return {"credits": user["credits"], "plan": user["plan"]}
+
+
+# ============================================================================
+# ======================== APP BÁN HÀNG (STORE) ==============================
+# ============================================================================
+# Cấu trúc: Danh mục (category) → Thư mục con (folder) → Sản phẩm (product)
+# Mỗi sản phẩm: nhiều mốc giá theo thời hạn (giờ/ngày/tuần/tháng) + kho KEY +
+# link/file tải. Khách trả tiền (nạp tự động ACB) → tự nhận 1 key + link tải.
+
+class MediaItem(BaseModel):
+    type: str = "image"   # image | video
+    url: str = ""
+
+def _dump_media(items) -> str:
+    out = []
+    for m in (items or [])[:5]:
+        if isinstance(m, MediaItem):
+            d = {"type": (m.type or "image"), "url": (m.url or "")}
+        elif isinstance(m, dict):
+            d = {"type": m.get("type", "image"), "url": m.get("url", "")}
+        else:
+            continue
+        if d["url"]:
+            out.append(d)
+    return json.dumps(out, ensure_ascii=False)
+
+def _load_media(s) -> list:
+    try:
+        v = json.loads(s or "[]")
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+def _product_prices(c, pid: int) -> list:
+    rows = c.execute("SELECT id,label,amount,sort FROM store_prices WHERE product_id=? "
+                     "ORDER BY sort ASC, amount ASC", (pid,)).fetchall()
+    return [{"id": r["id"], "label": r["label"], "amount": r["amount"]} for r in rows]
+
+def _product_public(c, row) -> dict:
+    avail = c.execute("SELECT COUNT(*) AS n FROM store_keys WHERE product_id=? AND status='available'",
+                      (row["id"],)).fetchone()["n"]
+    return {
+        "id": row["id"], "folder_id": row["folder_id"],
+        "name": row["name"], "description": row["description"] or "",
+        "media": _load_media(row["media"]),
+        "prices": _product_prices(c, row["id"]),
+        "available_keys": avail,
+        "has_download": bool((row["download_url"] or "").strip()) or row["download_file_id"] is not None,
+    }
+
+
+# -------------------- Khách xem (công khai) --------------------
+@app.get("/store/config")
+def store_config() -> dict[str, Any]:
+    return {
+        "logo_name": get_setting("store_logo_name", "KENIOS Store"),
+        "logo_url": get_setting("store_logo_url", ""),
+        "banner_type": get_setting("store_banner_type", "image"),
+        "banner_url": get_setting("store_banner_url", ""),
+    }
+
+@app.get("/store/categories")
+def store_categories() -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute("SELECT id,name,media,sort FROM store_categories "
+                         "ORDER BY sort ASC, id ASC").fetchall()
+    return [{"id": r["id"], "name": r["name"], "media": _load_media(r["media"])} for r in rows]
+
+@app.get("/store/categories/{cid}/folders")
+def store_folders(cid: int) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute("SELECT id,category_id,name,media,sort FROM store_folders "
+                         "WHERE category_id=? ORDER BY sort ASC, id ASC", (cid,)).fetchall()
+    return [{"id": r["id"], "category_id": r["category_id"], "name": r["name"],
+             "media": _load_media(r["media"])} for r in rows]
+
+@app.get("/store/folders/{fid}/products")
+def store_products(fid: int) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute("SELECT * FROM store_products WHERE folder_id=? "
+                         "ORDER BY sort ASC, id ASC", (fid,)).fetchall()
+        return [_product_public(c, r) for r in rows]
+
+@app.get("/store/products/{pid}")
+def store_product_detail(pid: int) -> dict[str, Any]:
+    with db() as c:
+        row = c.execute("SELECT * FROM store_products WHERE id=?", (pid,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+        return _product_public(c, row)
+
+@app.get("/store/products/{pid}/mine")
+def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    """Trả về key + link tải nếu khách đã mua sản phẩm này."""
+    with db() as c:
+        prod = c.execute("SELECT * FROM store_products WHERE id=?", (pid,)).fetchone()
+        if not prod:
+            raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+        key = c.execute("SELECT key_text FROM store_keys WHERE product_id=? AND owner_uid=? "
+                        "ORDER BY sold_at DESC LIMIT 1", (pid, user["id"])).fetchone()
+        if not key:
+            return {"owned": False}
+        return {
+            "owned": True,
+            "key": key["key_text"],
+            "download_url": prod["download_url"] or "",
+            "download_file_id": prod["download_file_id"],
+        }
+
+
+# -------------------- Khách mua --------------------
+class StoreOrderIn(BaseModel):
+    product_id: int
+    price_id: Optional[int] = None
+
+@app.post("/store/orders")
+def store_create_order(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        prod = c.execute("SELECT * FROM store_products WHERE id=?", (b.product_id,)).fetchone()
+        if not prod:
+            raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+        prices = _product_prices(c, b.product_id)
+        if not prices:
+            raise HTTPException(status_code=400, detail="Sản phẩm chưa có giá bán.")
+        price = None
+        if b.price_id is not None:
+            price = next((p for p in prices if p["id"] == b.price_id), None)
+        if price is None:
+            price = prices[0]
+        avail = c.execute("SELECT COUNT(*) AS n FROM store_keys WHERE product_id=? AND status='available'",
+                          (b.product_id,)).fetchone()["n"]
+        if avail <= 0:
+            raise HTTPException(status_code=400, detail="Sản phẩm tạm hết key. Vui lòng quay lại sau.")
+        ref = secrets.token_urlsafe(10)
+        cur = c.execute(
+            "INSERT INTO store_orders(user_id,product_id,price_id,amount,status,ref,created_at) "
+            "VALUES(?,?,?,?,'pending',?,?)",
+            (user["id"], b.product_id, price["id"], price["amount"], ref, int(time.time())))
+        oid = cur.lastrowid
+    bank = bank_info(amount=price["amount"], note=f"KENIOS {ref}")
+    return {
+        "order_id": oid, "ref": ref, "amount": price["amount"],
+        "label": price["label"], "product_name": prod["name"],
+        "message": "Chuyển khoản đúng số tiền & nội dung. Hệ thống tự xác nhận và cấp key trong giây lát.",
+        "bank_info": bank, "qr_url": bank["qr_url"],
+    }
+
+@app.get("/store/orders")
+def store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT o.id,o.product_id,o.amount,o.status,o.ref,o.created_at,o.key_id,"
+            "p.name AS product_name,p.download_url,p.download_file_id "
+            "FROM store_orders o LEFT JOIN store_products p ON p.id=o.product_id "
+            "WHERE o.user_id=? ORDER BY o.id DESC", (user["id"],)).fetchall()
+        out = []
+        for r in rows:
+            key_text = None
+            if r["key_id"]:
+                k = c.execute("SELECT key_text FROM store_keys WHERE id=?", (r["key_id"],)).fetchone()
+                key_text = k["key_text"] if k else None
+            out.append({
+                "id": r["id"], "product_id": r["product_id"],
+                "product_name": r["product_name"] or "(đã xoá)",
+                "amount": r["amount"], "status": r["status"], "ref": r["ref"],
+                "created_at": r["created_at"], "key": key_text,
+                "download_url": (r["download_url"] or "") if r["status"] == "completed" else "",
+                "download_file_id": r["download_file_id"] if r["status"] == "completed" else None,
+            })
+    return out
+
+
+# -------------------- Admin: cấu hình giao diện store --------------------
+class StoreConfigIn(BaseModel):
+    logo_name: Optional[str] = None
+    logo_url: Optional[str] = None
+    banner_type: Optional[str] = None   # image | video
+    banner_url: Optional[str] = None
+
+@app.post("/admin/store/config")
+def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    if b.logo_name is not None: set_setting("store_logo_name", b.logo_name.strip()[:60])
+    if b.logo_url is not None: set_setting("store_logo_url", b.logo_url.strip())
+    if b.banner_type is not None:
+        set_setting("store_banner_type", "video" if b.banner_type == "video" else "image")
+    if b.banner_url is not None: set_setting("store_banner_url", b.banner_url.strip())
+    return {"message": "Đã cập nhật giao diện app bán hàng."}
+
+
+# -------------------- Admin: danh mục --------------------
+class StoreCategoryIn(BaseModel):
+    id: Optional[int] = None
+    name: str
+    media: list[MediaItem] = []
+
+@app.post("/admin/store/categories")
+def admin_store_save_category(b: StoreCategoryIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    name = (b.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Tên danh mục không được để trống.")
+    media = _dump_media(b.media)
+    with db() as c:
+        if b.id:
+            c.execute("UPDATE store_categories SET name=?, media=? WHERE id=?", (name, media, b.id))
+            cid = b.id
+        else:
+            cur = c.execute("INSERT INTO store_categories(name,media,created_at) VALUES(?,?,?)",
+                            (name, media, int(time.time())))
+            cid = cur.lastrowid
+    return {"message": "Đã lưu danh mục.", "id": cid}
+
+@app.delete("/admin/store/categories/{cid}")
+def admin_store_delete_category(cid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        folder_ids = [r["id"] for r in c.execute(
+            "SELECT id FROM store_folders WHERE category_id=?", (cid,)).fetchall()]
+        for fid in folder_ids:
+            _delete_folder_cascade(c, fid)
+        c.execute("DELETE FROM store_categories WHERE id=?", (cid,))
+    return {"message": "Đã xoá danh mục."}
+
+
+# -------------------- Admin: thư mục con --------------------
+class StoreFolderIn(BaseModel):
+    id: Optional[int] = None
+    category_id: int
+    name: str
+    media: list[MediaItem] = []
+
+@app.post("/admin/store/folders")
+def admin_store_save_folder(b: StoreFolderIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    name = (b.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Tên thư mục không được để trống.")
+    media = _dump_media(b.media)
+    with db() as c:
+        if b.id:
+            c.execute("UPDATE store_folders SET name=?, media=? WHERE id=?", (name, media, b.id))
+            fid = b.id
+        else:
+            cur = c.execute("INSERT INTO store_folders(category_id,name,media,created_at) VALUES(?,?,?,?)",
+                            (b.category_id, name, media, int(time.time())))
+            fid = cur.lastrowid
+    return {"message": "Đã lưu thư mục.", "id": fid}
+
+def _delete_folder_cascade(c, fid: int) -> None:
+    prod_ids = [r["id"] for r in c.execute(
+        "SELECT id FROM store_products WHERE folder_id=?", (fid,)).fetchall()]
+    for pid in prod_ids:
+        c.execute("DELETE FROM store_prices WHERE product_id=?", (pid,))
+        c.execute("DELETE FROM store_keys WHERE product_id=?", (pid,))
+        c.execute("DELETE FROM store_products WHERE id=?", (pid,))
+    c.execute("DELETE FROM store_folders WHERE id=?", (fid,))
+
+@app.delete("/admin/store/folders/{fid}")
+def admin_store_delete_folder(fid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        _delete_folder_cascade(c, fid)
+    return {"message": "Đã xoá thư mục."}
+
+
+# -------------------- Admin: sản phẩm --------------------
+class StoreProductIn(BaseModel):
+    id: Optional[int] = None
+    folder_id: int
+    name: str
+    description: str = ""
+    media: list[MediaItem] = []
+    download_url: str = ""
+    download_file_id: Optional[int] = None
+
+@app.post("/admin/store/products")
+def admin_store_save_product(b: StoreProductIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    name = (b.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Tên sản phẩm không được để trống.")
+    media = _dump_media(b.media)
+    with db() as c:
+        if b.id:
+            c.execute("UPDATE store_products SET name=?,description=?,media=?,download_url=?,download_file_id=? "
+                      "WHERE id=?", (name, b.description or "", media, b.download_url or "",
+                                     b.download_file_id, b.id))
+            pid = b.id
+        else:
+            cur = c.execute("INSERT INTO store_products(folder_id,name,description,media,download_url,"
+                            "download_file_id,created_at) VALUES(?,?,?,?,?,?,?)",
+                            (b.folder_id, name, b.description or "", media, b.download_url or "",
+                             b.download_file_id, int(time.time())))
+            pid = cur.lastrowid
+    return {"message": "Đã lưu sản phẩm.", "id": pid}
+
+@app.delete("/admin/store/products/{pid}")
+def admin_store_delete_product(pid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        c.execute("DELETE FROM store_prices WHERE product_id=?", (pid,))
+        c.execute("DELETE FROM store_keys WHERE product_id=?", (pid,))
+        c.execute("DELETE FROM store_products WHERE id=?", (pid,))
+    return {"message": "Đã xoá sản phẩm."}
+
+
+# -------------------- Admin: giá theo thời hạn --------------------
+class StorePriceItem(BaseModel):
+    label: str
+    amount: int
+
+class StorePricesIn(BaseModel):
+    prices: list[StorePriceItem] = []
+
+@app.post("/admin/store/products/{pid}/prices")
+def admin_store_set_prices(pid: int, b: StorePricesIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        c.execute("DELETE FROM store_prices WHERE product_id=?", (pid,))
+        for i, p in enumerate(b.prices):
+            label = (p.label or "").strip()
+            if not label or p.amount < 0:
+                continue
+            c.execute("INSERT INTO store_prices(product_id,label,amount,sort) VALUES(?,?,?,?)",
+                      (pid, label, int(p.amount), i))
+    return {"message": "Đã cập nhật bảng giá."}
+
+
+# -------------------- Admin: kho KEY --------------------
+class StoreKeysIn(BaseModel):
+    text: str = ""   # mỗi dòng 1 key
+
+@app.get("/admin/store/products/{pid}/keys")
+def admin_store_list_keys(pid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        rows = c.execute("SELECT id,key_text,status,sold_at FROM store_keys WHERE product_id=? "
+                         "ORDER BY id DESC", (pid,)).fetchall()
+        avail = sum(1 for r in rows if r["status"] == "available")
+    return {
+        "available": avail, "total": len(rows),
+        "keys": [{"id": r["id"], "key_text": r["key_text"], "status": r["status"],
+                  "sold_at": r["sold_at"]} for r in rows],
+    }
+
+@app.post("/admin/store/products/{pid}/keys")
+def admin_store_add_keys(pid: int, b: StoreKeysIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    lines = [ln.strip() for ln in (b.text or "").replace("\r", "\n").split("\n")]
+    added = 0
+    now = int(time.time())
+    with db() as c:
+        for ln in lines:
+            if not ln:
+                continue
+            c.execute("INSERT INTO store_keys(product_id,key_text,status,created_at) VALUES(?,?,'available',?)",
+                      (pid, ln, now))
+            added += 1
+    return {"message": f"Đã thêm {added} key.", "added": added}
+
+@app.delete("/admin/store/keys/{kid}")
+def admin_store_delete_key(kid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        c.execute("DELETE FROM store_keys WHERE id=?", (kid,))
+    return {"message": "Đã xoá key."}
+
+@app.delete("/admin/store/products/{pid}/keys")
+def admin_store_delete_available_keys(pid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        cur = c.execute("DELETE FROM store_keys WHERE product_id=? AND status='available'", (pid,))
+    return {"message": f"Đã xoá {cur.rowcount} key khả dụng."}
+
+
+@app.get("/admin/store/orders")
+def admin_store_orders(admin=Depends(get_admin)) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT o.id,o.amount,o.status,o.ref,o.created_at,o.user_id,"
+            "p.name AS product_name,u.username "
+            "FROM store_orders o LEFT JOIN store_products p ON p.id=o.product_id "
+            "LEFT JOIN users u ON u.id=o.user_id ORDER BY o.id DESC LIMIT 200").fetchall()
+    return [{"id": r["id"], "amount": r["amount"], "status": r["status"], "ref": r["ref"],
+             "created_at": r["created_at"], "product_name": r["product_name"] or "(đã xoá)",
+             "username": r["username"] or "-"} for r in rows]
 
 
 # ======================== Prompt Templates ========================

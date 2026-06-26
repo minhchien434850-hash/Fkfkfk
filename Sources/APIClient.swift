@@ -305,7 +305,8 @@ struct APIClient {
         try decode(try await send("/admin/payment/settings", method: "POST", json: [
             "bank_code": s.bankCode, "bank_short": s.bankShort,
             "bank_account": s.bankAccount, "bank_name": s.bankName,
-            "bank_webhook": s.bankWebhook, "bank_apikey": s.bankApikey
+            "bank_webhook": s.bankWebhook, "bank_apikey": s.bankApikey,
+            "acb_api_token": s.acbApiToken
         ]))
     }
 
@@ -316,6 +317,96 @@ struct APIClient {
     func adminSetPro(price: Int, label: String) async throws -> ProPriceSettings {
         try decode(try await send("/admin/payment/pro", method: "POST",
                                   json: ["price": price, "label": label]))
+    }
+
+    // ============================ APP BÁN HÀNG (STORE) ============================
+    // -- Khách xem (công khai) --
+    func storeConfig() async throws -> StoreAppConfig {
+        try decode(try await send("/store/config", auth: false))
+    }
+    func storeCategories() async throws -> [StoreCategory] {
+        try decode(try await send("/store/categories", auth: false))
+    }
+    func storeFolders(categoryId: Int) async throws -> [StoreFolder] {
+        try decode(try await send("/store/categories/\(categoryId)/folders", auth: false))
+    }
+    func storeProducts(folderId: Int) async throws -> [StoreProduct] {
+        try decode(try await send("/store/folders/\(folderId)/products", auth: false))
+    }
+    func storeProduct(_ pid: Int) async throws -> StoreProduct {
+        try decode(try await send("/store/products/\(pid)", auth: false))
+    }
+    func storeProductMine(_ pid: Int) async throws -> StoreProductMine {
+        try decode(try await send("/store/products/\(pid)/mine"))
+    }
+    func storeCreateOrder(productId: Int, priceId: Int?) async throws -> StoreOrderCreateResponse {
+        var body: [String: Any] = ["product_id": productId]
+        if let priceId { body["price_id"] = priceId }
+        return try decode(try await send("/store/orders", method: "POST", json: body))
+    }
+    func storeMyOrders() async throws -> [StoreOrder] {
+        try decode(try await send("/store/orders"))
+    }
+
+    // -- Admin: giao diện store --
+    func adminStoreSetConfig(logoName: String, logoUrl: String,
+                             bannerType: String, bannerUrl: String) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/config", method: "POST", json: [
+            "logo_name": logoName, "logo_url": logoUrl,
+            "banner_type": bannerType, "banner_url": bannerUrl]))
+    }
+    // -- Admin: danh mục / thư mục / sản phẩm --
+    func adminStoreSaveCategory(id: Int?, name: String, media: [[String: String]]) async throws -> IdResponse {
+        var body: [String: Any] = ["name": name, "media": media]
+        if let id { body["id"] = id }
+        return try decode(try await send("/admin/store/categories", method: "POST", json: body))
+    }
+    func adminStoreDeleteCategory(_ id: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/categories/\(id)", method: "DELETE"))
+    }
+    func adminStoreSaveFolder(id: Int?, categoryId: Int, name: String,
+                              media: [[String: String]]) async throws -> IdResponse {
+        var body: [String: Any] = ["category_id": categoryId, "name": name, "media": media]
+        if let id { body["id"] = id }
+        return try decode(try await send("/admin/store/folders", method: "POST", json: body))
+    }
+    func adminStoreDeleteFolder(_ id: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/folders/\(id)", method: "DELETE"))
+    }
+    func adminStoreSaveProduct(id: Int?, folderId: Int, name: String, description: String,
+                               media: [[String: String]], downloadUrl: String,
+                               downloadFileId: Int?) async throws -> IdResponse {
+        var body: [String: Any] = ["folder_id": folderId, "name": name,
+                                    "description": description, "media": media,
+                                    "download_url": downloadUrl]
+        if let id { body["id"] = id }
+        if let downloadFileId { body["download_file_id"] = downloadFileId }
+        return try decode(try await send("/admin/store/products", method: "POST", json: body))
+    }
+    func adminStoreDeleteProduct(_ id: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/products/\(id)", method: "DELETE"))
+    }
+    // -- Admin: giá theo thời hạn --
+    func adminStoreSetPrices(productId: Int, prices: [[String: Any]]) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/products/\(productId)/prices",
+                                  method: "POST", json: ["prices": prices]))
+    }
+    // -- Admin: kho key --
+    func adminStoreListKeys(productId: Int) async throws -> StoreKeysInfo {
+        try decode(try await send("/admin/store/products/\(productId)/keys"))
+    }
+    func adminStoreAddKeys(productId: Int, text: String) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/products/\(productId)/keys",
+                                  method: "POST", json: ["text": text]))
+    }
+    func adminStoreDeleteKey(_ keyId: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/keys/\(keyId)", method: "DELETE"))
+    }
+    func adminStoreDeleteAvailableKeys(productId: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/products/\(productId)/keys", method: "DELETE"))
+    }
+    func adminStoreOrders() async throws -> [StoreAdminOrder] {
+        try decode(try await send("/admin/store/orders"))
     }
 
     // ---- Admin API keys (server-side) ----

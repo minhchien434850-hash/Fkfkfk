@@ -47,7 +47,10 @@ struct VideoFeedView: View {
             }
             .navigationTitle("Video")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { ThreeDLogoText(size: 20) } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { ThreeDLogoText(size: 20) }
+                ToolbarItem(placement: .topBarTrailing) { AppearanceMenu() }
+            }
             .task { await load() }
             .refreshable { await load() }
             .fullScreenCover(item: Binding(
