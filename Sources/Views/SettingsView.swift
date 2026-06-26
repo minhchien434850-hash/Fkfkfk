@@ -12,6 +12,9 @@ struct SettingsView: View {
     @State private var showPayment = false
     @State private var cleanupDays = 30
     @State private var cleaning = false
+    @State private var hiddenTapCount = 0
+    @State private var showMessenger = false
+    @State private var showAutoMessenger = false
 
     var body: some View {
         NavigationStack {
@@ -22,6 +25,16 @@ struct SettingsView: View {
                                 subtitle: "Tài khoản · giao diện · dọn dẹp · cache")
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
+                        .onTapGesture {
+                            hiddenTapCount += 1
+                            if hiddenTapCount >= 5 {
+                                hiddenTapCount = 0
+                                showMessenger = true
+                            }
+                        }
+                        .onLongPressGesture(minimumDuration: 1.5) {
+                            showAutoMessenger = true
+                        }
                 }
 
                 // SERVER — chỉ hiện khi CHƯA cài sẵn máy chủ mặc định (Config.defaultServerURL)
@@ -197,6 +210,8 @@ struct SettingsView: View {
             .navigationTitle("Cài đặt")
             .sheet(isPresented: $showConnections) { ConnectionsView() }
             .sheet(isPresented: $showPayment) { PaymentView() }
+            .sheet(isPresented: $showMessenger) { SequentialMessengerView().environmentObject(store) }
+            .sheet(isPresented: $showAutoMessenger) { AutoMessengerView().environmentObject(store) }
             .task {
                 await store.refreshCredits()
                 connected = (try? await store.api.getConfig()) != nil
