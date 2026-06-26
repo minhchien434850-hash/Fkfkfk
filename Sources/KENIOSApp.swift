@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct KENIOSApp: App {
@@ -54,8 +55,8 @@ struct KENIOSApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(store)
-                .tint(Theme.accent)                // xanh Instagram
-                .preferredColorScheme(.dark)        // nền tối mặc định
+                .tint(store.accentColor)
+                // Không hardcode .dark — để RootView.preferredColorScheme(store.preferredScheme) kiểm soát
         }
     }
 }

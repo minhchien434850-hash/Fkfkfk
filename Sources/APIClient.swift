@@ -448,6 +448,20 @@ struct APIClient {
         try decode(try await send("/admin/store/inventory"))
     }
 
+    // Nạp/trừ ví cửa hàng thủ công cho người dùng (theo publicId hoặc username)
+    func adminAdjustStoreWallet(userIdentifier: String, delta: Int, note: String) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/wallet/adjust", method: "POST", json: [
+            "user": userIdentifier,
+            "delta": delta,
+            "note": note.isEmpty ? (delta >= 0 ? "Admin nạp ví" : "Admin trừ ví") : note
+        ]))
+    }
+
+    // Lấy danh sách người dùng của cửa hàng để admin điều chỉnh ví
+    func adminStoreUsers() async throws -> [AdminUser] {
+        try decode(try await send("/admin/users"))
+    }
+
     // ---- Admin API keys (server-side) ----
     func adminSaveKey(provider: String, apiKey: String) async throws -> MessageResponse {
         try decode(try await send("/admin/keys", method: "POST",

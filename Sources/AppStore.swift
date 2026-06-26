@@ -1,5 +1,19 @@
 import Foundation
 import SwiftUI
+import UserNotifications
+
+// Bảng màu accent người dùng có thể chọn
+let kAccentColors: [(name: String, color: Color)] = [
+    ("blue",   Color(red: 0.0,  green: 0.58, blue: 0.96)),
+    ("purple", Color(red: 0.65, green: 0.45, blue: 0.95)),
+    ("pink",   Color(red: 0.96, green: 0.22, blue: 0.60)),
+    ("orange", Color(red: 0.98, green: 0.50, blue: 0.05)),
+    ("green",  Color(red: 0.20, green: 0.78, blue: 0.35)),
+    ("teal",   Color(red: 0.00, green: 0.80, blue: 0.78)),
+    ("red",    Color(red: 0.95, green: 0.18, blue: 0.18)),
+    ("gold",   Color(red: 1.00, green: 0.84, blue: 0.00)),
+    ("indigo", Color(red: 0.35, green: 0.34, blue: 0.84)),
+]
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -34,6 +48,11 @@ final class AppStore: ObservableObject {
     @Published var language: String
     @Published var systemPrompt: String
 
+    // Màu accent người dùng chọn (tên: "blue", "purple", ...)
+    @Published var accentColorName: String
+    // Logo có hiệu ứng động hay không
+    @Published var logoAnimated: Bool
+
     @Published var profiles: [ServerProfile] = []
 
     @Published var biometricsEnabled: Bool
@@ -45,6 +64,12 @@ final class AppStore: ObservableObject {
     @Published var directMessages: [Int: [DirectMessageItem]] = [:]
 
     private let d = UserDefaults.standard
+
+    /// Màu accent hiện tại của app (phụ thuộc vào accentColorName)
+    var accentColor: Color {
+        kAccentColors.first(where: { $0.name == accentColorName })?.color
+            ?? Color(red: 0.0, green: 0.58, blue: 0.96)
+    }
 
     init() {
         let savedURL = d.string(forKey: "baseURL") ?? ""
@@ -63,6 +88,8 @@ final class AppStore: ObservableObject {
         language = d.string(forKey: "language") ?? "vi"
         systemPrompt = d.string(forKey: "systemPrompt") ?? ""
         biometricsEnabled = d.bool(forKey: "biometricsEnabled")
+        accentColorName = d.string(forKey: "accentColorName") ?? "blue"
+        logoAnimated = d.bool(forKey: "logoAnimated")
         if let data = d.data(forKey: "profiles"),
            let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
             profiles = list
@@ -92,6 +119,25 @@ final class AppStore: ObservableObject {
     func setLanguage(_ v: String) { language = v; d.set(v, forKey: "language") }
     func setSystemPrompt(_ v: String) { systemPrompt = v; d.set(v, forKey: "systemPrompt") }
     func setBiometrics(_ v: Bool) { biometricsEnabled = v; d.set(v, forKey: "biometricsEnabled") }
+
+    func setAccentColor(_ name: String) { accentColorName = name; d.set(name, forKey: "accentColorName") }
+    func setLogoAnimated(_ v: Bool) { logoAnimated = v; d.set(v, forKey: "logoAnimated") }
+
+    /// Xin quyền thông báo từ iOS (không force, người dùng chủ động bấm)
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+    }
+
+    /// Gửi local notification khi có sản phẩm mới
+    func postLocalNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let req = UNNotificationRequest(identifier: UUID().uuidString,
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
 
     func saveServer(url: String, type: String) {
         baseURL = url; serverType = type

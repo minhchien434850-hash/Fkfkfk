@@ -17,7 +17,7 @@ struct RootView: View {
                     }
             }
         }
-        .tint(Theme.accent)
+        .tint(store.accentColor)
         .preferredColorScheme(store.preferredScheme)
     }
 }
@@ -52,7 +52,7 @@ struct MainTabView: View {
         // Chỉ 5 tab chính cho gọn & rõ — các mục khác nằm trong "Khám phá"
         TabView(selection: $store.tab) {
             SocialMediaToolsView()
-                .tabItem { Label("Mạng xã hội", systemImage: "globe.badge.ellipsis") }
+                .tabItem { Label("Mạng xã hội", systemImage: "network") }
                 .tag(2)
             VideoFeedView() // TikTok của riêng app
                 .tabItem { Label("Video", systemImage: "play.rectangle.on.rectangle.fill") }

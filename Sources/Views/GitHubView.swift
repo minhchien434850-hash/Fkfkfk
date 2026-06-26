@@ -505,8 +505,16 @@ struct GitHubRepoView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadRuns(); await loadRelease() }
         .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result { Task { await upload(urls) } }
+                      allowedContentTypes: [.data, .content, .package, .sourceCode,
+                                            .image, .movie, .audio, .text, .pdf,
+                                            .spreadsheet, .archive, .commaSeparatedText],
+                      allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                Task { await upload(urls) }
+            case .failure(let err):
+                error = "Không mở được file: \(err.localizedDescription)"
+            }
         }
     }
 
@@ -517,6 +525,12 @@ struct GitHubRepoView: View {
             buildMsg = "Đã gửi lệnh build. Đợi vài phút rồi bấm 'Làm mới trạng thái'."
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             await loadRuns()
+        } catch let e as GitHubError {
+            if case .http(404, _) = e {
+                buildMsg = "Lỗi 404: Repo này chưa có file .github/workflows/build-app.yml hoặc token thiếu quyền 'workflow'. Hãy copy file workflow từ repo KENIOS gốc sang repo này rồi thử lại."
+            } else {
+                buildMsg = "Không gửi được lệnh build: \(e.localizedDescription)"
+            }
         } catch {
             buildMsg = "Không gửi được lệnh build: \(error.localizedDescription)"
         }
@@ -568,12 +582,19 @@ struct GitHubRepoView: View {
         uploading = true; error = nil; log = []
         let dir = folder.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
         for url in urls {
+            // Bắt buộc gọi startAccessingSecurityScopedResource trước khi đọc file
             let access = url.startAccessingSecurityScopedResource()
-            defer { if access { url.stopAccessingSecurityScopedResource() } }
             let name = url.lastPathComponent
             let path = dir.isEmpty ? name : "\(dir)/\(name)"
             do {
-                let data = try Data(contentsOf: url)
+                // Copy sang temp trước (tránh mất quyền trong async context)
+                let tmp = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(name)
+                try? FileManager.default.removeItem(at: tmp)
+                try FileManager.default.copyItem(at: url, to: tmp)
+                if access { url.stopAccessingSecurityScopedResource() }
+
+                let data = try Data(contentsOf: tmp)
                 let b64 = data.base64EncodedString()
                 let sha = await api.existingSha(fullName: repo.full_name, path: path, branch: branch)
                 try await api.uploadFile(fullName: repo.full_name, path: path,
@@ -581,7 +602,9 @@ struct GitHubRepoView: View {
                                          message: "Tải lên \(name) từ KENIOS",
                                          branch: branch, sha: sha)
                 log.append("✓ \(path) (\(humanSize(data.count)))")
+                try? FileManager.default.removeItem(at: tmp)
             } catch {
+                if access { url.stopAccessingSecurityScopedResource() }
                 log.append("✗ \(name): \(error.localizedDescription)")
             }
         }

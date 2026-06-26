@@ -170,10 +170,29 @@ struct StoreView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showAdmin) { StoreAdminView() }
+            .sheet(isPresented: $showAdmin) {
+                StoreAdminView()
+                    .onDisappear { Task { await reload() } }
+            }
             .sheet(isPresented: $showMyOrders) { StoreMyOrdersView() }
             .sheet(isPresented: $showWallet) { StoreWalletView() }
-            .task { await reload() }
+            .task {
+                await reload()
+                // Polling mỗi 30 giây để cập nhật sản phẩm mới real-time
+                let prevCatCount = categories.count
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 30_000_000_000)
+                    let oldCount = categories.count
+                    await reload()
+                    // Gửi thông báo local nếu có danh mục mới
+                    if categories.count > oldCount && oldCount > 0 {
+                        store.postLocalNotification(
+                            title: "Cửa hàng cập nhật",
+                            body: "Có \(categories.count - oldCount) danh mục mới trong cửa hàng!")
+                    }
+                    _ = prevCatCount  // suppress warning
+                }
+            }
             .refreshable { await reload() }
         }
     }
@@ -307,10 +326,16 @@ struct StoreView: View {
 
     private func reload() async {
         loading = true; error = nil
-        config = try? await store.api.storeConfig()
-        downloads = (try? await store.api.storeDownloads()) ?? []
-        contacts = try? await store.api.storeContacts()
-        do { categories = try await store.api.storeCategories() }
+        // Xoá cache để luôn lấy dữ liệu mới nhất từ server
+        URLCache.shared.removeAllCachedResponses()
+        async let cfgTask = store.api.storeConfig()
+        async let dlTask  = store.api.storeDownloads()
+        async let ctTask  = store.api.storeContacts()
+        async let catTask = store.api.storeCategories()
+        config    = try? await cfgTask
+        downloads = (try? await dlTask) ?? []
+        contacts  = try? await ctTask
+        do { categories = try await catTask }
         catch { self.error = error.localizedDescription }
         loading = false
     }

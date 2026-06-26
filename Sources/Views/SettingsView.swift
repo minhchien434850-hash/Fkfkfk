@@ -69,7 +69,7 @@ struct SettingsView: View {
                     Button("Lưu thay đổi") { Task { await saveProfile() } }
                 }
 
-                Section("Khác") {
+                Section("Ngôn ngữ & Giao diện") {
                     Picker("Ngôn ngữ", selection: Binding(
                         get: { store.language },
                         set: { store.setLanguage($0) })) {
@@ -84,6 +84,62 @@ struct SettingsView: View {
                         Text("Tối").tag("dark")
                         Text("Tự động (cân bằng)").tag("system")
                     }
+                }
+
+                // ===== Màu chủ đạo =====
+                Section("Màu chủ đạo của app") {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 5), spacing: 12) {
+                        ForEach(kAccentColors, id: \.name) { item in
+                            Button {
+                                store.setAccentColor(item.name)
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(item.color)
+                                        .frame(width: 38, height: 38)
+                                    if store.accentColorName == item.name {
+                                        Image(systemName: "checkmark")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(.white)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
+
+                // ===== Hiệu ứng logo =====
+                Section("Hiệu ứng & Logo") {
+                    Toggle("Logo có hiệu ứng động", isOn: Binding(
+                        get: { store.logoAnimated },
+                        set: { store.setLogoAnimated($0) }))
+                    Text("Bật để logo KENIOS và logo cửa hàng có hiệu ứng chuyển động lấp lánh.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
+                // ===== Thông báo =====
+                Section("Thông báo") {
+                    Button {
+                        store.requestNotificationPermission()
+                        message = "Đã mở yêu cầu cấp quyền thông báo iOS."
+                    } label: {
+                        Label("Bật thông báo (sản phẩm mới, cập nhật)",
+                              systemImage: "bell.badge")
+                    }
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    } label: {
+                        Label("Mở Cài đặt iOS để quản lý thông báo",
+                              systemImage: "gear")
+                    }
+                    Text("Thông báo xuất hiện khi admin thêm sản phẩm mới hoặc có cập nhật bảo trì.")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
 
                 Section("Dung lượng & Dọn dẹp") {

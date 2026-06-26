@@ -88,6 +88,11 @@ struct StoreAdminView: View {
                     } label: {
                         Label("Sao lưu KEY / ACC đã bán", systemImage: "externaldrive.badge.checkmark")
                     }
+                    NavigationLink {
+                        AdminWalletAdjustView()
+                    } label: {
+                        Label("Nạp / Trừ ví khách hàng", systemImage: "dollarsign.arrow.circlepath")
+                    }
                 }
 
                 Section("Danh mục (\(categories.count))") {
@@ -810,4 +815,139 @@ struct StoreKeysBackupView: View {
         let f = DateFormatter(); f.dateFormat = "dd/MM HH:mm"
         return f.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
     }
+}
+
+// ======================== Nạp/Trừ ví khách hàng thủ công ========================
+struct AdminWalletAdjustView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var userIdentifier = ""    // username hoặc publicId
+    @State private var amountText = ""
+    @State private var note = ""
+    @State private var isDeduct = false       // false = nạp, true = trừ
+    @State private var processing = false
+    @State private var message: String?
+    @State private var isError = false
+    @State private var history: [WalletAdjustRecord] = []
+
+    private var amount: Int? { Int(amountText.filter { $0.isNumber }) }
+    private let presets = [10_000, 50_000, 100_000, 200_000, 500_000]
+
+    var body: some View {
+        Form {
+            Section {
+                KHeroHeader(icon: "dollarsign.arrow.circlepath",
+                            title: "Điều chỉnh ví",
+                            subtitle: "Nạp hoặc trừ tiền ví khách hàng thủ công")
+                    .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            }
+
+            Section("Khách hàng") {
+                TextField("Username hoặc ID khách hàng", text: $userIdentifier)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+            }
+
+            Section("Loại thao tác") {
+                Picker("", selection: $isDeduct) {
+                    Text("Nạp tiền (+)").tag(false)
+                    Text("Trừ tiền (-)").tag(true)
+                }.pickerStyle(.segmented)
+            }
+
+            Section(isDeduct ? "Số tiền trừ" : "Số tiền nạp") {
+                HStack {
+                    TextField("Nhập số tiền (VND)", text: $amountText).keyboardType(.numberPad)
+                    Text("đ").foregroundStyle(.secondary)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(presets, id: \.self) { v in
+                            Button(kFormatVND(v)) { amountText = "\(v)" }
+                                .font(.caption)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Color(.secondarySystemBackground)).clipShape(Capsule())
+                        }
+                    }
+                }
+            }
+
+            Section("Ghi chú") {
+                TextField("Lý do (tuỳ chọn)", text: $note, axis: .vertical).lineLimit(1...3)
+            }
+
+            Section {
+                Button {
+                    Task { await adjust() }
+                } label: {
+                    HStack {
+                        if processing { ProgressView().tint(.white) }
+                        Text(processing ? "Đang xử lý..." : (isDeduct ? "Trừ ví" : "Nạp ví"))
+                    }
+                    .frame(maxWidth: .infinity).frame(height: 44)
+                    .background(userIdentifier.isEmpty || (amount ?? 0) < 1 ? Color.gray :
+                                (isDeduct ? Color.red : Color.green))
+                    .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .disabled(userIdentifier.isEmpty || (amount ?? 0) < 1 || processing)
+            }
+
+            if let message {
+                Section {
+                    Text(message).foregroundStyle(isError ? .red : .green).font(.footnote)
+                }
+            }
+
+            if !history.isEmpty {
+                Section("Lịch sử thao tác (phiên này)") {
+                    ForEach(history) { r in
+                        HStack {
+                            Image(systemName: r.delta >= 0 ? "plus.circle.fill" : "minus.circle.fill")
+                                .foregroundStyle(r.delta >= 0 ? .green : .red)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(r.user).font(.caption.bold())
+                                Text(r.note).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text((r.delta >= 0 ? "+" : "") + kFormatVND(r.delta))
+                                .font(.caption.bold())
+                                .foregroundStyle(r.delta >= 0 ? .green : .red)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Điều chỉnh ví")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func adjust() async {
+        guard let amt = amount, amt > 0, !userIdentifier.isEmpty else { return }
+        processing = true; message = nil; isError = false
+        let delta = isDeduct ? -amt : amt
+        do {
+            let resp = try await store.api.adminAdjustStoreWallet(
+                userIdentifier: userIdentifier.trimmingCharacters(in: .whitespacesAndNewlines),
+                delta: delta,
+                note: note.isEmpty ? (isDeduct ? "Admin trừ ví thủ công" : "Admin nạp ví thủ công") : note)
+            message = resp.message
+            let record = WalletAdjustRecord(user: userIdentifier, delta: delta,
+                                            note: note.isEmpty ? resp.message : note)
+            history.insert(record, at: 0)
+            // Gửi thông báo local cho admin
+            store.postLocalNotification(
+                title: isDeduct ? "Đã trừ ví" : "Đã nạp ví",
+                body: "\(isDeduct ? "-" : "+")\(kFormatVND(amt)) cho \(userIdentifier)")
+            amountText = ""; note = ""; userIdentifier = ""
+        } catch {
+            isError = true; message = error.localizedDescription
+        }
+        processing = false
+    }
+}
+
+struct WalletAdjustRecord: Identifiable {
+    let id = UUID()
+    let user: String
+    let delta: Int
+    let note: String
 }
