@@ -64,6 +64,11 @@ struct StoreAdminView: View {
                         Label("Giao diện cửa hàng (logo, banner)", systemImage: "paintpalette")
                     }
                     NavigationLink {
+                        StoreTopupBonusEditor()
+                    } label: {
+                        Label("Khuyến mãi nạp ví (%)", systemImage: "percent")
+                    }
+                    NavigationLink {
                         StoreInventoryView()
                     } label: {
                         Label("Kho hàng (tồn kho)", systemImage: "shippingbox")
@@ -653,6 +658,45 @@ struct StoreAdminOrdersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { orders = (try? await store.api.adminStoreOrders()) ?? [] }
         .refreshable { orders = (try? await store.api.adminStoreOrders()) ?? [] }
+    }
+}
+
+// ---- Khuyến mãi nạp ví (%) — admin ----
+struct StoreTopupBonusEditor: View {
+    @EnvironmentObject var store: AppStore
+    @State private var percentText = ""
+    @State private var message: String?
+    @State private var isError = false
+    private var percent: Int? { Int(percentText.filter { $0.isNumber }) }
+
+    var body: some View {
+        Form {
+            Section("Phần trăm thưởng khi khách nạp ví") {
+                HStack {
+                    TextField("Ví dụ: 20", text: $percentText).keyboardType(.numberPad)
+                    Text("%").foregroundStyle(.secondary)
+                }
+                if let p = percent, p > 0 {
+                    Text("Khách nạp 100.000đ sẽ nhận \(kFormatVND(100_000 + 100_000 * p / 100)) vào ví.")
+                        .font(.caption).foregroundStyle(.pink)
+                }
+                Text("Đặt 0 để tắt khuyến mãi. Áp dụng cho VÍ cửa hàng (tách biệt với nâng cấp PRO của app chính).")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Section { Button("Lưu") { Task { await save() } }.disabled(percent == nil) }
+            if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
+        }
+        .navigationTitle("Khuyến mãi nạp ví")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            if let r = try? await store.api.adminGetTopupBonus() { percentText = "\(r.percent)" }
+        }
+    }
+    private func save() async {
+        guard let p = percent else { return }
+        message = nil
+        do { let r = try await store.api.adminSetTopupBonus(percent: p); isError = false; message = r.message }
+        catch { isError = true; message = error.localizedDescription }
     }
 }
 

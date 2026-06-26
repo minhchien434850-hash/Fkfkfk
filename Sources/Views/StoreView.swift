@@ -97,6 +97,8 @@ struct StoreView: View {
     @State private var error: String?
     @State private var showAdmin = false
     @State private var showMyOrders = false
+    @State private var showWallet = false
+    @State private var downloads: [StoreDownloadItem] = []
     @State private var search = ""
 
     private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
@@ -112,6 +114,12 @@ struct StoreView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     storeHeader
+
+                    walletBar
+
+                    if !downloads.isEmpty {
+                        downloadsSection
+                    }
 
                     if !categories.isEmpty {
                         searchField
@@ -159,12 +167,73 @@ struct StoreView: View {
             }
             .sheet(isPresented: $showAdmin) { StoreAdminView() }
             .sheet(isPresented: $showMyOrders) { StoreMyOrdersView() }
+            .sheet(isPresented: $showWallet) { StoreWalletView() }
             .task { await reload() }
             .refreshable { await reload() }
         }
     }
 
     private var appearanceMenu: some View { AppearanceMenu() }
+
+    // Thanh ví: bấm để nạp tiền / xem số dư
+    private var walletBar: some View {
+        Button { showWallet = true } label: {
+            HStack {
+                Image(systemName: "wallet.pass.fill").foregroundStyle(Theme.gold)
+                Text("Ví cửa hàng").font(.subheadline.bold())
+                if let pct = config?.topupBonusPercent, pct > 0 {
+                    Text("KM +\(pct)%").font(.caption2.bold())
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.pink.opacity(0.2)).foregroundStyle(.pink)
+                        .clipShape(Capsule())
+                }
+                Spacer()
+                Text("Nạp tiền").font(.caption).foregroundStyle(Theme.accent)
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // Mục "Tải về" hiện ngay khi vào cửa hàng (bản tải miễn phí)
+    private var downloadsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Tải về", systemImage: "arrow.down.circle.fill").font(.headline)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(downloads) { d in
+                        downloadCard(d)
+                    }
+                }
+            }
+        }
+    }
+
+    private func downloadCard(_ d: StoreDownloadItem) -> some View {
+        let url = !d.downloadUrl.isEmpty ? URL(string: d.downloadUrl) : store.api.storeDownloadURL(productId: d.id)
+        return VStack(alignment: .leading, spacing: 0) {
+            StoreThumb(media: d.media, height: 90)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(d.name).font(.caption.bold()).lineLimit(2)
+                if let url {
+                    Link(destination: url) {
+                        Label("Tải", systemImage: "arrow.down.circle")
+                            .font(.caption2.bold())
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(Theme.accent.opacity(0.15)).foregroundStyle(Theme.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .frame(width: 150)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
 
     private var searchField: some View {
         HStack {
@@ -234,6 +303,7 @@ struct StoreView: View {
     private func reload() async {
         loading = true; error = nil
         config = try? await store.api.storeConfig()
+        downloads = (try? await store.api.storeDownloads()) ?? []
         do { categories = try await store.api.storeCategories() }
         catch { self.error = error.localizedDescription }
         loading = false
@@ -382,12 +452,12 @@ struct StoreProductDetailView: View {
     @State private var product: StoreProduct?
     @State private var mine: StoreProductMine?
     @State private var selectedPrice: StorePrice?
-    @State private var order: StoreOrderCreateResponse?
+    @State private var balance: Int = 0
     @State private var loading = false
     @State private var buying = false
-    @State private var checking = false
     @State private var error: String?
     @State private var info: String?
+    @State private var showWallet = false
 
     var body: some View {
         ScrollView {
@@ -418,6 +488,9 @@ struct StoreProductDetailView: View {
         .navigationTitle(product?.name ?? "Sản phẩm")
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
+        .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) {
+            StoreWalletView()
+        }
     }
 
     // Đã mua: hiện key + nút tải game
@@ -461,12 +534,18 @@ struct StoreProductDetailView: View {
         }
     }
 
-    // Chưa mua: chọn gói thời hạn → tạo đơn → QR → kiểm tra
+    // Chưa mua: chọn gói thời hạn → mua bằng số dư ví (giao tức thì)
     @ViewBuilder private func buySection(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if p.prices.isEmpty {
                 Text("Sản phẩm chưa có giá bán.").foregroundStyle(.secondary)
             } else {
+                HStack {
+                    Text("Số dư ví: \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Nạp ví") { showWallet = true }.font(.caption.bold())
+                }
+
                 Text("Chọn gói thời hạn").font(.headline)
                 ForEach(p.prices) { price in
                     Button {
@@ -485,58 +564,28 @@ struct StoreProductDetailView: View {
                     .buttonStyle(.plain)
                 }
 
-                if order == nil {
-                    Button {
-                        Task { await createOrder(p) }
-                    } label: {
-                        HStack {
-                            if buying { ProgressView().tint(.white) }
-                            Text(buying ? "Đang tạo đơn..." : "Mua ngay")
-                        }
-                        .font(.headline).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity).frame(height: 50)
-                        .background(p.availableKeys > 0 ? Theme.purple : Color.gray)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                let priceAmt = selectedPrice?.amount ?? p.prices.first?.amount ?? 0
+                let enough = balance >= priceAmt
+                Button {
+                    Task { await buy(p) }
+                } label: {
+                    HStack {
+                        if buying { ProgressView().tint(.white) }
+                        Text(buying ? "Đang xử lý..."
+                             : (p.availableKeys <= 0 ? "Tạm hết hàng"
+                                : (enough ? "Mua bằng số dư (\(kFormatVND(priceAmt)))" : "Nạp thêm để mua")))
                     }
-                    .disabled(buying || p.availableKeys <= 0 || (selectedPrice == nil && p.prices.count > 1))
+                    .font(.headline).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 50)
+                    .background(p.availableKeys > 0 ? Theme.purple : Color.gray)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-            }
+                .disabled(buying || p.availableKeys <= 0)
 
-            if let o = order { paymentBox(o) }
-        }
-    }
-
-    @ViewBuilder private func paymentBox(_ o: StoreOrderCreateResponse) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Quét mã QR để chuyển khoản").font(.headline)
-            if let qr = o.qrUrl, let url = URL(string: qr) {
-                AsyncImage(url: url) { img in
-                    img.resizable().scaledToFit().frame(maxWidth: 260).frame(maxWidth: .infinity)
-                } placeholder: { ProgressView().frame(maxWidth: .infinity) }
+                Text("Mua bằng số dư ví — giao key/acc ngay lập tức.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
-            LabeledContent("Ngân hàng", value: o.bankInfo.bank)
-            LabeledContent("Số tài khoản", value: o.bankInfo.account)
-            LabeledContent("Chủ tài khoản", value: o.bankInfo.name)
-            LabeledContent("Nội dung CK", value: o.bankInfo.content)
-            LabeledContent("Số tiền", value: kFormatVND(o.amount))
-            Text(o.message).font(.footnote).foregroundStyle(.secondary)
-            Button {
-                Task { await checkPaid() }
-            } label: {
-                HStack {
-                    if checking { ProgressView() }
-                    Text(checking ? "Đang kiểm tra..." : "Tôi đã chuyển khoản — kiểm tra")
-                }
-                .frame(maxWidth: .infinity).frame(height: 46)
-                .background(Color.green.opacity(0.18)).foregroundStyle(.green)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .disabled(checking)
-            Text("Hệ thống tự xác nhận trong ~20 giây sau khi nhận tiền. Nếu chưa thấy key, đợi chút rồi bấm kiểm tra lại.")
-                .font(.caption2).foregroundStyle(.secondary)
         }
-        .padding().background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private func reload() async {
@@ -547,28 +596,36 @@ struct StoreProductDetailView: View {
             if selectedPrice == nil { selectedPrice = p.prices.first }
         } catch { self.error = error.localizedDescription }
         mine = try? await store.api.storeProductMine(productId)
+        await reloadBalance()
         loading = false
     }
 
-    private func createOrder(_ p: StoreProduct) async {
-        buying = true; error = nil; info = nil
-        do {
-            order = try await store.api.storeCreateOrder(productId: p.id,
-                                                         priceId: selectedPrice?.id)
-        } catch { self.error = error.localizedDescription }
-        buying = false
+    private func reloadBalance() async {
+        if let w = try? await store.api.storeWallet() { balance = w.balance }
     }
 
-    private func checkPaid() async {
-        checking = true; error = nil
-        let m = try? await store.api.storeProductMine(productId)
-        if let m, m.owned {
-            mine = m; order = nil
-            info = "Thanh toán thành công! Key đã được cấp."
-        } else {
-            info = "Chưa nhận được thanh toán. Vui lòng đợi thêm rồi kiểm tra lại."
+    private func buy(_ p: StoreProduct) async {
+        let priceAmt = selectedPrice?.amount ?? p.prices.first?.amount ?? 0
+        if balance < priceAmt {
+            info = nil; error = "Số dư ví không đủ. Hãy nạp thêm vào ví."
+            showWallet = true
+            return
         }
-        checking = false
+        buying = true; error = nil; info = nil
+        do {
+            let r = try await store.api.storeBuy(productId: p.id, priceId: selectedPrice?.id)
+            balance = r.balance
+            mine = StoreProductMine(owned: true, key: r.key,
+                                    downloadUrl: r.downloadUrl, downloadFileId: r.downloadFileId)
+            info = r.message
+        } catch {
+            self.error = error.localizedDescription
+            // Có thể do hết số dư (server kiểm tra lại) → mở ví
+            if (error.localizedDescription).contains("số dư") || (error.localizedDescription).contains("Số dư") {
+                showWallet = true
+            }
+        }
+        buying = false
     }
 }
 

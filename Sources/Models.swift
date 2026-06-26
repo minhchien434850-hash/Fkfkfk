@@ -250,7 +250,58 @@ struct StoreAppConfig: Decodable, Hashable {
     let logoUrl: String
     let bannerType: String   // image | video
     let bannerUrl: String
+    let topupBonusPercent: Int?
 }
+
+// ---- Ví cửa hàng ----
+struct StoreWalletTx: Identifiable, Decodable, Hashable {
+    var id: String { "\(kind)-\(createdAt ?? 0)-\(amount)" }
+    let kind: String      // topup | purchase
+    let amount: Int
+    let note: String
+    let createdAt: Int?
+}
+
+struct StoreWallet: Decodable {
+    let balance: Int
+    let bonusPercent: Int
+    let tx: [StoreWalletTx]
+}
+
+struct StoreTopupResponse: Decodable {
+    let topupId: Int
+    let ref: String
+    let amount: Int
+    let bonus: Int
+    let credited: Int
+    let bonusPercent: Int
+    let message: String
+    let bankInfo: BankInfo
+    let qrUrl: String?
+}
+
+struct StoreBuyResponse: Decodable {
+    let ok: Bool
+    let owned: Bool
+    let orderId: Int
+    let key: String
+    let productName: String
+    let downloadUrl: String?
+    let downloadFileId: Int?
+    let balance: Int
+    let message: String
+}
+
+struct StoreDownloadItem: Identifiable, Decodable, Hashable {
+    let id: Int
+    let name: String
+    let kind: String?
+    let media: [StoreMedia]
+    let downloadUrl: String
+    let hasFile: Bool
+}
+
+struct StoreTopupBonus: Decodable { let percent: Int }
 
 struct StoreCategory: Identifiable, Decodable, Hashable {
     let id: Int

@@ -339,13 +339,35 @@ struct APIClient {
     func storeProductMine(_ pid: Int) async throws -> StoreProductMine {
         try decode(try await send("/store/products/\(pid)/mine"))
     }
-    func storeCreateOrder(productId: Int, priceId: Int?) async throws -> StoreOrderCreateResponse {
+    // Mua bằng số dư ví (giao hàng tức thì)
+    func storeBuy(productId: Int, priceId: Int?) async throws -> StoreBuyResponse {
         var body: [String: Any] = ["product_id": productId]
         if let priceId { body["price_id"] = priceId }
         return try decode(try await send("/store/orders", method: "POST", json: body))
     }
     func storeMyOrders() async throws -> [StoreOrder] {
         try decode(try await send("/store/orders"))
+    }
+    // Ví cửa hàng
+    func storeWallet() async throws -> StoreWallet {
+        try decode(try await send("/store/wallet"))
+    }
+    func storeTopup(amount: Int) async throws -> StoreTopupResponse {
+        try decode(try await send("/store/wallet/topup", method: "POST", json: ["amount": amount]))
+    }
+    // Tải về công khai
+    func storeDownloads() async throws -> [StoreDownloadItem] {
+        try decode(try await send("/store/downloads", auth: false))
+    }
+    func storeDownloadURL(productId: Int) -> URL? {
+        URL(string: root + "/store/products/\(productId)/download")
+    }
+    // Admin: % khuyến mãi nạp ví
+    func adminGetTopupBonus() async throws -> StoreTopupBonus {
+        try decode(try await send("/admin/store/topup-bonus"))
+    }
+    func adminSetTopupBonus(percent: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/topup-bonus", method: "POST", json: ["percent": percent]))
     }
 
     // -- Admin: giao diện store --

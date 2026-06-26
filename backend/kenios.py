@@ -565,6 +565,27 @@ def init_db() -> None:
                 ref TEXT,
                 created_at INTEGER
             );
+
+            -- Nạp tiền vào VÍ cửa hàng (tách biệt thanh toán app chính)
+            CREATE TABLE IF NOT EXISTS store_topups(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,         -- số tiền chuyển khoản (VND)
+                bonus INTEGER DEFAULT 0,         -- thưởng thêm (VND)
+                credited INTEGER NOT NULL,       -- tổng cộng vào ví = amount + bonus
+                status TEXT DEFAULT 'pending',   -- pending | completed
+                ref TEXT,
+                created_at INTEGER
+            );
+            -- Lịch sử biến động ví
+            CREATE TABLE IF NOT EXISTS store_wallet_tx(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,              -- topup | purchase
+                amount INTEGER NOT NULL,         -- +nạp / -mua
+                note TEXT DEFAULT '',
+                created_at INTEGER
+            );
         """)
     _migrate()
 
@@ -594,6 +615,7 @@ def init_db() -> None:
     _seed_setting("store_logo_url", "")
     _seed_setting("store_banner_type", "image")   # image | video
     _seed_setting("store_banner_url", "")
+    _seed_setting("store_topup_bonus_percent", "0")   # % thưởng khi nạp tiền vào ví
     _seed_prompt_templates()
     log.info("DB sẵn sàng: %s", DB_PATH)
 
@@ -727,6 +749,8 @@ def _migrate() -> None:
         # App bán hàng: loại sản phẩm (app/key vs acc game) + lưu key trực tiếp vào đơn
         ("store_products", "kind", "TEXT DEFAULT 'app'"),   # app | acc
         ("store_orders", "key_text", "TEXT"),
+        # Ví cửa hàng (số dư VND, tách biệt với app chính)
+        ("users", "wallet", "INTEGER DEFAULT 0"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -752,6 +776,8 @@ def _create_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)",
         "CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)",
+        "CREATE INDEX IF NOT EXISTS idx_store_topups_user_status ON store_topups(user_id,status)",
+        "CREATE INDEX IF NOT EXISTS idx_store_wallet_tx_user ON store_wallet_tx(user_id)",
     ]
     with db() as c:
         for ddl in indexes:
@@ -3954,6 +3980,13 @@ def _confirm_by_customer_id(cid: str, amount: int) -> bool:
             if pay and _finalize_payment_row(c, pay):
                 log.info("Xác nhận theo ID=%s: đơn PRO #%d", cid, pay["id"])
                 return True
+            # Nạp ví cửa hàng
+            tops = c.execute("SELECT * FROM store_topups WHERE user_id=? AND status='pending' "
+                             "ORDER BY id ASC", (uid,)).fetchall()
+            top = _match_amount(tops, amount)
+            if top and _finalize_topup_row(c, top):
+                return True
+            # (tương thích cũ) đơn mua trực tiếp qua chuyển khoản
             orders = c.execute("SELECT * FROM store_orders WHERE user_id=? AND status='pending' "
                                "ORDER BY id ASC", (uid,)).fetchall()
             order = _match_amount(orders, amount)
@@ -4206,7 +4239,82 @@ def store_config() -> dict[str, Any]:
         "logo_url": get_setting("store_logo_url", ""),
         "banner_type": get_setting("store_banner_type", "image"),
         "banner_url": get_setting("store_banner_url", ""),
+        "topup_bonus_percent": _topup_bonus_percent(),
     }
+
+
+# ======================== VÍ CỬA HÀNG (tách biệt thanh toán app chính) ========================
+def _topup_bonus_percent() -> int:
+    try:
+        v = int(get_setting("store_topup_bonus_percent", "0") or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return max(0, min(v, 1000))
+
+def _wallet_balance(c, uid: int) -> int:
+    r = c.execute("SELECT wallet FROM users WHERE id=?", (uid,)).fetchone()
+    return (r["wallet"] or 0) if r else 0
+
+def _wallet_add(c, uid: int, delta: int, kind: str, note: str = "") -> None:
+    c.execute("UPDATE users SET wallet=COALESCE(wallet,0)+? WHERE id=?", (delta, uid))
+    c.execute("INSERT INTO store_wallet_tx(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",
+              (uid, kind, delta, note, int(time.time())))
+
+
+@app.get("/store/wallet")
+def store_wallet(user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        bal = _wallet_balance(c, user["id"])
+        tx = c.execute("SELECT kind,amount,note,created_at FROM store_wallet_tx "
+                       "WHERE user_id=? ORDER BY id DESC LIMIT 50", (user["id"],)).fetchall()
+    return {
+        "balance": bal,
+        "bonus_percent": _topup_bonus_percent(),
+        "tx": [{"kind": r["kind"], "amount": r["amount"], "note": r["note"] or "",
+                "created_at": r["created_at"]} for r in tx],
+    }
+
+
+class TopupIn(BaseModel):
+    amount: int
+
+@app.post("/store/wallet/topup")
+def store_wallet_topup(b: TopupIn, user=Depends(get_user)) -> dict[str, Any]:
+    amt = int(b.amount or 0)
+    if amt < 1000:
+        raise HTTPException(status_code=400, detail="Số tiền nạp tối thiểu 1.000đ.")
+    pct = _topup_bonus_percent()
+    bonus = amt * pct // 100
+    credited = amt + bonus
+    ref = secrets.token_urlsafe(10)
+    with db() as c:
+        cid = _ensure_public_id(c, user["id"])
+        cur = c.execute(
+            "INSERT INTO store_topups(user_id,amount,bonus,credited,status,ref,created_at) "
+            "VALUES(?,?,?,?,'pending',?,?)",
+            (user["id"], amt, bonus, credited, ref, int(time.time())))
+        tid = cur.lastrowid
+    bank = bank_info(amount=amt, note=cid)
+    return {
+        "topup_id": tid, "ref": cid, "amount": amt, "bonus": bonus,
+        "credited": credited, "bonus_percent": pct,
+        "message": (f"Chuyển khoản {amt:,}đ với nội dung là ID của bạn: {cid}. "
+                    f"Ví sẽ được cộng {credited:,}đ" + (f" (thưởng {pct}%)" if pct else "") + ".").replace(",", "."),
+        "bank_info": bank, "qr_url": bank["qr_url"],
+    }
+
+
+def _finalize_topup_row(c, t) -> bool:
+    """Hoàn tất 1 đơn nạp ví. Idempotent."""
+    claimed = c.execute("UPDATE store_topups SET status='completed' WHERE id=? AND status='pending'",
+                        (t["id"],))
+    if claimed.rowcount != 1:
+        return False
+    _wallet_add(c, t["user_id"], t["credited"], "topup",
+                f"Nạp {t['amount']:,}đ".replace(",", ".") +
+                (f" + thưởng {t['bonus']:,}đ".replace(",", ".") if t["bonus"] else ""))
+    log.info("Ví: nạp xong topup #%d user=%d +%d", t["id"], t["user_id"], t["credited"])
+    return True
 
 @app.get("/store/categories")
 def store_categories() -> list[dict[str, Any]]:
@@ -4259,13 +4367,13 @@ def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
         }
 
 
-# -------------------- Khách mua --------------------
+# -------------------- Khách mua bằng VÍ (giao hàng tức thì) --------------------
 class StoreOrderIn(BaseModel):
     product_id: int
     price_id: Optional[int] = None
 
 @app.post("/store/orders")
-def store_create_order(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
+def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
     with db() as c:
         prod = c.execute("SELECT * FROM store_products WHERE id=?", (b.product_id,)).fetchone()
         if not prod:
@@ -4278,24 +4386,98 @@ def store_create_order(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any
             price = next((p for p in prices if p["id"] == b.price_id), None)
         if price is None:
             price = prices[0]
-        avail = c.execute("SELECT COUNT(*) AS n FROM store_keys WHERE product_id=? AND status='available'",
-                          (b.product_id,)).fetchone()["n"]
-        if avail <= 0:
+        amount = price["amount"]
+        balance = _wallet_balance(c, user["id"])
+        if balance < amount:
+            raise HTTPException(status_code=400,
+                detail=f"Số dư ví không đủ (cần {amount:,}đ, còn {balance:,}đ). Vui lòng nạp thêm vào ví."
+                       .replace(",", "."))
+        # Giành 1 key khả dụng (atomic)
+        key = None
+        for _ in range(50):
+            cand = c.execute("SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
+                             "ORDER BY id ASC LIMIT 1", (b.product_id,)).fetchone()
+            if not cand:
+                break
+            got = c.execute("UPDATE store_keys SET status='sold' WHERE id=? AND status='available'",
+                            (cand["id"],))
+            if got.rowcount == 1:
+                key = cand
+                break
+        if not key:
             raise HTTPException(status_code=400, detail="Sản phẩm tạm hết hàng. Vui lòng quay lại sau.")
-        ref = secrets.token_urlsafe(10)
-        cid = _ensure_public_id(c, user["id"])   # nội dung CK = ID khách
+        # Trừ ví (atomic, chống âm)
+        ded = c.execute("UPDATE users SET wallet=wallet-? WHERE id=? AND wallet>=?",
+                        (amount, user["id"], amount))
+        if ded.rowcount != 1:
+            c.execute("UPDATE store_keys SET status='available' WHERE id=?", (key["id"],))  # trả key
+            raise HTTPException(status_code=400, detail="Số dư ví không đủ. Vui lòng nạp thêm.")
         cur = c.execute(
-            "INSERT INTO store_orders(user_id,product_id,price_id,amount,status,ref,created_at) "
-            "VALUES(?,?,?,?,'pending',?,?)",
-            (user["id"], b.product_id, price["id"], price["amount"], ref, int(time.time())))
+            "INSERT INTO store_orders(user_id,product_id,price_id,key_id,key_text,amount,status,ref,created_at) "
+            "VALUES(?,?,?,?,?,?,'completed',?,?)",
+            (user["id"], b.product_id, price["id"], key["id"], key["key_text"], amount,
+             "wallet", int(time.time())))
         oid = cur.lastrowid
-    bank = bank_info(amount=price["amount"], note=cid)
+        _backup_sold_key(c, {"id": oid, "product_id": b.product_id, "user_id": user["id"],
+                             "amount": amount}, key["key_text"])
+        c.execute("DELETE FROM store_keys WHERE id=?", (key["id"],))   # đã giao → xoá khỏi kho
+        c.execute("INSERT INTO store_wallet_tx(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",
+                  (user["id"], "purchase", -amount, f"Mua {prod['name']}", int(time.time())))
+        new_balance = _wallet_balance(c, user["id"])
     return {
-        "order_id": oid, "ref": cid, "amount": price["amount"],
-        "label": price["label"], "product_name": prod["name"],
-        "message": f"Chuyển khoản với nội dung là ID của bạn: {cid}. Hệ thống tự xác nhận & giao hàng trong giây lát.",
-        "bank_info": bank, "qr_url": bank["qr_url"],
+        "ok": True, "owned": True, "order_id": oid,
+        "key": key["key_text"], "product_name": prod["name"],
+        "download_url": prod["download_url"] or "",
+        "download_file_id": prod["download_file_id"],
+        "balance": new_balance,
+        "message": "Mua thành công! Key đã được giao.",
     }
+
+
+# -------------------- Tải về công khai (hiện ngay khi vào cửa hàng) --------------------
+@app.get("/store/downloads")
+def store_downloads() -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute("SELECT * FROM store_products WHERE download_url!='' OR download_file_id IS NOT NULL "
+                         "ORDER BY id DESC").fetchall()
+    return [{
+        "id": r["id"], "name": r["name"], "kind": _row_kind(r),
+        "media": _load_media(r["media"]),
+        "download_url": r["download_url"] or "",
+        "has_file": r["download_file_id"] is not None,
+    } for r in rows]
+
+@app.get("/store/products/{pid}/download")
+def store_public_download(pid: int, background_tasks: BackgroundTasks):
+    """Tải file/link của sản phẩm — công khai (bản tải miễn phí; KEY mới là thứ phải mua)."""
+    from fastapi.responses import RedirectResponse
+    with db() as c:
+        prod = c.execute("SELECT download_url,download_file_id FROM store_products WHERE id=?", (pid,)).fetchone()
+    if not prod:
+        raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+    if (prod["download_url"] or "").strip():
+        return RedirectResponse(prod["download_url"].strip())
+    fid = prod["download_file_id"]
+    if fid is None:
+        raise HTTPException(status_code=404, detail="Sản phẩm chưa có bản tải.")
+    with db() as c:
+        row = c.execute("SELECT name,mime,data FROM files WHERE id=?", (fid,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Không tìm thấy file tải.")
+    file_path = os.path.join(UPLOAD_DIR, str(fid))
+    if os.path.exists(file_path):
+        return FileResponse(path=file_path, filename=row["name"],
+                            media_type=row["mime"] or "application/octet-stream",
+                            content_disposition_type="attachment")
+    if row["data"]:
+        temp_path = os.path.join(UPLOAD_DIR, f"dl_{fid}_{secrets.token_hex(4)}")
+        with open(temp_path, "wb") as f:
+            f.write(base64.b64decode(row["data"]))
+        background_tasks.add_task(os.unlink, temp_path)
+        return FileResponse(path=temp_path, filename=row["name"],
+                            media_type=row["mime"] or "application/octet-stream",
+                            content_disposition_type="attachment")
+    raise HTTPException(status_code=404, detail="Không tìm thấy nội dung tệp.")
 
 @app.get("/store/orders")
 def store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
@@ -4335,6 +4517,21 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
         set_setting("store_banner_type", "video" if b.banner_type == "video" else "image")
     if b.banner_url is not None: set_setting("store_banner_url", b.banner_url.strip())
     return {"message": "Đã cập nhật giao diện app bán hàng."}
+
+
+# -------------------- Admin: % khuyến mãi nạp ví --------------------
+class TopupBonusIn(BaseModel):
+    percent: int
+
+@app.get("/admin/store/topup-bonus")
+def admin_get_topup_bonus(admin=Depends(get_admin)) -> dict[str, Any]:
+    return {"percent": _topup_bonus_percent()}
+
+@app.post("/admin/store/topup-bonus")
+def admin_set_topup_bonus(b: TopupBonusIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    p = max(0, min(int(b.percent), 1000))
+    set_setting("store_topup_bonus_percent", str(p))
+    return {"message": f"Đã đặt khuyến mãi nạp ví {p}%.", "percent": p}
 
 
 # -------------------- Admin: danh mục --------------------
