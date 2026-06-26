@@ -13,8 +13,8 @@ struct SettingsView: View {
     @State private var cleanupDays = 30
     @State private var cleaning = false
     @State private var hiddenTapCount = 0
-    @State private var showMessenger = false
-    @State private var showAutoMessenger = false
+    @State private var showMessengerHub = false
+    @State private var messengerInitialTab = 0
 
     var body: some View {
         NavigationStack {
@@ -29,11 +29,13 @@ struct SettingsView: View {
                             hiddenTapCount += 1
                             if hiddenTapCount >= 5 {
                                 hiddenTapCount = 0
-                                showMessenger = true
+                                messengerInitialTab = 0
+                                showMessengerHub = true
                             }
                         }
                         .onLongPressGesture(minimumDuration: 1.5) {
-                            showAutoMessenger = true
+                            messengerInitialTab = 1
+                            showMessengerHub = true
                         }
                 }
 
@@ -210,8 +212,9 @@ struct SettingsView: View {
             .navigationTitle("Cài đặt")
             .sheet(isPresented: $showConnections) { ConnectionsView() }
             .sheet(isPresented: $showPayment) { PaymentView() }
-            .sheet(isPresented: $showMessenger) { SequentialMessengerView().environmentObject(store) }
-            .sheet(isPresented: $showAutoMessenger) { WebAutoMessengerView().environmentObject(store) }
+            .sheet(isPresented: $showMessengerHub) {
+                MessengerHubView(initialTab: messengerInitialTab).environmentObject(store)
+            }
             .task {
                 await store.refreshCredits()
                 connected = (try? await store.api.getConfig()) != nil
