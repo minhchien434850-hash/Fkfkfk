@@ -53,6 +53,12 @@ final class AppStore: ObservableObject {
     // Logo có hiệu ứng động hay không
     @Published var logoAnimated: Bool
 
+    // Lời chào khi mở app (TTS)
+    @Published var welcomeEnabled: Bool
+    @Published var welcomeText: String
+    @Published var welcomeVoiceId: String   // AVSpeechSynthesisVoice.identifier hoặc "" = mặc định
+    @Published var welcomeRate: Float       // 0.3 (chậm) … 0.65 (nhanh); mặc định 0.5
+
     @Published var profiles: [ServerProfile] = []
 
     @Published var biometricsEnabled: Bool
@@ -90,6 +96,10 @@ final class AppStore: ObservableObject {
         biometricsEnabled = d.bool(forKey: "biometricsEnabled")
         accentColorName = d.string(forKey: "accentColorName") ?? "blue"
         logoAnimated = d.bool(forKey: "logoAnimated")
+        welcomeEnabled = d.bool(forKey: "welcomeEnabled")
+        welcomeText = d.string(forKey: "welcomeText") ?? "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"
+        welcomeVoiceId = d.string(forKey: "welcomeVoiceId") ?? ""
+        welcomeRate = d.object(forKey: "welcomeRate") as? Float ?? 0.5
         if let data = d.data(forKey: "profiles"),
            let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
             profiles = list
@@ -122,6 +132,10 @@ final class AppStore: ObservableObject {
 
     func setAccentColor(_ name: String) { accentColorName = name; d.set(name, forKey: "accentColorName") }
     func setLogoAnimated(_ v: Bool) { logoAnimated = v; d.set(v, forKey: "logoAnimated") }
+    func setWelcomeEnabled(_ v: Bool) { welcomeEnabled = v; d.set(v, forKey: "welcomeEnabled") }
+    func setWelcomeText(_ v: String) { welcomeText = v; d.set(v, forKey: "welcomeText") }
+    func setWelcomeVoiceId(_ v: String) { welcomeVoiceId = v; d.set(v, forKey: "welcomeVoiceId") }
+    func setWelcomeRate(_ v: Float) { welcomeRate = v; d.set(v, forKey: "welcomeRate") }
 
     /// Xin quyền thông báo từ iOS (không force, người dùng chủ động bấm)
     func requestNotificationPermission() {

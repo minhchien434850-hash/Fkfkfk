@@ -69,7 +69,12 @@ struct MainTabView: View {
         }
         .onAppear {
             if ![2, 14, 15, 4, 16].contains(store.tab) { store.tab = 2 }
-            WelcomeVoice.playOnce()   // giọng chào mừng khi vào app
+            if store.welcomeEnabled {
+                WelcomeVoice.shared.playOnce(
+                    text: store.welcomeText,
+                    voiceId: store.welcomeVoiceId,
+                    rate: store.welcomeRate)
+            }
         }
         .onChange(of: store.tab) { t in
             // Báo cho admin biết người dùng đang ở mục nào

@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 struct SettingsView: View {
     @EnvironmentObject var store: AppStore
@@ -112,6 +113,21 @@ struct SettingsView: View {
                     .listRowBackground(Color.clear)
                 }
 
+                // ===== Lời chào khi mở app =====
+                Section("Lời chào khi mở app") {
+                    NavigationLink {
+                        WelcomeGreetingView()
+                    } label: {
+                        HStack {
+                            Label("Lời chào & giọng đọc", systemImage: "waveform.badge.mic")
+                            Spacer()
+                            Text(store.welcomeEnabled ? "Đang bật" : "Tắt")
+                                .font(.caption)
+                                .foregroundStyle(store.welcomeEnabled ? .green : .secondary)
+                        }
+                    }
+                }
+
                 // ===== Hiệu ứng logo =====
                 Section("Hiệu ứng & Logo") {
                     Toggle("Logo có hiệu ứng động", isOn: Binding(
@@ -220,5 +236,103 @@ struct SettingsView: View {
             message = "Lỗi: \(error.localizedDescription)"
         }
         cleaning = false
+    }
+}
+
+// ============================ Lời chào khi mở app ============================
+struct WelcomeGreetingView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var voices: [AVSpeechSynthesisVoice] = []
+    @State private var rateBinding: Double = 0.5
+
+    private let templates = [
+        "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!",
+        "Xin chào! Rất vui được gặp lại bạn tại KENIOS hôm nay.",
+        "Kính chào quý khách! KENIOS xin chào và chúc bạn mua sắm vui vẻ.",
+        "Hello! Chào mừng bạn quay trở lại. Hôm nay có gì mới tại KENIOS đấy!",
+        "Chào bạn! Hãy cùng khám phá những tính năng thú vị của KENIOS nhé.",
+        "Xin kính chào! Chúc bạn có một trải nghiệm tuyệt vời với KENIOS.",
+    ]
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Bật lời chào tự động khi mở app", isOn: Binding(
+                    get: { store.welcomeEnabled },
+                    set: { store.setWelcomeEnabled($0) }))
+                Text("Khi bật, app sẽ đọc lời chào bằng giọng nói mỗi khi bạn mở app lên.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            if store.welcomeEnabled {
+                Section("Nội dung lời chào") {
+                    TextEditor(text: Binding(
+                        get: { store.welcomeText },
+                        set: { store.setWelcomeText($0) }))
+                        .frame(minHeight: 72)
+                }
+
+                Section("Mẫu lời chào (bấm để dùng)") {
+                    ForEach(templates, id: \.self) { t in
+                        Button {
+                            store.setWelcomeText(t)
+                        } label: {
+                            Text(t).font(.caption).foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Section("Giọng đọc") {
+                    Picker("Chọn giọng", selection: Binding(
+                        get: { store.welcomeVoiceId },
+                        set: { store.setWelcomeVoiceId($0) })) {
+                        Text("Mặc định (vi-VN tự động)").tag("")
+                        ForEach(voices, id: \.identifier) { v in
+                            Text(WelcomeVoice.displayName(v)).tag(v.identifier)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                    Text("Giọng ✦ là giọng Enhanced (rõ, tự nhiên hơn). Cài thêm giọng trong iOS Settings > Accessibility > Spoken Content > Voices.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
+                Section("Tốc độ đọc") {
+                    HStack(spacing: 10) {
+                        Text("🐢").font(.caption)
+                        Slider(value: $rateBinding, in: 0.3...0.65, step: 0.025)
+                            .onChange(of: rateBinding) { store.setWelcomeRate(Float($0)) }
+                        Text("🐇").font(.caption)
+                    }
+                    Text("Tốc độ: \(Int(rateBinding * 100))%  ·  (mặc định 50%)")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
+                Section("Thử giọng đọc") {
+                    Button {
+                        WelcomeVoice.shared.testSpeak(
+                            text: store.welcomeText,
+                            voiceId: store.welcomeVoiceId,
+                            rate: Float(rateBinding))
+                    } label: {
+                        Label("▶  Phát thử lời chào", systemImage: "play.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Button(role: .destructive) {
+                        WelcomeVoice.shared.stop()
+                    } label: {
+                        Label("■  Dừng phát", systemImage: "stop.circle")
+                    }
+                }
+            }
+        }
+        .navigationTitle("Lời chào khi mở app")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            voices = WelcomeVoice.availableVoices
+            rateBinding = Double(store.welcomeRate)
+        }
     }
 }

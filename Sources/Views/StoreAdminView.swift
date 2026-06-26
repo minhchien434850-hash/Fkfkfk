@@ -17,28 +17,45 @@ func mediaToEdit(_ items: [StoreMedia]) -> [EditMedia] {
     items.map { EditMedia(type: $0.type, url: $0.url) }
 }
 
-// Trình chỉnh sửa media dùng chung (tối đa 5)
+// Trình chỉnh sửa media dùng chung (tối đa 5) — hỗ trợ GIF/PNG/JPEG/WEBP/MP4
 struct MediaEditor: View {
     @Binding var media: [EditMedia]
+    @EnvironmentObject var store: AppStore
+    @State private var showConverter = false
 
     var body: some View {
-        Section("Ảnh / Video (dán link, tối đa 5)") {
+        Section {
             ForEach($media) { $m in
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("Loại", selection: $m.type) {
-                        Text("Ảnh").tag("image")
+                        Text("Ảnh / GIF").tag("image")
                         Text("Video").tag("video")
                     }.pickerStyle(.segmented)
-                    TextField("Dán link ảnh/video", text: $m.url)
+                    TextField("Dán link ảnh / GIF / PNG / JPEG / WEBP / MP4...", text: $m.url)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
             }
             .onDelete { media.remove(atOffsets: $0) }
             if media.count < 5 {
                 Button { media.append(EditMedia()) } label: {
-                    Label("Thêm media", systemImage: "plus.circle")
+                    Label("Thêm ảnh / video", systemImage: "plus.circle")
                 }
             }
+            Button {
+                showConverter = true
+            } label: {
+                Label("Chuyển đổi ảnh → link GIF / PNG / JPEG", systemImage: "wand.and.stars")
+                    .font(.caption)
+                    .foregroundStyle(store.accentColor)
+            }
+        } header: {
+            Text("Ảnh / Video (dán link, tối đa 5)")
+        } footer: {
+            Text("Dán link từ bất kỳ dịch vụ nào: Imgur, Cloudinary, Giphy, v.v. Hoặc bấm \"Chuyển đổi\" để tạo link từ ảnh.")
+                .font(.caption2)
+        }
+        .sheet(isPresented: $showConverter) {
+            MediaConverterView().environmentObject(store)
         }
     }
 }
@@ -95,19 +112,37 @@ struct StoreAdminView: View {
                     }
                 }
 
-                Section("Danh mục (\(categories.count))") {
+                Section("Danh mục sản phẩm (\(categories.count))") {
                     Button { newCategory = true } label: {
-                        Label("Thêm danh mục", systemImage: "plus.circle.fill")
+                        Label("Thêm danh mục mới", systemImage: "plus.circle.fill")
                     }
                     ForEach(categories) { cat in
                         NavigationLink {
                             StoreAdminFolderList(category: cat)
                         } label: {
-                            HStack {
-                                Text(cat.name)
+                            HStack(spacing: 10) {
+                                // Thumbnail danh mục
+                                if let m = cat.media.first, m.type != "video", let url = URL(string: m.url) {
+                                    AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                    placeholder: { Color(.tertiarySystemBackground) }
+                                        .frame(width: 38, height: 38)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "folder.fill")
+                                        .foregroundStyle(Theme.gold)
+                                        .frame(width: 38, height: 38)
+                                        .background(Color(.tertiarySystemBackground))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(cat.name).font(.subheadline.bold())
+                                    Text("Bấm để quản lý thư mục con")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
                                 Spacer()
                                 Button { editCategory = cat } label: {
-                                    Image(systemName: "pencil")
+                                    Image(systemName: "pencil.circle")
+                                        .foregroundStyle(.secondary)
                                 }.buttonStyle(.borderless)
                             }
                         }
@@ -162,18 +197,18 @@ struct StoreConfigEditor: View {
         Form {
             Section("Logo cửa hàng") {
                 TextField("Tên cửa hàng / logo", text: $logoName)
-                TextField("Link ảnh logo (tuỳ chọn)", text: $logoUrl)
+                TextField("Link ảnh logo (PNG / GIF / JPEG / WEBP)", text: $logoUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
             Section("Banner đầu trang") {
                 Picker("Loại banner", selection: $bannerType) {
-                    Text("Ảnh").tag("image")
-                    Text("Video").tag("video")
+                    Text("Ảnh / GIF").tag("image")
+                    Text("Video / MP4").tag("video")
                 }.pickerStyle(.segmented)
-                TextField("Dán link ảnh/video banner", text: $bannerUrl)
+                TextField("Dán link banner (GIF / PNG / JPEG / MP4...)", text: $bannerUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Text("Chỉ cần dán link là cửa hàng tự cập nhật. Khách hàng chỉ thấy giao diện này.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("Hỗ trợ GIF động, PNG, JPEG, WEBP, MP4. Dùng Khám phá → Chuyển đổi để tạo link GIF/PNG từ ảnh bất kỳ.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             Section { Button("Lưu giao diện") { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
@@ -256,11 +291,24 @@ struct StoreAdminFolderList: View {
                     NavigationLink {
                         StoreAdminProductList(folder: f)
                     } label: {
-                        HStack {
-                            Text(f.name)
+                        HStack(spacing: 10) {
+                            if let m = f.media.first, m.type != "video", let url = URL(string: m.url) {
+                                AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                placeholder: { Color(.tertiarySystemBackground) }
+                                    .frame(width: 36, height: 36)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(Theme.gold)
+                                    .frame(width: 36, height: 36)
+                                    .background(Color(.tertiarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            Text(f.name).font(.subheadline)
                             Spacer()
-                            Button { editFolder = f } label: { Image(systemName: "pencil") }
-                                .buttonStyle(.borderless)
+                            Button { editFolder = f } label: {
+                                Image(systemName: "pencil.circle").foregroundStyle(.secondary)
+                            }.buttonStyle(.borderless)
                         }
                     }
                 }
