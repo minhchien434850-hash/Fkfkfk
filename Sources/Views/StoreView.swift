@@ -55,6 +55,16 @@ struct StoreView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var showAdmin = false
+    @State private var showMyOrders = false
+    @State private var search = ""
+
+    private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
+    private var filteredCategories: [StoreCategory] {
+        let q = search.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return categories }
+        return categories.filter { $0.name.localizedCaseInsensitiveContains(q) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -62,28 +72,24 @@ struct StoreView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     storeHeader
 
+                    if !categories.isEmpty {
+                        searchField
+                    }
+
                     if loading && categories.isEmpty {
                         HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
                     } else if categories.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "bag").font(.largeTitle).foregroundStyle(.secondary)
-                            Text("Chưa có danh mục sản phẩm nào.")
-                                .foregroundStyle(.secondary)
-                            if store.isAdmin {
-                                Text("Bấm biểu tượng ⚙️ ở góc trên để thêm danh mục, sản phẩm.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                    .multilineTextAlignment(.center)
-                            }
-                        }
-                        .frame(maxWidth: .infinity).padding(.top, 40)
+                        emptyState
                     } else {
-                        ForEach(categories) { cat in
-                            NavigationLink {
-                                StoreFolderListView(category: cat)
-                            } label: {
-                                categoryCard(cat)
+                        LazyVGrid(columns: grid, spacing: 12) {
+                            ForEach(filteredCategories) { cat in
+                                NavigationLink {
+                                    StoreFolderListView(category: cat)
+                                } label: {
+                                    categoryCard(cat)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
 
@@ -96,6 +102,11 @@ struct StoreView: View {
             .navigationTitle(config?.logoName ?? "Ứng dụng")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showMyOrders = true } label: {
+                        Image(systemName: "bag.badge.questionmark")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack {
                         appearanceMenu
@@ -106,12 +117,40 @@ struct StoreView: View {
                 }
             }
             .sheet(isPresented: $showAdmin) { StoreAdminView() }
+            .sheet(isPresented: $showMyOrders) { StoreMyOrdersView() }
             .task { await reload() }
             .refreshable { await reload() }
         }
     }
 
     private var appearanceMenu: some View { AppearanceMenu() }
+
+    private var searchField: some View {
+        HStack {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Tìm danh mục…", text: $search)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+            }
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "bag").font(.largeTitle).foregroundStyle(.secondary)
+            Text("Chưa có danh mục sản phẩm nào.").foregroundStyle(.secondary)
+            if store.isAdmin {
+                Text("Bấm biểu tượng ⚙️ ở góc trên để thêm danh mục, sản phẩm.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity).padding(.top, 40)
+    }
 
     private var storeHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -140,13 +179,12 @@ struct StoreView: View {
 
     private func categoryCard(_ cat: StoreCategory) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            StoreMediaCarousel(media: cat.media, height: 150)
-            HStack {
-                Text(cat.name).font(.headline)
-                Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.secondary)
-            }
-            .padding(12)
+            StoreMediaCarousel(media: cat.media, height: 120)
+            Text(cat.name)
+                .font(.subheadline.bold())
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
         }
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -232,14 +270,17 @@ struct StoreProductListView: View {
     @State private var products: [StoreProduct] = []
     @State private var loading = false
 
+    private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if loading && products.isEmpty {
-                    HStack { Spacer(); ProgressView(); Spacer() }
-                } else if products.isEmpty {
-                    Text("Chưa có sản phẩm nào.").foregroundStyle(.secondary)
-                } else {
+            if loading && products.isEmpty {
+                HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
+            } else if products.isEmpty {
+                Text("Chưa có sản phẩm nào.").foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity).padding(.top, 40)
+            } else {
+                LazyVGrid(columns: grid, spacing: 12) {
                     ForEach(products) { p in
                         NavigationLink {
                             StoreProductDetailView(productId: p.id)
@@ -247,8 +288,8 @@ struct StoreProductListView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                .padding()
             }
-            .padding()
         }
         .navigationTitle(folder.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -258,27 +299,28 @@ struct StoreProductListView: View {
 
     private func productRow(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            StoreMediaCarousel(media: p.media, height: 160)
+            StoreMediaCarousel(media: p.media, height: 130)
             VStack(alignment: .leading, spacing: 4) {
-                Text(p.name).font(.headline)
+                Text(p.name).font(.subheadline.bold()).lineLimit(2)
                 if let cheapest = p.prices.map(\.amount).min() {
-                    Text("Từ \(kFormatVND(cheapest))").font(.subheadline).foregroundStyle(Theme.accent)
+                    Text("Từ \(kFormatVND(cheapest))").font(.caption.bold()).foregroundStyle(Theme.accent)
+                } else {
+                    Text("Chưa có giá").font(.caption2).foregroundStyle(.secondary)
                 }
-                HStack(spacing: 8) {
-                    Text(p.availableKeys > 0 ? "Còn \(p.availableKeys) \(p.stockLabel)" : "Tạm hết hàng")
+                HStack(spacing: 6) {
+                    Text(p.availableKeys > 0 ? "Còn \(p.availableKeys)" : "Hết hàng")
                         .font(.caption2)
                         .foregroundStyle(p.availableKeys > 0 ? .green : .red)
                     if p.isAcc {
-                        Label("Acc game", systemImage: "gamecontroller")
-                            .font(.caption2).foregroundStyle(.purple)
+                        Image(systemName: "gamecontroller").font(.caption2).foregroundStyle(.purple)
                     }
                     if p.hasDownload {
-                        Label("Có bản tải", systemImage: "arrow.down.circle")
-                            .font(.caption2).foregroundStyle(.secondary)
+                        Image(systemName: "arrow.down.circle").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
             }
-            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
         }
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -529,6 +571,72 @@ struct StoreFileDownloadButton: View {
             localURL = url
         } catch { self.error = error.localizedDescription }
         downloading = false
+    }
+}
+
+// ============================ Đơn của tôi (khách) ============================
+struct StoreMyOrdersView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) var dismiss
+    @State private var orders: [StoreOrder] = []
+    @State private var loading = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if loading && orders.isEmpty {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                } else if orders.isEmpty {
+                    Text("Bạn chưa mua sản phẩm nào.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(orders) { o in orderRow(o) }
+                }
+            }
+            .navigationTitle("Đơn của tôi")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .task { await reload() }
+            .refreshable { await reload() }
+        }
+    }
+
+    @ViewBuilder private func orderRow(_ o: StoreOrder) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(o.productName).font(.subheadline.bold())
+                Spacer()
+                Text(o.status == "completed" ? "Hoàn tất" : "Chờ thanh toán")
+                    .font(.caption2)
+                    .foregroundStyle(o.status == "completed" ? .green : .orange)
+            }
+            Text(kFormatVND(o.amount)).font(.caption).foregroundStyle(Theme.accent)
+            if let key = o.key, !key.isEmpty {
+                HStack {
+                    Text(key).font(.caption.monospaced()).textSelection(.enabled).lineLimit(2)
+                    Spacer()
+                    Button { UIPasteboard.general.string = key } label: { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(.borderless)
+                }
+                .padding(8).background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            if o.status == "completed" {
+                if let url = o.downloadUrl, !url.isEmpty, let u = URL(string: url) {
+                    Link(destination: u) {
+                        Label("Tải game", systemImage: "arrow.down.circle.fill").font(.caption.bold())
+                    }
+                } else if let fid = o.downloadFileId {
+                    StoreFileDownloadButton(fileId: fid)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func reload() async {
+        loading = true
+        orders = (try? await store.api.storeMyOrders()) ?? []
+        loading = false
     }
 }
 
