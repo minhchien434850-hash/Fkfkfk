@@ -301,28 +301,12 @@ struct MessengerHubView: View {
     // ── UI ──────────────────────────────────
     @State private var activeTab: Int = 0
 
-    // Mỗi dấu chấm (.) cuối dòng = kết thúc 1 tin nhắn.
-    // Nhiều dòng liên tiếp chưa có dấu chấm được ghép thành 1 tin.
+    // Mỗi dòng kết thúc bằng dấu chấm (.) = 1 tin nhắn.
+    // Dòng không có dấu chấm ở cuối = chưa hoàn thành, bỏ qua.
     private var messages: [String] {
-        let lines = rawLines.components(separatedBy: "\n")
-        var result: [String] = []
-        var buffer: [String] = []
-        for line in lines {
-            let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if t.isEmpty { continue }
-            buffer.append(t)
-            if t.hasSuffix(".") {
-                let msg = buffer.joined(separator: " ")
-                if !msg.isEmpty { result.append(msg) }
-                buffer = []
-            }
-        }
-        // Dòng chưa có dấu chấm (đang soạn) vẫn hiện preview nhưng chưa gửi
-        if !buffer.isEmpty {
-            let msg = buffer.joined(separator: " ")
-            if !msg.isEmpty { result.append(msg) }
-        }
-        return result
+        rawLines.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.hasSuffix(".") }
     }
     private var manualPlatform: ManualPlatform {
         kManualPlatforms.first { $0.id == manualPlatformId } ?? kManualPlatforms[0]
@@ -376,7 +360,7 @@ struct MessengerHubView: View {
                             .foregroundStyle(store.accentColor)
                     }
                 } footer: {
-                    Text("Kết thúc 1 tin bằng dấu chấm (.) rồi xuống dòng → 1 tin nhắn mới. Nhiều dòng liên tiếp chưa có dấu chấm sẽ ghép thành 1 tin.\nVí dụ:\nÊ bạn ơi.\nSao im lặng thế.\nNhớ trả lời nhé.")
+                    Text("Mỗi dòng kết thúc bằng dấu chấm (.) = 1 tin nhắn. Dòng chưa có dấu chấm sẽ bị bỏ qua.\nVí dụ:\nTôi là kenios.\nBạn tên là gì.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
