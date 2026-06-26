@@ -211,7 +211,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showConnections) { ConnectionsView() }
             .sheet(isPresented: $showPayment) { PaymentView() }
             .sheet(isPresented: $showMessenger) { SequentialMessengerView().environmentObject(store) }
-            .sheet(isPresented: $showAutoMessenger) { AutoMessengerView().environmentObject(store) }
+            .sheet(isPresented: $showAutoMessenger) { WebAutoMessengerView().environmentObject(store) }
             .task {
                 await store.refreshCredits()
                 connected = (try? await store.api.getConfig()) != nil
