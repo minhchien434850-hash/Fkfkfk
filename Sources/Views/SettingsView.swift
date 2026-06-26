@@ -12,9 +12,6 @@ struct SettingsView: View {
     @State private var showPayment = false
     @State private var cleanupDays = 30
     @State private var cleaning = false
-    @State private var hiddenTapCount = 0
-    @State private var showMessengerHub = false
-    @State private var messengerInitialTab = 0
 
     var body: some View {
         NavigationStack {
@@ -25,18 +22,6 @@ struct SettingsView: View {
                                 subtitle: "Tài khoản · giao diện · dọn dẹp · cache")
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
-                        .onTapGesture {
-                            hiddenTapCount += 1
-                            if hiddenTapCount >= 5 {
-                                hiddenTapCount = 0
-                                messengerInitialTab = 0
-                                showMessengerHub = true
-                            }
-                        }
-                        .onLongPressGesture(minimumDuration: 1.5) {
-                            messengerInitialTab = 1
-                            showMessengerHub = true
-                        }
                 }
 
                 // SERVER — chỉ hiện khi CHƯA cài sẵn máy chủ mặc định (Config.defaultServerURL)
@@ -212,9 +197,6 @@ struct SettingsView: View {
             .navigationTitle("Cài đặt")
             .sheet(isPresented: $showConnections) { ConnectionsView() }
             .sheet(isPresented: $showPayment) { PaymentView() }
-            .sheet(isPresented: $showMessengerHub) {
-                MessengerHubView(initialTab: messengerInitialTab).environmentObject(store)
-            }
             .task {
                 await store.refreshCredits()
                 connected = (try? await store.api.getConfig()) != nil

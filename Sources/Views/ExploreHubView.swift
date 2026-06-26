@@ -3,7 +3,7 @@ import PhotosUI
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case library, read, fun, games, tools, github, settings, admin, mediaConverter
+    case library, read, fun, games, tools, github, settings, admin, mediaConverter, messenger
     var id: String { rawValue }
 
     var title: String {
@@ -17,6 +17,7 @@ enum HubDest: String, Identifiable {
         case .settings:       return "Cài đặt"
         case .admin:          return "Quản trị"
         case .mediaConverter: return "Chuyển đổi"
+        case .messenger:      return "Nhắn tin"
         }
     }
     var subtitle: String {
@@ -30,6 +31,7 @@ enum HubDest: String, Identifiable {
         case .settings:       return "Tài khoản · giao diện"
         case .admin:          return "Quản lý người dùng"
         case .mediaConverter: return "Ảnh/Video → GIF · PNG"
+        case .messenger:      return "Thủ công · Tự động Web"
         }
     }
     var icon: String {
@@ -43,6 +45,7 @@ enum HubDest: String, Identifiable {
         case .settings:       return "gearshape.fill"
         case .admin:          return "person.2.badge.gearshape.fill"
         case .mediaConverter: return "wand.and.stars"
+        case .messenger:      return "bubble.left.and.bubble.right.fill"
         }
     }
     var colors: [Color] {
@@ -56,6 +59,7 @@ enum HubDest: String, Identifiable {
         case .settings:       return [Color(red: 0.4, green: 0.45, blue: 0.55), Color(red: 0.25, green: 0.3, blue: 0.4)]
         case .admin:          return [Color(red: 1.0, green: 0.78, blue: 0.0), Color(red: 0.9, green: 0.55, blue: 0.0)]
         case .mediaConverter: return [Color(red: 0.6, green: 0.1, blue: 0.9), Color(red: 0.9, green: 0.2, blue: 0.6)]
+        case .messenger:      return [Color(red: 0.05, green: 0.7, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.75)]
         }
     }
     var gradient: LinearGradient {
@@ -68,7 +72,7 @@ struct ExploreHubView: View {
     @State private var dest: HubDest?
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.library, .read, .fun, .games, .tools, .github, .mediaConverter, .settings]
+        var a: [HubDest] = [.library, .read, .fun, .games, .tools, .github, .mediaConverter, .messenger, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -126,6 +130,7 @@ struct ExploreHubView: View {
         case .settings:       SettingsView()
         case .admin:          AdminView()
         case .mediaConverter: MediaConverterView()
+        case .messenger:      MessengerHubView().environmentObject(store)
         }
     }
 }
