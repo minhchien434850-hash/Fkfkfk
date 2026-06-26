@@ -734,6 +734,31 @@ def _migrate() -> None:
                 c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
             except Exception:
                 pass
+    _create_indexes()
+
+
+def _create_indexes() -> None:
+    """Chỉ mục tăng tốc truy vấn hay dùng (hiệu năng)."""
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS idx_store_keys_prod_status ON store_keys(product_id,status)",
+        "CREATE INDEX IF NOT EXISTS idx_store_orders_user_status ON store_orders(user_id,status)",
+        "CREATE INDEX IF NOT EXISTS idx_store_orders_ref ON store_orders(ref)",
+        "CREATE INDEX IF NOT EXISTS idx_store_prices_prod ON store_prices(product_id)",
+        "CREATE INDEX IF NOT EXISTS idx_store_products_folder ON store_products(folder_id)",
+        "CREATE INDEX IF NOT EXISTS idx_store_folders_cat ON store_folders(category_id)",
+        "CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)",
+        "CREATE INDEX IF NOT EXISTS idx_payments_user_status ON payments(user_id,status)",
+        "CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)",
+        "CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)",
+    ]
+    with db() as c:
+        for ddl in indexes:
+            try:
+                c.execute(ddl)
+            except Exception:
+                pass
 
 
 # ========================== Bảo mật ==========================
@@ -1333,6 +1358,42 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
 
+# ---------- Bảo mật: thêm header an toàn cho mọi phản hồi ----------
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["X-XSS-Protection"] = "1; mode=block"
+    return resp
+
+
+# ---------- Bảo mật: giới hạn tần suất (chống dò mật khẩu / spam) ----------
+_rl_hits: dict[str, list[float]] = {}
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+def _rate_limit(request: Request, bucket: str, limit: int, window: int) -> None:
+    """Cho phép tối đa `limit` lần trong `window` giây cho mỗi IP + bucket."""
+    key = f"{bucket}:{_client_ip(request)}"
+    now = time.time()
+    arr = [t for t in _rl_hits.get(key, []) if now - t < window]
+    if len(arr) >= limit:
+        raise HTTPException(status_code=429,
+            detail="Bạn thao tác quá nhiều lần. Vui lòng thử lại sau vài phút.")
+    arr.append(now)
+    _rl_hits[key] = arr
+    # Dọn bộ nhớ định kỳ để không phình to
+    if len(_rl_hits) > 5000:
+        for k in [k for k, v in _rl_hits.items() if not any(now - t < window for t in v)]:
+            _rl_hits.pop(k, None)
+
+
 _acb_task = None   # giữ tham chiếu tránh bị thu gom (GC)
 
 @app.on_event("startup")
@@ -1613,7 +1674,8 @@ def devices_list(admin=Depends(get_admin)) -> dict[str, Any]:
 
 # ======================== Auth ========================
 @app.post("/auth/register")
-def register(b: RegisterIn) -> dict[str, Any]:
+def register(b: RegisterIn, request: Request) -> dict[str, Any]:
+    _rate_limit(request, "register", limit=10, window=600)
     if len(b.username) < 3 or len(b.password) < 6:
         raise HTTPException(status_code=400,
             detail="Username ≥3 ký tự, mật khẩu ≥6 ký tự.")
@@ -1639,7 +1701,8 @@ def register(b: RegisterIn) -> dict[str, Any]:
 
 
 @app.post("/auth/login")
-def login(b: LoginIn) -> dict[str, Any]:
+def login(b: LoginIn, request: Request) -> dict[str, Any]:
+    _rate_limit(request, "login", limit=12, window=300)
     with db() as c:
         row = c.execute("SELECT * FROM users WHERE username=?", (b.username,)).fetchone()
     if not row or not verify_pw(b.password, row["pw_hash"]):
@@ -1653,7 +1716,8 @@ def login(b: LoginIn) -> dict[str, Any]:
 
 
 @app.post("/auth/forgot-password")
-def forgot(b: ForgotIn) -> dict[str, Any]:
+def forgot(b: ForgotIn, request: Request) -> dict[str, Any]:
+    _rate_limit(request, "forgot", limit=8, window=600)
     token = secrets.token_urlsafe(24)
     with db() as c:
         row = c.execute("SELECT id FROM users WHERE username=?", (b.username,)).fetchone()
@@ -2307,13 +2371,26 @@ async def upload_file_raw(
     return {"id": fid, "name": name, "size": total_size, "mime": mime}
 
 
+def _can_access_file(c, fid: int, user) -> bool:
+    """Cho phép tải file nếu: là chủ file, hoặc admin, hoặc đã MUA sản phẩm có file này."""
+    own = c.execute("SELECT 1 FROM files WHERE id=? AND user_id=?", (fid, user["id"])).fetchone()
+    if own:
+        return True
+    if user["is_admin"]:
+        return True
+    bought = c.execute(
+        "SELECT 1 FROM store_orders o JOIN store_products p ON p.id=o.product_id "
+        "WHERE o.user_id=? AND o.status='completed' AND p.download_file_id=? LIMIT 1",
+        (user["id"], fid)).fetchone()
+    return bought is not None
+
+
 @app.get("/files/{fid}/download")
 def download_file_raw(fid: int, background_tasks: BackgroundTasks, user=Depends(get_user)):
     with db() as c:
-        row = c.execute(
-            "SELECT name,mime,data FROM files WHERE id=? AND user_id=?",
-            (fid, user["id"])
-        ).fetchone()
+        if not _can_access_file(c, fid, user):
+            raise HTTPException(status_code=404, detail="Không tìm thấy file.")
+        row = c.execute("SELECT name,mime,data FROM files WHERE id=?", (fid,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy file.")
         
@@ -2372,9 +2449,10 @@ def list_files(category: Optional[str] = None,
 @app.get("/files/{fid}")
 def download_file(fid: int, user=Depends(get_user)) -> dict[str, Any]:
     with db() as c:
+        if not _can_access_file(c, fid, user):
+            raise HTTPException(status_code=404, detail="Không tìm thấy file.")
         row = c.execute(
-            "SELECT name,category,mime,data,size FROM files WHERE id=? AND user_id=?",
-            (fid, user["id"])
+            "SELECT name,category,mime,data,size FROM files WHERE id=?", (fid,)
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy file.")
@@ -3545,7 +3623,8 @@ def _otp_check(email: str, code: str) -> bool:
 
 
 @app.post("/auth/send-otp")
-def auth_send_otp(b: OtpSendIn) -> dict[str, Any]:
+def auth_send_otp(b: OtpSendIn, request: Request) -> dict[str, Any]:
+    _rate_limit(request, "otp", limit=6, window=600)
     return _otp_store_and_send(b.email, b.purpose or "register")
 
 
@@ -4447,6 +4526,32 @@ def admin_store_orders(admin=Depends(get_admin)) -> list[dict[str, Any]]:
     return [{"id": r["id"], "amount": r["amount"], "status": r["status"], "ref": r["ref"],
              "created_at": r["created_at"], "product_name": r["product_name"] or "(đã xoá)",
              "username": r["username"] or "-"} for r in rows]
+
+
+# -------------------- Admin: kho hàng (tổng quan tồn kho) --------------------
+@app.get("/admin/store/inventory")
+def admin_store_inventory(admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        rows = c.execute("""
+            SELECT p.id, p.name, p.kind, f.name AS folder_name, cat.name AS category_name,
+                   (SELECT COUNT(*) FROM store_keys k WHERE k.product_id=p.id AND k.status='available') AS available,
+                   (SELECT COUNT(*) FROM store_orders o WHERE o.product_id=p.id AND o.status='completed') AS sold
+            FROM store_products p
+            LEFT JOIN store_folders f ON f.id=p.folder_id
+            LEFT JOIN store_categories cat ON cat.id=f.category_id
+            ORDER BY available ASC, p.id DESC
+        """).fetchall()
+    products = [{
+        "id": r["id"], "name": r["name"], "kind": _row_kind(r),
+        "folder_name": r["folder_name"] or "", "category_name": r["category_name"] or "",
+        "available": r["available"], "sold": r["sold"],
+    } for r in rows]
+    return {
+        "total_available": sum(p["available"] for p in products),
+        "total_sold": sum(p["sold"] for p in products),
+        "out_of_stock": sum(1 for p in products if p["available"] == 0),
+        "products": products,
+    }
 
 
 # -------------------- Admin: sao lưu key/acc đã bán --------------------

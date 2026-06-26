@@ -64,6 +64,11 @@ struct StoreAdminView: View {
                         Label("Giao diện cửa hàng (logo, banner)", systemImage: "paintpalette")
                     }
                     NavigationLink {
+                        StoreInventoryView()
+                    } label: {
+                        Label("Kho hàng (tồn kho)", systemImage: "shippingbox")
+                    }
+                    NavigationLink {
                         StoreAdminOrdersView()
                     } label: {
                         Label("Đơn hàng đã bán", systemImage: "list.bullet.rectangle")
@@ -648,6 +653,68 @@ struct StoreAdminOrdersView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { orders = (try? await store.api.adminStoreOrders()) ?? [] }
         .refreshable { orders = (try? await store.api.adminStoreOrders()) ?? [] }
+    }
+}
+
+// ---- Kho hàng (tồn kho) — admin ----
+struct StoreInventoryView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var inv: StoreInventory?
+
+    var body: some View {
+        List {
+            if let inv {
+                Section {
+                    HStack {
+                        invStat("Còn lại", "\(inv.totalAvailable)", .green)
+                        invStat("Đã bán", "\(inv.totalSold)", .blue)
+                        invStat("Hết hàng", "\(inv.outOfStock)", inv.outOfStock > 0 ? .red : .secondary)
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                Section("Sản phẩm (\(inv.products.count)) — ưu tiên hết/sắp hết") {
+                    if inv.products.isEmpty {
+                        Text("Chưa có sản phẩm nào.").foregroundStyle(.secondary)
+                    }
+                    ForEach(inv.products) { p in
+                        HStack(spacing: 10) {
+                            Image(systemName: (p.kind ?? "app") == "acc" ? "gamecontroller.fill" : "key.fill")
+                                .foregroundStyle((p.kind ?? "app") == "acc" ? .purple : Theme.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(p.name).font(.subheadline.bold()).lineLimit(1)
+                                Text("\(p.categoryName) › \(p.folderName)")
+                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text(p.available == 0 ? "HẾT" : "Còn \(p.available)")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(p.available == 0 ? .red : (p.available <= 5 ? .orange : .green))
+                                Text("đã bán \(p.sold)").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            } else {
+                HStack { Spacer(); ProgressView(); Spacer() }
+            }
+        }
+        .navigationTitle("Kho hàng")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { inv = try? await store.api.adminStoreInventory() }
+        .refreshable { inv = try? await store.api.adminStoreInventory() }
+    }
+
+    private func invStat(_ label: String, _ value: String, _ color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value).font(.title3.bold().monospacedDigit()).foregroundStyle(color)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

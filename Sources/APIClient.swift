@@ -411,6 +411,9 @@ struct APIClient {
     func adminStoreKeysBackup() async throws -> StoreKeysBackup {
         try decode(try await send("/admin/store/keys-backup"))
     }
+    func adminStoreInventory() async throws -> StoreInventory {
+        try decode(try await send("/admin/store/inventory"))
+    }
 
     // ---- Admin API keys (server-side) ----
     func adminSaveKey(provider: String, apiKey: String) async throws -> MessageResponse {

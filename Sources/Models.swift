@@ -332,6 +332,23 @@ struct StoreKeysInfo: Decodable {
     let keys: [StoreKeyItem]
 }
 
+struct StoreInventoryItem: Identifiable, Decodable, Hashable {
+    let id: Int
+    let name: String
+    let kind: String?
+    let folderName: String
+    let categoryName: String
+    let available: Int
+    let sold: Int
+}
+
+struct StoreInventory: Decodable {
+    let totalAvailable: Int
+    let totalSold: Int
+    let outOfStock: Int
+    let products: [StoreInventoryItem]
+}
+
 struct StoreAdminOrder: Identifiable, Decodable, Hashable {
     let id: Int
     let amount: Int
