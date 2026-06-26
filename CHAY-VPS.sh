@@ -65,7 +65,8 @@ Type=simple
 User=root
 WorkingDirectory=$WORK_DIR
 EnvironmentFile=$WORK_DIR/.env
-ExecStart=$WORK_DIR/venv/bin/uvicorn kenios:app --host 0.0.0.0 --port $PORT --workers 2
+# 1 worker: TikTok-live & nạp tự động ACB dùng bộ nhớ/luồng nền trong 1 tiến trình
+ExecStart=$WORK_DIR/venv/bin/uvicorn kenios:app --host 0.0.0.0 --port $PORT --workers 1
 Restart=always
 RestartSec=5
 [Install]

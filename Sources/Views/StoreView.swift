@@ -46,6 +46,47 @@ struct StoreMediaCarousel: View {
     }
 }
 
+// Ảnh thu nhỏ TĨNH (không vuốt) — dùng cho thẻ trong lưới để không nuốt thao tác chạm
+struct StoreThumb: View {
+    let media: [StoreMedia]
+    var height: CGFloat = 120
+
+    private var first: StoreMedia? { media.first }
+
+    var body: some View {
+        ZStack {
+            if let m = first, m.type != "video", let url = URL(string: m.url) {
+                AsyncImage(url: url) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Color(.tertiarySystemBackground)
+                }
+            } else if first?.type == "video" {
+                Color.black.opacity(0.85)
+                Image(systemName: "play.circle.fill").font(.largeTitle).foregroundStyle(.white)
+            } else {
+                Color(.tertiarySystemBackground)
+                Image(systemName: "photo").font(.title).foregroundStyle(.secondary)
+            }
+            if (media.count) > 1 {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Text("\(media.count) ảnh")
+                            .font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.ultraThinMaterial).clipShape(Capsule())
+                            .padding(6)
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .frame(height: height)
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+}
+
 // ============================ App bán hàng (khách) ============================
 struct StoreView: View {
     @EnvironmentObject var store: AppStore
@@ -179,7 +220,7 @@ struct StoreView: View {
 
     private func categoryCard(_ cat: StoreCategory) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            StoreMediaCarousel(media: cat.media, height: 120)
+            StoreThumb(media: cat.media, height: 120)
             Text(cat.name)
                 .font(.subheadline.bold())
                 .lineLimit(2)
@@ -299,7 +340,7 @@ struct StoreProductListView: View {
 
     private func productRow(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            StoreMediaCarousel(media: p.media, height: 130)
+            StoreThumb(media: p.media, height: 130)
             VStack(alignment: .leading, spacing: 4) {
                 Text(p.name).font(.subheadline.bold()).lineLimit(2)
                 if let cheapest = p.prices.map(\.amount).min() {

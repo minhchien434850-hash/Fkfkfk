@@ -1333,12 +1333,15 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
 
+_acb_task = None   # giữ tham chiếu tránh bị thu gom (GC)
+
 @app.on_event("startup")
 def _startup() -> None:
+    global _acb_task
     init_db()
     start_mail_smtp()
     try:
-        asyncio.create_task(_acb_autopay_loop())
+        _acb_task = asyncio.create_task(_acb_autopay_loop())
     except RuntimeError:
         # Không có event loop (vd chạy test) → bỏ qua
         pass
@@ -3772,9 +3775,12 @@ def _determine_plan_from_credits(credits: int) -> str:
     return "free"
 
 
-def _finalize_payment_row(c, pay) -> None:
-    """Hoàn tất 1 đơn PRO/credits (đã chắc chắn pending)."""
-    c.execute("UPDATE payments SET status='completed' WHERE id=?", (pay["id"],))
+def _finalize_payment_row(c, pay) -> bool:
+    """Hoàn tất 1 đơn PRO/credits. Idempotent: chỉ xử lý nếu giành được đơn pending."""
+    claimed = c.execute("UPDATE payments SET status='completed' WHERE id=? AND status='pending'",
+                        (pay["id"],))
+    if claimed.rowcount != 1:
+        return False
     if pay["credits"] and pay["credits"] > 0:
         c.execute("UPDATE users SET credits=credits+? WHERE id=?", (pay["credits"], pay["user_id"]))
         new_plan = _determine_plan_from_credits(pay["credits"])
@@ -3783,6 +3789,7 @@ def _finalize_payment_row(c, pay) -> None:
                       (new_plan, pay["user_id"]))
     else:
         c.execute("UPDATE users SET plan='pro' WHERE id=?", (pay["user_id"],))
+    return True
 
 
 def _backup_sold_key(c, order, key_text: str) -> None:
@@ -3802,22 +3809,40 @@ def _backup_sold_key(c, order, key_text: str) -> None:
         log.error("Backup key lỗi: %s", e)
 
 
-def _finalize_store_order_row(c, order) -> None:
-    """Hoàn tất 1 đơn mua sản phẩm: cấp 1 key khả dụng, sao lưu rồi XOÁ key khỏi kho."""
-    key = c.execute("SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
-                    "ORDER BY id ASC LIMIT 1", (order["product_id"],)).fetchone()
+def _finalize_store_order_row(c, order) -> bool:
+    """Hoàn tất 1 đơn mua sản phẩm: cấp 1 key khả dụng, sao lưu rồi XOÁ key khỏi kho.
+
+    Idempotent: chỉ xử lý nếu giành được đơn pending (tránh giao key 2 lần).
+    """
+    # Giành đơn: chỉ 1 tiến trình flip được pending → completed
+    claimed = c.execute("UPDATE store_orders SET status='completed' WHERE id=? AND status='pending'",
+                        (order["id"],))
+    if claimed.rowcount != 1:
+        return False
+    # Giành 1 key khả dụng (cập nhật có điều kiện để không trùng key giữa các đơn)
+    key = None
+    for _ in range(50):
+        cand = c.execute("SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
+                         "ORDER BY id ASC LIMIT 1", (order["product_id"],)).fetchone()
+        if not cand:
+            break
+        got = c.execute("UPDATE store_keys SET status='sold' WHERE id=? AND status='available'",
+                        (cand["id"],))
+        if got.rowcount == 1:
+            key = cand
+            break
     if not key:
-        c.execute("UPDATE store_orders SET status='completed' WHERE id=?", (order["id"],))
         log.warning("Store: đơn #%d đã thanh toán nhưng HẾT key (product=%d)",
                     order["id"], order["product_id"])
-        return
+        return True
     _backup_sold_key(c, order, key["key_text"])
-    c.execute("UPDATE store_orders SET status='completed', key_id=?, key_text=? WHERE id=?",
+    c.execute("UPDATE store_orders SET key_id=?, key_text=? WHERE id=?",
               (key["id"], key["key_text"], order["id"]))
     # Khách đã nhận key → tự động xoá key khỏi kho (không bao giờ bán lại)
     c.execute("DELETE FROM store_keys WHERE id=?", (key["id"],))
     log.info("Store xác nhận: đơn #%d, user=%d, product=%d (đã xoá key khỏi kho)",
              order["id"], order["user_id"], order["product_id"])
+    return True
 
 
 def _match_amount(rows, amount: int):
@@ -3847,15 +3872,13 @@ def _confirm_by_customer_id(cid: str, amount: int) -> bool:
             pays = c.execute("SELECT * FROM payments WHERE user_id=? AND status='pending' "
                              "ORDER BY id ASC", (uid,)).fetchall()
             pay = _match_amount(pays, amount)
-            if pay:
-                _finalize_payment_row(c, pay)
+            if pay and _finalize_payment_row(c, pay):
                 log.info("Xác nhận theo ID=%s: đơn PRO #%d", cid, pay["id"])
                 return True
             orders = c.execute("SELECT * FROM store_orders WHERE user_id=? AND status='pending' "
                                "ORDER BY id ASC", (uid,)).fetchall()
             order = _match_amount(orders, amount)
-            if order:
-                _finalize_store_order_row(c, order)
+            if order and _finalize_store_order_row(c, order):
                 return True
         return False
     except Exception as e:
@@ -3953,16 +3976,14 @@ def _auto_confirm_payment(ref: str, amount: int) -> bool:
             if pay:
                 if amount > 0 and amount < pay["amount"]:
                     return False
-                _finalize_payment_row(c, pay)
-                return True
+                return _finalize_payment_row(c, pay)
             order = c.execute(
                 "SELECT * FROM store_orders WHERE ref=? AND status='pending'", (ref,)
             ).fetchone()
             if order:
                 if amount > 0 and amount < order["amount"]:
                     return False
-                _finalize_store_order_row(c, order)
-                return True
+                return _finalize_store_order_row(c, order)
         return False
     except Exception as e:
         log.error("Lỗi xác nhận ref=%s: %s", ref, e)
