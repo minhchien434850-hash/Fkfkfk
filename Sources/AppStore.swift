@@ -229,11 +229,19 @@ final class AppStore: ObservableObject {
             let wasOff = !maintenance
             maintenance = st.maintenance
             maintenanceMessage = st.message
+            // Đồng bộ vào UserDefaults để background task đọc được
+            d.set(st.maintenance, forKey: "bgLastMaintenance")
             // Phát thông báo + giọng khi bảo trì vừa bật (chỉ với người dùng thường)
             if st.maintenance && wasOff && !isAdmin {
                 postMaintenanceNotification(message: st.message)
             }
         }
+    }
+
+    /// Lưu trạng thái hiện tại vào UserDefaults để background task dùng khi app bị tắt
+    func syncStateForBackground() {
+        d.set(maintenance, forKey: "bgLastMaintenance")
+        // bgLastCatCount được cập nhật từ StoreView sau mỗi lần reload
     }
 
     func refreshCredits() async {

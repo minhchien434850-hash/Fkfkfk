@@ -541,6 +541,8 @@ struct StoreView: View {
         do { categories = try await catTask }
         catch { self.error = error.localizedDescription }
         loading = false
+        // Lưu số danh mục hiện tại để background task so sánh lần sau
+        UserDefaults.standard.set(categories.count, forKey: "bgLastCatCount")
         // Tải toàn bộ sản phẩm ngay sau khi có danh sách danh mục
         if !categories.isEmpty { await loadAllProducts() }
     }

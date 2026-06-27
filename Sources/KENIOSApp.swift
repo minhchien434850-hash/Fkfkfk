@@ -1,27 +1,110 @@
 import SwiftUI
 import UserNotifications
+import BackgroundTasks
 import AVFoundation
 
-// ============================ App Delegate — thông báo nền ============================
+// ============================ App Delegate — thông báo nền + background refresh ============================
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+
+    static let bgTaskId = "com.kenios.codebox.refresh"
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Đặt delegate thông báo
         UNUserNotificationCenter.current().delegate = self
+
         // Xin quyền thông báo ngay khi khởi động (iOS chỉ hỏi lần đầu)
         UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .badge, .sound]) { _, _ in }
+
+        // Đăng ký background task để kiểm tra server khi app bị tắt
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: AppDelegate.bgTaskId, using: nil
+        ) { task in
+            self.handleBackgroundRefresh(task as! BGAppRefreshTask)
+        }
+
         return true
     }
 
-    // Hiển thị banner + âm thanh ngay cả khi app đang mở ở foreground
+    // MARK: - Background refresh
+
+    /// Lên lịch lần kiểm tra tiếp theo (iOS tự quyết định khi nào chạy, thường 15–60 phút)
+    static func scheduleNextRefresh() {
+        let req = BGAppRefreshTaskRequest(identifier: bgTaskId)
+        req.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60) // sớm nhất sau 15 phút
+        try? BGTaskScheduler.shared.submit(req)
+    }
+
+    /// Chạy ngầm: kiểm tra sản phẩm mới & bảo trì, phát thông báo nếu có thay đổi
+    private func handleBackgroundRefresh(_ task: BGAppRefreshTask) {
+        // Hủy task nếu quá hạn
+        task.expirationHandler = { task.setTaskCompleted(success: false) }
+
+        let ud = UserDefaults.standard
+        let baseURL = ud.string(forKey: "baseURL") ?? Config.defaultServerURL
+        guard !baseURL.isEmpty else { task.setTaskCompleted(success: true); return }
+        let token = Keychain.load("token")
+        let api = APIClient(baseURL: baseURL, token: token)
+
+        Task {
+            var ok = true
+
+            // --- Kiểm tra danh mục sản phẩm mới ---
+            if let cats = try? await api.storeCategories() {
+                let saved = ud.integer(forKey: "bgLastCatCount")
+                let now = cats.count
+                if now > saved && saved > 0 {
+                    AppDelegate.postBgNotification(
+                        title: "🛒 KENIOS Cửa hàng",
+                        body: "KENIOS vừa cập nhật \(now - saved) danh mục sản phẩm mới!",
+                        category: "KENIOS_PRODUCT")
+                }
+                ud.set(now, forKey: "bgLastCatCount")
+            } else { ok = false }
+
+            // --- Kiểm tra bảo trì ---
+            if let st = try? await api.appStatus() {
+                let wasOff = !ud.bool(forKey: "bgLastMaintenance")
+                ud.set(st.maintenance, forKey: "bgLastMaintenance")
+                if st.maintenance && wasOff {
+                    let msg = st.message.isEmpty
+                        ? "Ứng dụng KENIOS đang được nâng cấp phiên bản. Vui lòng chờ trong giây lát."
+                        : st.message
+                    AppDelegate.postBgNotification(
+                        title: "🔧 KENIOS - Thông báo bảo trì",
+                        body: msg,
+                        category: "KENIOS_MAINTENANCE")
+                }
+            } else { ok = false }
+
+            // Lên lịch lần kiểm tra tiếp theo
+            AppDelegate.scheduleNextRefresh()
+            task.setTaskCompleted(success: ok)
+        }
+    }
+
+    /// Gửi local notification từ background task
+    private static func postBgNotification(title: String, body: String, category: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = category
+        let req = UNNotificationRequest(identifier: "\(category)-\(UUID().uuidString)",
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Hiển thị banner + âm thanh ngay cả khi app đang mở ở foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler handler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        // Luôn hiển thị banner + huy hiệu + âm thanh dù app đang mở
         handler([.banner, .badge, .sound])
 
-        // Đọc thông báo bằng giọng nói khi app đang chạy
+        // Đọc thông báo bằng giọng nói khi app đang chạy (chỉ product/maintenance)
         let cat = notification.request.content.categoryIdentifier
         if cat == "KENIOS_PRODUCT" || cat == "KENIOS_MAINTENANCE" {
             let text = notification.request.content.body
@@ -31,7 +114,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
-    // Xử lý khi người dùng bấm vào thông báo
+    /// Xử lý khi người dùng bấm vào thông báo
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler handler: @escaping () -> Void) {
@@ -47,16 +130,14 @@ struct KENIOSApp: App {
 
     init() {
         // ===== Giao diện navy cao cấp: nền xanh đen sâu, thẻ navy, chữ trắng =====
-        let bg      = Theme.bgNavyUI     // nền sâu #0B0F1A
-        let card    = Theme.cardNavyUI   // ô/thẻ #161A2B
-        let tintCol = UIColor(red: 0.0, green: 0.58, blue: 0.96, alpha: 1)   // xanh accent
+        let bg      = Theme.bgNavyUI
+        let card    = Theme.cardNavyUI
+        let tintCol = UIColor(red: 0.0, green: 0.58, blue: 0.96, alpha: 1)
 
-        // --- Thanh tab: mờ kính + viền tinh tế ---
         let tab = UITabBarAppearance()
         tab.configureWithOpaqueBackground()
         tab.backgroundColor = bg
         tab.shadowColor = UIColor.white.withAlphaComponent(0.06)
-        // Màu icon/chữ: chọn = accent, chưa chọn = xám nhạt
         let selected = tab.stackedLayoutAppearance.selected
         let normal   = tab.stackedLayoutAppearance.normal
         selected.iconColor = tintCol
@@ -68,7 +149,6 @@ struct KENIOSApp: App {
             UITabBar.appearance().scrollEdgeAppearance = tab
         }
 
-        // --- Thanh điều hướng ---
         let nav = UINavigationBarAppearance()
         nav.configureWithOpaqueBackground()
         nav.backgroundColor = bg
@@ -79,12 +159,10 @@ struct KENIOSApp: App {
         UINavigationBar.appearance().scrollEdgeAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
 
-        // --- Nền navy cho MỌI danh sách/Form; ô dạng thẻ navy nhạt hơn ---
         UITableView.appearance().backgroundColor = bg
         UITableViewCell.appearance().backgroundColor = card
         UICollectionView.appearance().backgroundColor = bg
 
-        // --- Toolbar bàn phím ---
         let bar = UIToolbarAppearance()
         bar.configureWithOpaqueBackground()
         bar.backgroundColor = bg
@@ -96,7 +174,12 @@ struct KENIOSApp: App {
             RootView()
                 .environmentObject(store)
                 .tint(store.accentColor)
-                // Không hardcode .dark — để RootView.preferredColorScheme(store.preferredScheme) kiểm soát
+                .onAppear {
+                    // Lên lịch background refresh ngay khi app mở
+                    AppDelegate.scheduleNextRefresh()
+                    // Đồng bộ trạng thái hiện tại vào UserDefaults cho background task dùng
+                    store.syncStateForBackground()
+                }
         }
     }
 }

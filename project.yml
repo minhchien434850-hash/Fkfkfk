@@ -22,6 +22,10 @@ targets:
         LSRequiresIPhoneOS: true
         UIBackgroundModes:
           - audio
+          - fetch
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.kenios.codebox.refresh
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
