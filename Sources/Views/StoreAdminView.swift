@@ -286,7 +286,7 @@ struct StoreConfigEditor: View {
     @State private var sloganFont = "rounded"
     @State private var cardSize = "medium"
     @State private var cardScale: Double = 1.0
-    @State private var sections: [String] = ["announce", "hero", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
+    @State private var sections: [String] = ["announce", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
                                              "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "products", "footer"]
     @State private var hiddenSections: Set<String> = ["products"]
     // Thanh thông báo + số sản phẩm/danh mục
@@ -331,14 +331,13 @@ struct StoreConfigEditor: View {
         case "leaderboard":  return "Bảng xếp hạng nạp"
         case "transactions": return "Giao dịch gần đây"
         case "topups":       return "Nạp tiền gần đây"
-        case "hero":         return "Hero (slogan + Mua ngay)"
         case "gamecat":      return "Danh mục Game (lưới 2 cột)"
         case "announce":     return "Thanh thông báo"
         case "footer":       return "Footer (logo + slogan)"
         default:             return key
         }
     }
-    private let allSectionKeys = ["announce", "hero", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
+    private let allSectionKeys = ["announce", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
                                   "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
 
     var body: some View {

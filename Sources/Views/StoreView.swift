@@ -353,7 +353,7 @@ struct StoreView: View {
     // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
     private var orderedSections: [String] {
         // Thứ tự mặc định gọn gàng, ưu tiên thấy sản phẩm ngay
-        let all = ["announce", "hero", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
+        let all = ["announce", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
                    "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "products", "footer"]
         let hidden = Set((config?.sectionHidden ?? "")
             .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
@@ -413,10 +413,8 @@ struct StoreView: View {
         case "topups":
             topupsSection(effectiveShowcase.recentTopups)
         case "hero":
-            // Chỉ hiện Hero khi admin đặt TIÊU ĐỀ Hero riêng — tránh trùng với slogan ở đầu trang.
-            if let t = config?.heroTitle, !t.trimmingCharacters(in: .whitespaces).isEmpty {
-                heroSection
-            }
+            // Hero đã được GỘP vào storeHeader (1 khối duy nhất) → không hiện riêng nữa.
+            EmptyView()
         case "gamecat":
             if !productsByCategory.isEmpty { gameCatSection }
         case "announce":
@@ -1177,44 +1175,7 @@ struct StoreView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    // Hero đầu trang: slogan lớn + nút "Mua ngay" (như mẫu)
-    private var heroSection: some View {
-        let heroText: String = {
-            if let t = config?.heroTitle, !t.trimmingCharacters(in: .whitespaces).isEmpty { return t }
-            let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
-            return s.isEmpty ? store.t("GAME CHẤT LƯỢNG CAO · GIÁ TỐT NHẤT", "TOP QUALITY · BEST PRICE") : s
-        }()
-        let heroSub: String = {
-            if let s = config?.heroSubtitle, !s.trimmingCharacters(in: .whitespaces).isEmpty { return s }
-            return store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty")
-        }()
-        return VStack(alignment: .leading, spacing: 12) {
-            AnimatedStoreText(
-                text: heroText,
-                effect: config?.heroEffect ?? "gradient",
-                font: keniosFont(config?.heroFont ?? "rounded-bold", size: 20),
-                anim: config?.heroAnim ?? "none")
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(3)
-            Text(heroSub)
-                .font(.subheadline).foregroundStyle(.secondary)
-            Button { scrollTarget = "products" } label: {
-                HStack(spacing: 6) {
-                    Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
-                    Image(systemName: "arrow.right")
-                }
-                .padding(.horizontal, 22).padding(.vertical, 12)
-                .background(Color.white).foregroundStyle(.black)
-                .clipShape(Capsule())
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(
-            LinearGradient(colors: [Theme.accent.opacity(0.18), Color(.secondarySystemBackground)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
+    // (Hero đã được gộp thẳng vào storeHeader — không còn khối riêng.)
 
     // Footer cuối trang: logo + slogan
     private var footerSection: some View {
@@ -1463,6 +1424,37 @@ struct StoreView: View {
                 }
                 .padding(.vertical, 8)
             }
+
+            // ===== Hero gộp chung trong header: tiêu đề lớn + dòng phụ + nút Mua ngay (1 khối duy nhất) =====
+            VStack(alignment: .leading, spacing: 10) {
+                // Tiêu đề Hero lớn (kèm hiệu ứng/font) — chỉ hiện khi admin đặt riêng, tránh trùng slogan
+                if let t = config?.heroTitle, !t.trimmingCharacters(in: .whitespaces).isEmpty {
+                    AnimatedStoreText(
+                        text: t,
+                        effect: config?.heroEffect ?? "gradient",
+                        font: keniosFont(config?.heroFont ?? "rounded-bold", size: 20),
+                        anim: config?.heroAnim ?? "none")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(3)
+                }
+                Text({
+                    if let s = config?.heroSubtitle, !s.trimmingCharacters(in: .whitespaces).isEmpty { return s }
+                    return store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty")
+                }())
+                .font(.subheadline).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button { scrollTarget = "gamecat" } label: {
+                    HStack(spacing: 6) {
+                        Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
+                        Image(systemName: "arrow.right")
+                    }
+                    .padding(.horizontal, 24).padding(.vertical, 12)
+                    .background(Theme.accent).foregroundStyle(.white)
+                    .clipShape(Capsule())
+                }
+            }
+            .padding(.top, 10)
+            .padding(.horizontal, effectiveConfig?.bannerUrl.isEmpty == false ? 14 : 0)
         }
     }
 
