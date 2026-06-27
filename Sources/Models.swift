@@ -251,7 +251,14 @@ struct StoreAppConfig: Decodable, Hashable {
     let bannerType: String   // image | video
     let bannerUrl: String
     let topupBonusPercent: Int?
+    var logoEffect: String? = nil   // rainbow|none|glow|neon|gold
+    var logoFont: String? = nil     // rounded|serif|mono|default
+    var logoAnim: String? = nil     // shimmer|wave|pulse|none
+    var bgType: String? = nil       // none|image|video
+    var bgUrl: String? = nil
 }
+
+struct MediaUploadResponse: Decodable { let id: Int; let path: String }
 
 // ---- Ví cửa hàng ----
 struct StoreWalletTx: Identifiable, Decodable, Hashable {

@@ -144,6 +144,7 @@ struct MediaConverterView: View {
     @State private var converting = false
     @State private var errorMsg: String?
     @State private var picker: PhotosPickerItem?
+    @State private var uploading = false
 
     var body: some View {
         NavigationStack {
@@ -155,7 +156,20 @@ struct MediaConverterView: View {
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
 
-                Section("Nguồn ảnh / video") {
+                Section("Chọn ảnh từ máy → tạo link") {
+                    PhotosPicker(selection: $picker, matching: .images) {
+                        HStack {
+                            if uploading { ProgressView().padding(.trailing, 4) }
+                            Label(uploading ? "Đang tải ảnh lên..." : "Chọn ảnh từ thư viện",
+                                  systemImage: "photo.on.rectangle.angled")
+                        }
+                    }
+                    .disabled(uploading)
+                    Text("Chọn 1 ảnh từ máy → app tự tải lên máy chủ và trả về 1 link dùng được ngay.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
+                Section("Hoặc dán link sẵn") {
                     TextField("Dán link ảnh hoặc video...", text: $inputURL, axis: .vertical)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .lineLimit(1...3)
@@ -227,6 +241,27 @@ struct MediaConverterView: View {
             }
             .navigationTitle("Chuyển đổi Media")
             .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: picker) { item in
+                guard let item else { return }
+                Task { await uploadPicked(item) }
+            }
+        }
+    }
+
+    private func uploadPicked(_ item: PhotosPickerItem) async {
+        uploading = true; errorMsg = nil
+        defer { uploading = false }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                errorMsg = "Không đọc được ảnh đã chọn."; return
+            }
+            let b64 = data.base64EncodedString()
+            let url = try await store.api.mediaUpload(dataBase64: b64, mime: "image/jpeg",
+                                                      name: "upload_\(Int(Date().timeIntervalSince1970))")
+            resultLink = url
+            inputURL = url
+        } catch {
+            errorMsg = error.localizedDescription
         }
     }
 

@@ -4240,7 +4240,63 @@ def store_config() -> dict[str, Any]:
         "banner_type": get_setting("store_banner_type", "image"),
         "banner_url": get_setting("store_banner_url", ""),
         "topup_bonus_percent": _topup_bonus_percent(),
+        # Hiệu ứng / font logo cửa hàng + nền full màn hình
+        "logo_effect": get_setting("store_logo_effect", "rainbow"),   # rainbow|none|glow|neon|gold
+        "logo_font": get_setting("store_logo_font", "rounded"),       # rounded|serif|mono|default
+        "logo_anim": get_setting("store_logo_anim", "shimmer"),       # shimmer|wave|pulse|none
+        "bg_type": get_setting("store_bg_type", "none"),              # none|image|video
+        "bg_url": get_setting("store_bg_url", ""),
     }
+
+
+# -------------------- Lưu ảnh từ máy → trả về link URL công khai --------------------
+class MediaUploadIn(BaseModel):
+    data_base64: str
+    mime: Optional[str] = None
+    name: Optional[str] = None
+
+@app.post("/media/upload")
+def media_upload(b: MediaUploadIn, user=Depends(get_user)) -> dict[str, Any]:
+    data = (b.data_base64 or "").strip()
+    if data.startswith("data:") and "," in data:
+        data = data.split(",", 1)[1]
+    try:
+        raw = base64.b64decode(data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Dữ liệu ảnh không hợp lệ.")
+    if not raw:
+        raise HTTPException(status_code=400, detail="Ảnh rỗng.")
+    mime = b.mime or "image/jpeg"
+    name = (b.name or f"media_{int(time.time())}")[:80]
+    with db() as c:
+        cur = c.execute("INSERT INTO files(user_id,name,category,mime,size,data,created_at) "
+                        "VALUES(?,?,?,?,?,'',?)",
+                        (user["id"], name, "media", mime, len(raw), int(time.time())))
+        fid = cur.lastrowid
+    try:
+        with open(os.path.join(UPLOAD_DIR, str(fid)), "wb") as f:
+            f.write(raw)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lưu ảnh: {e}")
+    return {"id": fid, "path": f"/media/{fid}"}
+
+@app.get("/media/{fid}")
+def media_serve(fid: int, background_tasks: BackgroundTasks):
+    """Phục vụ ảnh đã upload — công khai (để dùng làm link logo/banner/media)."""
+    with db() as c:
+        row = c.execute("SELECT name,mime,data FROM files WHERE id=? AND category='media'", (fid,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Không tìm thấy ảnh.")
+    path = os.path.join(UPLOAD_DIR, str(fid))
+    if os.path.exists(path):
+        return FileResponse(path, media_type=row["mime"] or "image/jpeg")
+    if row["data"]:
+        tmp = os.path.join(UPLOAD_DIR, f"m_{fid}_{secrets.token_hex(3)}")
+        with open(tmp, "wb") as f:
+            f.write(base64.b64decode(row["data"]))
+        background_tasks.add_task(os.unlink, tmp)
+        return FileResponse(tmp, media_type=row["mime"] or "image/jpeg")
+    raise HTTPException(status_code=404, detail="Không có nội dung ảnh.")
 
 
 # ======================== VÍ CỬA HÀNG (tách biệt thanh toán app chính) ========================
@@ -4508,6 +4564,11 @@ class StoreConfigIn(BaseModel):
     logo_url: Optional[str] = None
     banner_type: Optional[str] = None   # image | video
     banner_url: Optional[str] = None
+    logo_effect: Optional[str] = None
+    logo_font: Optional[str] = None
+    logo_anim: Optional[str] = None
+    bg_type: Optional[str] = None       # none | image | video
+    bg_url: Optional[str] = None
 
 @app.post("/admin/store/config")
 def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
@@ -4516,6 +4577,12 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.banner_type is not None:
         set_setting("store_banner_type", "video" if b.banner_type == "video" else "image")
     if b.banner_url is not None: set_setting("store_banner_url", b.banner_url.strip())
+    if b.logo_effect is not None: set_setting("store_logo_effect", b.logo_effect.strip()[:20])
+    if b.logo_font is not None: set_setting("store_logo_font", b.logo_font.strip()[:20])
+    if b.logo_anim is not None: set_setting("store_logo_anim", b.logo_anim.strip()[:20])
+    if b.bg_type is not None:
+        set_setting("store_bg_type", b.bg_type if b.bg_type in ("none", "image", "video") else "none")
+    if b.bg_url is not None: set_setting("store_bg_url", b.bg_url.strip())
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
 

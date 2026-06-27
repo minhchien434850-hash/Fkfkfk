@@ -383,10 +383,25 @@ struct APIClient {
 
     // -- Admin: giao diện store --
     func adminStoreSetConfig(logoName: String, logoUrl: String,
-                             bannerType: String, bannerUrl: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/config", method: "POST", json: [
+                             bannerType: String, bannerUrl: String,
+                             logoEffect: String? = nil, logoFont: String? = nil,
+                             logoAnim: String? = nil, bgType: String? = nil,
+                             bgUrl: String? = nil) async throws -> MessageResponse {
+        var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
-            "banner_type": bannerType, "banner_url": bannerUrl]))
+            "banner_type": bannerType, "banner_url": bannerUrl]
+        if let logoEffect { body["logo_effect"] = logoEffect }
+        if let logoFont { body["logo_font"] = logoFont }
+        if let logoAnim { body["logo_anim"] = logoAnim }
+        if let bgType { body["bg_type"] = bgType }
+        if let bgUrl { body["bg_url"] = bgUrl }
+        return try decode(try await send("/admin/store/config", method: "POST", json: body))
+    }
+    // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)
+    func mediaUpload(dataBase64: String, mime: String, name: String) async throws -> String {
+        let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",
+            json: ["data_base64": dataBase64, "mime": mime, "name": name]))
+        return root + r.path
     }
     // -- Admin: danh mục / thư mục / sản phẩm --
     func adminStoreSaveCategory(id: Int?, name: String, media: [[String: String]]) async throws -> IdResponse {
