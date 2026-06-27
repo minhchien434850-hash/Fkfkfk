@@ -315,7 +315,7 @@ struct StoreView: View {
         case "products":
             if !allProducts.isEmpty { allProductsSection }
         case "downloads":
-            if !downloads.isEmpty { downloadsSection }
+            if !downloads.isEmpty || !downloadableProducts.isEmpty { downloadsSection }
         case "contacts":
             if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
                 StoreContactsBlock(contacts: c)
@@ -355,7 +355,7 @@ struct StoreView: View {
                         storeHeader
                         walletBar
                         // Nút tải xuống cố định ngay dưới ví (luôn hiển thị nếu có file/link)
-                        if !downloads.isEmpty { downloadsSection.id("downloads") }
+                        if !downloads.isEmpty || !downloadableProducts.isEmpty { downloadsSection.id("downloads") }
                         // Các mục hiển thị theo thứ tự admin sắp xếp (bỏ qua "downloads" vì đã hiện ở trên)
                         ForEach(orderedSections.filter { $0 != "downloads" }, id: \.self) { key in
                             sectionView(key).id(key)
@@ -754,14 +754,18 @@ struct StoreView: View {
     }
 
     // Mục "Tải về" hiện ngay khi vào cửa hàng (bản tải miễn phí)
+    // Sản phẩm có file/link tải (hasDownload = true) — hiển thị cùng khu vực Tải về
+    private var downloadableProducts: [StoreProduct] {
+        allProducts.filter { $0.hasDownload }
+    }
+
     private var downloadsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader(title: store.t("Tải về", "Downloads"), icon: "arrow.down.circle.fill", color: .blue)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(downloads) { d in
-                        downloadCard(d)
-                    }
+                    ForEach(downloads) { d in downloadCard(d) }
+                    ForEach(downloadableProducts) { p in productDownloadCard(p) }
                 }
                 .padding(.horizontal, 2)
             }
@@ -808,6 +812,45 @@ struct StoreView: View {
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+    }
+
+    // Thẻ tải xuống cho sản phẩm có link/file (hasDownload = true)
+    private func productDownloadCard(_ p: StoreProduct) -> some View {
+        let url = store.api.storeDownloadURL(productId: p.id)
+        return NavigationLink {
+            StoreProductDetailView(productId: p.id)
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                StoreThumb(media: p.media, height: 90)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(p.name).font(.caption.bold()).lineLimit(2).foregroundStyle(.primary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text(store.t("Tải", "Download") + " " + p.name)
+                            .font(.caption2.bold()).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 7).padding(.horizontal, 4)
+                    .background(LinearGradient(
+                        colors: [Theme.accent, Theme.accent.opacity(0.7)],
+                        startPoint: .leading, endPoint: .trailing))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    if let url {
+                        Link(destination: url) {
+                            Text(store.t("Link trực tiếp", "Direct link"))
+                                .font(.system(size: 9)).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .padding(8)
+            }
+            .frame(width: 160)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
     }
 
     // Toàn bộ sản phẩm — hiện ngay khi vào cửa hàng
