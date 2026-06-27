@@ -169,13 +169,17 @@ struct StoreView: View {
     @State private var flashNow = Date()   // cập nhật để đồng hồ flash sale đếm ngược
     @State private var showcaseTick: Int = 0   // tăng mỗi 5 phút → xoay vòng showcase
     private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    private let showcaseTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
+    private let showcaseTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
-    // Danh sách tên hiển thị trong showcase (xoay vòng)
-    private let showcaseNames = ["Minh", "Huy", "Linh", "An", "Tùng", "Mai", "Dũng", "Thu",
-                                  "Nam", "Trang", "Bình", "Khoa", "Lan", "Phong", "Quân",
-                                  "Bảo", "Hà", "Việt", "Trung", "Khánh", "Ken", "Tony",
-                                  "Alex", "Bin", "Rin", "Sơn", "Cường", "Đức", "Long", "Thắng"]
+    // Tên Việt Nam đầy đủ (họ + chữ đệm viết tắt) — hiển thị dạng "Nguyễn T***"
+    private let showcaseNames: [(String, String)] = [
+        ("Nguyễn", "M"), ("Trần", "V"), ("Lê", "T"), ("Phạm", "H"), ("Hoàng", "A"),
+        ("Huỳnh", "N"), ("Phan", "K"), ("Vũ", "L"), ("Võ", "B"), ("Đặng", "P"),
+        ("Bùi", "Q"), ("Đỗ", "T"), ("Hồ", "V"), ("Ngô", "H"), ("Dương", "M"),
+        ("Lý", "T"), ("Đinh", "C"), ("Trương", "Đ"), ("Tô", "S"), ("Lưu", "G"),
+        ("Cao", "T"), ("Mai", "N"), ("Tạ", "V"), ("Lâm", "K"), ("Thái", "H"),
+        ("Đoàn", "L"), ("Quách", "B"), ("Châu", "P"), ("Tiêu", "T"), ("Từ", "M"),
+    ]
 
     // Tự sinh từ sản phẩm thật, xoay vòng theo tick (5 phút/lần)
     private var effectiveShowcase: StoreShowcase {
@@ -209,11 +213,15 @@ struct StoreView: View {
         let count = min(8, combos.count)
         let offset = tick % combos.count
 
+        func name(_ seed: Int) -> String {
+            let n = showcaseNames[seed % showcaseNames.count]
+            return "\(n.0) \(n.1)***"
+        }
+
         let orders: [ShowcaseOrder] = (0..<count).map { i in
             let ci = (offset + i) % combos.count
-            let ni = (tick + i * 7) % showcaseNames.count
             return ShowcaseOrder(
-                user: "\(showcaseNames[ni])***",
+                user: name(tick + i * 7),
                 product: combos[ci].0,
                 label: "Thành công",
                 amount: combos[ci].1,
@@ -224,20 +232,18 @@ struct StoreView: View {
         // Topup xoay theo tick lệch pha
         let topupAmounts = [500_000, 200_000, 1_000_000, 300_000, 150_000, 800_000, 50_000, 250_000]
         let topups: [ShowcaseTopup] = (0..<8).map { i in
-            let ni = (tick + i * 11 + 5) % showcaseNames.count
             let ai = (tick + i) % topupAmounts.count
             return ShowcaseTopup(
-                user: "\(showcaseNames[ni])***",
+                user: name(tick + i * 11 + 5),
                 amount: topupAmounts[ai],
                 at: now - timeAgo[i % timeAgo.count] * 2
             )
         }
 
-        // Leaderboard tổng chi dùng combo để tính tổng ảo
+        // Leaderboard
         let leaders: [ShowcaseLeader] = (0..<5).map { i in
-            let ni = (tick * 3 + i * 13) % showcaseNames.count
             let total = [5_200_000, 3_800_000, 2_900_000, 1_750_000, 980_000][(tick + i) % 5]
-            return ShowcaseLeader(rank: i + 1, user: "\(showcaseNames[ni])***", total: total)
+            return ShowcaseLeader(rank: i + 1, user: name(tick * 3 + i * 13), total: total)
         }
 
         return StoreShowcase(recentOrders: orders, recentTopups: topups, leaderboard: leaders)
