@@ -223,57 +223,63 @@ struct StoreView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(spacing: 0) {
                     storeHeader
+                        .padding(.horizontal).padding(.top, 8)
 
                     walletBar
+                        .padding(.horizontal).padding(.top, 14)
 
                     if !downloads.isEmpty {
-                        downloadsSection
+                        downloadsSection.padding(.top, 22)
                     }
 
                     if !allProducts.isEmpty {
-                        allProductsSection
+                        allProductsSection.padding(.top, 22)
                     }
 
                     if !wishlistProducts.isEmpty {
-                        wishlistSection
+                        wishlistSection.padding(.top, 22)
                     }
 
                     if !recentProducts.isEmpty {
-                        recentlyViewedSection
+                        recentlyViewedSection.padding(.top, 22)
                     }
 
-                    if !categories.isEmpty {
-                        searchField
-                    }
-
-                    if loading && categories.isEmpty {
-                        HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
-                    } else if categories.isEmpty {
-                        emptyState
-                    } else {
-                        LazyVGrid(columns: grid, spacing: 12) {
-                            ForEach(filteredCategories) { cat in
-                                NavigationLink {
-                                    StoreFolderListView(category: cat)
-                                } label: {
-                                    categoryCard(cat)
+                    VStack(spacing: 10) {
+                        if !categories.isEmpty {
+                            searchField.padding(.horizontal).padding(.top, 22)
+                        }
+                        if loading && categories.isEmpty {
+                            HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
+                        } else if categories.isEmpty {
+                            emptyState
+                        } else {
+                            LazyVGrid(columns: grid, spacing: 12) {
+                                ForEach(filteredCategories) { cat in
+                                    NavigationLink {
+                                        StoreFolderListView(category: cat)
+                                    } label: {
+                                        categoryCard(cat)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                             }
+                            .padding(.horizontal).padding(.top, 6)
                         }
                     }
 
                     if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
                         StoreContactsBlock(contacts: c)
+                            .padding(.horizontal).padding(.top, 22)
                     }
 
                     if let error {
-                        Text(error).font(.caption).foregroundStyle(.red)
+                        Text(error).font(.caption).foregroundStyle(.red).padding()
                     }
+
+                    Spacer().frame(height: 30)
                 }
-                .padding()
             }
             .background {
                 if let c = effectiveConfig, let bt = c.bgType, bt != "none",
@@ -347,39 +353,65 @@ struct StoreView: View {
 
     private var appearanceMenu: some View { AppearanceMenu() }
 
-    // Thanh ví: bấm để nạp tiền / xem số dư
+    // ── Section header helper ──
+    private func sectionHeader(_ title: String, _ icon: String, color: Color = Theme.accent) -> some View {
+        Label(title, systemImage: icon)
+            .font(.subheadline.bold())
+            .foregroundStyle(color)
+    }
+
+    // ── Ví cửa hàng ──
     private var walletBar: some View {
         Button { showWallet = true } label: {
-            HStack {
-                Image(systemName: "wallet.pass.fill").foregroundStyle(Theme.gold)
-                Text("Ví cửa hàng").font(.subheadline.bold())
-                if let pct = config?.topupBonusPercent, pct > 0 {
-                    Text("KM +\(pct)%").font(.caption2.bold())
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.pink.opacity(0.2)).foregroundStyle(.pink)
-                        .clipShape(Capsule())
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(.white.opacity(0.18)).frame(width: 44, height: 44)
+                    Image(systemName: "wallet.pass.fill")
+                        .font(.title3).foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ví cửa hàng").font(.subheadline.bold()).foregroundStyle(.white)
+                    if let pct = config?.topupBonusPercent, pct > 0 {
+                        Text("Khuyến mãi nạp tiền +\(pct)%")
+                            .font(.caption2).foregroundStyle(.white.opacity(0.82))
+                    } else {
+                        Text("Nạp tiền · xem số dư")
+                            .font(.caption2).foregroundStyle(.white.opacity(0.82))
+                    }
                 }
                 Spacer()
-                Text("Nạp tiền").font(.caption).foregroundStyle(Theme.accent)
-                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                if let pct = config?.topupBonusPercent, pct > 0 {
+                    Text("+\(pct)%")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(.white.opacity(0.22))
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold()).foregroundStyle(.white.opacity(0.65))
             }
-            .padding(12)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16).padding(.vertical, 14)
+            .background(
+                LinearGradient(
+                    colors: [Theme.accent, Theme.purple],
+                    startPoint: .leading, endPoint: .trailing))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: Theme.accent.opacity(0.35), radius: 8, x: 0, y: 4)
         }
         .buttonStyle(.plain)
     }
 
-    // Mục "Tải về" hiện ngay khi vào cửa hàng (bản tải miễn phí)
+    // ── Tải về miễn phí ──
     private var downloadsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Tải về", systemImage: "arrow.down.circle.fill").font(.headline)
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Tải về miễn phí", "arrow.down.circle.fill", color: .green)
+                .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(downloads) { d in
-                        downloadCard(d)
-                    }
+                    ForEach(downloads) { d in downloadCard(d) }
                 }
+                .padding(.horizontal)
             }
         }
     }
@@ -387,32 +419,32 @@ struct StoreView: View {
     private func downloadCard(_ d: StoreDownloadItem) -> some View {
         let url = !d.downloadUrl.isEmpty ? URL(string: d.downloadUrl) : store.api.storeDownloadURL(productId: d.id)
         return VStack(alignment: .leading, spacing: 0) {
-            StoreThumb(media: d.media, height: 90)
-            VStack(alignment: .leading, spacing: 4) {
+            StoreThumb(media: d.media, height: 100)
+            VStack(alignment: .leading, spacing: 6) {
                 Text(d.name).font(.caption.bold()).lineLimit(2)
                 if let url {
                     Link(destination: url) {
-                        Label("Tải", systemImage: "arrow.down.circle")
+                        Label("Tải miễn phí", systemImage: "arrow.down.circle.fill")
                             .font(.caption2.bold())
-                            .frame(maxWidth: .infinity).padding(.vertical, 6)
-                            .background(Theme.accent.opacity(0.15)).foregroundStyle(Theme.accent)
+                            .frame(maxWidth: .infinity).padding(.vertical, 7)
+                            .background(Color.green.opacity(0.14)).foregroundStyle(.green)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
             }
-            .padding(8)
+            .padding(10)
         }
         .frame(width: 150)
         .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.07), radius: 4, x: 0, y: 2)
     }
 
-    // Toàn bộ sản phẩm — hiện ngay khi vào cửa hàng
+    // ── Tất cả sản phẩm ──
     private var allProductsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Label("Tất cả sản phẩm", systemImage: "bag.fill")
-                    .font(.headline)
+                sectionHeader("Tất cả sản phẩm", "bag.fill")
                 Spacer()
                 Menu {
                     Section("Sắp xếp") {
@@ -437,12 +469,15 @@ struct StoreView: View {
                         }
                     }
                 } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .foregroundStyle(productSort != "default" || productFilter != "all" ? Theme.accent : .secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "slider.horizontal.3")
+                        Text("\(displayProducts.count) sp")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(productSort != "default" || productFilter != "all" ? Theme.accent : .secondary)
                 }
-                Text("\(displayProducts.count) sp")
-                    .font(.caption).foregroundStyle(.secondary)
             }
+            .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(displayProducts) { product in
@@ -452,7 +487,7 @@ struct StoreView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 2)
+                .padding(.horizontal)
             }
         }
     }
@@ -460,163 +495,198 @@ struct StoreView: View {
     private func allProductCard(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                StoreThumb(media: p.media, height: 100)
+                StoreThumb(media: p.media, height: 130)
                 Button { toggleWishlist(p.id) } label: {
                     Image(systemName: wishlistIds.contains(p.id) ? "heart.fill" : "heart")
                         .font(.caption.bold())
                         .foregroundStyle(wishlistIds.contains(p.id) ? .red : .white)
-                        .padding(6)
+                        .padding(7)
                         .background(.ultraThinMaterial)
                         .clipShape(Circle())
-                        .padding(6)
+                        .padding(8)
                 }
                 .buttonStyle(.plain)
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text(p.name)
-                    .font(.caption.bold())
-                    .lineLimit(2)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(p.name).font(.caption.bold()).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if !p.prices.isEmpty {
-                    Text(kFormatVND(p.prices[0].amount))
-                        .font(.caption2.bold())
-                        .foregroundStyle(Theme.accent)
+                HStack(alignment: .bottom) {
+                    if !p.prices.isEmpty {
+                        Text(kFormatVND(p.prices[0].amount))
+                            .font(.caption.bold()).foregroundStyle(Theme.accent)
+                    } else {
+                        Text("Liên hệ").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(p.availableKeys > 0 ? "Còn hàng" : "Hết")
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(p.availableKeys > 0
+                            ? Color.green.opacity(0.14) : Color.red.opacity(0.12))
+                        .foregroundStyle(p.availableKeys > 0 ? .green : .red)
+                        .clipShape(Capsule())
                 }
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 11))
-                    Text("Tải xuống")
-                        .font(.caption2.bold())
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(Theme.accent.opacity(0.13))
-                .foregroundStyle(Theme.accent)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                Label("Tải xuống", systemImage: "arrow.down.circle.fill")
+                    .font(.caption2.bold())
+                    .frame(maxWidth: .infinity).padding(.vertical, 7)
+                    .background(Theme.accent.opacity(0.12)).foregroundStyle(Theme.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .padding(8)
+            .padding(10)
         }
-        .frame(width: 150)
+        .frame(width: 160)
         .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
     }
 
     private var wishlistSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Yêu thích", systemImage: "heart.fill")
-                    .font(.headline).foregroundStyle(.red)
+                sectionHeader("Yêu thích", "heart.fill", color: .red)
                 Spacer()
                 Text("\(wishlistProducts.count) sản phẩm")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption2).foregroundStyle(.secondary)
             }
+            .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(wishlistProducts) { product in
-                        NavigationLink { StoreProductDetailView(productId: product.id) } label: {
-                            allProductCard(product)
-                        }
+                        NavigationLink { StoreProductDetailView(productId: product.id) }
+                        label: { allProductCard(product) }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 2)
+                .padding(.horizontal)
             }
         }
     }
 
     private var recentlyViewedSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Đã xem gần đây", systemImage: "clock.arrow.circlepath")
-                .font(.headline)
+            sectionHeader("Đã xem gần đây", "clock.arrow.circlepath")
+                .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(recentProducts) { product in
-                        NavigationLink { StoreProductDetailView(productId: product.id) } label: {
-                            allProductCard(product)
-                        }
+                        NavigationLink { StoreProductDetailView(productId: product.id) }
+                        label: { allProductCard(product) }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 2)
+                .padding(.horizontal)
             }
         }
     }
 
     private var searchField: some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             TextField("Tìm danh mục…", text: $search)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
             if !search.isEmpty {
-                Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                Button { search = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(10)
+        .padding(12)
         .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "bag").font(.largeTitle).foregroundStyle(.secondary)
-            Text("Chưa có danh mục sản phẩm nào.").foregroundStyle(.secondary)
+        VStack(spacing: 12) {
+            Image(systemName: "bag").font(.system(size: 50)).foregroundStyle(.secondary)
+            Text("Chưa có sản phẩm nào").font(.headline).foregroundStyle(.secondary)
             if store.isAdmin {
-                Text("Bấm biểu tượng ⚙️ ở góc trên để thêm danh mục, sản phẩm.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                Text("Bấm ⚙️ góc trên để thêm danh mục và sản phẩm.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
         }
-        .frame(maxWidth: .infinity).padding(.top, 40)
+        .frame(maxWidth: .infinity).padding(.top, 50)
     }
 
     private var storeHeader: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        ZStack(alignment: .bottomLeading) {
             if let c = effectiveConfig, !c.bannerUrl.isEmpty {
-                StoreMediaCarousel(media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)], height: 170)
+                StoreMediaCarousel(
+                    media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)],
+                    height: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .overlay(
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.62)],
+                        startPoint: .center, endPoint: .bottom)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                )
+            } else {
+                LinearGradient(
+                    colors: [Theme.accent.opacity(0.80), Theme.purple.opacity(0.65)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing)
+                .frame(height: 160)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .overlay(
+                    Image(systemName: "bag.fill")
+                        .font(.system(size: 64)).foregroundStyle(.white.opacity(0.07))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .padding(.trailing, 20)
+                )
             }
-            HStack(spacing: 12) {
+            HStack(alignment: .bottom, spacing: 12) {
                 if let c = effectiveConfig, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
                     Group {
                         if c.logoUrl.lowercased().contains(".gif") {
                             GIFWebView(url: url, contentMode: "cover")
                         } else {
                             AsyncImage(url: url) { img in img.resizable().scaledToFill() }
-                            placeholder: { Color(.secondarySystemBackground) }
+                            placeholder: { Color.white.opacity(0.2) }
                         }
                     }
-                    .frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 10))
+                    .frame(width: 58, height: 58)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14)
+                        .stroke(.white.opacity(0.35), lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
                 } else {
-                    Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
-                        .frame(width: 48, height: 48)
-                        .background(Color(.secondarySystemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    Image(systemName: "bag.fill")
+                        .font(.title2).foregroundStyle(.white)
+                        .frame(width: 58, height: 58)
+                        .background(.white.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     AnimatedStoreLogo(
                         text: displayName,
                         effect: effectiveConfig?.logoEffect ?? "rainbow",
                         fontStyle: effectiveConfig?.logoFont ?? "rounded",
                         anim: effectiveConfig?.logoAnim ?? "shimmer",
-                        size: 24)
-                    Text("Cửa hàng sản phẩm số · key · tải về").font(.caption).foregroundStyle(.secondary)
+                        size: 22)
+                    Text("Sản phẩm số · key · tải về")
+                        .font(.caption2).foregroundStyle(.white.opacity(0.82))
                 }
                 Spacer()
             }
+            .padding(16)
         }
     }
 
     private func categoryCard(_ cat: StoreCategory) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            StoreThumb(media: cat.media, height: 120)
+        ZStack(alignment: .bottomLeading) {
+            StoreThumb(media: cat.media, height: 150)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.68)],
+                startPoint: .center, endPoint: .bottom)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
             Text(cat.name)
                 .font(.subheadline.bold())
+                .foregroundStyle(.white)
                 .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
+                .padding(12)
         }
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 3)
     }
 
     private func reload() async {
