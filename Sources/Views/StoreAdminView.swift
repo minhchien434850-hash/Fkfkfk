@@ -190,6 +190,11 @@ struct StoreConfigEditor: View {
     @State private var logoUrl = ""
     @State private var bannerType = "image"
     @State private var bannerUrl = ""
+    @State private var logoEffect = "rainbow"
+    @State private var logoFont = "rounded"
+    @State private var logoAnim = "shimmer"
+    @State private var bgType = "none"
+    @State private var bgUrl = ""
     @State private var message: String?
     @State private var isError = false
     @AppStorage("storeCfgName") private var cfgName: String = ""
@@ -214,6 +219,37 @@ struct StoreConfigEditor: View {
                 Text("Hỗ trợ GIF động, PNG, JPEG, WEBP, MP4. Dùng Khám phá → Chuyển đổi để tạo link GIF/PNG từ ảnh bất kỳ.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+
+            Section("Hiệu ứng tên/logo cửa hàng") {
+                HStack { Spacer()
+                    AnimatedStoreLogo(text: logoName.isEmpty ? "KENIOS STORE" : logoName,
+                                      effect: logoEffect, fontStyle: logoFont, anim: logoAnim, size: 28)
+                    Spacer() }
+                Picker("Hiệu ứng màu", selection: $logoEffect) {
+                    ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker("Kiểu chữ (font)", selection: $logoFont) {
+                    ForEach(kLogoFonts, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker("Chuyển động", selection: $logoAnim) {
+                    ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                }
+            }
+
+            Section("Nền cửa hàng (full màn hình)") {
+                Picker("Loại nền", selection: $bgType) {
+                    Text("Không").tag("none")
+                    Text("Ảnh / GIF").tag("image")
+                    Text("Video / MP4").tag("video")
+                }.pickerStyle(.segmented)
+                if bgType != "none" {
+                    TextField("Dán link nền (GIF / PNG / JPEG / WEBP / MP4)", text: $bgUrl)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                Text("Nền chạy sâu phía dưới, mọi nội dung/nút vẫn nằm bên trên và bấm được.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
             Section { Button("Lưu giao diện") { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
@@ -228,13 +264,19 @@ struct StoreConfigEditor: View {
         if let c = try? await store.api.storeConfig() {
             logoName = c.logoName; logoUrl = c.logoUrl
             bannerType = c.bannerType; bannerUrl = c.bannerUrl
+            logoEffect = c.logoEffect ?? "rainbow"; logoFont = c.logoFont ?? "rounded"
+            logoAnim = c.logoAnim ?? "shimmer"
+            bgType = c.bgType ?? "none"; bgUrl = c.bgUrl ?? ""
         }
     }
     private func save() async {
         message = nil
         do {
-            let r = try await store.api.adminStoreSetConfig(logoName: logoName, logoUrl: logoUrl,
-                                                            bannerType: bannerType, bannerUrl: bannerUrl)
+            let r = try await store.api.adminStoreSetConfig(
+                logoName: logoName, logoUrl: logoUrl,
+                bannerType: bannerType, bannerUrl: bannerUrl,
+                logoEffect: logoEffect, logoFont: logoFont, logoAnim: logoAnim,
+                bgType: bgType, bgUrl: bgUrl)
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message

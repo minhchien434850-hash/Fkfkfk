@@ -254,6 +254,12 @@ struct StoreView: View {
                 }
                 .padding()
             }
+            .background {
+                if let c = effectiveConfig, let bt = c.bgType, bt != "none",
+                   let bu = c.bgUrl, !bu.isEmpty {
+                    StoreBackground(type: bt, url: bu)
+                }
+            }
             .navigationTitle(displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -525,7 +531,12 @@ struct StoreView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(displayName).font(.title3.bold())
+                    AnimatedStoreLogo(
+                        text: displayName,
+                        effect: effectiveConfig?.logoEffect ?? "rainbow",
+                        fontStyle: effectiveConfig?.logoFont ?? "rounded",
+                        anim: effectiveConfig?.logoAnim ?? "shimmer",
+                        size: 24)
                     Text("Cửa hàng sản phẩm số · key · tải về").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()

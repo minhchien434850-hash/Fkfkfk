@@ -9,6 +9,8 @@ struct PaymentView: View {
     @State private var created: PaymentCreateResponse?
     @State private var error: String?
     @State private var loading = false
+    @State private var checking = false
+    @State private var info: String?
 
     var body: some View {
         NavigationStack {
@@ -60,7 +62,9 @@ struct PaymentView: View {
                                 switch phase {
                                 case .success(let img):
                                     img.resizable().scaledToFit()
-                                        .frame(maxWidth: 280).frame(maxWidth: .infinity)
+                                        .frame(maxWidth: 260).frame(maxWidth: .infinity)
+                                        .padding(8).background(Color.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 14))
                                 case .failure:
                                     Text("Không tải được mã QR. Dùng số tài khoản bên dưới.")
                                         .font(.footnote).foregroundStyle(.secondary)
@@ -69,16 +73,26 @@ struct PaymentView: View {
                                 }
                             }
                         }
-                    }
-                    Section("Thông tin chuyển khoản") {
                         LabeledContent("Ngân hàng", value: created.bankInfo.bank)
                         LabeledContent("Số tài khoản", value: created.bankInfo.account)
                         LabeledContent("Chủ tài khoản", value: created.bankInfo.name)
                         LabeledContent("Nội dung CK", value: created.bankInfo.content)
-                        LabeledContent("Số tiền", value: "\(created.amount) đ")
+                        LabeledContent("Số tiền", value: kFormatVND(created.amount))
                         Text(created.message).font(.footnote).foregroundStyle(.secondary)
-                        Text("Sau khi chuyển khoản, admin sẽ xác nhận và nâng cấp tài khoản của bạn lên PRO.")
-                            .font(.footnote).foregroundStyle(Theme.accent)
+                        Button {
+                            Task { await checkPaid() }
+                        } label: {
+                            HStack {
+                                if checking { ProgressView() }
+                                Text(checking ? "Đang kiểm tra..." : "Tôi đã chuyển khoản — kiểm tra")
+                            }
+                            .frame(maxWidth: .infinity).frame(height: 46)
+                            .background(Color.green.opacity(0.18)).foregroundStyle(.green)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }.disabled(checking)
+                        if let info { Text(info).font(.footnote).foregroundStyle(.green) }
+                        Text("Hệ thống tự xác nhận trong ~20 giây sau khi nhận tiền. Nếu chưa lên PRO, đợi chút rồi bấm kiểm tra lại.")
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
 
@@ -103,7 +117,7 @@ struct PaymentView: View {
 
                 if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             }
-            .navigationTitle("Nạp Credits")
+            .navigationTitle("Nâng cấp PRO")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
             .task { await load() }
@@ -129,11 +143,25 @@ struct PaymentView: View {
     }
 
     private func create(_ p: PaymentPackage) async {
-        loading = true; error = nil
+        loading = true; error = nil; info = nil
         do {
             created = try await store.api.createPayment(package: p.id, amount: p.amount)
             history = try await store.api.paymentHistory()
         } catch { self.error = error.localizedDescription }
         loading = false
+    }
+
+    private func checkPaid() async {
+        checking = true; error = nil
+        await store.refreshMe()
+        await store.refreshCredits()
+        history = (try? await store.api.paymentHistory()) ?? history
+        if store.isPro {
+            info = "Thanh toán thành công! Tài khoản đã lên PRO."
+            created = nil
+        } else {
+            info = "Chưa nhận được thanh toán. Vui lòng đợi thêm rồi kiểm tra lại."
+        }
+        checking = false
     }
 }
