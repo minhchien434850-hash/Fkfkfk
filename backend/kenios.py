@@ -45,7 +45,31 @@ from pydantic import BaseModel
 # ========================= Cấu hình =========================
 DB_PATH         = os.getenv("CODEBOX_DB", "kenios.db")
 PORT            = int(os.getenv("PORT", "8000"))
-SECRET          = os.getenv("CODEBOX_SECRET") or secrets.token_hex(32)
+
+def _load_or_create_secret() -> str:
+    """Khóa ký session token. Ưu tiên biến môi trường; nếu không có thì lưu ra
+    file & tái sử dụng — tránh việc mỗi lần restart VPS lại sinh khóa mới khiến
+    toàn bộ user bị đăng xuất (token cũ thành không hợp lệ)."""
+    if os.getenv("CODEBOX_SECRET"):
+        return os.getenv("CODEBOX_SECRET")
+    path = os.getenv("CODEBOX_SECRET_FILE",
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "kenios_secret.key"))
+    try:
+        if os.path.exists(path):
+            v = open(path).read().strip()
+            if v:
+                return v
+        v = secrets.token_hex(32)
+        with open(path, "w") as f:
+            f.write(v)
+        try: os.chmod(path, 0o600)
+        except OSError: pass
+        return v
+    except OSError:
+        # Không ghi được file (chỉ đọc) — vẫn chạy được nhưng cảnh báo
+        return secrets.token_hex(32)
+
+SECRET          = _load_or_create_secret()
 TOKEN_TTL       = int(os.getenv("TOKEN_TTL", str(60 * 60 * 24 * 30)))  # 30 ngày
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120"))
 SANDBOX_TIMEOUT = int(os.getenv("SANDBOX_TIMEOUT", "15"))  # giây chạy code
@@ -1443,11 +1467,57 @@ def _rate_limit(request: Request, bucket: str, limit: int, window: int) -> None:
 
 _acb_task = None   # giữ tham chiếu tránh bị thu gom (GC)
 
+# ----- Sao lưu CSDL tự động (tránh mất đơn hàng / ví / key khi VPS hỏng) -----
+BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+BACKUP_KEEP = int(os.getenv("BACKUP_KEEP", "7"))            # số bản giữ lại
+BACKUP_EVERY_H = int(os.getenv("BACKUP_EVERY_HOURS", "24")) # chu kỳ (giờ)
+
+def backup_db_once() -> str | None:
+    """Tạo một bản sao an toàn của CSDL (dùng Online Backup API của SQLite nên
+    không hỏng kể cả khi đang ghi). Trả về đường dẫn bản backup, hoặc None nếu lỗi."""
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        dest_path = os.path.join(BACKUP_DIR, f"kenios-{stamp}.db")
+        src = sqlite3.connect(DB_PATH)
+        try:
+            dst = sqlite3.connect(dest_path)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+        # Dọn bớt, chỉ giữ BACKUP_KEEP bản mới nhất
+        files = sorted(
+            (f for f in os.listdir(BACKUP_DIR) if f.startswith("kenios-") and f.endswith(".db")),
+            reverse=True)
+        for old in files[BACKUP_KEEP:]:
+            try: os.remove(os.path.join(BACKUP_DIR, old))
+            except OSError: pass
+        log.info("Đã sao lưu CSDL: %s (giữ %d bản)", dest_path, BACKUP_KEEP)
+        return dest_path
+    except Exception as e:
+        log.warning("Sao lưu CSDL thất bại: %s", e)
+        return None
+
+def _backup_loop() -> None:
+    import threading
+    backup_db_once()  # backup ngay khi khởi động
+    def _tick():
+        while True:
+            time.sleep(max(1, BACKUP_EVERY_H) * 3600)
+            backup_db_once()
+    t = threading.Thread(target=_tick, daemon=True, name="db-backup")
+    t.start()
+
+
 @app.on_event("startup")
 def _startup() -> None:
     global _acb_task
     init_db()
     start_mail_smtp()
+    _backup_loop()
     try:
         _acb_task = asyncio.create_task(_acb_autopay_loop())
     except RuntimeError:
