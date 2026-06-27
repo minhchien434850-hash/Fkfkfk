@@ -13,6 +13,29 @@ struct L10n {
 
         // ──────────────── Chinese (Simplified) ────────────────
         "zh": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "密码",
+            "Forgot password?": "忘记密码？",
+            "or": "或",
+            "Create new account": "创建新账户",
+            "Create account": "创建账户",
+            "Change": "更改",
+            "Server": "服务器",
+            "Change password": "修改密码",
+            "Top up wallet": "充值钱包",
+            "Wallet history": "钱包记录",
+            "Purchase": "购买",
+            "Bank": "银行",
+            "Account number": "账号",
+            "Account holder": "账户名",
+            "Transfer note": "转账备注",
+            "Amount": "金额",
+            "Upgrade to PRO": "升级 PRO",
+            "Upgrade to Pro": "升级 Pro",
+            "Pro feature": "Pro 功能",
+            "Pending": "待确认",
+            "Credited": "已入账",
+            "Username": "用户名",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "商店钱包",
             "Wallet balance": "钱包余额",
@@ -149,6 +172,29 @@ struct L10n {
 
         // ──────────────── Korean ────────────────
         "ko": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "비밀번호",
+            "Forgot password?": "비밀번호 찾기?",
+            "or": "또는",
+            "Create new account": "새 계정 만들기",
+            "Create account": "계정 만들기",
+            "Change": "변경",
+            "Server": "서버",
+            "Change password": "비밀번호 변경",
+            "Top up wallet": "지갑 충전",
+            "Wallet history": "지갑 내역",
+            "Purchase": "구매",
+            "Bank": "은행",
+            "Account number": "계좌번호",
+            "Account holder": "예금주",
+            "Transfer note": "이체 메모",
+            "Amount": "금액",
+            "Upgrade to PRO": "PRO 업그레이드",
+            "Upgrade to Pro": "Pro 업그레이드",
+            "Pro feature": "Pro 기능",
+            "Pending": "대기 중",
+            "Credited": "입금됨",
+            "Username": "사용자 이름",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "상점 지갑",
             "Wallet balance": "지갑 잔액",
@@ -278,6 +324,29 @@ struct L10n {
 
         // ──────────────── Japanese ────────────────
         "ja": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "パスワード",
+            "Forgot password?": "パスワードを忘れた？",
+            "or": "または",
+            "Create new account": "新規アカウント作成",
+            "Create account": "アカウント作成",
+            "Change": "変更",
+            "Server": "サーバー",
+            "Change password": "パスワード変更",
+            "Top up wallet": "ウォレット入金",
+            "Wallet history": "ウォレット履歴",
+            "Purchase": "購入",
+            "Bank": "銀行",
+            "Account number": "口座番号",
+            "Account holder": "口座名義",
+            "Transfer note": "振込メモ",
+            "Amount": "金額",
+            "Upgrade to PRO": "PROにアップグレード",
+            "Upgrade to Pro": "Proにアップグレード",
+            "Pro feature": "Pro機能",
+            "Pending": "保留中",
+            "Credited": "入金済み",
+            "Username": "ユーザー名",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "ストアウォレット",
             "Wallet balance": "残高",
@@ -406,6 +475,29 @@ struct L10n {
 
         // ──────────────── Thai ────────────────
         "th": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "รหัสผ่าน",
+            "Forgot password?": "ลืมรหัสผ่าน?",
+            "or": "หรือ",
+            "Create new account": "สร้างบัญชีใหม่",
+            "Create account": "สร้างบัญชี",
+            "Change": "เปลี่ยน",
+            "Server": "เซิร์ฟเวอร์",
+            "Change password": "เปลี่ยนรหัสผ่าน",
+            "Top up wallet": "เติมเงินกระเป๋า",
+            "Wallet history": "ประวัติกระเป๋า",
+            "Purchase": "ซื้อ",
+            "Bank": "ธนาคาร",
+            "Account number": "เลขบัญชี",
+            "Account holder": "ชื่อบัญชี",
+            "Transfer note": "หมายเหตุโอน",
+            "Amount": "จำนวนเงิน",
+            "Upgrade to PRO": "อัปเกรด PRO",
+            "Upgrade to Pro": "อัปเกรด Pro",
+            "Pro feature": "ฟีเจอร์ Pro",
+            "Pending": "รอดำเนินการ",
+            "Credited": "เข้าบัญชีแล้ว",
+            "Username": "ชื่อผู้ใช้",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "กระเป๋าร้าน",
             "Wallet balance": "ยอดเงิน",
@@ -534,6 +626,29 @@ struct L10n {
 
         // ──────────────── French ────────────────
         "fr": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "Mot de passe",
+            "Forgot password?": "Mot de passe oublié ?",
+            "or": "ou",
+            "Create new account": "Créer un compte",
+            "Create account": "Créer un compte",
+            "Change": "Changer",
+            "Server": "Serveur",
+            "Change password": "Changer le mot de passe",
+            "Top up wallet": "Recharger le portefeuille",
+            "Wallet history": "Historique",
+            "Purchase": "Achat",
+            "Bank": "Banque",
+            "Account number": "Numéro de compte",
+            "Account holder": "Titulaire",
+            "Transfer note": "Note de virement",
+            "Amount": "Montant",
+            "Upgrade to PRO": "Passer à PRO",
+            "Upgrade to Pro": "Passer à Pro",
+            "Pro feature": "Fonction Pro",
+            "Pending": "En attente",
+            "Credited": "Crédité",
+            "Username": "Nom d'utilisateur",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "Portefeuille",
             "Wallet balance": "Solde",
@@ -662,6 +777,29 @@ struct L10n {
 
         // ──────────────── Spanish ────────────────
         "es": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "Contraseña",
+            "Forgot password?": "¿Olvidó la contraseña?",
+            "or": "o",
+            "Create new account": "Crear cuenta nueva",
+            "Create account": "Crear cuenta",
+            "Change": "Cambiar",
+            "Server": "Servidor",
+            "Change password": "Cambiar contraseña",
+            "Top up wallet": "Recargar billetera",
+            "Wallet history": "Historial",
+            "Purchase": "Compra",
+            "Bank": "Banco",
+            "Account number": "Número de cuenta",
+            "Account holder": "Titular",
+            "Transfer note": "Nota de transferencia",
+            "Amount": "Importe",
+            "Upgrade to PRO": "Mejorar a PRO",
+            "Upgrade to Pro": "Mejorar a Pro",
+            "Pro feature": "Función Pro",
+            "Pending": "Pendiente",
+            "Credited": "Acreditado",
+            "Username": "Usuario",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "Billetera",
             "Wallet balance": "Saldo",
@@ -790,6 +928,29 @@ struct L10n {
 
         // ──────────────── German ────────────────
         "de": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "Passwort",
+            "Forgot password?": "Passwort vergessen?",
+            "or": "oder",
+            "Create new account": "Neues Konto erstellen",
+            "Create account": "Konto erstellen",
+            "Change": "Ändern",
+            "Server": "Server",
+            "Change password": "Passwort ändern",
+            "Top up wallet": "Wallet aufladen",
+            "Wallet history": "Wallet-Verlauf",
+            "Purchase": "Kauf",
+            "Bank": "Bank",
+            "Account number": "Kontonummer",
+            "Account holder": "Kontoinhaber",
+            "Transfer note": "Verwendungszweck",
+            "Amount": "Betrag",
+            "Upgrade to PRO": "Auf PRO upgraden",
+            "Upgrade to Pro": "Auf Pro upgraden",
+            "Pro feature": "Pro-Funktion",
+            "Pending": "Ausstehend",
+            "Credited": "Gutgeschrieben",
+            "Username": "Benutzername",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "Shop-Wallet",
             "Wallet balance": "Guthaben",
@@ -918,6 +1079,29 @@ struct L10n {
 
         // ──────────────── Portuguese ────────────────
         "pt": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "Senha",
+            "Forgot password?": "Esqueceu a senha?",
+            "or": "ou",
+            "Create new account": "Criar nova conta",
+            "Create account": "Criar conta",
+            "Change": "Alterar",
+            "Server": "Servidor",
+            "Change password": "Alterar senha",
+            "Top up wallet": "Recarregar carteira",
+            "Wallet history": "Histórico da carteira",
+            "Purchase": "Compra",
+            "Bank": "Banco",
+            "Account number": "Número da conta",
+            "Account holder": "Titular",
+            "Transfer note": "Descrição",
+            "Amount": "Valor",
+            "Upgrade to PRO": "Mudar para PRO",
+            "Upgrade to Pro": "Mudar para Pro",
+            "Pro feature": "Recurso Pro",
+            "Pending": "Pendente",
+            "Credited": "Creditado",
+            "Username": "Usuário",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "Carteira",
             "Wallet balance": "Saldo",
@@ -1046,6 +1230,29 @@ struct L10n {
 
         // ──────────────── Russian ────────────────
         "ru": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "Пароль",
+            "Forgot password?": "Забыли пароль?",
+            "or": "или",
+            "Create new account": "Создать аккаунт",
+            "Create account": "Создать аккаунт",
+            "Change": "Изменить",
+            "Server": "Сервер",
+            "Change password": "Сменить пароль",
+            "Top up wallet": "Пополнить кошелёк",
+            "Wallet history": "История кошелька",
+            "Purchase": "Покупка",
+            "Bank": "Банк",
+            "Account number": "Номер счёта",
+            "Account holder": "Владелец счёта",
+            "Transfer note": "Назначение",
+            "Amount": "Сумма",
+            "Upgrade to PRO": "Перейти на PRO",
+            "Upgrade to Pro": "Перейти на Pro",
+            "Pro feature": "Функция Pro",
+            "Pending": "Ожидание",
+            "Credited": "Зачислено",
+            "Username": "Имя пользователя",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "Кошелёк",
             "Wallet balance": "Баланс",
@@ -1174,6 +1381,29 @@ struct L10n {
 
         // ──────────────── Indonesian / Bahasa ────────────────
         "id": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "Kata sandi",
+            "Forgot password?": "Lupa kata sandi?",
+            "or": "atau",
+            "Create new account": "Buat akun baru",
+            "Create account": "Buat akun",
+            "Change": "Ubah",
+            "Server": "Server",
+            "Change password": "Ubah kata sandi",
+            "Top up wallet": "Isi dompet",
+            "Wallet history": "Riwayat dompet",
+            "Purchase": "Pembelian",
+            "Bank": "Bank",
+            "Account number": "Nomor rekening",
+            "Account holder": "Pemilik rekening",
+            "Transfer note": "Catatan transfer",
+            "Amount": "Jumlah",
+            "Upgrade to PRO": "Tingkatkan ke PRO",
+            "Upgrade to Pro": "Tingkatkan ke Pro",
+            "Pro feature": "Fitur Pro",
+            "Pending": "Menunggu",
+            "Credited": "Dikreditkan",
+            "Username": "Nama pengguna",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "Dompet toko",
             "Wallet balance": "Saldo",
@@ -1302,6 +1532,29 @@ struct L10n {
 
         // ──────────────── Arabic ────────────────
         "ar": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "كلمة المرور",
+            "Forgot password?": "نسيت كلمة المرور؟",
+            "or": "أو",
+            "Create new account": "إنشاء حساب جديد",
+            "Create account": "إنشاء حساب",
+            "Change": "تغيير",
+            "Server": "الخادم",
+            "Change password": "تغيير كلمة المرور",
+            "Top up wallet": "شحن المحفظة",
+            "Wallet history": "سجل المحفظة",
+            "Purchase": "شراء",
+            "Bank": "البنك",
+            "Account number": "رقم الحساب",
+            "Account holder": "صاحب الحساب",
+            "Transfer note": "ملاحظة التحويل",
+            "Amount": "المبلغ",
+            "Upgrade to PRO": "الترقية إلى PRO",
+            "Upgrade to Pro": "الترقية إلى Pro",
+            "Pro feature": "ميزة Pro",
+            "Pending": "قيد الانتظار",
+            "Credited": "تمت الإضافة",
+            "Username": "اسم المستخدم",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "محفظة المتجر",
             "Wallet balance": "الرصيد",
@@ -1430,6 +1683,29 @@ struct L10n {
 
         // ──────────────── Hindi ────────────────
         "hi": [
+            // —— Đăng nhập/Ví/Thanh toán (đợt 3) ——
+            "Password": "पासवर्ड",
+            "Forgot password?": "पासवर्ड भूल गए?",
+            "or": "या",
+            "Create new account": "नया खाता बनाएँ",
+            "Create account": "खाता बनाएँ",
+            "Change": "बदलें",
+            "Server": "सर्वर",
+            "Change password": "पासवर्ड बदलें",
+            "Top up wallet": "वॉलेट टॉप अप",
+            "Wallet history": "वॉलेट इतिहास",
+            "Purchase": "खरीद",
+            "Bank": "बैंक",
+            "Account number": "खाता संख्या",
+            "Account holder": "खाताधारक",
+            "Transfer note": "ट्रांसफ़र नोट",
+            "Amount": "राशि",
+            "Upgrade to PRO": "PRO में अपग्रेड",
+            "Upgrade to Pro": "Pro में अपग्रेड",
+            "Pro feature": "Pro सुविधा",
+            "Pending": "लंबित",
+            "Credited": "जमा किया",
+            "Username": "उपयोगकर्ता नाम",
             // —— Cửa hàng & Cài đặt (đợt 2) ——
             "Store wallet": "स्टोर वॉलेट",
             "Wallet balance": "वॉलेट शेष",
