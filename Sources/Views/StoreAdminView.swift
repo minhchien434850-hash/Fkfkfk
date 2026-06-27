@@ -196,9 +196,6 @@ struct StoreAdminView: View {
                 }
 
                 Section(store.t("Danh mục sản phẩm", "Product categories") + " (\(categories.count))") {
-                    Button { newCategory = true } label: {
-                        Label(store.t("Thêm danh mục mới", "Add new category"), systemImage: "plus.circle.fill")
-                    }
                     ForEach(categories) { cat in
                         NavigationLink {
                             StoreAdminFolderList(category: cat)
@@ -232,6 +229,9 @@ struct StoreAdminView: View {
                     }
                     .onDelete { idx in
                         Task { await deleteCategories(idx) }
+                    }
+                    Button { newCategory = true } label: {
+                        Label(store.t("Thêm danh mục mới", "Add new category"), systemImage: "plus.circle.fill")
                     }
                 }
 
@@ -839,14 +839,22 @@ struct StoreProductEditor: View {
     private func uploadFile(_ url: URL) async {
         uploading = true; message = nil
         let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.removeItem(at: tmp)
+        do { try FileManager.default.copyItem(at: url, to: tmp) } catch {
+            if access { url.stopAccessingSecurityScopedResource() }
+            isError = true; message = store.t("Không đọc được file.", "Could not read file.")
+            uploading = false; return
+        }
+        if access { url.stopAccessingSecurityScopedResource() }
         do {
             let r = try await store.api.uploadFileRaw(name: url.lastPathComponent,
-                                                      category: "store", fileURL: url)
+                                                      category: "store", fileURL: tmp)
             downloadFileId = r.id
             isError = false; message = store.t("Đã tải file lên", "File uploaded") + " (#\(r.id)). " + store.t("Nhớ bấm Lưu sản phẩm.", "Remember to tap Save product.")
         } catch { isError = true; message = error.localizedDescription }
         uploading = false
+        try? FileManager.default.removeItem(at: tmp)
     }
 }
 
@@ -1156,13 +1164,21 @@ struct StoreQuickAddView: View {
     private func uploadFile(_ url: URL) async {
         uploading = true; message = nil
         let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.removeItem(at: tmp)
+        do { try FileManager.default.copyItem(at: url, to: tmp) } catch {
+            if access { url.stopAccessingSecurityScopedResource() }
+            isError = true; message = store.t("Không đọc được file.", "Could not read file.")
+            uploading = false; return
+        }
+        if access { url.stopAccessingSecurityScopedResource() }
         do {
-            let r = try await store.api.uploadFileRaw(name: url.lastPathComponent, category: "store", fileURL: url)
+            let r = try await store.api.uploadFileRaw(name: url.lastPathComponent, category: "store", fileURL: tmp)
             downloadFileId = r.id
             isError = false; message = store.t("Đã tải file lên", "File uploaded") + " (#\(r.id))."
         } catch { isError = true; message = error.localizedDescription }
         uploading = false
+        try? FileManager.default.removeItem(at: tmp)
     }
 
     // ---- Lưu tất cả ----

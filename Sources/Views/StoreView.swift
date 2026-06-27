@@ -163,8 +163,44 @@ struct StoreView: View {
     @State private var showCart = false
     @AppStorage("storeCartRaw") private var cartRaw: String = "[]"
     @State private var showcase: StoreShowcase?
+    @State private var scrollTarget: String?   // dùng cho ScrollViewReader scroll đến section
     @State private var flashNow = Date()   // cập nhật để đồng hồ flash sale đếm ngược
     private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    // Demo data hiện khi chưa có dữ liệu thực từ server
+    private var effectiveShowcase: StoreShowcase {
+        if let s = showcase { return s }
+        let now = Int(Date().timeIntervalSince1970)
+        return StoreShowcase(
+            recentOrders: [
+                ShowcaseOrder(user: "Minh***", product: "Free Fire 100 Kim Cương", label: "Thành công", amount: 25000, at: now - 35),
+                ShowcaseOrder(user: "Huy***",  product: "PUBG Mobile UC 325",      label: "Thành công", amount: 89000, at: now - 120),
+                ShowcaseOrder(user: "Linh***", product: "Valorant 475 VP",          label: "Thành công", amount: 120000, at: now - 310),
+                ShowcaseOrder(user: "An***",   product: "Genshin 60 Genesis",       label: "Thành công", amount: 55000, at: now - 620),
+                ShowcaseOrder(user: "Tùng***", product: "LOL 650 RP",               label: "Thành công", amount: 99000, at: now - 900),
+                ShowcaseOrder(user: "Mai***",  product: "Steam Wallet 100k",        label: "Thành công", amount: 100000, at: now - 1500),
+                ShowcaseOrder(user: "Dũng***", product: "Mobile Legends 50 Kim",    label: "Thành công", amount: 18000, at: now - 2200),
+                ShowcaseOrder(user: "Thu***",  product: "Garena Shell 100",         label: "Thành công", amount: 30000, at: now - 3600),
+            ],
+            recentTopups: [
+                ShowcaseTopup(user: "Minh***",  amount: 500000,  at: now - 60),
+                ShowcaseTopup(user: "Linh***",  amount: 200000,  at: now - 200),
+                ShowcaseTopup(user: "Huy***",   amount: 1000000, at: now - 480),
+                ShowcaseTopup(user: "An***",    amount: 300000,  at: now - 750),
+                ShowcaseTopup(user: "Nam***",   amount: 150000,  at: now - 1300),
+                ShowcaseTopup(user: "Trang***", amount: 800000,  at: now - 2000),
+                ShowcaseTopup(user: "Dũng***",  amount: 50000,   at: now - 3200),
+                ShowcaseTopup(user: "Bình***",  amount: 250000,  at: now - 5400),
+            ],
+            leaderboard: [
+                ShowcaseLeader(rank: 1, user: "Minh***",  total: 5_200_000),
+                ShowcaseLeader(rank: 2, user: "Huy***",   total: 3_800_000),
+                ShowcaseLeader(rank: 3, user: "Linh***",  total: 2_900_000),
+                ShowcaseLeader(rank: 4, user: "Nam***",   total: 1_750_000),
+                ShowcaseLeader(rank: 5, user: "Trang***", total: 980_000),
+            ]
+        )
+    }
 
     private var displayName: String {
         if let n = config?.logoName, !n.isEmpty { return n }
@@ -293,11 +329,11 @@ struct StoreView: View {
         case "flash":
             if let p = flashProduct { flashSection(p) }
         case "leaderboard":
-            if let s = showcase, !s.leaderboard.isEmpty { leaderboardSection(s.leaderboard) }
+            leaderboardSection(effectiveShowcase.leaderboard)
         case "transactions":
-            if let s = showcase, !s.recentOrders.isEmpty { transactionsSection(s.recentOrders) }
+            transactionsSection(effectiveShowcase.recentOrders)
         case "topups":
-            if let s = showcase, !s.recentTopups.isEmpty { topupsSection(s.recentTopups) }
+            topupsSection(effectiveShowcase.recentTopups)
         case "hero":
             heroSection
         case "gamecat":
@@ -312,21 +348,26 @@ struct StoreView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    storeHeader
-
-                    walletBar
-
-                    // Các mục hiển thị theo thứ tự admin sắp xếp (Sắp xếp bố cục trang)
-                    ForEach(orderedSections, id: \.self) { key in
-                        sectionView(key)
+                ScrollViewReader { proxy in
+                    VStack(alignment: .leading, spacing: 16) {
+                        storeHeader
+                        walletBar
+                        // Các mục hiển thị theo thứ tự admin sắp xếp (Sắp xếp bố cục trang)
+                        ForEach(orderedSections, id: \.self) { key in
+                            sectionView(key).id(key)
+                        }
+                        if let error {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
                     }
-
-                    if let error {
-                        Text(error).font(.caption).foregroundStyle(.red)
+                    .padding()
+                    .onChange(of: scrollTarget) { target in
+                        if let t = target {
+                            withAnimation(.easeInOut(duration: 0.5)) { proxy.scrollTo(t, anchor: .top) }
+                            scrollTarget = nil
+                        }
                     }
                 }
-                .padding()
             }
             .background {
                 if let c = effectiveConfig, let bt = c.bgType, bt != "none",
@@ -934,7 +975,7 @@ struct StoreView: View {
                 .lineLimit(3)
             Text(store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty"))
                 .font(.subheadline).foregroundStyle(.secondary)
-            Button { showSearch = true } label: {
+            Button { scrollTarget = "products" } label: {
                 HStack(spacing: 6) {
                     Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
                     Image(systemName: "arrow.right")
@@ -966,7 +1007,7 @@ struct StoreView: View {
                     return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
                  }())
                 .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Text("© \(Calendar.current.component(.year, from: Date())) \(displayName)")
+            Text("© " + String(Calendar.current.component(.year, from: Date())) + " " + displayName)
                 .font(.caption2).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
