@@ -157,7 +157,6 @@ struct L10n {
             "Connected":            "已连接",
             "Disconnected":         "已断开",
             // Friends / Social
-            "Friends":              "朋友",
             "Messages":             "消息",
             "Notifications":        "通知",
             "Online":               "在线",
@@ -310,7 +309,6 @@ struct L10n {
             "Connecting...":        "연결 중...",
             "Connected":            "연결됨",
             "Disconnected":         "연결 해제됨",
-            "Friends":              "친구",
             "Messages":             "메시지",
             "Notifications":        "알림",
             "Online":               "온라인",
