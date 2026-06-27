@@ -4586,6 +4586,12 @@ def _finalize_topup_row(c, t) -> bool:
                 f"Nạp {t['amount']:,}đ".replace(",", ".") +
                 (f" + thưởng {t['bonus']:,}đ".replace(",", ".") if t["bonus"] else ""))
     log.info("Ví: nạp xong topup #%d user=%d +%d", t["id"], t["user_id"], t["credited"])
+    # Báo admin có người nạp ví (chạy nền)
+    urow = c.execute("SELECT username FROM users WHERE id=?", (t["user_id"],)).fetchone()
+    uname = urow["username"] if urow else f"user#{t['user_id']}"
+    _notify_admins("💰 Nạp ví mới",
+                   f"{uname} vừa nạp {t['amount']:,}đ".replace(",", ".") +
+                   (f" (+{t['bonus']:,}đ thưởng)".replace(",", ".") if t["bonus"] else ""))
     return True
 
 @app.get("/store/categories")
@@ -4725,6 +4731,10 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
         c.execute("INSERT INTO store_wallet_tx(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",
                   (user["id"], "purchase", -amount, f"Mua {prod['name']}", int(time.time())))
         new_balance = _wallet_balance(c, user["id"])
+    # Báo admin có đơn mới (chạy nền, không ảnh hưởng tới phản hồi mua hàng)
+    _notify_admins("🛒 Đơn hàng mới",
+                   f"{user['username']} vừa mua {prod['name']} — "
+                   f"{amount:,}đ".replace(",", "."))
     return {
         "ok": True, "owned": True, "order_id": oid,
         "key": key["key_text"], "product_name": prod["name"],
@@ -5441,25 +5451,63 @@ class PushNotifIn(BaseModel):
     body: str
     target: str = "all"   # all | uid:<id>
 
+def _apns_configured() -> bool:
+    return all([os.getenv("APNS_KEY_ID", ""), os.getenv("APNS_TEAM_ID", ""),
+                os.getenv("APNS_BUNDLE_ID", ""), os.getenv("APNS_KEY_PATH", "")])
+
+def _apns_send(tokens: list[str], title: str, body: str) -> tuple[int, int]:
+    """Gửi push tới danh sách device token. Trả (sent, failed).
+    Im lặng trả (0,0) nếu chưa cấu hình APNs — dùng được cho thông báo tự động."""
+    tokens = [t for t in tokens if t]
+    if not tokens or not _apns_configured():
+        return (0, 0)
+    try:
+        import httpx, jwt as pyjwt
+        with open(os.getenv("APNS_KEY_PATH"), "r") as f:
+            private_key = f.read()
+        jwt_token = pyjwt.encode({"iss": os.getenv("APNS_TEAM_ID"), "iat": int(time.time())},
+                                 private_key, algorithm="ES256",
+                                 headers={"kid": os.getenv("APNS_KEY_ID")})
+        payload = {"aps": {"alert": {"title": title, "body": body}, "sound": "default"}}
+        headers = {"authorization": f"bearer {jwt_token}",
+                   "apns-topic": os.getenv("APNS_BUNDLE_ID"), "apns-push-type": "alert"}
+        sent = failed = 0
+        with httpx.Client(http2=True, timeout=10) as client:
+            for t in tokens:
+                try:
+                    r = client.post(f"https://api.push.apple.com/3/device/{t}",
+                                    json=payload, headers=headers)
+                    if r.status_code == 200: sent += 1
+                    else: failed += 1
+                except Exception:
+                    failed += 1
+        return (sent, failed)
+    except Exception as e:
+        log.warning("APNs gửi lỗi: %s", e)
+        return (0, 0)
+
+def _notify_admins(title: str, body: str) -> None:
+    """Gửi push cho mọi thiết bị của admin, chạy nền (không chặn request mua hàng)."""
+    try:
+        with db() as c:
+            tokens = [r["token"] for r in c.execute(
+                "SELECT dt.token FROM device_tokens dt JOIN users u ON u.id=dt.user_id "
+                "WHERE u.is_admin=1").fetchall()]
+        if not tokens or not _apns_configured():
+            return
+        import threading
+        threading.Thread(target=_apns_send, args=(tokens, title, body),
+                         daemon=True, name="notify-admin").start()
+    except Exception as e:
+        log.warning("notify_admins lỗi: %s", e)
+
+
 @app.post("/admin/push-notification")
 def admin_send_push(b: PushNotifIn, admin=Depends(get_admin)) -> dict[str, Any]:
     """Gửi push notification qua APNs. Cần cấu hình APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_KEY_PATH."""
-    import httpx, jwt as pyjwt
-    key_id    = os.getenv("APNS_KEY_ID", "")
-    team_id   = os.getenv("APNS_TEAM_ID", "")
-    bundle_id = os.getenv("APNS_BUNDLE_ID", "")
-    key_path  = os.getenv("APNS_KEY_PATH", "")
-    if not all([key_id, team_id, bundle_id, key_path]):
+    if not _apns_configured():
         raise HTTPException(status_code=501,
             detail="Chưa cấu hình APNs (APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_KEY_PATH).")
-    try:
-        with open(key_path, "r") as f:
-            private_key = f.read()
-    except Exception:
-        raise HTTPException(status_code=500, detail="Không đọc được file APNs key.")
-    now = int(time.time())
-    token = pyjwt.encode({"iss": team_id, "iat": now}, private_key,
-                         algorithm="ES256", headers={"kid": key_id})
     with db() as c:
         if b.target == "all":
             tokens = [r["token"] for r in c.execute("SELECT token FROM device_tokens").fetchall()]
@@ -5471,24 +5519,7 @@ def admin_send_push(b: PushNotifIn, admin=Depends(get_admin)) -> dict[str, Any]:
             tokens = []
     if not tokens:
         return {"sent": 0, "message": "Không có thiết bị nào để gửi."}
-    payload = {"aps": {"alert": {"title": b.title, "body": b.body}, "sound": "default"}}
-    sent, failed = 0, 0
-    apns_url = f"https://api.push.apple.com/3/device"
-    headers = {
-        "authorization": f"bearer {token}",
-        "apns-topic": bundle_id,
-        "apns-push-type": "alert",
-    }
-    with httpx.Client(http2=True, timeout=10) as client:
-        for t in tokens:
-            try:
-                r = client.post(f"{apns_url}/{t}", json=payload, headers=headers)
-                if r.status_code == 200:
-                    sent += 1
-                else:
-                    failed += 1
-            except Exception:
-                failed += 1
+    sent, failed = _apns_send(tokens, b.title, b.body)
     return {"sent": sent, "failed": failed, "message": f"Đã gửi {sent}/{len(tokens)} thiết bị."}
 
 @app.get("/admin/push-notification/devices")
