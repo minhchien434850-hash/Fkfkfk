@@ -413,7 +413,10 @@ struct StoreView: View {
         case "topups":
             topupsSection(effectiveShowcase.recentTopups)
         case "hero":
-            heroSection
+            // Chỉ hiện Hero khi admin đặt TIÊU ĐỀ Hero riêng — tránh trùng với slogan ở đầu trang.
+            if let t = config?.heroTitle, !t.trimmingCharacters(in: .whitespaces).isEmpty {
+                heroSection
+            }
         case "gamecat":
             if !productsByCategory.isEmpty { gameCatSection }
         case "announce":
