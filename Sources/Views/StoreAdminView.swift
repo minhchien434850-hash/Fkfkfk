@@ -303,6 +303,7 @@ struct StoreConfigEditor: View {
     @State private var sloganAnim = "none"
     @State private var promoImageUrl = ""
     @State private var promoProductId = 0
+    @State private var editSteps: [EditStep] = EditStep.defaults
     @State private var message: String?
     @State private var isError = false
     @AppStorage("storeCfgName") private var cfgName: String = ""
@@ -540,6 +541,20 @@ struct StoreConfigEditor: View {
                     .font(.caption2)
             }
 
+            Section {
+                NavigationLink {
+                    StoreStepsEditor(steps: $editSteps)
+                } label: {
+                    Label(store.t("3 bước hướng dẫn", "3 guide steps"), systemImage: "list.number")
+                }
+            } header: {
+                Text(store.t("Bước hướng dẫn", "Guide steps"))
+            } footer: {
+                Text(store.t("Tuỳ chỉnh tiêu đề, mô tả và biểu tượng của 3 bước hiển thị trên trang cửa hàng.",
+                             "Customize the icon, title and description of the 3 steps shown on the storefront."))
+                    .font(.caption2)
+            }
+
             Section { Button(store.t("Lưu giao diện", "Save appearance")) { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
@@ -584,6 +599,11 @@ struct StoreConfigEditor: View {
             sloganAnim = c.sloganAnim ?? "none"
             promoImageUrl = c.promoImageUrl ?? ""
             promoProductId = c.promoProductId ?? 0
+            if let s = c.steps, s.count == 3 {
+                editSteps = s.map { EditStep(icon: $0.icon, title: $0.title, desc: $0.desc) }
+            } else {
+                editSteps = EditStep.defaults
+            }
         }
     }
     private func save() async {
@@ -604,7 +624,8 @@ struct StoreConfigEditor: View {
                 heroEffect: heroEffect, heroFont: heroFont, heroAnim: heroAnim,
                 sloganEffect: sloganEffect, sloganAnim: sloganAnim,
                 promoImageUrl: promoImageUrl.isEmpty ? nil : promoImageUrl,
-                promoProductId: promoProductId > 0 ? promoProductId : nil)
+                promoProductId: promoProductId > 0 ? promoProductId : nil,
+                steps: editSteps.map { ["icon": $0.icon, "title": $0.title, "desc": $0.desc] })
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message
@@ -2939,5 +2960,84 @@ struct AdminPushNotificationView: View {
             result = error.localizedDescription; isError = true
         }
         sending = false
+    }
+}
+
+// ---- Cấu trúc bước hướng dẫn (dùng trong admin) ----
+struct EditStep: Identifiable {
+    let id = UUID()
+    var icon: String
+    var title: String
+    var desc: String
+
+    static let defaults: [EditStep] = [
+        EditStep(icon: "magnifyingglass", title: "Chọn game",  desc: "Tìm & chọn gói phù hợp"),
+        EditStep(icon: "creditcard",       title: "Thanh toán", desc: "Nạp qua bank hoặc thẻ"),
+        EditStep(icon: "arrow.down.circle",title: "Nhận key",   desc: "Key gửi tức thì"),
+    ]
+
+    static let iconOptions: [(String, String)] = [
+        ("magnifyingglass",    "Tìm kiếm"),
+        ("cart",               "Giỏ hàng"),
+        ("creditcard",         "Thẻ / Ngân hàng"),
+        ("arrow.down.circle",  "Tải xuống"),
+        ("key",                "Key"),
+        ("gamecontroller",     "Game"),
+        ("bolt",               "Tức thì"),
+        ("lock.open",          "Mở khoá"),
+        ("star",               "Nổi bật"),
+        ("gift",               "Quà tặng"),
+        ("checkmark.circle",   "Hoàn thành"),
+        ("person.crop.circle", "Tài khoản"),
+        ("phone",              "Điện thoại"),
+        ("envelope",           "Email"),
+        ("shield.checkered",   "Bảo hành"),
+    ]
+}
+
+// ---- Editor 3 bước hướng dẫn ----
+struct StoreStepsEditor: View {
+    @EnvironmentObject var store: AppStore
+    @Binding var steps: [EditStep]
+
+    var body: some View {
+        Form {
+            ForEach($steps) { $step in
+                let idx = steps.firstIndex(where: { $0.id == step.id }).map { $0 + 1 } ?? 0
+                Section("Bước \(idx)") {
+                    // Chọn icon
+                    Picker(store.t("Biểu tượng", "Icon"), selection: $step.icon) {
+                        ForEach(EditStep.iconOptions, id: \.0) { sym, label in
+                            Label(label, systemImage: sym).tag(sym)
+                        }
+                    }
+                    // Xem trước icon đang chọn
+                    HStack {
+                        Spacer()
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: step.icon).font(.title3)
+                                .frame(width: 46, height: 46)
+                                .background(Color.accentColor.opacity(0.15))
+                                .foregroundStyle(.accentColor)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            Text("\(idx)").font(.system(size: 11, weight: .bold))
+                                .frame(width: 18, height: 18)
+                                .background(Color.accentColor).foregroundStyle(.white)
+                                .clipShape(Circle()).offset(x: 6, y: -6)
+                        }
+                        Spacer()
+                    }
+                    TextField(store.t("Tiêu đề (vd: Chọn game)", "Title (e.g. Choose game)"), text: $step.title)
+                    TextField(store.t("Mô tả ngắn", "Short description"), text: $step.desc)
+                }
+            }
+            Section {
+                Button(store.t("Đặt lại mặc định", "Reset to defaults"), role: .destructive) {
+                    steps = EditStep.defaults
+                }
+            }
+        }
+        .navigationTitle(store.t("3 bước hướng dẫn", "Guide steps"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

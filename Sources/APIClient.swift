@@ -430,7 +430,8 @@ struct APIClient {
                              sloganEffect: String? = nil,
                              sloganAnim: String? = nil,
                              promoImageUrl: String? = nil,
-                             promoProductId: Int? = nil) async throws -> MessageResponse {
+                             promoProductId: Int? = nil,
+                             steps: [[String: String]]? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
@@ -458,6 +459,7 @@ struct APIClient {
         if let sloganAnim { body["slogan_anim"] = sloganAnim }
         body["promo_image_url"] = promoImageUrl ?? ""
         if let promoProductId { body["promo_product_id"] = promoProductId }
+        if let steps { body["steps"] = steps }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
     // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)

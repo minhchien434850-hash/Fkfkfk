@@ -279,6 +279,14 @@ struct StoreAppConfig: Decodable, Hashable {
     // Khuyến mãi (banner ảnh trong phần ví nạp tiền)
     var promoImageUrl: String? = nil
     var promoProductId: Int? = nil
+    // 3 bước hướng dẫn tuỳ chỉnh
+    var steps: [StoreStep]? = nil
+}
+
+struct StoreStep: Codable, Hashable {
+    var icon: String
+    var title: String
+    var desc: String
 }
 
 // ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----

@@ -490,13 +490,19 @@ struct StoreView: View {
         }
     }
 
-    // 3 bước: Chọn game → Thanh toán → Nhận key
+    // 3 bước: dùng config từ server nếu có, fallback về mặc định
     private var stepsSection: some View {
-        let steps: [(String, String, String)] = [
-            ("magnifyingglass", store.t("Chọn game", "Choose game"), store.t("Tìm & chọn gói phù hợp", "Find & pick a package")),
-            ("creditcard", store.t("Thanh toán", "Payment"), store.t("Nạp qua bank hoặc thẻ", "Pay via bank or card")),
-            ("arrow.down.circle", store.t("Nhận key", "Get key"), store.t("Key gửi tức thì", "Key sent instantly")),
+        let fallback: [(String, String, String)] = [
+            ("magnifyingglass", store.t("Chọn game", "Choose game"),   store.t("Tìm & chọn gói phù hợp", "Find & pick a package")),
+            ("creditcard",       store.t("Thanh toán", "Payment"),      store.t("Nạp qua bank hoặc thẻ", "Pay via bank or card")),
+            ("arrow.down.circle",store.t("Nhận key", "Get key"),        store.t("Key gửi tức thì", "Key sent instantly")),
         ]
+        let steps: [(String, String, String)] = {
+            if let s = config?.steps, s.count == 3 {
+                return s.map { ($0.icon, $0.title, $0.desc) }
+            }
+            return fallback
+        }()
         return HStack(spacing: 10) {
             ForEach(Array(steps.enumerated()), id: \.offset) { i, s in
                 VStack(spacing: 6) {
