@@ -1573,8 +1573,9 @@ struct AdminPromoCodesView: View {
                                 Label("Tối thiểu \(kFormatVND(promo.minAmount))", systemImage: "cart")
                             }
                             if promo.expiresAt > 0 {
-                                Label(Date(timeIntervalSince1970: TimeInterval(promo.expiresAt)),
-                                      format: .dateTime.day().month().year())
+                                Label(Date(timeIntervalSince1970: TimeInterval(promo.expiresAt))
+                                        .formatted(.dateTime.day().month().year()),
+                                      systemImage: "calendar")
                             }
                         }
                         .font(.caption2).foregroundStyle(.secondary)
