@@ -124,15 +124,6 @@ struct StoreAdminView: View {
         NavigationStack {
             List {
                 Section {
-                    Button { quickAdd = true } label: {
-                        Label(store.t("➕ Thêm sản phẩm (tất cả trong 1)", "➕ Add product (all-in-one)"), systemImage: "wand.and.stars")
-                            .font(.headline)
-                    }
-                    Text(store.t("Tạo danh mục, thư mục con, sản phẩm, giá & nhập key — tất cả trong 1 màn.",
-                                 "Create category, subfolder, product, prices & keys — all in one screen."))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section {
                     NavigationLink {
                         StoreConfigEditor()
                     } label: {
