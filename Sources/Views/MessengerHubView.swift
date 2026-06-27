@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import PhotosUI
 
 // ============================ Messenger Hub ============================
 // Tab 0 — Thủ công: copy clipboard + mở app (paste & gửi tay)
@@ -366,6 +367,17 @@ struct MessengerHubView: View {
     @State private var blastIdx = 0
     @State private var blastDone = 0
     @State private var blastTask: Task<Void, Never>?
+    // Tab 3: Tool nhóm — gửi hàng loạt cho nhiều bạn đã chọn (Messenger / Zalo)
+    @AppStorage("mhToolPlatform") private var toolPlatformRaw = "messenger"
+    @State private var toolFriends: [String] = []
+    @State private var toolSelected: Set<String> = []
+    @State private var loadingTool = false
+    @State private var toolConnected = false
+    @State private var toolRunning = false
+    @State private var toolDone = 0
+    @State private var toolTask: Task<Void, Never>?
+    @State private var toolImageItem: PhotosPickerItem?
+    @State private var toolImageData: Data?
 
     // ── UI ──────────────────────────────────
     @State private var activeTab: Int = 0
@@ -469,13 +481,15 @@ struct MessengerHubView: View {
                 // Mode switcher
                 Section {
                     Picker("Chế độ", selection: $activeTab) {
-                        Label("📋  Thủ công", systemImage: "doc.on.clipboard").tag(0)
-                        Label("⚡  Tự động Web", systemImage: "bolt.fill").tag(1)
+                        Text("📋 Thủ công").tag(0)
+                        Text("⚡ Tự động").tag(1)
+                        Text("👥 Tool nhóm").tag(2)
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: activeTab) { _ in
                         if manRunning { stopManual() }
                         if autoRunning { stopAuto() }
+                        if toolRunning { stopTool() }
                     }
                 }
 
@@ -875,35 +889,53 @@ struct MessengerHubView: View {
                         }
                     }
                 }
+
+                // ─────────────────── TAB: Tool nhóm ───────────────────
+                if activeTab == 2 { toolGroupSections }
             }
-            .navigationTitle(activeTab == 0 ? "Nhắn tin thủ công 📋" : "Nhắn tin tự động ⚡")
+            .navigationTitle(activeTab == 0 ? "Nhắn tin thủ công 📋"
+                             : (activeTab == 1 ? "Nhắn tin tự động ⚡" : "Tool nhóm 👥"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
             .onAppear { activeTab = initialTab }
-            .onDisappear { stopManual(); stopAuto(); stopBlast() }
+            .onDisappear { stopManual(); stopAuto(); stopBlast(); stopTool() }
             .sheet(isPresented: $showWebLogin, onDismiss: {
-                Task { await checkConnected(); if autoConnected { await loadFriends() } }
+                Task {
+                    if activeTab == 2 { await loadToolFriends() }
+                    else { await checkConnected(); if autoConnected { await loadFriends() } }
+                }
             }) {
+                let p = activeTab == 2 ? toolPlatform : autoPlatform
                 HubBrowserSheet(
-                    webView: HubWebViews.shared.view(for: autoPlatform),
-                    initialURL: autoPlatform.chatURL(recipient: autoRecipient) ?? autoPlatform.homeURL,
-                    platformLabel: autoPlatform.label
+                    webView: HubWebViews.shared.view(for: p),
+                    initialURL: p.homeURL,
+                    platformLabel: p.label
                 )
             }
             .onChange(of: autoPlatformRaw) { _ in
                 autoConnected = false; autoFriends = []; selectedFriend = ""
                 Task { await checkConnected() }
             }
+            .onChange(of: toolPlatformRaw) { _ in
+                toolConnected = false; toolFriends = []; toolSelected = []
+            }
+            .onChange(of: toolImageItem) { item in
+                guard let item else { return }
+                Task { toolImageData = try? await item.loadTransferable(type: Data.self) }
+            }
             .task { await checkConnected() }
         }
     }
 
     // MARK: - Web: kết nối & danh sách bạn bè
-    @MainActor private func evalAuto(_ js: String) async -> String {
-        let wv = HubWebViews.shared.view(for: autoPlatform)
+    private var toolPlatform: AutoWebPlatform { AutoWebPlatform(rawValue: toolPlatformRaw) ?? .messenger }
+
+    @MainActor private func evalOn(_ p: AutoWebPlatform, _ js: String) async -> String {
+        let wv = HubWebViews.shared.view(for: p)
         let r = try? await wv.evaluateJavaScript(js)
         return (r as? String) ?? ""
     }
+    @MainActor private func evalAuto(_ js: String) async -> String { await evalOn(autoPlatform, js) }
     private func checkConnected() async {
         guard autoPlatform.supportsAutoNav || autoPlatform == .zalo || autoPlatform == .messenger || autoPlatform == .instagram else {
             autoConnected = false; return
@@ -1022,6 +1054,159 @@ struct MessengerHubView: View {
     }
     private func stopBlast() {
         blastTask?.cancel(); blastTask = nil; blasting = false
+    }
+
+    // MARK: - Tab 3: Tool nhóm (gửi hàng loạt nhiều bạn — Messenger / Zalo)
+    @ViewBuilder private var toolGroupSections: some View {
+        Section("Nền tảng") {
+            Picker("Nền tảng", selection: $toolPlatformRaw) {
+                Text("Facebook / Messenger").tag("messenger")
+                Text("Zalo").tag("zalo")
+            }.pickerStyle(.segmented)
+            HStack {
+                Circle().fill(toolConnected ? .green : .gray).frame(width: 10, height: 10)
+                Text(toolConnected ? "Đã kết nối \(toolPlatform.label)" : "Chưa kết nối")
+                    .font(.subheadline.bold()).foregroundStyle(toolConnected ? .green : .secondary)
+                Spacer()
+                Button("Mở Web đăng nhập") { showWebLogin = true }.font(.caption)
+            }
+        }
+
+        Section {
+            Button {
+                Task { await loadToolFriends() }
+            } label: {
+                HStack { if loadingTool { ProgressView() }
+                    Label("Tải danh sách bạn bè", systemImage: "person.2.crop.square.stack") }
+            }.disabled(loadingTool || toolRunning)
+            if !toolFriends.isEmpty {
+                HStack {
+                    Text("Đã chọn \(toolSelected.count)/\(toolFriends.count)").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(toolSelected.count == toolFriends.count ? "Bỏ chọn tất cả" : "Chọn tất cả") {
+                        if toolSelected.count == toolFriends.count { toolSelected.removeAll() }
+                        else { toolSelected = Set(toolFriends) }
+                    }.font(.caption.bold())
+                }
+                ForEach(toolFriends, id: \.self) { name in
+                    Button {
+                        if toolSelected.contains(name) { toolSelected.remove(name) } else { toolSelected.insert(name) }
+                    } label: {
+                        HStack {
+                            Image(systemName: toolSelected.contains(name) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(toolSelected.contains(name) ? store.accentColor : .secondary)
+                            Text(name).foregroundStyle(.primary).lineLimit(1)
+                            Spacer()
+                        }
+                    }.buttonStyle(.plain)
+                }
+            } else if toolConnected {
+                Text("Bấm \"Tải danh sách bạn bè\" để lấy danh sách.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        } header: { Text("Danh sách bạn bè") }
+
+        Section("Ảnh đính kèm (tuỳ chọn)") {
+            PhotosPicker(selection: $toolImageItem, matching: .images) {
+                Label(toolImageData == nil ? "Tải ảnh lên để gửi kèm" : "Đã chọn ảnh — đổi ảnh khác",
+                      systemImage: "photo.badge.plus")
+            }
+            if toolImageData != nil {
+                Button("Bỏ ảnh", role: .destructive) { toolImageData = nil; toolImageItem = nil }
+                    .font(.caption)
+            }
+            Text("Nội dung gửi lấy từ ô \"Soạn thảo tin nhắn\" ở trên. Tốc độ dùng chung với tab Tự động.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+
+        Section {
+            if toolRunning {
+                HStack {
+                    ProgressView()
+                    Text("Đang gửi \(toolDone)/\(toolSelected.count)…").font(.caption)
+                    Spacer()
+                    Button("Dừng", role: .destructive) { stopTool() }
+                }
+            } else {
+                Button {
+                    startTool()
+                } label: {
+                    Label("Gửi cho \(toolSelected.count) người đã chọn", systemImage: "paperplane.fill")
+                        .frame(maxWidth: .infinity).frame(height: 44)
+                        .background(canStartTool ? store.accentColor : .gray)
+                        .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 10))
+                }.buttonStyle(.plain).disabled(!canStartTool)
+                if toolSelected.isEmpty { Text("Chọn ít nhất 1 người.").font(.caption2).foregroundStyle(.red) }
+                else if messages.isEmpty && toolImageData == nil {
+                    Text("Nhập nội dung hoặc chọn ảnh để gửi.").font(.caption2).foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    private var canStartTool: Bool { !toolSelected.isEmpty && (!messages.isEmpty || toolImageData != nil) }
+
+    private func loadToolFriends() async {
+        loadingTool = true; defer { loadingTool = false }
+        toolConnected = (await evalOn(toolPlatform, toolPlatform.loginCheckJS)) == "in"
+        let json = await evalOn(toolPlatform, toolPlatform.chatListJS)
+        if let data = json.data(using: .utf8),
+           let arr = try? JSONDecoder().decode([String].self, from: data) {
+            toolFriends = arr.filter { !$0.isEmpty }
+        }
+    }
+
+    // JS đính ảnh từ data URL vào ô soạn tin (best-effort)
+    private func attachImageJS(_ dataURL: String) -> String {
+        return """
+        (function(){
+          try{
+            var inp=document.querySelector('input[type=file]');
+            if(!inp)return 'no_input';
+            var arr='\(dataURL)'.split(','),mime=arr[0].match(/:(.*?);/)[1],
+                bstr=atob(arr[1]),n=bstr.length,u8=new Uint8Array(n);
+            while(n--){u8[n]=bstr.charCodeAt(n);}
+            var file=new File([u8],'image.jpg',{type:mime});
+            var dt=new DataTransfer();dt.items.add(file);
+            inp.files=dt.files;
+            inp.dispatchEvent(new Event('change',{bubbles:true}));
+            return 'ok';
+          }catch(e){return 'err';}
+        })();
+        """
+    }
+
+    private func startTool() {
+        guard canStartTool else { return }
+        toolRunning = true; toolDone = 0
+        let names = toolFriends.filter { toolSelected.contains($0) }
+        let p = toolPlatform
+        let delay = max(0.1, min(autoDelaySec, 5.0))
+        let imgURL: String? = toolImageData.map { "data:image/jpeg;base64,\($0.base64EncodedString())" }
+        let msgs = messages
+        toolTask = Task { @MainActor in
+            for (i, name) in names.enumerated() {
+                guard toolRunning, !Task.isCancelled else { break }
+                _ = await evalOn(p, p.openChatJS(name))           // mở chat với người này
+                try? await Task.sleep(nanoseconds: 2_200_000_000)
+                for msg in msgs {
+                    guard toolRunning, !Task.isCancelled else { break }
+                    _ = await evalOn(p, p.sendJS(msg))
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+                if let imgURL {
+                    _ = await evalOn(p, attachImageJS(imgURL))
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    _ = await evalOn(p, p.sendJS(""))             // bấm gửi ảnh
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+                toolDone = i + 1
+            }
+            toolRunning = false
+        }
+    }
+    private func stopTool() {
+        toolTask?.cancel(); toolTask = nil; toolRunning = false
     }
 
     // MARK: - Computed helpers
