@@ -818,14 +818,11 @@ struct StoreProductEditor: View {
                     kind = p.kind ?? "app"
                 }
             }
-            .fileImporter(isPresented: $showImporter,
-                          allowedContentTypes: [.data, .image, .movie, .pdf, .text,
-                                               .spreadsheet, .presentation, .archive,
-                                               .sourceCode, .json, .xml, .html],
-                          allowsMultipleSelection: true) { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    Task { await uploadFile(url) }
+            .sheet(isPresented: $showImporter) {
+                DocumentPicker(allowsMultipleSelection: false) { urls in
+                    if let url = urls.first { Task { await uploadFile(url) } }
                 }
+                .ignoresSafeArea()
             }
         }
     }
@@ -1359,12 +1356,11 @@ struct StoreQuickAddView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await loadCategories() }
-            .fileImporter(isPresented: $showImporter,
-                          allowedContentTypes: [.data, .image, .movie, .pdf, .text,
-                                               .spreadsheet, .presentation, .archive,
-                                               .sourceCode, .json, .xml, .html],
-                          allowsMultipleSelection: true) { result in
-                if case .success(let urls) = result, let url = urls.first { Task { await uploadFile(url) } }
+            .sheet(isPresented: $showImporter) {
+                DocumentPicker(allowsMultipleSelection: false) { urls in
+                    if let url = urls.first { Task { await uploadFile(url) } }
+                }
+                .ignoresSafeArea()
             }
         }
     }
@@ -1785,14 +1781,11 @@ struct StoreKeysManager: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
         .refreshable { await reload() }
-        .fileImporter(isPresented: $showFileImporter,
-                      allowedContentTypes: [.data, .image, .movie, .pdf, .text,
-                                            .spreadsheet, .presentation, .archive,
-                                            .sourceCode, .json, .xml, .html],
-                      allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                Task { await importFromFile(url) }
+        .sheet(isPresented: $showFileImporter) {
+            DocumentPicker(allowsMultipleSelection: false) { urls in
+                if let url = urls.first { Task { await importFromFile(url) } }
             }
+            .ignoresSafeArea()
         }
     }
 
@@ -2503,14 +2496,11 @@ struct StoreRestoreBackupView: View {
         }
         .navigationTitle(store.t("Khôi phục backup", "Restore backup"))
         .navigationBarTitleDisplayMode(.inline)
-        .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.data, .image, .movie, .pdf, .text,
-                                            .spreadsheet, .presentation, .archive,
-                                            .sourceCode, .json, .xml, .html],
-                      allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result, let url = urls.first {
-                Task { await parseFile(url) }
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(allowsMultipleSelection: false) { urls in
+                if let url = urls.first { Task { await parseFile(url) } }
             }
+            .ignoresSafeArea()
         }
     }
 

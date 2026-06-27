@@ -161,11 +161,12 @@ struct FilesPane: View {
             }
         }
         .task { await reload() }
-        .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.data, .image, .movie, .pdf, .text,
-                                            .spreadsheet, .presentation, .archive,
-                                            .sourceCode, .json, .xml, .html],
-                      allowsMultipleSelection: true) { handleImport($0) }
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(allowsMultipleSelection: true) { urls in
+                handleImport(.success(urls))
+            }
+            .ignoresSafeArea()
+        }
         .fileExporter(isPresented: Binding(get: { exportDoc != nil }, set: { if !$0 { exportDoc = nil } }),
                       document: exportDoc, contentType: .data,
                       defaultFilename: exportDoc?.filename ?? "file") { _ in exportDoc = nil }

@@ -508,17 +508,11 @@ struct GitHubRepoView: View {
         .navigationTitle(repo.name)
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadRuns(); await loadRelease() }
-        .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.data, .image, .movie, .pdf, .text,
-                                            .spreadsheet, .presentation, .archive,
-                                            .sourceCode, .json, .xml, .html],
-                      allowsMultipleSelection: true) { result in
-            switch result {
-            case .success(let urls):
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(allowsMultipleSelection: true) { urls in
                 Task { await upload(urls) }
-            case .failure(let err):
-                error = "Không mở được file: \(err.localizedDescription)"
             }
+            .ignoresSafeArea()
         }
     }
 
