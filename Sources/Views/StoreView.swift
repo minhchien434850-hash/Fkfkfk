@@ -493,25 +493,27 @@ struct StoreView: View {
     // 3 bước: dùng config từ server nếu có, fallback về mặc định
     private var stepsSection: some View {
         let fallback: [(String, String, String)] = [
-            ("magnifyingglass", store.t("Chọn game", "Choose game"),   store.t("Tìm & chọn gói phù hợp", "Find & pick a package")),
-            ("creditcard",       store.t("Thanh toán", "Payment"),      store.t("Nạp qua bank hoặc thẻ", "Pay via bank or card")),
-            ("arrow.down.circle",store.t("Nhận key", "Get key"),        store.t("Key gửi tức thì", "Key sent instantly")),
+            ("magnifyingglass",  store.t("Chọn game", "Choose game"),  store.t("Tìm & chọn gói phù hợp", "Find & pick a package")),
+            ("creditcard",       store.t("Thanh toán", "Payment"),     store.t("Nạp qua bank hoặc thẻ", "Pay via bank or card")),
+            ("arrow.down.circle",store.t("Nhận key", "Get key"),       store.t("Key gửi tức thì", "Key sent instantly")),
         ]
-        let steps: [(String, String, String)] = {
+        let steps: [(String, String, String, String)] = {
             if let s = config?.steps, s.count == 3 {
-                return s.map { ($0.icon, $0.title, $0.desc) }
+                return s.enumerated().map { (i, st) in
+                    (st.icon, st.title, st.desc, st.badge.isEmpty ? "\(i+1)" : st.badge)
+                }
             }
-            return fallback
+            return fallback.enumerated().map { (i, t) in (t.0, t.1, t.2, "\(i+1)") }
         }()
         return HStack(spacing: 10) {
-            ForEach(Array(steps.enumerated()), id: \.offset) { i, s in
+            ForEach(Array(steps.enumerated()), id: \.offset) { _, s in
                 VStack(spacing: 6) {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: s.0).font(.title3)
                             .frame(width: 46, height: 46)
                             .background(Theme.accent.opacity(0.15)).foregroundStyle(Theme.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
-                        Text("\(i+1)").font(.system(size: 11, weight: .bold))
+                        Text(s.3).font(.system(size: 11, weight: .bold))
                             .frame(width: 18, height: 18)
                             .background(Theme.accent).foregroundStyle(.white).clipShape(Circle())
                             .offset(x: 6, y: -6)

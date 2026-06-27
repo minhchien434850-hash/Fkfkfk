@@ -600,7 +600,7 @@ struct StoreConfigEditor: View {
             promoImageUrl = c.promoImageUrl ?? ""
             promoProductId = c.promoProductId ?? 0
             if let s = c.steps, s.count == 3 {
-                editSteps = s.map { EditStep(icon: $0.icon, title: $0.title, desc: $0.desc) }
+                editSteps = s.map { EditStep(icon: $0.icon, title: $0.title, desc: $0.desc, badge: $0.badge.isEmpty ? "" : $0.badge) }
             } else {
                 editSteps = EditStep.defaults
             }
@@ -625,7 +625,7 @@ struct StoreConfigEditor: View {
                 sloganEffect: sloganEffect, sloganAnim: sloganAnim,
                 promoImageUrl: promoImageUrl.isEmpty ? nil : promoImageUrl,
                 promoProductId: promoProductId > 0 ? promoProductId : nil,
-                steps: editSteps.map { ["icon": $0.icon, "title": $0.title, "desc": $0.desc] })
+                steps: editSteps.map { ["icon": $0.icon, "title": $0.title, "desc": $0.desc, "badge": $0.badge] })
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message
@@ -2969,11 +2969,12 @@ struct EditStep: Identifiable {
     var icon: String
     var title: String
     var desc: String
+    var badge: String   // số/ký tự trong vòng tròn
 
     static let defaults: [EditStep] = [
-        EditStep(icon: "magnifyingglass", title: "Chọn game",  desc: "Tìm & chọn gói phù hợp"),
-        EditStep(icon: "creditcard",       title: "Thanh toán", desc: "Nạp qua bank hoặc thẻ"),
-        EditStep(icon: "arrow.down.circle",title: "Nhận key",   desc: "Key gửi tức thì"),
+        EditStep(icon: "magnifyingglass",  title: "Chọn game",  desc: "Tìm & chọn gói phù hợp", badge: "1"),
+        EditStep(icon: "creditcard",       title: "Thanh toán", desc: "Nạp qua bank hoặc thẻ",  badge: "2"),
+        EditStep(icon: "arrow.down.circle",title: "Nhận key",   desc: "Key gửi tức thì",         badge: "3"),
     ]
 
     static let iconOptions: [(String, String)] = [
@@ -3011,7 +3012,7 @@ struct StoreStepsEditor: View {
                             Label(label, systemImage: sym).tag(sym)
                         }
                     }
-                    // Xem trước icon đang chọn
+                    // Xem trước icon + số hiện tại
                     HStack {
                         Spacer()
                         ZStack(alignment: .topTrailing) {
@@ -3020,12 +3021,20 @@ struct StoreStepsEditor: View {
                                 .background(Color.accentColor.opacity(0.15))
                                 .foregroundStyle(.accentColor)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                            Text("\(idx)").font(.system(size: 11, weight: .bold))
+                            let badgeText = step.badge.isEmpty ? "\(idx)" : step.badge
+                            Text(badgeText).font(.system(size: 11, weight: .bold))
                                 .frame(width: 18, height: 18)
                                 .background(Color.accentColor).foregroundStyle(.white)
                                 .clipShape(Circle()).offset(x: 6, y: -6)
                         }
                         Spacer()
+                    }
+                    HStack {
+                        Text(store.t("Số hiển thị", "Badge"))
+                        Spacer()
+                        TextField(store.t("Mặc định (\(idx))", "Default (\(idx))"), text: $step.badge)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
                     }
                     TextField(store.t("Tiêu đề (vd: Chọn game)", "Title (e.g. Choose game)"), text: $step.title)
                     TextField(store.t("Mô tả ngắn", "Short description"), text: $step.desc)

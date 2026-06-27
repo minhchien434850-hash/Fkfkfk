@@ -287,6 +287,7 @@ struct StoreStep: Codable, Hashable {
     var icon: String
     var title: String
     var desc: String
+    var badge: String = ""   // số/ký tự hiển thị trong vòng tròn (mặc định = số thứ tự)
 }
 
 // ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----
