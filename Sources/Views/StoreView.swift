@@ -169,7 +169,7 @@ struct StoreView: View {
     @State private var flashNow = Date()   // cập nhật để đồng hồ flash sale đếm ngược
     @State private var showcaseTick: Int = 0   // tăng mỗi 5 phút → xoay vòng showcase
     private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    private let showcaseTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    private let showcaseTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     // Tên Việt Nam đầy đủ (họ + chữ đệm viết tắt) — hiển thị dạng "Nguyễn T***"
     private let showcaseNames: [(String, String)] = [
