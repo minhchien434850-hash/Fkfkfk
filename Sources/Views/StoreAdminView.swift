@@ -1553,8 +1553,7 @@ struct AdminPromoCodesView: View {
                 Section { ProgressView() }
             }
             Section {
-                ForEach(codes.indices, id: \.self) { i in
-                    let promo = codes[i]
+                ForEach(Array(codes.enumerated()), id: \.offset) { _, promo in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(promo.code).font(.headline.monospaced())
