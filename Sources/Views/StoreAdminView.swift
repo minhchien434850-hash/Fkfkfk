@@ -3022,10 +3022,12 @@ struct StoreStepsEditor: View {
                                 .foregroundStyle(.accentColor)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             let badgeText = step.badge.isEmpty ? "\(idx)" : step.badge
-                            Text(badgeText).font(.system(size: 11, weight: .bold))
-                                .frame(width: 18, height: 18)
+                            Text(badgeText).font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .frame(minWidth: 18, minHeight: 18)
                                 .background(Color.accentColor).foregroundStyle(.white)
-                                .clipShape(Circle()).offset(x: 6, y: -6)
+                                .clipShape(Capsule())
+                                .offset(x: badgeText.count > 2 ? 10 : 6, y: -6)
                         }
                         Spacer()
                     }
