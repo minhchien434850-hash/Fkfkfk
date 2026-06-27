@@ -926,19 +926,30 @@ struct MessengerHubView: View {
     }
 
     // MARK: - Zalo: quét & nhắn từng thành viên nhóm (best-effort)
-    private var zaloScanMembersJS: String {
+    // Quét 1 bước: cuộn danh sách thành viên xuống + trả tên đang hiện (gọi lặp để gom hết)
+    private var zaloScanStepJS: String {
         """
         (function(){
+          // tìm container có thể cuộn (panel thành viên)
+          var nodes=document.querySelectorAll('div,ul,section');
+          var sc=null;
+          for(var i=0;i<nodes.length;i++){
+            var n=nodes[i];
+            if(n.scrollHeight>n.clientHeight+30 && n.clientHeight>120 &&
+               /member|thành viên|danh sách/i.test((n.className||'')+(n.getAttribute('aria-label')||''))){ sc=n; break; }
+          }
+          if(!sc){ for(var j=0;j<nodes.length;j++){ if(nodes[j].scrollHeight>nodes[j].clientHeight+200 && nodes[j].clientHeight>200){sc=nodes[j];break;} } }
+          if(sc){ sc.scrollTop = sc.scrollTop + Math.max(300, sc.clientHeight-60); }
           var out=[],seen={};
           var sels=['[class*="member-item"]','[class*="group-member"]','[class*="memberItem"]',
-                    '[class*="member"] [class*="name"]','[role="listitem"]'];
+                    '[class*="member"] [class*="name"]','[class*="member"] [title]','[role="listitem"] [title]'];
           sels.forEach(function(s){
             document.querySelectorAll(s).forEach(function(e){
               var t=(e.getAttribute('title')||e.textContent||'').trim();
               if(t&&t.length>=1&&t.length<=50&&!seen[t]){seen[t]=1;out.push(t);}
             });
           });
-          return JSON.stringify(out.slice(0,300));
+          return JSON.stringify(out);
         })();
         """
     }
@@ -968,11 +979,21 @@ struct MessengerHubView: View {
 
     private func scanZaloMembers() async {
         scanningMembers = true; defer { scanningMembers = false }
-        let json = await evalAuto(zaloScanMembersJS)
-        if let data = json.data(using: .utf8),
-           let arr = try? JSONDecoder().decode([String].self, from: data) {
-            zaloMembers = arr.filter { !$0.isEmpty }
+        var seen = Set<String>()
+        var ordered: [String] = []
+        // Cuộn & gom dần tối đa ~15 lần để lấy hết thành viên (danh sách ảo hoá)
+        for _ in 0..<15 {
+            let json = await evalAuto(zaloScanStepJS)
+            if let data = json.data(using: .utf8),
+               let arr = try? JSONDecoder().decode([String].self, from: data) {
+                for n in arr where !n.isEmpty && !seen.contains(n) {
+                    seen.insert(n); ordered.append(n)
+                }
+            }
+            zaloMembers = ordered   // cập nhật dần cho người dùng thấy
+            try? await Task.sleep(nanoseconds: 350_000_000)
         }
+        zaloMembers = ordered
     }
 
     private func startBlast() {
