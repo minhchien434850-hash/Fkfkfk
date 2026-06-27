@@ -164,7 +164,7 @@ struct StoreView: View {
 
     private var displayName: String {
         if let n = config?.logoName, !n.isEmpty { return n }
-        return cfgName.isEmpty ? "Cửa hàng" : cfgName
+        return cfgName.isEmpty ? "KENIOS STORE" : cfgName
     }
     // Cấu hình hiệu lực: ưu tiên server, fallback cache (để banner/logo không biến mất khi offline)
     private var effectiveConfig: StoreAppConfig? {
