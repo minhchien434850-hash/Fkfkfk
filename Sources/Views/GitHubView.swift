@@ -620,8 +620,8 @@ struct GitHubRepoView: View {
 struct TokenBrowser: View {
     @StateObject private var model = BrowserModel()
     var body: some View {
-        BrowserWebView(model: model,
-                       home: "https://github.com/settings/tokens/new?scopes=repo&description=KENIOS")
+        BrowserWebView(model: model)
             .ignoresSafeArea(edges: .bottom)
+            .onAppear { model.open("https://github.com/settings/tokens/new?scopes=repo&description=KENIOS") }
     }
 }

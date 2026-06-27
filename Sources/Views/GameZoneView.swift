@@ -157,8 +157,9 @@ struct GamePlayerView: View {
 
     var body: some View {
         NavigationStack {
-            BrowserWebView(model: model, home: url)
+            BrowserWebView(model: model)
                 .ignoresSafeArea(edges: .bottom)
+                .onAppear { model.open(url) }
                 .navigationTitle(model.pageTitle.isEmpty ? store.t("Đang chơi", "Playing") : model.pageTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
