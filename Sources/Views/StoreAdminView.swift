@@ -31,11 +31,11 @@ struct MediaEditor: View {
         Section {
             ForEach($media) { $m in
                 VStack(alignment: .leading, spacing: 6) {
-                    Picker("Loại", selection: $m.type) {
+                    Picker(store.t("Loại", "Type"), selection: $m.type) {
                         Text("Ảnh / GIF").tag("image")
                         Text("Video").tag("video")
                     }.pickerStyle(.segmented)
-                    TextField("Dán link ảnh / GIF / PNG / JPEG / WEBP / MP4...", text: $m.url)
+                    TextField(store.t("Dán link ảnh / GIF / PNG / JPEG / WEBP / MP4...", "Paste image / GIF / PNG / JPEG / WEBP / MP4 link..."), text: $m.url)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
             }
@@ -53,13 +53,13 @@ struct MediaEditor: View {
                 .disabled(uploading)
 
                 Button { media.append(EditMedia()) } label: {
-                    Label("Thêm ô dán link thủ công", systemImage: "plus.circle")
+                    Label(store.t("Thêm ô dán link thủ công", "Add manual link field"), systemImage: "plus.circle")
                 }
             }
             Button {
                 showConverter = true
             } label: {
-                Label("Chuyển đổi ảnh → link GIF / PNG / JPEG", systemImage: "wand.and.stars")
+                Label(store.t("Chuyển đổi ảnh → link GIF / PNG / JPEG", "Convert image → GIF / PNG / JPEG link"), systemImage: "wand.and.stars")
                     .font(.caption)
                     .foregroundStyle(store.accentColor)
             }
@@ -67,9 +67,10 @@ struct MediaEditor: View {
                 Text(uploadError).font(.caption2).foregroundStyle(.red)
             }
         } header: {
-            Text("Ảnh / Video (tối đa 5)")
+            Text(store.t("Ảnh / Video (tối đa 5)", "Photo / Video (max 5)"))
         } footer: {
-            Text("Chọn ảnh/video từ máy để tự tải lên, hoặc dán link từ Imgur, Cloudinary, Giphy... Hoặc bấm \"Chuyển đổi\" để tạo link từ ảnh.")
+            Text(store.t("Chọn ảnh/video từ máy để tự tải lên, hoặc dán link từ Imgur, Cloudinary, Giphy... Hoặc bấm \"Chuyển đổi\" để tạo link từ ảnh.",
+                         "Pick image/video from device to auto-upload, or paste a link from Imgur, Cloudinary, Giphy... Or tap \"Convert\" to make a link from an image."))
                 .font(.caption2)
         }
         .onChange(of: picker) { item in
@@ -124,68 +125,68 @@ struct StoreAdminView: View {
                     NavigationLink {
                         StoreConfigEditor()
                     } label: {
-                        Label("Giao diện cửa hàng (logo, nền)", systemImage: "paintpalette")
+                        Label(store.t("Giao diện cửa hàng (logo, nền)", "Store appearance (logo, background)"), systemImage: "paintpalette")
                     }
                     NavigationLink {
                         StoreContactsEditor()
                     } label: {
-                        Label("Liên hệ admin & Nhóm cộng đồng", systemImage: "bubble.left.and.text.bubble.right")
+                        Label(store.t("Liên hệ admin & Nhóm cộng đồng", "Admin contact & Community groups"), systemImage: "bubble.left.and.text.bubble.right")
                     }
                     NavigationLink {
                         StoreTopupBonusEditor()
                     } label: {
-                        Label("Khuyến mãi nạp ví (%)", systemImage: "percent")
+                        Label(store.t("Khuyến mãi nạp ví (%)", "Wallet top-up bonus (%)"), systemImage: "percent")
                     }
                     NavigationLink {
                         StoreInventoryView()
                     } label: {
-                        Label("Kho hàng (tồn kho)", systemImage: "shippingbox")
+                        Label(store.t("Kho hàng (tồn kho)", "Inventory (stock)"), systemImage: "shippingbox")
                     }
                     NavigationLink {
                         StoreAdminOrdersView()
                     } label: {
-                        Label("Đơn hàng đã bán", systemImage: "list.bullet.rectangle")
+                        Label(store.t("Đơn hàng đã bán", "Completed orders"), systemImage: "list.bullet.rectangle")
                     }
                     NavigationLink {
                         StoreKeysBackupView()
                     } label: {
-                        Label("Sao lưu KEY / ACC đã bán", systemImage: "externaldrive.badge.checkmark")
+                        Label(store.t("Sao lưu KEY / ACC đã bán", "Backup sold KEY / ACC"), systemImage: "externaldrive.badge.checkmark")
                     }
                     NavigationLink {
                         StoreStructureBackupView()
                     } label: {
-                        Label("Backup toàn bộ cửa hàng (JSON)", systemImage: "arrow.down.doc.fill")
+                        Label(store.t("Backup toàn bộ cửa hàng (JSON)", "Backup entire store (JSON)"), systemImage: "arrow.down.doc.fill")
                     }
                     NavigationLink {
                         StoreRestoreBackupView()
                     } label: {
-                        Label("Khôi phục backup JSON", systemImage: "arrow.up.doc.fill")
+                        Label(store.t("Khôi phục backup JSON", "Restore JSON backup"), systemImage: "arrow.up.doc.fill")
                     }
                     NavigationLink {
                         AdminAnalyticsView()
                     } label: {
-                        Label("Thống kê & Phân tích", systemImage: "chart.bar.xaxis")
+                        Label(store.t("Thống kê & Phân tích", "Statistics & Analytics"), systemImage: "chart.bar.xaxis")
                     }
                     NavigationLink {
                         AdminPromoCodesView()
                     } label: {
-                        Label("Mã khuyến mãi", systemImage: "tag.fill")
+                        Label(store.t("Mã khuyến mãi", "Promo codes"), systemImage: "tag.fill")
                     }
                     NavigationLink {
                         AdminPushNotificationView()
                     } label: {
-                        Label("Gửi thông báo (Push)", systemImage: "bell.badge.fill")
+                        Label(store.t("Gửi thông báo (Push)", "Send notification (Push)"), systemImage: "bell.badge.fill")
                     }
                     NavigationLink {
                         AdminWalletAdjustView()
                     } label: {
-                        Label("Nạp / Trừ ví khách hàng", systemImage: "dollarsign.arrow.circlepath")
+                        Label(store.t("Nạp / Trừ ví khách hàng", "Add / Deduct customer wallet"), systemImage: "dollarsign.arrow.circlepath")
                     }
                 }
 
-                Section("Danh mục sản phẩm (\(categories.count))") {
+                Section(store.t("Danh mục sản phẩm", "Product categories") + " (\(categories.count))") {
                     Button { newCategory = true } label: {
-                        Label("Thêm danh mục mới", systemImage: "plus.circle.fill")
+                        Label(store.t("Thêm danh mục mới", "Add new category"), systemImage: "plus.circle.fill")
                     }
                     ForEach(categories) { cat in
                         NavigationLink {
@@ -207,7 +208,7 @@ struct StoreAdminView: View {
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(cat.name).font(.subheadline.bold())
-                                    Text("Bấm để quản lý thư mục con")
+                                    Text(store.t("Bấm để quản lý thư mục con", "Tap to manage subfolders"))
                                         .font(.caption2).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -225,9 +226,9 @@ struct StoreAdminView: View {
 
                 if let error { Text(error).foregroundStyle(.red).font(.caption) }
             }
-            .navigationTitle("Quản trị cửa hàng")
+            .navigationTitle(store.t("Quản trị cửa hàng", "Store admin"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await reload() }
             .refreshable { await reload() }
             .sheet(isPresented: $newCategory) {
@@ -292,17 +293,17 @@ struct StoreConfigEditor: View {
 
     var body: some View {
         Form {
-            Section("Logo cửa hàng") {
-                TextField("Tên cửa hàng / logo", text: $logoName)
-                TextField("Link ảnh logo (PNG / GIF / JPEG / WEBP)", text: $logoUrl)
+            Section(store.t("Logo cửa hàng", "Store logo")) {
+                TextField(store.t("Tên cửa hàng / logo", "Store name / logo"), text: $logoName)
+                TextField(store.t("Link ảnh logo (PNG / GIF / JPEG / WEBP)", "Logo image link (PNG / GIF / JPEG / WEBP)"), text: $logoUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
 
             // Dòng giới thiệu (slogan) dưới tên cửa hàng + chọn font đa dạng
-            Section("Dòng giới thiệu (slogan)") {
-                TextField("Vd: Cửa hàng sản phẩm số · key · tải về", text: $slogan, axis: .vertical)
+            Section(store.t("Dòng giới thiệu (slogan)", "Slogan")) {
+                TextField(store.t("Vd: Cửa hàng sản phẩm số · key · tải về", "e.g. Digital store · keys · downloads"), text: $slogan, axis: .vertical)
                     .lineLimit(1...3)
-                Picker("Font chữ", selection: $sloganFont) {
+                Picker(store.t("Font chữ", "Font"), selection: $sloganFont) {
                     ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
                 }
                 Text(slogan.isEmpty ? "Cửa hàng sản phẩm số · key · tải về" : slogan)
@@ -311,12 +312,12 @@ struct StoreConfigEditor: View {
             }
 
             // Kích cỡ thẻ sản phẩm / danh mục ngoài trang — KÉO để chỉnh mượt
-            Section("Kích cỡ thẻ hiển thị") {
+            Section(store.t("Kích cỡ thẻ hiển thị", "Card display size")) {
                 // Nút nhanh
-                Picker("Kích cỡ nhanh", selection: $cardSize) {
-                    Text("Nhỏ").tag("small")
-                    Text("Vừa").tag("medium")
-                    Text("Lớn").tag("large")
+                Picker(store.t("Kích cỡ nhanh", "Quick size"), selection: $cardSize) {
+                    Text(store.t("Nhỏ", "Small")).tag("small")
+                    Text(store.t("Vừa", "Medium")).tag("medium")
+                    Text(store.t("Lớn", "Large")).tag("large")
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: cardSize) { v in
@@ -326,7 +327,7 @@ struct StoreConfigEditor: View {
                 // Thanh kéo tinh chỉnh
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Kéo chỉnh kích cỡ").font(.subheadline)
+                        Text(store.t("Kéo chỉnh kích cỡ", "Drag to resize")).font(.subheadline)
                         Spacer()
                         Text("\(Int(cardScale * 100))%")
                             .font(.subheadline.bold().monospacedDigit())
@@ -347,12 +348,13 @@ struct StoreConfigEditor: View {
                             .fill(Color(.tertiarySystemBackground))
                             .frame(width: 124 * cardScale, height: 84 * cardScale)
                             .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
-                        Text("Xem trước").font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
+                        Text(store.t("Xem trước", "Preview")).font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
                     }
                     Spacer() }
                 .padding(.vertical, 4)
 
-                Text("Kéo sang trái = thẻ nhỏ (nhiều thẻ/hàng), kéo sang phải = thẻ to. Áp cho thẻ danh mục & sản phẩm ngoài trang.")
+                Text(store.t("Kéo sang trái = thẻ nhỏ (nhiều thẻ/hàng), kéo sang phải = thẻ to. Áp cho thẻ danh mục & sản phẩm ngoài trang.",
+                             "Drag left = smaller cards (more per row), right = bigger. Applies to category & product cards on the storefront."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -367,49 +369,51 @@ struct StoreConfigEditor: View {
                 .onMove { from, to in sections.move(fromOffsets: from, toOffset: to) }
             } header: {
                 HStack {
-                    Text("Sắp xếp bố cục trang")
+                    Text(store.t("Sắp xếp bố cục trang", "Arrange page layout"))
                     Spacer()
                     EditButton().font(.caption)
                 }
             } footer: {
-                Text("Kéo biểu tượng ☰ để đổi vị trí các mục (Danh mục, Sản phẩm, Tải về, Liên hệ & Cộng đồng...). Thứ tự này áp dụng cho trang cửa hàng khách thấy.")
+                Text(store.t("Kéo biểu tượng ☰ để đổi vị trí các mục (Danh mục, Sản phẩm, Tải về, Liên hệ & Cộng đồng...). Thứ tự này áp dụng cho trang cửa hàng khách thấy.",
+                             "Drag the ☰ icon to reorder sections (Categories, Products, Downloads, Contact & Community...). This order applies to the customer storefront."))
                     .font(.caption2)
             }
 
-            Section("Hiệu ứng tên/logo cửa hàng") {
+            Section(store.t("Hiệu ứng tên/logo cửa hàng", "Store name/logo effects")) {
                 HStack { Spacer()
                     AnimatedStoreLogo(text: logoName.isEmpty ? "KENIOS STORE" : logoName,
                                       effect: logoEffect, fontStyle: logoFont, anim: logoAnim, size: 28)
                     Spacer() }
-                Picker("Hiệu ứng màu", selection: $logoEffect) {
+                Picker(store.t("Hiệu ứng màu", "Color effect"), selection: $logoEffect) {
                     ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
                 }
-                Picker("Kiểu chữ (font)", selection: $logoFont) {
+                Picker(store.t("Kiểu chữ (font)", "Font style"), selection: $logoFont) {
                     ForEach(kLogoFonts, id: \.0) { Text($0.1).tag($0.0) }
                 }
-                Picker("Chuyển động", selection: $logoAnim) {
+                Picker(store.t("Chuyển động", "Animation"), selection: $logoAnim) {
                     ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
                 }
             }
 
-            Section("Nền cửa hàng (full màn hình)") {
-                Picker("Loại nền", selection: $bgType) {
-                    Text("Không").tag("none")
+            Section(store.t("Nền cửa hàng (full màn hình)", "Store background (full screen)")) {
+                Picker(store.t("Loại nền", "Background type"), selection: $bgType) {
+                    Text(store.t("Không", "None")).tag("none")
                     Text("Ảnh / GIF").tag("image")
                     Text("Video / MP4").tag("video")
                 }.pickerStyle(.segmented)
                 if bgType != "none" {
-                    TextField("Dán link nền (GIF / PNG / JPEG / WEBP / MP4)", text: $bgUrl)
+                    TextField(store.t("Dán link nền (GIF / PNG / JPEG / WEBP / MP4)", "Paste background link (GIF / PNG / JPEG / WEBP / MP4)"), text: $bgUrl)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
-                Text("Nền chạy sâu phía dưới, mọi nội dung/nút vẫn nằm bên trên và bấm được.")
+                Text(store.t("Nền chạy sâu phía dưới, mọi nội dung/nút vẫn nằm bên trên và bấm được.",
+                             "The background sits behind; all content/buttons stay on top and remain tappable."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
-            Section { Button("Lưu giao diện") { Task { await save() } } }
+            Section { Button(store.t("Lưu giao diện", "Save appearance")) { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
-        .navigationTitle("Giao diện cửa hàng")
+        .navigationTitle(store.t("Giao diện cửa hàng", "Store appearance"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
@@ -467,16 +471,16 @@ struct StoreCategoryEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Tên danh mục") {
-                    TextField("Ví dụ: Game Mod, Tài khoản, Phần mềm...", text: $name)
+                Section(store.t("Tên danh mục", "Category name")) {
+                    TextField(store.t("Ví dụ: Game Mod, Tài khoản, Phần mềm...", "e.g. Modded games, Accounts, Software..."), text: $name)
                 }
                 MediaEditor(media: $media)
-                Section { Button("Lưu danh mục") { Task { await save() } }.disabled(name.isEmpty) }
+                Section { Button(store.t("Lưu danh mục", "Save category")) { Task { await save() } }.disabled(name.isEmpty) }
                 if let message { Text(message).font(.footnote).foregroundStyle(.red) }
             }
-            .navigationTitle(category == nil ? "Thêm danh mục" : "Sửa danh mục")
+            .navigationTitle(category == nil ? store.t("Thêm danh mục", "Add category") : store.t("Sửa danh mục", "Edit category"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .onAppear {
                 if let c = category { name = c.name; media = mediaToEdit(c.media) }
             }
@@ -503,9 +507,9 @@ struct StoreAdminFolderList: View {
 
     var body: some View {
         List {
-            Section("Thư mục con (\(folders.count))") {
+            Section(store.t("Thư mục con", "Subfolders") + " (\(folders.count))") {
                 Button { newFolder = true } label: {
-                    Label("Thêm thư mục con", systemImage: "plus.circle.fill")
+                    Label(store.t("Thêm thư mục con", "Add subfolder"), systemImage: "plus.circle.fill")
                 }
                 ForEach(folders) { f in
                     NavigationLink {
@@ -570,16 +574,16 @@ struct StoreFolderEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Tên thư mục con") {
-                    TextField("Ví dụ: Liên Quân, PUBG, Free Fire...", text: $name)
+                Section(store.t("Tên thư mục con", "Subfolder name")) {
+                    TextField(store.t("Ví dụ: Liên Quân, PUBG, Free Fire...", "e.g. Arena, PUBG, Free Fire..."), text: $name)
                 }
                 MediaEditor(media: $media)
-                Section { Button("Lưu thư mục") { Task { await save() } }.disabled(name.isEmpty) }
+                Section { Button(store.t("Lưu thư mục", "Save folder")) { Task { await save() } }.disabled(name.isEmpty) }
                 if let message { Text(message).font(.footnote).foregroundStyle(.red) }
             }
-            .navigationTitle(folder == nil ? "Thêm thư mục" : "Sửa thư mục")
+            .navigationTitle(folder == nil ? store.t("Thêm thư mục", "Add folder") : store.t("Sửa thư mục", "Edit folder"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .onAppear { if let f = folder { name = f.name; media = mediaToEdit(f.media) } }
         }
     }
@@ -603,9 +607,9 @@ struct StoreAdminProductList: View {
 
     var body: some View {
         List {
-            Section("Sản phẩm (\(products.count))") {
+            Section(store.t("Sản phẩm", "Products") + " (\(products.count))") {
                 Button { newProduct = true } label: {
-                    Label("Thêm sản phẩm", systemImage: "plus.circle.fill")
+                    Label(store.t("Thêm sản phẩm", "Add product"), systemImage: "plus.circle.fill")
                 }
                 ForEach(products) { p in
                     NavigationLink {
@@ -614,7 +618,7 @@ struct StoreAdminProductList: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(p.name)
                             HStack(spacing: 6) {
-                                Text("\(p.prices.count) mốc giá")
+                                Text("\(p.prices.count) " + store.t("mốc giá", "price tiers"))
                                     .font(.caption2).foregroundStyle(.secondary)
                                 stockBadge(p.availableKeys)
                             }
@@ -678,62 +682,63 @@ struct StoreProductEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Thông tin sản phẩm") {
-                    Picker("Loại", selection: $kind) {
-                        Text("Ứng dụng / Key").tag("app")
-                        Text("Acc game").tag("acc")
+                Section(store.t("Thông tin sản phẩm", "Product info")) {
+                    Picker(store.t("Loại", "Type"), selection: $kind) {
+                        Text(store.t("Ứng dụng / Key", "App / Key")).tag("app")
+                        Text(store.t("Acc game", "Game account")).tag("acc")
                     }.pickerStyle(.segmented)
-                    TextField("Tên sản phẩm", text: $name)
-                    TextField("Mô tả (tuỳ chọn)", text: $desc, axis: .vertical).lineLimit(1...4)
+                    TextField(store.t("Tên sản phẩm", "Product name"), text: $name)
+                    TextField(store.t("Mô tả (tuỳ chọn)", "Description (optional)"), text: $desc, axis: .vertical).lineLimit(1...4)
                     Text(kind == "acc"
-                         ? "Acc game: mỗi dòng trong kho là 1 tài khoản (vd user|pass). Khách mua xong tự nhận 1 acc."
-                         : "Ứng dụng/Key: mỗi dòng trong kho là 1 key. Khách mua xong tự nhận 1 key + bản tải.")
+                         ? store.t("Acc game: mỗi dòng trong kho là 1 tài khoản (vd user|pass). Khách mua xong tự nhận 1 acc.", "Game account: each line in stock is 1 account (e.g. user|pass). Buyer auto-receives 1 account.")
+                         : store.t("Ứng dụng/Key: mỗi dòng trong kho là 1 key. Khách mua xong tự nhận 1 key + bản tải.", "App/Key: each line in stock is 1 key. Buyer auto-receives 1 key + download."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 MediaEditor(media: $media)
-                Section("Bản tải (link hoặc file)") {
-                    TextField("Dán link tải game/app", text: $downloadUrl)
+                Section(store.t("Bản tải (link hoặc file)", "Download (link or file)")) {
+                    TextField(store.t("Dán link tải game/app", "Paste game/app download link"), text: $downloadUrl)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button {
                         showImporter = true
                     } label: {
                         HStack {
                             if uploading { ProgressView().padding(.trailing, 4) }
-                            Label(downloadFileId != nil ? "Đã có file (#\(downloadFileId!)) — đổi file"
-                                                        : "Tải file lên (không giới hạn dung lượng)",
+                            Label(downloadFileId != nil ? store.t("Đã có file", "File added") + " (#\(downloadFileId!)) — " + store.t("đổi file", "change file")
+                                                        : store.t("Tải file lên (không giới hạn dung lượng)", "Upload file (no size limit)"),
                                   systemImage: "arrow.up.doc")
                         }
                     }.disabled(uploading)
-                    Text("Khách mua xong sẽ thấy nút 'Tải game' đồng bộ với link/file ở đây.")
+                    Text(store.t("Khách mua xong sẽ thấy nút 'Tải game' đồng bộ với link/file ở đây.",
+                                 "After buying, customers see a 'Download game' button synced with the link/file here."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Section { Button("Lưu sản phẩm") { Task { await save() } }.disabled(name.isEmpty) }
+                Section { Button(store.t("Lưu sản phẩm", "Save product")) { Task { await save() } }.disabled(name.isEmpty) }
 
                 if let pid = productId {
-                    Section("Cấu hình bán") {
+                    Section(store.t("Cấu hình bán", "Sale config")) {
                         NavigationLink {
                             StorePricesEditor(productId: pid, initial: product?.prices ?? [], kind: kind)
                         } label: {
-                            Label(kind == "acc" ? "Giá bán acc" : "Bảng giá theo thời hạn",
+                            Label(kind == "acc" ? store.t("Giá bán acc", "Account price") : store.t("Bảng giá theo thời hạn", "Price table by duration"),
                                   systemImage: "tag")
                         }
                         NavigationLink {
                             StoreKeysManager(productId: pid)
                         } label: {
-                            Label(kind == "acc" ? "Kho tài khoản (ACC)" : "Kho KEY sản phẩm",
+                            Label(kind == "acc" ? store.t("Kho tài khoản (ACC)", "Account stock (ACC)") : store.t("Kho KEY sản phẩm", "Product KEY stock"),
                                   systemImage: kind == "acc" ? "person.text.rectangle" : "key")
                         }
                     }
                 } else {
-                    Text("Lưu sản phẩm trước để thêm giá & key/tài khoản.")
+                    Text(store.t("Lưu sản phẩm trước để thêm giá & key/tài khoản.", "Save the product first to add prices & keys/accounts."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
                 if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
             }
-            .navigationTitle(product == nil ? "Thêm sản phẩm" : "Sửa sản phẩm")
+            .navigationTitle(product == nil ? store.t("Thêm sản phẩm", "Add product") : store.t("Sửa sản phẩm", "Edit product"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .onAppear {
                 if let p = product {
                     name = p.name; desc = p.description; media = mediaToEdit(p.media)
@@ -758,11 +763,11 @@ struct StoreProductEditor: View {
                 media: editMediaToPayload(media), downloadUrl: downloadUrl,
                 downloadFileId: downloadFileId, kind: kind)
             savedId = r.id ?? savedId
-            isError = false; message = "Đã lưu sản phẩm."
+            isError = false; message = store.t("Đã lưu sản phẩm.", "Product saved.")
             // Thông báo đến người dùng khi có sản phẩm mới (không phải chỉnh sửa)
             if isNew {
                 store.postProductNotification(
-                    body: "Sản phẩm mới vừa được thêm vào cửa hàng: \(name)")
+                    body: store.t("Sản phẩm mới vừa được thêm vào cửa hàng:", "A new product was added to the store:") + " \(name)")
             }
             onDone()
         } catch { isError = true; message = error.localizedDescription }
@@ -776,7 +781,7 @@ struct StoreProductEditor: View {
             let r = try await store.api.uploadFileRaw(name: url.lastPathComponent,
                                                       category: "store", fileURL: url)
             downloadFileId = r.id
-            isError = false; message = "Đã tải file lên (#\(r.id)). Nhớ bấm Lưu sản phẩm."
+            isError = false; message = store.t("Đã tải file lên", "File uploaded") + " (#\(r.id)). " + store.t("Nhớ bấm Lưu sản phẩm.", "Remember to tap Save product.")
         } catch { isError = true; message = error.localizedDescription }
         uploading = false
     }
@@ -806,29 +811,30 @@ struct StorePricesEditor: View {
         Form {
             if isAcc {
                 // Acc game: chỉ cần giá tiền, KHÔNG có mốc thời hạn.
-                Section("Giá bán acc") {
+                Section(store.t("Giá bán acc", "Account price")) {
                     HStack {
-                        TextField("Giá VND", text: $accPrice).keyboardType(.numberPad)
+                        TextField(store.t("Giá VND", "Price VND"), text: $accPrice).keyboardType(.numberPad)
                         Text("đ").foregroundStyle(.secondary)
                     }
-                    Text("Acc game bán 1 giá cố định, khách mua xong nhận ngay 1 tài khoản.")
+                    Text(store.t("Acc game bán 1 giá cố định, khách mua xong nhận ngay 1 tài khoản.",
+                                 "Game accounts sell at one fixed price; buyer receives 1 account instantly."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             } else {
-                Section("Các mốc giá (theo thời hạn)") {
+                Section(store.t("Các mốc giá (theo thời hạn)", "Price tiers (by duration)")) {
                     ForEach($rows) { $r in
                         HStack {
-                            TextField("Thời hạn (vd 1 ngày)", text: $r.label)
-                            TextField("Giá VND", text: $r.amount).keyboardType(.numberPad)
+                            TextField(store.t("Thời hạn (vd 1 ngày)", "Duration (e.g. 1 day)"), text: $r.label)
+                            TextField(store.t("Giá VND", "Price VND"), text: $r.amount).keyboardType(.numberPad)
                                 .frame(width: 110)
                         }
                     }
                     .onDelete { rows.remove(atOffsets: $0) }
                     Button { rows.append(EditPrice()) } label: {
-                        Label("Thêm mốc giá", systemImage: "plus.circle")
+                        Label(store.t("Thêm mốc giá", "Add price tier"), systemImage: "plus.circle")
                     }
                 }
-                Section("Mẫu nhanh") {
+                Section(store.t("Mẫu nhanh", "Quick presets")) {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack {
                             ForEach(presets, id: \.self) { p in
@@ -842,10 +848,10 @@ struct StorePricesEditor: View {
                     }
                 }
             }
-            Section { Button(isAcc ? "Lưu giá" : "Lưu bảng giá") { Task { await save() } } }
+            Section { Button(isAcc ? store.t("Lưu giá", "Save price") : store.t("Lưu bảng giá", "Save price table")) { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
-        .navigationTitle(isAcc ? "Giá bán acc" : "Bảng giá")
+        .navigationTitle(isAcc ? store.t("Giá bán acc", "Account price") : store.t("Bảng giá", "Price table"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if isAcc {
@@ -893,7 +899,7 @@ struct StoreKeysManager: View {
 
     private var isAcc: Bool { kind == "acc" }
     private func priceLabel(_ id: Int?) -> String {
-        guard let id, let p = prices.first(where: { $0.id == id }) else { return "(chưa gán mốc)" }
+        guard let id, let p = prices.first(where: { $0.id == id }) else { return store.t("(chưa gán mốc)", "(no tier)") }
         return p.label
     }
 
@@ -901,53 +907,56 @@ struct StoreKeysManager: View {
         Form {
             // Với Ứng dụng/Key: chọn mốc thời hạn để nhập key riêng cho từng khung giờ.
             if !isAcc && !prices.isEmpty {
-                Section("Nhập key cho mốc thời hạn nào?") {
-                    Picker("Mốc thời hạn", selection: $selectedPriceId) {
+                Section(store.t("Nhập key cho mốc thời hạn nào?", "Add keys for which tier?")) {
+                    Picker(store.t("Mốc thời hạn", "Duration tier"), selection: $selectedPriceId) {
                         ForEach(prices) { p in
                             Text("\(p.label) · \(kFormatVND(p.amount))").tag(Int?.some(p.id))
                         }
                     }
-                    Text("Mỗi mốc (giờ/ngày/tuần/tháng) có kho key RIÊNG. Khách mua mốc nào nhận key của mốc đó; hết mốc nào → mốc đó hiện 'Hết hàng', không mua được.")
+                    Text(store.t("Mỗi mốc (giờ/ngày/tuần/tháng) có kho key RIÊNG. Khách mua mốc nào nhận key của mốc đó; hết mốc nào → mốc đó hiện 'Hết hàng', không mua được.",
+                                 "Each tier (hour/day/week/month) has its OWN key stock. Buyers get the key of the tier they buy; when a tier runs out it shows 'Out of stock' and can't be bought."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             } else if !isAcc && prices.isEmpty {
                 Section {
-                    Text("Chưa có mốc giá. Hãy vào 'Bảng giá theo thời hạn' tạo các mốc (1 giờ/ngày/tuần/tháng) trước, rồi quay lại nhập key cho từng mốc.")
+                    Text(store.t("Chưa có mốc giá. Hãy vào 'Bảng giá theo thời hạn' tạo các mốc (1 giờ/ngày/tuần/tháng) trước, rồi quay lại nhập key cho từng mốc.",
+                                 "No price tiers yet. Go to 'Price table by duration' to create tiers (1 hour/day/week/month) first, then return to add keys per tier."))
                         .font(.caption).foregroundStyle(.orange)
                 }
             }
 
-            Section(isAcc ? "Thêm tài khoản (mỗi dòng: user|pass)" : "Thêm key (mỗi dòng 1 key)") {
+            Section(isAcc ? store.t("Thêm tài khoản (mỗi dòng: user|pass)", "Add accounts (one per line: user|pass)") : store.t("Thêm key (mỗi dòng 1 key)", "Add keys (one per line)")) {
                 TextEditor(text: $newKeys).frame(minHeight: 120)
                 if isAcc {
-                    Text("Ví dụ mỗi dòng: taikhoan1|matkhau1 — khách mua xong tự nhận 1 tài khoản.")
+                    Text(store.t("Ví dụ mỗi dòng: taikhoan1|matkhau1 — khách mua xong tự nhận 1 tài khoản.",
+                                 "Each line e.g. account1|password1 — buyer auto-receives 1 account."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 HStack {
-                    Button(isAcc ? "Thêm tài khoản" : "Thêm key") { Task { await addKeys() } }
+                    Button(isAcc ? store.t("Thêm tài khoản", "Add accounts") : store.t("Thêm key", "Add keys")) { Task { await addKeys() } }
                         .disabled(newKeys.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Spacer()
                     Button { showFileImporter = true } label: {
-                        Label("Nhập file CSV/TXT", systemImage: "doc.badge.plus").font(.caption)
+                        Label(store.t("Nhập file CSV/TXT", "Import CSV/TXT file"), systemImage: "doc.badge.plus").font(.caption)
                     }
                 }
             }
             if let info {
-                Section("Tồn kho: \(info.available) khả dụng / \(info.total) tổng") {
-                    Button(isAcc ? "Xoá tất cả tài khoản khả dụng" : "Xoá tất cả key khả dụng", role: .destructive) {
+                Section(store.t("Tồn kho:", "Stock:") + " \(info.available) " + store.t("khả dụng", "available") + " / \(info.total) " + store.t("tổng", "total")) {
+                    Button(isAcc ? store.t("Xoá tất cả tài khoản khả dụng", "Delete all available accounts") : store.t("Xoá tất cả key khả dụng", "Delete all available keys"), role: .destructive) {
                         Task { await deleteAvailable() }
                     }
                 }
-                Section(isAcc ? "Danh sách tài khoản" : "Danh sách key") {
+                Section(isAcc ? store.t("Danh sách tài khoản", "Account list") : store.t("Danh sách key", "Key list")) {
                     if info.keys.isEmpty {
-                        Text(isAcc ? "Chưa có tài khoản nào." : "Chưa có key nào.").foregroundStyle(.secondary)
+                        Text(isAcc ? store.t("Chưa có tài khoản nào.", "No accounts yet.") : store.t("Chưa có key nào.", "No keys yet.")).foregroundStyle(.secondary)
                     } else {
                         ForEach(info.keys) { k in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(k.keyText).font(.caption.monospaced()).lineLimit(1)
                                     HStack(spacing: 6) {
-                                        Text(k.status == "sold" ? "đã bán" : "khả dụng")
+                                        Text(k.status == "sold" ? store.t("đã bán", "sold") : store.t("khả dụng", "available"))
                                             .font(.caption2)
                                             .foregroundStyle(k.status == "sold" ? .orange : .green)
                                         if !isAcc {
@@ -968,7 +977,7 @@ struct StoreKeysManager: View {
             }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
-        .navigationTitle(isAcc ? "Kho tài khoản (ACC)" : "Kho KEY")
+        .navigationTitle(isAcc ? store.t("Kho tài khoản (ACC)", "Account stock (ACC)") : store.t("Kho KEY", "KEY stock"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
         .refreshable { await reload() }
@@ -994,14 +1003,14 @@ struct StoreKeysManager: View {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
-            isError = true; message = "Không đọc được file."; return
+            isError = true; message = store.t("Không đọc được file.", "Could not read file."); return
         }
         let lines = content.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         newKeys = lines.joined(separator: "\n")
         isError = false
-        message = "Đã tải \(lines.count) key từ file. Bấm 'Thêm key' để lưu."
+        message = store.t("Đã tải", "Loaded") + " \(lines.count) " + store.t("key từ file. Bấm 'Thêm key' để lưu.", "keys from file. Tap 'Add keys' to save.")
     }
     private func addKeys() async {
         message = nil
@@ -1035,14 +1044,14 @@ struct StoreAdminOrdersView: View {
     var body: some View {
         List {
             if orders.isEmpty {
-                Text("Chưa có đơn nào.").foregroundStyle(.secondary)
+                Text(store.t("Chưa có đơn nào.", "No orders yet.")).foregroundStyle(.secondary)
             } else {
                 ForEach(orders) { o in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
                             Text(o.productName).font(.subheadline.bold())
                             Spacer()
-                            Text(o.status == "completed" ? "đã thanh toán" : "chờ")
+                            Text(o.status == "completed" ? store.t("đã thanh toán", "paid") : store.t("chờ", "pending"))
                                 .font(.caption2)
                                 .foregroundStyle(o.status == "completed" ? .green : .orange)
                         }
@@ -1052,7 +1061,7 @@ struct StoreAdminOrdersView: View {
                 }
             }
         }
-        .navigationTitle("Đơn hàng")
+        .navigationTitle(store.t("Đơn hàng", "Orders"))
         .navigationBarTitleDisplayMode(.inline)
         .task { orders = (try? await store.api.adminStoreOrders()) ?? [] }
         .refreshable { orders = (try? await store.api.adminStoreOrders()) ?? [] }
@@ -1069,22 +1078,23 @@ struct StoreTopupBonusEditor: View {
 
     var body: some View {
         Form {
-            Section("Phần trăm thưởng khi khách nạp ví") {
+            Section(store.t("Phần trăm thưởng khi khách nạp ví", "Bonus percent on customer top-up")) {
                 HStack {
-                    TextField("Ví dụ: 20", text: $percentText).keyboardType(.numberPad)
+                    TextField(store.t("Ví dụ: 20", "e.g. 20"), text: $percentText).keyboardType(.numberPad)
                     Text("%").foregroundStyle(.secondary)
                 }
                 if let p = percent, p > 0 {
-                    Text("Khách nạp 100.000đ sẽ nhận \(kFormatVND(100_000 + 100_000 * p / 100)) vào ví.")
+                    Text(store.t("Khách nạp 100.000đ sẽ nhận", "A 100,000đ top-up gives") + " \(kFormatVND(100_000 + 100_000 * p / 100)) " + store.t("vào ví.", "in the wallet."))
                         .font(.caption).foregroundStyle(.pink)
                 }
-                Text("Đặt 0 để tắt khuyến mãi. Áp dụng cho VÍ cửa hàng (tách biệt với nâng cấp PRO của app chính).")
+                Text(store.t("Đặt 0 để tắt khuyến mãi. Áp dụng cho VÍ cửa hàng (tách biệt với nâng cấp PRO của app chính).",
+                             "Set 0 to disable. Applies to the store WALLET (separate from the main app's PRO upgrade)."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            Section { Button("Lưu") { Task { await save() } }.disabled(percent == nil) }
+            Section { Button(store.t("Lưu", "Save")) { Task { await save() } }.disabled(percent == nil) }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
-        .navigationTitle("Khuyến mãi nạp ví")
+        .navigationTitle(store.t("Khuyến mãi nạp ví", "Top-up bonus"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if let r = try? await store.api.adminGetTopupBonus() { percentText = "\(r.percent)" }
@@ -1108,15 +1118,15 @@ struct StoreInventoryView: View {
             if let inv {
                 Section {
                     HStack {
-                        invStat("Còn lại", "\(inv.totalAvailable)", .green)
-                        invStat("Đã bán", "\(inv.totalSold)", .blue)
-                        invStat("Hết hàng", "\(inv.outOfStock)", inv.outOfStock > 0 ? .red : .secondary)
+                        invStat(store.t("Còn lại", "Available"), "\(inv.totalAvailable)", .green)
+                        invStat(store.t("Đã bán", "Sold"), "\(inv.totalSold)", .blue)
+                        invStat(store.t("Hết hàng", "Out of stock"), "\(inv.outOfStock)", inv.outOfStock > 0 ? .red : .secondary)
                     }
                     .listRowBackground(Color.clear)
                 }
-                Section("Sản phẩm (\(inv.products.count)) — ưu tiên hết/sắp hết") {
+                Section(store.t("Sản phẩm", "Products") + " (\(inv.products.count)) — " + store.t("ưu tiên hết/sắp hết", "out/low stock first")) {
                     if inv.products.isEmpty {
-                        Text("Chưa có sản phẩm nào.").foregroundStyle(.secondary)
+                        Text(store.t("Chưa có sản phẩm nào.", "No products yet.")).foregroundStyle(.secondary)
                     }
                     ForEach(inv.products) { p in
                         HStack(spacing: 10) {
@@ -1129,10 +1139,10 @@ struct StoreInventoryView: View {
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 2) {
-                                Text(p.available == 0 ? "HẾT" : "Còn \(p.available)")
+                                Text(p.available == 0 ? store.t("HẾT", "OUT") : store.t("Còn", "Left") + " \(p.available)")
                                     .font(.caption.bold())
                                     .foregroundStyle(p.available == 0 ? .red : (p.available <= 5 ? .orange : .green))
-                                Text("đã bán \(p.sold)").font(.caption2).foregroundStyle(.secondary)
+                                Text(store.t("đã bán", "sold") + " \(p.sold)").font(.caption2).foregroundStyle(.secondary)
                             }
                         }
                         .padding(.vertical, 2)
@@ -1142,7 +1152,7 @@ struct StoreInventoryView: View {
                 HStack { Spacer(); ProgressView(); Spacer() }
             }
         }
-        .navigationTitle("Kho hàng")
+        .navigationTitle(store.t("Kho hàng", "Inventory"))
         .navigationBarTitleDisplayMode(.inline)
         .task { inv = try? await store.api.adminStoreInventory() }
         .refreshable { inv = try? await store.api.adminStoreInventory() }
@@ -1168,9 +1178,9 @@ struct StoreKeysBackupView: View {
     var body: some View {
         List {
             if let b = backup {
-                Section("Đã bán: \(b.total)") {
+                Section(store.t("Đã bán:", "Sold:") + " \(b.total)") {
                     if b.entries.isEmpty {
-                        Text("Chưa có key/acc nào được bán.").foregroundStyle(.secondary)
+                        Text(store.t("Chưa có key/acc nào được bán.", "No keys/accounts sold yet.")).foregroundStyle(.secondary)
                     }
                 }
                 ForEach(b.entries) { e in
@@ -1193,7 +1203,7 @@ struct StoreKeysBackupView: View {
                 HStack { Spacer(); ProgressView(); Spacer() }
             }
         }
-        .navigationTitle("Sao lưu KEY/ACC")
+        .navigationTitle(store.t("Sao lưu KEY/ACC", "KEY/ACC backup"))
         .navigationBarTitleDisplayMode(.inline)
         .task { backup = try? await store.api.adminStoreKeysBackup() }
         .refreshable { backup = try? await store.api.adminStoreKeysBackup() }
@@ -1217,18 +1227,19 @@ struct StoreStructureBackupView: View {
         Form {
             Section {
                 KHeroHeader(icon: "arrow.down.doc.fill",
-                            title: "Backup cửa hàng",
-                            subtitle: "Xuất toàn bộ danh mục · thư mục · sản phẩm ra file JSON")
+                            title: store.t("Backup cửa hàng", "Store backup"),
+                            subtitle: store.t("Xuất toàn bộ danh mục · thư mục · sản phẩm ra file JSON",
+                                              "Export all categories · folders · products to a JSON file"))
                     .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
             }
 
-            Section("Xuất dữ liệu") {
+            Section(store.t("Xuất dữ liệu", "Export data")) {
                 Button {
                     Task { await createBackup() }
                 } label: {
                     HStack {
                         if loading { ProgressView().padding(.trailing, 4) }
-                        Label(loading ? "Đang xuất..." : "Tạo file JSON backup",
+                        Label(loading ? store.t("Đang xuất...", "Exporting...") : store.t("Tạo file JSON backup", "Create JSON backup file"),
                               systemImage: "arrow.down.doc.fill")
                     }
                 }
@@ -1239,13 +1250,14 @@ struct StoreStructureBackupView: View {
             }
 
             if let url = backupURL {
-                Section("Sẵn sàng lưu") {
+                Section(store.t("Sẵn sàng lưu", "Ready to save")) {
                     ShareLink(item: url, preview: SharePreview(url.lastPathComponent,
                                                                icon: Image(systemName: "doc.badge.arrow.up"))) {
-                        Label("Chia sẻ / Lưu file về máy", systemImage: "square.and.arrow.up")
+                        Label(store.t("Chia sẻ / Lưu file về máy", "Share / Save file to device"), systemImage: "square.and.arrow.up")
                             .foregroundStyle(store.accentColor)
                     }
-                    Text("File JSON chứa toàn bộ danh mục, thư mục con, sản phẩm và giá. KEY/ACC đã bán → mục \"Sao lưu KEY/ACC\".")
+                    Text(store.t("File JSON chứa toàn bộ danh mục, thư mục con, sản phẩm và giá. KEY/ACC đã bán → mục \"Sao lưu KEY/ACC\".",
+                                 "The JSON file holds all categories, subfolders, products and prices. Sold KEY/ACC → \"KEY/ACC backup\" section."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
@@ -1254,18 +1266,18 @@ struct StoreStructureBackupView: View {
                 Section { Text(error).foregroundStyle(.red).font(.caption) }
             }
 
-            Section("Hướng dẫn") {
+            Section(store.t("Hướng dẫn", "Guide")) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Bấm 'Tạo file JSON backup' → app tải toàn bộ dữ liệu từ máy chủ", systemImage: "1.circle.fill")
-                    Label("Bấm 'Lưu file về máy' → chọn vị trí lưu hoặc gửi lên Google Drive/iCloud", systemImage: "2.circle.fill")
-                    Label("Khi chuyển server mới: dùng file để tham khảo và nhập lại cấu trúc", systemImage: "3.circle.fill")
-                    Label("KEY/ACC đã bán xuất riêng ở mục 'Sao lưu KEY/ACC đã bán'", systemImage: "info.circle.fill")
+                    Label(store.t("Bấm 'Tạo file JSON backup' → app tải toàn bộ dữ liệu từ máy chủ", "Tap 'Create JSON backup' → app downloads all data from the server"), systemImage: "1.circle.fill")
+                    Label(store.t("Bấm 'Lưu file về máy' → chọn vị trí lưu hoặc gửi lên Google Drive/iCloud", "Tap 'Save file' → pick a location or send to Google Drive/iCloud"), systemImage: "2.circle.fill")
+                    Label(store.t("Khi chuyển server mới: dùng file để tham khảo và nhập lại cấu trúc", "When moving to a new server: use the file to reference and re-import the structure"), systemImage: "3.circle.fill")
+                    Label(store.t("KEY/ACC đã bán xuất riêng ở mục 'Sao lưu KEY/ACC đã bán'", "Sold KEY/ACC are exported separately in 'Backup sold KEY/ACC'"), systemImage: "info.circle.fill")
                         .foregroundStyle(.orange)
                 }
                 .font(.caption)
             }
         }
-        .navigationTitle("Backup cửa hàng")
+        .navigationTitle(store.t("Backup cửa hàng", "Store backup"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -1352,27 +1364,28 @@ struct AdminWalletAdjustView: View {
         Form {
             Section {
                 KHeroHeader(icon: "dollarsign.arrow.circlepath",
-                            title: "Điều chỉnh ví",
-                            subtitle: "Nạp hoặc trừ tiền ví khách hàng thủ công")
+                            title: store.t("Điều chỉnh ví", "Adjust wallet"),
+                            subtitle: store.t("Nạp hoặc trừ tiền ví khách hàng thủ công",
+                                              "Manually add or deduct customer wallet funds"))
                     .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
             }
 
-            Section("Khách hàng") {
-                TextField("Username hoặc ID khách hàng", text: $userIdentifier)
+            Section(store.t("Khách hàng", "Customer")) {
+                TextField(store.t("Username hoặc ID khách hàng", "Customer username or ID"), text: $userIdentifier)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
             .onAppear { if userIdentifier.isEmpty && !prefillUser.isEmpty { userIdentifier = prefillUser } }
 
-            Section("Loại thao tác") {
+            Section(store.t("Loại thao tác", "Operation type")) {
                 Picker("", selection: $isDeduct) {
-                    Text("Nạp tiền (+)").tag(false)
-                    Text("Trừ tiền (-)").tag(true)
+                    Text(store.t("Nạp tiền (+)", "Add (+)")).tag(false)
+                    Text(store.t("Trừ tiền (-)", "Deduct (-)")).tag(true)
                 }.pickerStyle(.segmented)
             }
 
-            Section(isDeduct ? "Số tiền trừ" : "Số tiền nạp") {
+            Section(isDeduct ? store.t("Số tiền trừ", "Deduct amount") : store.t("Số tiền nạp", "Add amount")) {
                 HStack {
-                    TextField("Nhập số tiền (VND)", text: $amountText).keyboardType(.numberPad)
+                    TextField(store.t("Nhập số tiền (VND)", "Enter amount (VND)"), text: $amountText).keyboardType(.numberPad)
                     Text("đ").foregroundStyle(.secondary)
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1387,8 +1400,8 @@ struct AdminWalletAdjustView: View {
                 }
             }
 
-            Section("Ghi chú") {
-                TextField("Lý do (tuỳ chọn)", text: $note, axis: .vertical).lineLimit(1...3)
+            Section(store.t("Ghi chú", "Note")) {
+                TextField(store.t("Lý do (tuỳ chọn)", "Reason (optional)"), text: $note, axis: .vertical).lineLimit(1...3)
             }
 
             Section {
@@ -1397,7 +1410,7 @@ struct AdminWalletAdjustView: View {
                 } label: {
                     HStack {
                         if processing { ProgressView().tint(.white) }
-                        Text(processing ? "Đang xử lý..." : (isDeduct ? "Trừ ví" : "Nạp ví"))
+                        Text(processing ? store.t("Đang xử lý...", "Processing...") : (isDeduct ? store.t("Trừ ví", "Deduct wallet") : store.t("Nạp ví", "Add to wallet")))
                     }
                     .frame(maxWidth: .infinity).frame(height: 44)
                     .background(userIdentifier.isEmpty || (amount ?? 0) < 1 ? Color.gray :
@@ -1415,7 +1428,7 @@ struct AdminWalletAdjustView: View {
             }
 
             if !history.isEmpty {
-                Section("Lịch sử thao tác (phiên này)") {
+                Section(store.t("Lịch sử thao tác (phiên này)", "Operation history (this session)")) {
                     ForEach(history) { r in
                         HStack {
                             Image(systemName: r.delta >= 0 ? "plus.circle.fill" : "minus.circle.fill")
@@ -1433,7 +1446,7 @@ struct AdminWalletAdjustView: View {
                 }
             }
         }
-        .navigationTitle("Điều chỉnh ví")
+        .navigationTitle(store.t("Điều chỉnh ví", "Adjust wallet"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -1497,36 +1510,36 @@ struct AdminAnalyticsView: View {
     var body: some View {
         List {
             if loading && stats == nil {
-                HStack { Spacer(); ProgressView("Đang tải..."); Spacer() }
+                HStack { Spacer(); ProgressView(store.t("Đang tải...", "Loading...")); Spacer() }
             } else if let s = stats {
-                Section("Doanh thu cửa hàng") {
+                Section(store.t("Doanh thu cửa hàng", "Store revenue")) {
                     HStack(spacing: 10) {
-                        analyticsCard("Tổng cộng", kFormatVND(storeRevenue), .green)
-                        analyticsCard("Đơn hoàn tất", "\(completedOrderCount)", .blue)
+                        analyticsCard(store.t("Tổng cộng", "Total"), kFormatVND(storeRevenue), .green)
+                        analyticsCard(store.t("Đơn hoàn tất", "Completed orders"), "\(completedOrderCount)", .blue)
                     }
                     .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 }
-                Section("Người dùng") {
+                Section(store.t("Người dùng", "Users")) {
                     HStack(spacing: 10) {
-                        analyticsCard("Tổng users", "\(s.totalUsers)", .purple)
-                        analyticsCard("7 ngày mới", "+\(s.newUsers7d)", .orange)
+                        analyticsCard(store.t("Tổng users", "Total users"), "\(s.totalUsers)", .purple)
+                        analyticsCard(store.t("7 ngày mới", "New (7 days)"), "+\(s.newUsers7d)", .orange)
                     }
                     .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 }
-                Section("AI & Hội thoại") {
+                Section(store.t("AI & Hội thoại", "AI & Conversations")) {
                     HStack(spacing: 10) {
-                        analyticsCard("Hội thoại", "\(s.totalConversations)", .teal)
-                        analyticsCard("Tin nhắn", "\(s.totalMessages)", Theme.accent)
+                        analyticsCard(store.t("Hội thoại", "Conversations"), "\(s.totalConversations)", .teal)
+                        analyticsCard(store.t("Tin nhắn", "Messages"), "\(s.totalMessages)", Theme.accent)
                     }
                     .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                     HStack(spacing: 10) {
-                        analyticsCard("Doanh thu AI", kFormatVND(s.revenueTotal), .green)
-                        analyticsCard("30 ngày", kFormatVND(s.revenue30d), .mint)
+                        analyticsCard(store.t("Doanh thu AI", "AI revenue"), kFormatVND(s.revenueTotal), .green)
+                        analyticsCard(store.t("30 ngày", "30 days"), kFormatVND(s.revenue30d), .mint)
                     }
                     .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 }
                 if !topProducts.isEmpty {
-                    Section("Top sản phẩm bán chạy") {
+                    Section(store.t("Top sản phẩm bán chạy", "Top selling products")) {
                         let maxRev = topProducts.first.map { $0.revenue } ?? 1
                         ForEach(topProducts.indices, id: \.self) { i in
                             let item = topProducts[i]
@@ -1550,7 +1563,7 @@ struct AdminAnalyticsView: View {
                                         }
                                     }
                                     .frame(height: 6)
-                                    Text("\(item.count) đơn").font(.caption2).foregroundStyle(.secondary)
+                                    Text("\(item.count) " + store.t("đơn", "orders")).font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(.vertical, 2)
@@ -1558,14 +1571,14 @@ struct AdminAnalyticsView: View {
                     }
                 }
                 if !s.topProviders.isEmpty {
-                    Section("AI provider phổ biến") {
+                    Section(store.t("AI provider phổ biến", "Popular AI providers")) {
                         let maxCount = s.topProviders.first?.count ?? 1
                         ForEach(s.topProviders, id: \.provider) { p in
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack {
                                     Text(p.provider).font(.subheadline)
                                     Spacer()
-                                    Text("\(p.count) lượt").font(.caption2).foregroundStyle(.secondary)
+                                    Text("\(p.count) " + store.t("lượt", "uses")).font(.caption2).foregroundStyle(.secondary)
                                 }
                                 GeometryReader { geo in
                                     ZStack(alignment: .leading) {
@@ -1585,10 +1598,10 @@ struct AdminAnalyticsView: View {
                     }
                 }
             } else if !loading {
-                Text("Không tải được thống kê.").foregroundStyle(.secondary)
+                Text(store.t("Không tải được thống kê.", "Could not load statistics.")).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Thống kê & Phân tích")
+        .navigationTitle(store.t("Thống kê & Phân tích", "Statistics & Analytics"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
@@ -1633,30 +1646,31 @@ struct StoreRestoreBackupView: View {
         Form {
             Section {
                 KHeroHeader(icon: "arrow.up.doc.fill",
-                            title: "Khôi phục backup",
-                            subtitle: "Nhập file JSON backup để tạo lại cấu trúc cửa hàng")
+                            title: store.t("Khôi phục backup", "Restore backup"),
+                            subtitle: store.t("Nhập file JSON backup để tạo lại cấu trúc cửa hàng",
+                                              "Import a JSON backup to recreate the store structure"))
                     .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
             }
 
-            Section("Chọn file backup") {
+            Section(store.t("Chọn file backup", "Choose backup file")) {
                 Button { showImporter = true } label: {
-                    Label("Chọn file JSON backup", systemImage: "doc.badge.plus")
+                    Label(store.t("Chọn file JSON backup", "Choose JSON backup file"), systemImage: "doc.badge.plus")
                 }
                 if !parsedCategories.isEmpty {
-                    Label("\(catCount) danh mục · \(folderCount) thư mục · \(productCount) sản phẩm",
+                    Label("\(catCount) " + store.t("danh mục", "categories") + " · \(folderCount) " + store.t("thư mục", "folders") + " · \(productCount) " + store.t("sản phẩm", "products"),
                           systemImage: "checkmark.circle.fill")
                         .font(.caption).foregroundStyle(.green)
                 }
             }
 
             if !parsedCategories.isEmpty && !restored {
-                Section("Thực hiện") {
+                Section(store.t("Thực hiện", "Run")) {
                     Button {
                         Task { await restore() }
                     } label: {
                         HStack {
                             if loading { ProgressView().padding(.trailing, 4) }
-                            Label(loading ? "Đang khôi phục..." : "Bắt đầu khôi phục",
+                            Label(loading ? store.t("Đang khôi phục...", "Restoring...") : store.t("Bắt đầu khôi phục", "Start restore"),
                                   systemImage: "arrow.counterclockwise")
                         }
                     }
@@ -1671,18 +1685,18 @@ struct StoreRestoreBackupView: View {
                 Section { Text(message).foregroundStyle(isError ? .red : .green).font(.footnote) }
             }
 
-            Section("Lưu ý") {
+            Section(store.t("Lưu ý", "Notes")) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Chỉ tạo mới — không ghi đè cấu trúc đã có", systemImage: "info.circle")
-                    Label("KEY/ACC cũ KHÔNG được khôi phục từ file này", systemImage: "exclamationmark.triangle")
+                    Label(store.t("Chỉ tạo mới — không ghi đè cấu trúc đã có", "Only creates new — won't overwrite existing structure"), systemImage: "info.circle")
+                    Label(store.t("KEY/ACC cũ KHÔNG được khôi phục từ file này", "Old KEY/ACC are NOT restored from this file"), systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
-                    Label("Nên xoá cửa hàng cũ trước khi khôi phục (nếu muốn sạch)", systemImage: "trash.circle")
+                    Label(store.t("Nên xoá cửa hàng cũ trước khi khôi phục (nếu muốn sạch)", "Delete the old store before restoring (for a clean state)"), systemImage: "trash.circle")
                         .foregroundStyle(.red)
                 }
                 .font(.caption)
             }
         }
-        .navigationTitle("Khôi phục backup")
+        .navigationTitle(store.t("Khôi phục backup", "Restore backup"))
         .navigationBarTitleDisplayMode(.inline)
         .fileImporter(isPresented: $showImporter,
                       allowedContentTypes: [.json, .text, .plainText, .data, .item],
@@ -1699,7 +1713,7 @@ struct StoreRestoreBackupView: View {
         guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let cats = json["categories"] as? [[String: Any]] else {
-            isError = true; message = "File không hợp lệ hoặc sai định dạng."; return
+            isError = true; message = store.t("File không hợp lệ hoặc sai định dạng.", "Invalid or malformed file."); return
         }
         parsedCategories = cats
         catCount = cats.count
@@ -1744,7 +1758,7 @@ struct StoreRestoreBackupView: View {
         }
         progress = ""
         isError = false
-        message = "Khôi phục xong! Đã tạo \(doneCount)/\(catCount) danh mục."
+        message = store.t("Khôi phục xong! Đã tạo", "Restore complete! Created") + " \(doneCount)/\(catCount) " + store.t("danh mục.", "categories.")
         loading = false; restored = true
     }
 }
@@ -1784,10 +1798,10 @@ struct AdminPromoCodesView: View {
                                 .clipShape(Capsule())
                         }
                         HStack(spacing: 12) {
-                            Label("\(promo.usedCount)\(promo.maxUses > 0 ? "/\(promo.maxUses)" : "") lượt",
+                            Label("\(promo.usedCount)\(promo.maxUses > 0 ? "/\(promo.maxUses)" : "") " + store.t("lượt", "uses"),
                                   systemImage: "person.2")
                             if promo.minAmount > 0 {
-                                Label("Tối thiểu \(kFormatVND(promo.minAmount))", systemImage: "cart")
+                                Label(store.t("Tối thiểu", "Min") + " \(kFormatVND(promo.minAmount))", systemImage: "cart")
                             }
                             if promo.expiresAt > 0 {
                                 Label(Date(timeIntervalSince1970: TimeInterval(promo.expiresAt))
@@ -1799,13 +1813,13 @@ struct AdminPromoCodesView: View {
                     }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { Task { await deleteCode(promo.id) } } label: {
-                            Label("Xoá", systemImage: "trash")
+                            Label(store.t("Xoá", "Delete"), systemImage: "trash")
                         }
                     }
                 }
             } header: {
                 HStack {
-                    Text("Danh sách mã (\(codes.count))")
+                    Text(store.t("Danh sách mã", "Code list") + " (\(codes.count))")
                     Spacer()
                     Button { showAdd = true } label: { Image(systemName: "plus") }
                 }
@@ -1815,7 +1829,7 @@ struct AdminPromoCodesView: View {
                 Section { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("Mã khuyến mãi")
+        .navigationTitle(store.t("Mã khuyến mãi", "Promo codes"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
         .sheet(isPresented: $showAdd) { addSheet }
@@ -1824,31 +1838,31 @@ struct AdminPromoCodesView: View {
     private var addSheet: some View {
         NavigationStack {
             Form {
-                Section("Mã giảm giá") {
-                    TextField("Tên mã (VD: SALE50)", text: $newCode)
+                Section(store.t("Mã giảm giá", "Discount code")) {
+                    TextField(store.t("Tên mã (VD: SALE50)", "Code name (e.g. SALE50)"), text: $newCode)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
-                    Picker("Loại giảm", selection: $discountType) {
-                        Text("Phần trăm (%)").tag("percent")
-                        Text("Số tiền cố định (đ)").tag("fixed")
+                    Picker(store.t("Loại giảm", "Discount type"), selection: $discountType) {
+                        Text(store.t("Phần trăm (%)", "Percent (%)")).tag("percent")
+                        Text(store.t("Số tiền cố định (đ)", "Fixed amount (đ)")).tag("fixed")
                     }
-                    TextField(discountType == "percent" ? "Giảm bao nhiêu % (VD: 20)" : "Giảm bao nhiêu đ (VD: 10000)",
+                    TextField(discountType == "percent" ? store.t("Giảm bao nhiêu % (VD: 20)", "Discount % (e.g. 20)") : store.t("Giảm bao nhiêu đ (VD: 10000)", "Discount đ (e.g. 10000)"),
                               text: $discountValue)
                         .keyboardType(.numberPad)
                 }
-                Section("Điều kiện") {
-                    TextField("Đơn tối thiểu (VD: 50000, để trống = không giới hạn)", text: $minAmount)
+                Section(store.t("Điều kiện", "Conditions")) {
+                    TextField(store.t("Đơn tối thiểu (VD: 50000, để trống = không giới hạn)", "Min order (e.g. 50000, empty = no limit)"), text: $minAmount)
                         .keyboardType(.numberPad)
-                    TextField("Số lần dùng tối đa (để trống = không giới hạn)", text: $maxUses)
+                    TextField(store.t("Số lần dùng tối đa (để trống = không giới hạn)", "Max uses (empty = unlimited)"), text: $maxUses)
                         .keyboardType(.numberPad)
                 }
             }
-            .navigationTitle("Tạo mã mới")
+            .navigationTitle(store.t("Tạo mã mới", "Create new code"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Huỷ") { showAdd = false } }
+                ToolbarItem(placement: .topBarLeading) { Button(store.t("Huỷ", "Cancel")) { showAdd = false } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Tạo") { Task { await createCode() } }
+                    Button(store.t("Tạo", "Create")) { Task { await createCode() } }
                         .bold()
                         .disabled(newCode.trimmingCharacters(in: .whitespaces).isEmpty || discountValue.isEmpty)
                 }
@@ -1898,15 +1912,15 @@ struct AdminPushNotificationView: View {
     var body: some View {
         Form {
             if let stats = deviceStats {
-                Section("Thiết bị đã đăng ký") {
-                    Label("\(stats.totalDevices) thiết bị", systemImage: "iphone")
-                    Label("\(stats.totalUsers) người dùng", systemImage: "person.2")
+                Section(store.t("Thiết bị đã đăng ký", "Registered devices")) {
+                    Label("\(stats.totalDevices) " + store.t("thiết bị", "devices"), systemImage: "iphone")
+                    Label("\(stats.totalUsers) " + store.t("người dùng", "users"), systemImage: "person.2")
                 }
             }
 
-            Section("Nội dung thông báo") {
-                TextField("Tiêu đề", text: $notifTitle)
-                TextField("Nội dung", text: $notifBody, axis: .vertical)
+            Section(store.t("Nội dung thông báo", "Notification content")) {
+                TextField(store.t("Tiêu đề", "Title"), text: $notifTitle)
+                TextField(store.t("Nội dung", "Body"), text: $notifBody, axis: .vertical)
                     .lineLimit(3...6)
             }
 
@@ -1916,7 +1930,7 @@ struct AdminPushNotificationView: View {
                 } label: {
                     HStack {
                         if sending { ProgressView().padding(.trailing, 4) }
-                        Text(sending ? "Đang gửi..." : "Gửi cho tất cả người dùng")
+                        Text(sending ? store.t("Đang gửi...", "Sending...") : store.t("Gửi cho tất cả người dùng", "Send to all users"))
                             .font(.headline)
                     }
                     .frame(maxWidth: .infinity)
@@ -1930,7 +1944,7 @@ struct AdminPushNotificationView: View {
                 }
             }
 
-            Section("Hướng dẫn cấu hình APNs") {
+            Section(store.t("Hướng dẫn cấu hình APNs", "APNs setup guide")) {
                 Text("""
                 Để gửi push notification thật, cần cấu hình các biến môi trường trên server:
                 • APNS_KEY_ID — Key ID từ Apple Developer
@@ -1941,7 +1955,7 @@ struct AdminPushNotificationView: View {
                 .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Gửi thông báo")
+        .navigationTitle(store.t("Gửi thông báo", "Send notification"))
         .navigationBarTitleDisplayMode(.inline)
         .task { deviceStats = try? await store.api.adminPushDeviceStats() }
     }
