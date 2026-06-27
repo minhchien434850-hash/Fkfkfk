@@ -5,7 +5,9 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if !store.isLoggedIn {
+            if !store.udidDone {
+                UDIDGateView()
+            } else if !store.isLoggedIn {
                 LoginView()
             } else {
                 MainTabView()

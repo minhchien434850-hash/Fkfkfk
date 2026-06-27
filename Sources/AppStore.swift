@@ -140,6 +140,14 @@ final class AppStore: ObservableObject {
     /// Dịch nhanh: trả tiếng Anh nếu đang chọn EN, ngược lại tiếng Việt.
     func t(_ vi: String, _ en: String) -> String { language == "en" ? en : vi }
 
+    // ===== Cổng lấy UDID khi cài app lần đầu =====
+    // UserDefaults bị xoá khi gỡ app → cài lại sẽ hiện cổng UDID lại đúng yêu cầu.
+    @Published var udidDone: Bool = UserDefaults.standard.bool(forKey: "udidDone")
+    func setUdidDone() {
+        udidDone = true
+        d.set(true, forKey: "udidDone")
+    }
+
     // ===== Nhớ tài khoản & mật khẩu (lưu trong Keychain, có mã hoá) =====
     var rememberLogin: Bool {
         get { d.bool(forKey: "rememberLogin") }
