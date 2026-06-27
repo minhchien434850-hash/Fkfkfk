@@ -149,6 +149,29 @@ struct StoreView: View {
     @State private var search = ""
     @State private var allProducts: [StoreProduct] = []
     @State private var loadingProducts = false
+    @AppStorage("storeWishlist") private var wishlistRaw: String = ""
+    @AppStorage("storeRecentViews") private var recentViewsRaw: String = ""
+
+    private var wishlistIds: Set<Int> {
+        Set(wishlistRaw.split(separator: ",").compactMap { Int($0) })
+    }
+    private var recentViewIds: [Int] {
+        recentViewsRaw.split(separator: ",").compactMap { Int($0) }
+    }
+    private var wishlistProducts: [StoreProduct] {
+        let ids = wishlistIds
+        return allProducts.filter { ids.contains($0.id) }
+    }
+    private var recentProducts: [StoreProduct] {
+        let ids = recentViewIds
+        let map = Dictionary(uniqueKeysWithValues: allProducts.map { ($0.id, $0) })
+        return ids.compactMap { map[$0] }
+    }
+    private func toggleWishlist(_ id: Int) {
+        var ids = wishlistIds
+        if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }
+        wishlistRaw = ids.map(String.init).joined(separator: ",")
+    }
 
     private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -172,6 +195,14 @@ struct StoreView: View {
 
                     if !allProducts.isEmpty {
                         allProductsSection
+                    }
+
+                    if !wishlistProducts.isEmpty {
+                        wishlistSection
+                    }
+
+                    if !recentProducts.isEmpty {
+                        recentlyViewedSection
                     }
 
                     if !categories.isEmpty {
@@ -330,7 +361,7 @@ struct StoreView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(allProducts) { product in
-                        NavigationLink { StoreProductDetailView(product: product) } label: {
+                        NavigationLink { StoreProductDetailView(productId: product.id) } label: {
                             allProductCard(product)
                         }
                         .buttonStyle(.plain)
@@ -343,7 +374,19 @@ struct StoreView: View {
 
     private func allProductCard(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            StoreThumb(media: p.media, height: 100)
+            ZStack(alignment: .topTrailing) {
+                StoreThumb(media: p.media, height: 100)
+                Button { toggleWishlist(p.id) } label: {
+                    Image(systemName: wishlistIds.contains(p.id) ? "heart.fill" : "heart")
+                        .font(.caption.bold())
+                        .foregroundStyle(wishlistIds.contains(p.id) ? .red : .white)
+                        .padding(6)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                        .padding(6)
+                }
+                .buttonStyle(.plain)
+            }
             VStack(alignment: .leading, spacing: 6) {
                 Text(p.name)
                     .font(.caption.bold())
@@ -372,6 +415,47 @@ struct StoreView: View {
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+    }
+
+    private var wishlistSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Yêu thích", systemImage: "heart.fill")
+                    .font(.headline).foregroundStyle(.red)
+                Spacer()
+                Text("\(wishlistProducts.count) sản phẩm")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(wishlistProducts) { product in
+                        NavigationLink { StoreProductDetailView(productId: product.id) } label: {
+                            allProductCard(product)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+    }
+
+    private var recentlyViewedSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Đã xem gần đây", systemImage: "clock.arrow.circlepath")
+                .font(.headline)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(recentProducts) { product in
+                        NavigationLink { StoreProductDetailView(productId: product.id) } label: {
+                            allProductCard(product)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
     }
 
     private var searchField: some View {
@@ -630,6 +714,7 @@ struct StoreProductDetailView: View {
     @EnvironmentObject var store: AppStore
     let productId: Int
 
+    @AppStorage("storeRecentViews") private var recentViewsRaw: String = ""
     @State private var product: StoreProduct?
     @State private var mine: StoreProductMine?
     @State private var selectedPrice: StorePrice?
@@ -679,10 +764,18 @@ struct StoreProductDetailView: View {
         }
         .navigationTitle(product?.name ?? "Sản phẩm")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await reload() }
+        .task { await reload(); trackRecentView(productId) }
         .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) {
             StoreWalletView()
         }
+    }
+
+    private func trackRecentView(_ id: Int) {
+        var ids = recentViewsRaw.split(separator: ",").compactMap { Int($0) }
+        ids.removeAll { $0 == id }
+        ids.insert(id, at: 0)
+        if ids.count > 10 { ids = Array(ids.prefix(10)) }
+        recentViewsRaw = ids.map(String.init).joined(separator: ",")
     }
 
     // Đã mua: hiện key + nút tải game

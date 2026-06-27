@@ -391,10 +391,13 @@ struct StoreAdminProductList: View {
                     NavigationLink {
                         StoreProductEditor(folderId: folder.id, product: p) { Task { await reload() } }
                     } label: {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(p.name)
-                            Text("\(p.prices.count) mốc giá · \(p.availableKeys) key khả dụng")
-                                .font(.caption2).foregroundStyle(.secondary)
+                            HStack(spacing: 6) {
+                                Text("\(p.prices.count) mốc giá")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                stockBadge(p.availableKeys)
+                            }
                         }
                     }
                 }
@@ -409,6 +412,17 @@ struct StoreAdminProductList: View {
         .sheet(isPresented: $newProduct) {
             StoreProductEditor(folderId: folder.id, product: nil) { Task { await reload() } }
         }
+    }
+
+    @ViewBuilder private func stockBadge(_ count: Int) -> some View {
+        let label = count == 0 ? "Hết hàng" : count <= 5 ? "Sắp hết (\(count))" : "Còn \(count)"
+        let color: Color = count == 0 ? .red : count <= 5 ? .orange : .green
+        Text(label)
+            .font(.caption2.bold())
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
     }
 
     private func reload() async {
