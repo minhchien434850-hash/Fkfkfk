@@ -836,9 +836,12 @@ struct StoreView: View {
     }
 
     // Mục "Tải về" hiện ngay khi vào cửa hàng (bản tải miễn phí)
-    // Sản phẩm có file/link tải (hasDownload = true) — hiển thị cùng khu vực Tải về
+    // Sản phẩm có file/link tải (hasDownload = true) — hiển thị cùng khu vực Tải về.
+    // Loại các sản phẩm đã có trong feed /store/downloads để không hiện trùng;
+    // phần này chỉ là dự phòng khi feed tải lỗi (mạng chậm) mà danh mục đã có.
     private var downloadableProducts: [StoreProduct] {
-        allProducts.filter { $0.hasDownload }
+        let dlIds = Set(downloads.map { $0.id })
+        return allProducts.filter { $0.hasDownload && !dlIds.contains($0.id) }
     }
 
     private var downloadsSection: some View {
