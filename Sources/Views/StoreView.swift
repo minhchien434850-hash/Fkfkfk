@@ -218,13 +218,22 @@ struct StoreView: View {
         return categories.filter { $0.name.localizedCaseInsensitiveContains(q) }
     }
 
-    // Kích cỡ thẻ — theo cấu hình admin (Kích cỡ thẻ hiển thị)
-    private var cardSize: String { config?.cardSize ?? effectiveConfig?.cardSize ?? "medium" }
-    private var productCardWidth: CGFloat { cardSize == "small" ? 104 : (cardSize == "large" ? 156 : 124) }
-    private var productThumbHeight: CGFloat { cardSize == "small" ? 68 : (cardSize == "large" ? 108 : 84) }
-    private var categoryThumbHeight: CGFloat { cardSize == "small" ? 92 : (cardSize == "large" ? 156 : 120) }
+    // Kích cỡ thẻ — theo hệ số kéo của admin (Kích cỡ thẻ hiển thị)
+    private var cardScale: CGFloat {
+        if let s = config?.cardScale ?? effectiveConfig?.cardScale, let v = Double(s) {
+            return CGFloat(max(0.6, min(v, 1.6)))
+        }
+        switch config?.cardSize ?? effectiveConfig?.cardSize {
+        case "small": return 0.8
+        case "large": return 1.25
+        default:      return 1.0
+        }
+    }
+    private var productCardWidth: CGFloat { 124 * cardScale }
+    private var productThumbHeight: CGFloat { 84 * cardScale }
+    private var categoryThumbHeight: CGFloat { 120 * cardScale }
     private var categoryGrid: [GridItem] {
-        let n = cardSize == "small" ? 3 : 2
+        let n = cardScale < 0.85 ? 3 : 2
         return Array(repeating: GridItem(.flexible(), spacing: 12), count: n)
     }
 
@@ -634,7 +643,7 @@ struct StoreView: View {
         VStack(alignment: .leading, spacing: 0) {
             StoreThumb(media: cat.media, height: categoryThumbHeight)
             Text(cat.name)
-                .font(cardSize == "small" ? .caption.bold() : .subheadline.bold())
+                .font(cardScale < 0.85 ? .caption.bold() : .subheadline.bold())
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)

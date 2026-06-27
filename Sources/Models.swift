@@ -260,6 +260,7 @@ struct StoreAppConfig: Decodable, Hashable {
     var sloganFont: String? = nil   // rounded|serif|mono|default|...
     var sectionOrder: String? = nil // thứ tự bố cục: categories,products,downloads,contacts,wishlist,recent
     var cardSize: String? = nil     // small | medium | large — kích cỡ thẻ sản phẩm/danh mục
+    var cardScale: String? = nil    // hệ số kéo kích cỡ "0.6"–"1.6" (server trả chuỗi)
 }
 
 struct MediaUploadResponse: Decodable { let id: Int; let path: String }

@@ -269,6 +269,7 @@ struct StoreConfigEditor: View {
     @State private var slogan = ""
     @State private var sloganFont = "rounded"
     @State private var cardSize = "medium"
+    @State private var cardScale: Double = 1.0
     @State private var sections: [String] = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
     @State private var message: String?
     @State private var isError = false
@@ -309,14 +310,49 @@ struct StoreConfigEditor: View {
                     .foregroundStyle(.secondary)
             }
 
-            // Kích cỡ thẻ sản phẩm / danh mục ngoài trang
+            // Kích cỡ thẻ sản phẩm / danh mục ngoài trang — KÉO để chỉnh mượt
             Section("Kích cỡ thẻ hiển thị") {
-                Picker("Kích cỡ", selection: $cardSize) {
+                // Nút nhanh
+                Picker("Kích cỡ nhanh", selection: $cardSize) {
                     Text("Nhỏ").tag("small")
                     Text("Vừa").tag("medium")
                     Text("Lớn").tag("large")
-                }.pickerStyle(.segmented)
-                Text("Nhỏ: nhiều thẻ/hàng, gọn. Lớn: thẻ to, ảnh rõ. Áp cho thẻ danh mục & sản phẩm ngoài trang.")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: cardSize) { v in
+                    cardScale = (v == "small") ? 0.8 : (v == "large" ? 1.25 : 1.0)
+                }
+
+                // Thanh kéo tinh chỉnh
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Kéo chỉnh kích cỡ").font(.subheadline)
+                        Spacer()
+                        Text("\(Int(cardScale * 100))%")
+                            .font(.subheadline.bold().monospacedDigit())
+                            .foregroundStyle(store.accentColor)
+                    }
+                    HStack(spacing: 8) {
+                        Image(systemName: "rectangle.compress.vertical").font(.caption).foregroundStyle(.secondary)
+                        Slider(value: $cardScale, in: 0.6...1.6, step: 0.05)
+                        Image(systemName: "rectangle.expand.vertical").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+
+                // Xem trước thẻ theo kích cỡ đang chọn
+                HStack { Spacer()
+                    VStack(spacing: 0) {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.tertiarySystemBackground))
+                            .frame(width: 124 * cardScale, height: 84 * cardScale)
+                            .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+                        Text("Xem trước").font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
+                    }
+                    Spacer() }
+                .padding(.vertical, 4)
+
+                Text("Kéo sang trái = thẻ nhỏ (nhiều thẻ/hàng), kéo sang phải = thẻ to. Áp cho thẻ danh mục & sản phẩm ngoài trang.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -389,6 +425,7 @@ struct StoreConfigEditor: View {
             bgType = c.bgType ?? "none"; bgUrl = c.bgUrl ?? ""
             slogan = c.slogan ?? ""; sloganFont = c.sloganFont ?? "rounded"
             cardSize = c.cardSize ?? "medium"
+            cardScale = Double(c.cardScale ?? "") ?? ((cardSize == "small") ? 0.8 : (cardSize == "large" ? 1.25 : 1.0))
             if let order = c.sectionOrder, !order.isEmpty {
                 let parts = order.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
                 let all = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
@@ -409,7 +446,7 @@ struct StoreConfigEditor: View {
                 bgType: bgType, bgUrl: bgUrl,
                 slogan: slogan, sloganFont: sloganFont,
                 sectionOrder: sections.joined(separator: ","),
-                cardSize: cardSize)
+                cardSize: cardSize, cardScale: cardScale)
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message
