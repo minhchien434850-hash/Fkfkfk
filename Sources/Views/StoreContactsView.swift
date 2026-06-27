@@ -145,6 +145,97 @@ struct StoreContactsBlock: View {
     }
 }
 
+// ============================ Khách: sheet Liên hệ & Nhóm (mở khi bấm icon header) ============================
+struct StoreContactsSheet: View {
+    let contacts: StoreContacts
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab = 0
+
+    private var enabledContacts: [SocialLink] {
+        contacts.contact.filter { $0.enabled && !$0.url.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+    private var enabledGroups: [SocialLink] {
+        contacts.groups.filter { $0.enabled && !$0.url.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("", selection: $tab) {
+                    Text("Liên hệ admin").tag(0)
+                    Text("Nhóm cộng đồng").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+                if tab == 0 {
+                    contactList(enabledContacts, isGroup: false)
+                } else {
+                    contactList(enabledGroups, isGroup: true)
+                }
+            }
+            .navigationTitle(tab == 0 ? "Liên hệ admin" : "Nhóm cộng đồng")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Đóng") { dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func contactList(_ links: [SocialLink], isGroup: Bool) -> some View {
+        if links.isEmpty {
+            Spacer()
+            VStack(spacing: 12) {
+                Image(systemName: isGroup ? "person.3" : "person.crop.circle")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.secondary)
+                Text(isGroup ? "Chưa có nhóm cộng đồng nào." : "Chưa có liên hệ admin nào.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer()
+        } else {
+            List {
+                ForEach(Array(links.enumerated()), id: \.offset) { _, link in
+                    let p = socialPlatform(link.platform)
+                    if let url = socialOpenURL(link.platform, link.url) {
+                        Link(destination: url) {
+                            HStack(spacing: 14) {
+                                Image(systemName: p.icon)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 40, height: 40)
+                                    .background(p.color)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(isGroup ? "Nhóm \(p.label)" : p.label)
+                                        .font(.subheadline.bold())
+                                        .foregroundStyle(.primary)
+                                    Text(link.url.trimmingCharacters(in: .whitespaces))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+}
+
 // ============================ Admin: chỉnh sửa Liên hệ & Nhóm ============================
 struct EditSocial: Identifiable, Hashable {
     let id = UUID()

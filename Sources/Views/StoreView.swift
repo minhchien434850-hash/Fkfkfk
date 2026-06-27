@@ -162,6 +162,7 @@ struct StoreView: View {
     @State private var productSort: String = "default"  // default | priceAsc | priceDesc | name
     @State private var productFilter: String = "all"    // all | inStock
     @State private var showCart = false
+    @State private var showContacts = false
     @AppStorage("storeCartRaw") private var cartRaw: String = "[]"
     @State private var showcase: StoreShowcase?
     @State private var scrollTarget: String?   // dùng cho ScrollViewReader scroll đến section
@@ -422,6 +423,9 @@ struct StoreView: View {
             .sheet(isPresented: $showWallet) { StoreWalletView() }
             .sheet(isPresented: $showSearch) { StoreGlobalSearchView(categories: categories) }
             .sheet(isPresented: $showCart) { StoreCartView() }
+            .sheet(isPresented: $showContacts) {
+                if let c = contacts { StoreContactsSheet(contacts: c) }
+            }
             .task {
                 await reload()
                 // Polling mỗi 30 giây để cập nhật sản phẩm mới real-time
@@ -1145,49 +1149,41 @@ struct StoreView: View {
         .frame(maxWidth: .infinity).padding(.top, 40)
     }
 
-    // Icon liên hệ nhanh: tối đa 4 nút tròn màu cho các kênh admin đã bật
+    // Icon liên hệ nhanh: hiện tối đa 3 icon preview + badge số còn lại, bấm mở sheet danh sách
     @ViewBuilder private var headerContactIcons: some View {
         let enabled = (contacts?.contact ?? []).filter {
             $0.enabled && !$0.url.trimmingCharacters(in: .whitespaces).isEmpty
         }
-        if !enabled.isEmpty {
-            VStack(alignment: .trailing, spacing: 5) {
-                HStack(spacing: 6) {
-                    ForEach(Array(enabled.prefix(4).enumerated()), id: \.offset) { _, link in
+        let hasGroups = (contacts?.groups ?? []).contains {
+            $0.enabled && !$0.url.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        if !enabled.isEmpty || hasGroups {
+            Button { showContacts = true } label: {
+                HStack(spacing: -8) {
+                    ForEach(Array(enabled.prefix(3).enumerated()), id: \.offset) { idx, link in
                         let p = socialPlatform(link.platform)
-                        if let url = socialOpenURL(link.platform, link.url) {
-                            Link(destination: url) {
-                                Image(systemName: p.icon)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .frame(width: 34, height: 34)
-                                    .background(p.color)
-                                    .clipShape(Circle())
-                                    .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 1)
-                            }
-                        }
+                        Image(systemName: p.icon)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(p.color)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color(.systemBackground).opacity(0.4), lineWidth: 1.5))
+                            .zIndex(Double(3 - idx))
+                    }
+                    if enabled.count > 3 || hasGroups {
+                        Text("+")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.black.opacity(0.45))
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color(.systemBackground).opacity(0.4), lineWidth: 1.5))
                     }
                 }
-                if enabled.count > 4 {
-                    let rest = enabled.dropFirst(4).prefix(4)
-                    HStack(spacing: 6) {
-                        ForEach(Array(rest.enumerated()), id: \.offset) { _, link in
-                            let p = socialPlatform(link.platform)
-                            if let url = socialOpenURL(link.platform, link.url) {
-                                Link(destination: url) {
-                                    Image(systemName: p.icon)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(.white)
-                                        .frame(width: 34, height: 34)
-                                        .background(p.color)
-                                        .clipShape(Circle())
-                                        .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 1)
-                                }
-                            }
-                        }
-                    }
-                }
+                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
             }
+            .buttonStyle(.plain)
         }
     }
 
