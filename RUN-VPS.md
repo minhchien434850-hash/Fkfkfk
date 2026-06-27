@@ -16,12 +16,12 @@ App KENIOS cần **backend** chạy trên VPS. Dưới đây là các bước t�
 sudo -i
 apt update -y && apt install -y git unzip
 cd /opt
-git clone -b claude/game-web-fixes-auto-click-qppnr5 https://github.com/lythikieuoanh1999-cmd/Apple-l-i.git kenios-src
+git clone -b claude/new-session-0tfv1k <LINK_REPO> kenios-src
 cd kenios-src
 ```
-**Cách B — repo private / không git:** mở tab **SFTP** của Termius → upload `KENIOS_project.zip` vào `/opt` → rồi:
+**Cách B — repo private / không git:** mở tab **SFTP** của Termius → upload `KENIOS-VPS.zip` vào `/opt` → rồi:
 ```bash
-cd /opt && unzip -o KENIOS_project.zip -d kenios-src && cd kenios-src
+cd /opt && unzip -o KENIOS-VPS.zip -d kenios-src && cd kenios-src
 ```
 
 ---
@@ -53,7 +53,7 @@ systemctl restart kenios
 ---
 
 ## 4. (Tuỳ chọn) Gửi OTP qua email khi đăng ký
-- Cần SMTP relay để gửi mail ra ngoài — thêm vào `/opt/kenios-src/.env`:
+- Cần SMTP relay để gửi mail ra ngoài — thêm vào `/root/kenios/.env` (thư mục cài, WORK_DIR):
   ```
   SMTP_RELAY_HOST=smtp.gmail.com
   SMTP_RELAY_PORT=587
@@ -71,7 +71,7 @@ systemctl restart kenios
 
 ---
 
-## 6. Cấu hình thường dùng trong `.env` (`/opt/kenios-src/.env`)
+## 6. Cấu hình thường dùng trong `.env` (`/root/kenios/.env` — thư mục cài WORK_DIR)
 ```
 PORT=8000
 ADMIN_USER=kenios
