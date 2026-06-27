@@ -1273,6 +1273,9 @@ struct AdminAnalyticsView: View {
     private var storeRevenue: Int {
         orders.filter { $0.status == "completed" }.reduce(0) { $0 + $1.amount }
     }
+    private var completedOrderCount: Int {
+        orders.filter { $0.status == "completed" }.count
+    }
 
     var body: some View {
         List {
@@ -1282,7 +1285,7 @@ struct AdminAnalyticsView: View {
                 Section("Doanh thu cửa hàng") {
                     HStack(spacing: 10) {
                         analyticsCard("Tổng cộng", kFormatVND(storeRevenue), .green)
-                        analyticsCard("Đơn hoàn tất", "\(orders.filter { $0.status == \"completed\" }.count)", .blue)
+                        analyticsCard("Đơn hoàn tất", "\(completedOrderCount)", .blue)
                     }
                     .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 }
