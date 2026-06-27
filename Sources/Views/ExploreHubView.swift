@@ -119,7 +119,11 @@ struct ExploreHubView: View {
 
                     LazyVGrid(columns: cols, spacing: 14) {
                         ForEach(items) { it in
-                            Button { dest = it } label: { card(it) }
+                            Button {
+                                dest = it
+                                // Báo cho admin biết người dùng đang mở tính năng nào
+                                Task { try? await store.api.sendActivity(it.title) }
+                            } label: { card(it) }
                                 .buttonStyle(.plain)
                         }
                     }
@@ -161,7 +165,10 @@ struct ExploreHubView: View {
         case .settings:       SettingsView()
         case .admin:          AdminView()
         case .mediaConverter: MediaConverterView()
-        case .messenger:      MessengerHubView().environmentObject(store)
+        case .messenger:
+            // Nhắn tin (thủ công/tự động/tool nhóm) chỉ dành cho gói PRO
+            if store.isPro { MessengerHubView().environmentObject(store) }
+            else { ProLockCard(feature: store.t("Nhắn tin", "Messaging")) }
         }
     }
 }

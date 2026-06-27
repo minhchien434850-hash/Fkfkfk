@@ -154,7 +154,14 @@ struct AdminView: View {
                                 Text(p).font(.caption).foregroundStyle(.secondary)
                             }
                             if let lf = u.lastFeature, !lf.isEmpty {
-                                Text(store.t("Đang dùng:", "Using:") + " \(lf)").font(.caption2).foregroundStyle(.green)
+                                HStack(spacing: 4) {
+                                    Image(systemName: "dot.radiowaves.left.and.right")
+                                        .font(.caption2).foregroundStyle(.green)
+                                    Text(store.t("Đang dùng:", "Using:") + " \(lf)").font(.caption2).foregroundStyle(.green)
+                                    if let ls = u.lastSeen, ls > 0 {
+                                        Text("· " + seenAgo(ls)).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                             HStack {
                                 Menu(store.t("Thao tác", "Actions")) {
@@ -196,6 +203,11 @@ struct AdminView: View {
                 await reload()
                 await loadStats()
                 await loadPendingPayments()
+                // Tự làm mới danh sách người dùng mỗi 15s để xem "đang dùng" theo thời gian thực
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    await reload()
+                }
             }
             .refreshable {
                 await reload()
@@ -213,6 +225,15 @@ struct AdminView: View {
                 Button("OK") { error = nil }
             } message: { Text(error ?? "") }
         }
+    }
+
+    // Thời gian hoạt động gần nhất (tương đối)
+    private func seenAgo(_ ts: Int) -> String {
+        let s = max(0, Int(Date().timeIntervalSince1970) - ts)
+        if s < 60 { return store.t("vừa xong", "just now") }
+        if s < 3600 { return "\(s/60) " + store.t("phút trước", "min ago") }
+        if s < 86400 { return "\(s/3600) " + store.t("giờ trước", "h ago") }
+        return "\(s/86400) " + store.t("ngày trước", "d ago")
     }
 
     // MARK: - Stat Card

@@ -3,6 +3,7 @@ import AVFoundation
 
 struct SettingsView: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var phone = ""
     @State private var newPassword = ""
@@ -224,7 +225,10 @@ struct SettingsView: View {
                 if let message { Text(message).foregroundStyle(.green).font(.footnote) }
 
                 Section {
-                    Button(store.t("Đăng xuất", "Logout"), role: .destructive) { store.logout() }
+                    Button(store.t("Đăng xuất", "Logout"), role: .destructive) {
+                        dismiss()                 // đóng màn Cài đặt (sheet) ngay
+                        store.logout()            // xoá phiên → về màn đăng nhập tức thì
+                    }
                 }
             }
             .navigationTitle(store.t("Cài đặt", "Settings"))

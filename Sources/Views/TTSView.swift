@@ -875,13 +875,24 @@ struct TTSView: View {
                     // ----- Động cơ & Tinh chỉnh giọng -----
                     section(store.t("Thiết lập Động cơ giọng nói", "Voice engine settings")) {
                         Text(store.t("Động cơ", "Engine")).font(.caption).foregroundStyle(.secondary)
+                        // Giọng ElevenLabs chỉ dành cho gói PRO — Free không thấy lựa chọn này
                         Picker(store.t("Động cơ", "Engine"), selection: $tts.engineType) {
-                            ForEach(TTSEngine.EngineType.allCases) { type in
+                            ForEach(TTSEngine.EngineType.allCases.filter { store.isPro || $0 != .elevenlabs }) { type in
                                 Text(type.label).tag(type)
                             }
                         }
                         .pickerStyle(.segmented)
                         .padding(.bottom, 8)
+                        .onAppear {
+                            // Free lỡ đang ở ElevenLabs (từ bản cũ) → đưa về giọng hệ thống
+                            if !store.isPro && tts.engineType == .elevenlabs { tts.engineType = .system }
+                        }
+                        if !store.isPro {
+                            Label(store.t("Giọng ElevenLabs (AI) chỉ có ở gói PRO. Nâng cấp để mở khoá.",
+                                          "ElevenLabs (AI) voice is PRO-only. Upgrade to unlock."),
+                                  systemImage: "crown.fill")
+                                .font(.caption2).foregroundStyle(Theme.gold)
+                        }
 
                         Toggle(isOn: $translateToVi) {
                             Label(store.t("Tự dịch sang tiếng Việt khi đọc", "Auto-translate to Vietnamese when reading"), systemImage: "character.bubble")
@@ -908,8 +919,8 @@ struct TTSView: View {
                         slider("Cao độ", value: $tts.pitch, range: 0.5...2.0)
                         slider("Âm lượng", value: $tts.volume, range: 0...1)
 
-                        // ElevenLabs — đọc tiếng Việt
-                        if tts.engineType == .elevenlabs {
+                        // ElevenLabs — đọc tiếng Việt (chỉ PRO)
+                        if tts.engineType == .elevenlabs && store.isPro {
                             Divider().padding(.vertical, 4)
 
                             // --- Chọn tông giọng ElevenLabs ---
