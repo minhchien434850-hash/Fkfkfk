@@ -2,12 +2,100 @@ import SwiftUI
 import WebKit
 import AVFoundation
 
-// ======================== Persistent WKWebView delegate (lives with BrowserModel) ========================
+// ======================== Ad-block content rules (YouTube + common ad networks) ========================
+private let kAdBlockRules = """
+[
+  {"trigger":{"url-filter":"googlesyndication\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"doubleclick\\\\.net"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"googleadservices\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"adservice\\\\.google\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"advertising\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"adnxs\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"adsystem\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"moatads\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"scorecardresearch\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"amazon-adsystem\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"cdn\\\\.ima\\\\.googlevideo\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"ads\\\\.youtube\\\\.com"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"static\\\\.doubleclick\\\\.net"},"action":{"type":"block"}},
+  {"trigger":{"url-filter":"pagead2\\\\.googlesyndication\\\\.com"},"action":{"type":"block"}}
+]
+"""
+
+// JS injected into every YouTube page — auto-skip ads + hide ad UI
+private let kYouTubeAdSkipJS = """
+(function(){
+  // ── Override Page Visibility so YouTube never pauses ──
+  Object.defineProperty(document,'hidden',{get:()=>false,configurable:true});
+  Object.defineProperty(document,'visibilityState',{get:()=>'visible',configurable:true});
+  document.addEventListener('visibilitychange',function(e){e.stopImmediatePropagation();},true);
+
+  // ── Skip / remove ads ──
+  function skipAds(){
+    // Click "Skip Ad" / "Skip Ads" buttons when available
+    var skip = document.querySelector(
+      '.ytp-skip-ad-button, .ytp-ad-skip-button, ' +
+      '.ytp-ad-skip-button-modern, button[class*="skip"]'
+    );
+    if(skip){ skip.click(); }
+
+    // If pre-roll ad is playing → jump to end (forces skip)
+    var vid = document.querySelector('video');
+    var adBadge = document.querySelector('.ad-showing, .ytp-ad-player-overlay');
+    if(vid && adBadge && isFinite(vid.duration) && vid.duration > 0){
+      vid.currentTime = vid.duration;
+      vid.playbackRate = 16;
+    }
+
+    // Hide ad overlay banners & survey modals
+    var selectors = [
+      '.ytp-ad-overlay-container','.ytp-ad-text-overlay',
+      '.ytp-ad-image-overlay','.ytd-action-companion-ad-renderer',
+      '.ytd-banner-promo-renderer','ytd-ad-slot-renderer',
+      '#masthead-ad','.ytd-display-ad-renderer',
+      '.ytp-suggested-action','.ytp-ce-element'
+    ];
+    selectors.forEach(function(s){
+      document.querySelectorAll(s).forEach(function(el){ el.style.display='none'; });
+    });
+  }
+
+  // Run every 500 ms
+  setInterval(skipAds, 500);
+
+  // Also run on DOM mutations (faster reaction)
+  var obs = new MutationObserver(skipAds);
+  obs.observe(document.documentElement,{childList:true,subtree:true});
+})();
+"""
+
+// CSS to hide remaining ad UI chrome
+private let kYouTubeAdCSS = """
+.ytp-ad-overlay-container,
+.ytp-ad-text-overlay,
+.ytp-ad-image-overlay,
+.ytp-ad-preview-container,
+#masthead-ad,
+ytd-ad-slot-renderer,
+.ytd-banner-promo-renderer,
+.ytd-display-ad-renderer,
+ytd-action-companion-ad-renderer,
+.ytp-suggested-action { display:none!important; }
+"""
+
+private let kCSSInjectJS = """
+(function(){
+  var s=document.createElement('style');
+  s.textContent=`\(kYouTubeAdCSS)`;
+  (document.head||document.documentElement).appendChild(s);
+})();
+"""
+
+// ======================== WKWebView delegate ========================
 private final class WVDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
     weak var model: BrowserModel?
     init(_ m: BrowserModel) { model = m; super.init() }
 
-    // Block native-app schemes (youtube://, tiktok://...) but allow http/https/about/blob
     func webView(_ wv: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if let scheme = action.request.url?.scheme?.lowercased(),
@@ -18,7 +106,7 @@ private final class WVDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler(.allow)
     }
 
-    // Handle target="_blank" / window.open() — load in same webview instead of new window
+    // Handle target="_blank" — load in same webview
     func webView(_ wv: WKWebView, createWebViewWith cfg: WKWebViewConfiguration,
                  for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = action.request.url { wv.load(URLRequest(url: url)) }
@@ -34,86 +122,94 @@ private final class WVDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         if let u = wv.url?.absoluteString, u != "about:blank" { m.urlText = u }
     }
 
-    func webView(_ wv: WKWebView, didStartProvisionalNavigation _: WKNavigation!) { model?.isLoading = true;  sync(wv) }
-    func webView(_ wv: WKWebView, didFinish _: WKNavigation!)               { model?.isLoading = false; sync(wv) }
-    func webView(_ wv: WKWebView, didFail _: WKNavigation!, withError _: Error)           { model?.isLoading = false; sync(wv) }
+    func webView(_ wv: WKWebView, didStartProvisionalNavigation _: WKNavigation!)               { model?.isLoading = true;  sync(wv) }
+    func webView(_ wv: WKWebView, didFinish _: WKNavigation!)                                   { model?.isLoading = false; sync(wv) }
+    func webView(_ wv: WKWebView, didFail _: WKNavigation!, withError _: Error)                 { model?.isLoading = false; sync(wv) }
     func webView(_ wv: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError _: Error) { model?.isLoading = false; sync(wv) }
 }
 
 // ======================== BrowserModel — owns the persistent WKWebView ========================
 final class BrowserModel: ObservableObject {
-    @Published var urlText     = ""
-    @Published var canGoBack   = false
+    @Published var urlText      = ""
+    @Published var canGoBack    = false
     @Published var canGoForward = false
-    @Published var isLoading   = false
-    @Published var pageTitle   = ""
+    @Published var isLoading    = false
+    @Published var pageTitle    = ""
 
-    /// Single WKWebView that lives for the entire app session — survives sheet dismiss
+    /// Persistent WKWebView — survives sheet dismiss, keeps playing audio in background
     let webView: WKWebView
-    private var wvDelegate: WVDelegate!   // strong ref so delegate lives with model
+    private var wvDelegate: WVDelegate!
 
     static let homeURL = "https://www.youtube.com"
 
     init() {
-        // ── Configuration ──
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = WKWebsiteDataStore.default()   // shared cookies → stay logged in
         cfg.allowsInlineMediaPlayback = true
-        cfg.mediaTypesRequiringUserActionForPlayback = []     // auto-play allowed
+        cfg.mediaTypesRequiringUserActionForPlayback = []
         cfg.allowsPictureInPictureMediaPlayback = true
 
-        // Override Page Visibility so YouTube/Spotify don't pause when view is hidden
-        cfg.userContentController.addUserScript(WKUserScript(
-            source: """
-            (function(){
-              Object.defineProperty(document,'hidden',{get:()=>false,configurable:true});
-              Object.defineProperty(document,'visibilityState',{get:()=>'visible',configurable:true});
-              document.addEventListener('visibilitychange',function(e){
-                e.stopImmediatePropagation();
-              },true);
-            })();
-            """,
+        let uc = cfg.userContentController
+
+        // 1. Visibility bypass — prevents YouTube pausing when app goes to background
+        uc.addUserScript(WKUserScript(
+            source: kYouTubeAdSkipJS,
             injectionTime: .atDocumentStart,
             forMainFrameOnly: false
         ))
+        // 2. CSS ad-hider — injected after DOM ready
+        uc.addUserScript(WKUserScript(
+            source: kCSSInjectJS,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: false
+        ))
 
-        // ── Create WKWebView ──
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.allowsBackForwardNavigationGestures = true
-        // Desktop-class Safari UA — YouTube serves full web player (no "open in app" redirect)
+        // Desktop Safari UA — YouTube web player, no app redirect
         wv.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         self.webView = wv
         self.urlText = BrowserModel.homeURL
 
-        // All stored properties assigned — can now use `self`
         let del = WVDelegate(self)
         wv.navigationDelegate = del
         wv.uiDelegate = del
         self.wvDelegate = del
 
-        // Background audio session so video/music continues while switching tabs
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback,
-                                                          options: [.mixWithOthers, .allowBluetooth])
+        // Background audio: .playback keeps audio alive when screen locks
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback, mode: .moviePlayback,
+            options: [.mixWithOthers, .allowBluetooth, .allowAirPlay]
+        )
         try? AVAudioSession.sharedInstance().setActive(true)
 
-        // Load home page on first launch
+        // Compile ad-block content rules async and attach once ready
+        Task.detached(priority: .utility) { [weak wv] in
+            guard let wv else { return }
+            if let list = try? await WKContentRuleListStore.default()
+                .compileContentRuleList(forIdentifier: "kenios-yt-adblock",
+                                        encodedContentRuleList: kAdBlockRules) {
+                await MainActor.run {
+                    wv.configuration.userContentController.add(list)
+                }
+            }
+        }
+
         loadRaw(BrowserModel.homeURL)
     }
 
-    // MARK: - Public commands
+    // MARK: - Commands
 
-    func go()             { navigate(urlText) }
-    func back()           { webView.goBack() }
-    func forward()        { webView.goForward() }
-    func reload()         { webView.reload() }
-    func stopLoading()    { webView.stopLoading() }
-
+    func go()          { navigate(urlText) }
+    func back()        { webView.goBack() }
+    func forward()     { webView.goForward() }
+    func reload()      { webView.reload() }
+    func stopLoading() { webView.stopLoading() }
     func open(_ raw: String) { urlText = raw; navigate(raw) }
 
     func navigate(_ raw: String) {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return }
-        // Bare word / phrase → Google search
         if s.contains(" ") || (!s.contains(".") && !s.hasPrefix("http")) {
             let q = s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s
             s = "https://www.google.com/search?q=\(q)"
@@ -132,12 +228,7 @@ final class BrowserModel: ObservableObject {
 // ======================== UIViewRepresentable — wraps the persistent WKWebView ========================
 struct BrowserWebView: UIViewRepresentable {
     let model: BrowserModel
-
-    func makeUIView(context: Context) -> WKWebView {
-        // Return the SAME WKWebView every time — survives sheet dismiss/reopen
-        model.webView
-    }
-
+    func makeUIView(context: Context) -> WKWebView { model.webView }
     func updateUIView(_ wv: WKWebView, context: Context) {}
 }
 
@@ -148,7 +239,7 @@ struct WebShortcut: Identifiable, Codable {
     var url:  String
 }
 
-// ======================== Main entertainment browser view ========================
+// ======================== Main entertainment browser ========================
 struct MediaWebView: View {
     @ObservedObject var model: BrowserModel
     @FocusState private var addressFocused: Bool
@@ -159,11 +250,11 @@ struct MediaWebView: View {
     @State private var newURL  = ""
 
     private let builtinShortcuts: [(String, String, String)] = [
-        ("YouTube",   "play.tv.fill",            "https://www.youtube.com"),
-        ("Âm nhạc",   "music.note",              "https://soundcloud.com/discover"),
-        ("Spotify",   "music.note.list",          "https://open.spotify.com"),
-        ("Phim",      "film.fill",               "https://www.youtube.com/results?search_query=phim+hay"),
-        ("Tìm kiếm",  "magnifyingglass",          "https://www.google.com"),
+        ("YouTube",   "play.tv.fill",         "https://www.youtube.com"),
+        ("Âm nhạc",  "music.note",            "https://soundcloud.com/discover"),
+        ("Spotify",   "music.note.list",       "https://open.spotify.com"),
+        ("Phim",      "film.fill",             "https://www.youtube.com/results?search_query=phim+hay"),
+        ("Tìm kiếm",  "magnifyingglass",       "https://www.google.com"),
     ]
 
     private var customShortcuts: [WebShortcut] {
@@ -177,16 +268,14 @@ struct MediaWebView: View {
         guard !url.isEmpty else { return }
         if !url.lowercased().hasPrefix("http") { url = "https://" + url }
         let name = newName.trimmingCharacters(in: .whitespaces).isEmpty ? url : newName
-        var list = customShortcuts
-        list.append(WebShortcut(name: name, url: url))
-        saveCustom(list)
-        newName = ""; newURL = ""
+        var list = customShortcuts; list.append(WebShortcut(name: name, url: url))
+        saveCustom(list); newName = ""; newURL = ""
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 6) {
-                // ── Address bar + nav controls ──
+                // ── Address bar ──
                 HStack(spacing: 8) {
                     Button { model.back() }    label: { Image(systemName: "chevron.left")  }.disabled(!model.canGoBack)
                     Button { model.forward() } label: { Image(systemName: "chevron.right") }.disabled(!model.canGoForward)
@@ -206,9 +295,7 @@ struct MediaWebView: View {
                     .background(Color(.secondarySystemBackground))
                     .clipShape(Capsule())
 
-                    Button {
-                        model.isLoading ? model.stopLoading() : model.reload()
-                    } label: {
+                    Button { model.isLoading ? model.stopLoading() : model.reload() } label: {
                         Image(systemName: model.isLoading ? "xmark" : "arrow.clockwise")
                     }
                 }
@@ -256,7 +343,7 @@ struct MediaWebView: View {
 
                 if model.isLoading { ProgressView().frame(maxWidth: .infinity) }
 
-                // ── Web content (persistent — keeps playing when sheet is closed) ──
+                // ── Web view (persistent — survives sheet close, keeps audio) ──
                 BrowserWebView(model: model)
                     .ignoresSafeArea(edges: .bottom)
             }
@@ -265,12 +352,11 @@ struct MediaWebView: View {
             .alert("Thêm game / app (web)", isPresented: $showAddShortcut) {
                 TextField("Tên (vd: Game của tôi)", text: $newName)
                 TextField("Link (vd: crazygames.com)", text: $newURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
                 Button("Thêm") { addCustom() }
                 Button("Huỷ", role: .cancel) { }
             } message: {
-                Text("Dán link game/website để thêm vào lối tắt. Video YouTube tiếp tục phát khi bạn thoát màn hình này.")
+                Text("Video YouTube tiếp tục phát khi bạn thoát màn hình này hoặc khoá màn hình.")
             }
         }
     }
