@@ -420,6 +420,7 @@ struct APIClient {
                              logoAnim: String? = nil, bgType: String? = nil,
                              bgUrl: String? = nil, slogan: String? = nil,
                              sloganFont: String? = nil, sectionOrder: String? = nil,
+                             sectionHidden: String? = nil,
                              cardSize: String? = nil, cardScale: Double? = nil,
                              flashEnabled: Bool? = nil, flashProductId: Int? = nil,
                              flashEnd: Int? = nil, flashDiscount: Int? = nil,
@@ -448,6 +449,7 @@ struct APIClient {
         if let slogan { body["slogan"] = slogan }
         if let sloganFont { body["slogan_font"] = sloganFont }
         if let sectionOrder { body["section_order"] = sectionOrder }
+        if let sectionHidden { body["section_hidden"] = sectionHidden }
         if let cardSize { body["card_size"] = cardSize }
         if let cardScale { body["card_scale"] = cardScale }
         body["hero_title"] = heroTitle ?? ""

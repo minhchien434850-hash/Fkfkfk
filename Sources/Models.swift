@@ -259,6 +259,7 @@ struct StoreAppConfig: Decodable, Hashable {
     var slogan: String? = nil       // dòng giới thiệu dưới tên cửa hàng
     var sloganFont: String? = nil   // rounded|serif|mono|default|...
     var sectionOrder: String? = nil // thứ tự bố cục: categories,products,downloads,contacts,wishlist,recent
+    var sectionHidden: String? = nil // các mục bị admin ẩn (cho gọn)
     var cardSize: String? = nil     // small | medium | large — kích cỡ thẻ sản phẩm/danh mục
     var cardScale: String? = nil    // hệ số kéo kích cỡ "0.6"–"1.6" (server trả chuỗi)
     // Flash sale (đếm ngược)

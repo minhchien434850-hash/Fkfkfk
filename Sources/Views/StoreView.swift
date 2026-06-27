@@ -352,16 +352,21 @@ struct StoreView: View {
 
     // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
     private var orderedSections: [String] {
-        let all = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
-                   "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
-        guard let raw = (config?.sectionOrder ?? effectiveConfig?.sectionOrder), !raw.isEmpty else { return all }
+        // Thứ tự mặc định gọn gàng, ưu tiên thấy sản phẩm ngay
+        let all = ["hero", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
+                   "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "products", "footer"]
+        let hidden = Set((config?.sectionHidden ?? "")
+            .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
+        guard let raw = (config?.sectionOrder ?? effectiveConfig?.sectionOrder), !raw.isEmpty else {
+            return all.filter { !hidden.contains($0) }
+        }
         let parts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
         var merged = parts.filter { all.contains($0) }
         // Chèn các mục mới (chưa có trong cấu hình cũ) vào đúng vị trí ưu tiên thay vì dồn cuối
         for (i, k) in all.enumerated() where !merged.contains(k) {
             merged.insert(k, at: min(i, merged.count))
         }
-        return merged
+        return merged.filter { !hidden.contains($0) }
     }
 
     @ViewBuilder

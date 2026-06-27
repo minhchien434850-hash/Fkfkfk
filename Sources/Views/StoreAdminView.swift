@@ -286,8 +286,9 @@ struct StoreConfigEditor: View {
     @State private var sloganFont = "rounded"
     @State private var cardSize = "medium"
     @State private var cardScale: Double = 1.0
-    @State private var sections: [String] = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
-                                             "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
+    @State private var sections: [String] = ["hero", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
+                                             "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "products", "footer"]
+    @State private var hiddenSections: Set<String> = ["products"]
     // Flash sale
     @State private var flashEnabled = false
     @State private var flashProductId = 0
@@ -442,24 +443,34 @@ struct StoreConfigEditor: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
-            // Sắp xếp thứ tự các mục hiển thị ngoài trang cửa hàng (kéo để đổi vị trí)
+            // Sắp xếp thứ tự + ẩn/hiện các mục hiển thị ngoài trang cửa hàng
             Section {
                 ForEach(sections, id: \.self) { key in
+                    let hidden = hiddenSections.contains(key)
                     HStack {
                         Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
                         Text(sectionLabel(key))
+                            .foregroundStyle(hidden ? .secondary : .primary)
+                            .strikethrough(hidden)
+                        Spacer()
+                        Button {
+                            if hidden { hiddenSections.remove(key) } else { hiddenSections.insert(key) }
+                        } label: {
+                            Image(systemName: hidden ? "eye.slash" : "eye")
+                                .foregroundStyle(hidden ? .secondary : store.accentColor)
+                        }.buttonStyle(.borderless)
                     }
                 }
                 .onMove { from, to in sections.move(fromOffsets: from, toOffset: to) }
             } header: {
                 HStack {
-                    Text(store.t("Sắp xếp bố cục trang", "Arrange page layout"))
+                    Text(store.t("Sắp xếp & ẩn/hiện bố cục", "Arrange & show/hide layout"))
                     Spacer()
                     EditButton().font(.caption)
                 }
             } footer: {
-                Text(store.t("Kéo biểu tượng ☰ để đổi vị trí các mục (Danh mục, Sản phẩm, Tải về, Liên hệ & Cộng đồng...). Thứ tự này áp dụng cho trang cửa hàng khách thấy.",
-                             "Drag the ☰ icon to reorder sections (Categories, Products, Downloads, Contact & Community...). This order applies to the customer storefront."))
+                Text(store.t("Kéo ☰ để đổi vị trí; bấm 👁 để ẩn/hiện từng mục cho gọn. Thứ tự & ẩn/hiện áp dụng cho trang khách thấy.",
+                             "Drag ☰ to reorder; tap 👁 to show/hide each section. Order & visibility apply to the customer storefront."))
                     .font(.caption2)
             }
 
@@ -585,6 +596,9 @@ struct StoreConfigEditor: View {
                 }
                 sections = merged
             }
+            if let hidden = c.sectionHidden {
+                hiddenSections = Set(hidden.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+            }
             flashEnabled = c.flashEnabled ?? false
             flashProductId = c.flashProductId ?? 0
             flashDiscount = c.flashDiscount ?? 0
@@ -616,6 +630,7 @@ struct StoreConfigEditor: View {
                 bgType: bgType, bgUrl: bgUrl,
                 slogan: slogan, sloganFont: sloganFont,
                 sectionOrder: sections.joined(separator: ","),
+                sectionHidden: hiddenSections.joined(separator: ","),
                 cardSize: cardSize, cardScale: cardScale,
                 flashEnabled: flashEnabled, flashProductId: flashProductId,
                 flashEnd: Int(flashEnd.timeIntervalSince1970), flashDiscount: flashDiscount,

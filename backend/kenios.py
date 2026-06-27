@@ -4278,8 +4278,10 @@ def store_config() -> dict[str, Any]:
         "slogan": get_setting("store_slogan", "Cửa hàng sản phẩm số · key · tải về"),
         "slogan_font": get_setting("store_slogan_font", "rounded"),
         "section_order": get_setting("store_section_order",
-                                     "hero,trust,steps,flash,leaderboard,categories,gamecat,products,"
-                                     "transactions,topups,downloads,contacts,wishlist,recent,footer"),
+                                     "hero,categories,gamecat,flash,trust,steps,leaderboard,"
+                                     "transactions,topups,downloads,contacts,wishlist,recent,products,footer"),
+        # Các mục bị ẩn (admin tắt cho gọn). Mặc định ẩn "products" vì đã có lưới "gamecat".
+        "section_hidden": get_setting("store_section_hidden", "products"),
         "card_size": get_setting("store_card_size", "medium"),   # small | medium | large
         "card_scale": get_setting("store_card_scale", "1.0"),    # hệ số kéo kích cỡ 0.6–1.6
         # Flash sale (đếm ngược) — admin bật + chọn sản phẩm + thời điểm kết thúc + % giảm
@@ -4727,6 +4729,7 @@ class StoreConfigIn(BaseModel):
     slogan: Optional[str] = None
     slogan_font: Optional[str] = None
     section_order: Optional[str] = None
+    section_hidden: Optional[str] = None
     card_size: Optional[str] = None
     card_scale: Optional[float] = None
     flash_enabled: Optional[bool] = None
@@ -4765,6 +4768,7 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.slogan is not None: set_setting("store_slogan", b.slogan.strip()[:120])
     if b.slogan_font is not None: set_setting("store_slogan_font", b.slogan_font.strip()[:20])
     if b.section_order is not None: set_setting("store_section_order", b.section_order.strip()[:200])
+    if b.section_hidden is not None: set_setting("store_section_hidden", b.section_hidden.strip()[:200])
     if b.card_size is not None:
         set_setting("store_card_size", b.card_size if b.card_size in ("small", "medium", "large") else "medium")
     if b.card_scale is not None:
