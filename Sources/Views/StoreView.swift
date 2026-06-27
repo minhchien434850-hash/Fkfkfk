@@ -148,6 +148,7 @@ struct StoreView: View {
     @State private var contacts: StoreContacts?
     @State private var search = ""
     @State private var allProducts: [StoreProduct] = []
+    @State private var productsByCategory: [Int: [StoreProduct]] = [:]
     @State private var loadingProducts = false
     @AppStorage("storeWishlist") private var wishlistRaw: String = ""
     @AppStorage("storeRecentViews") private var recentViewsRaw: String = ""
@@ -242,7 +243,7 @@ struct StoreView: View {
 
     // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
     private var orderedSections: [String] {
-        let all = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "products",
+        let all = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
                    "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
         guard let raw = (config?.sectionOrder ?? effectiveConfig?.sectionOrder), !raw.isEmpty else { return all }
         let parts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -299,6 +300,8 @@ struct StoreView: View {
             if let s = showcase, !s.recentTopups.isEmpty { topupsSection(s.recentTopups) }
         case "hero":
             heroSection
+        case "gamecat":
+            if !productsByCategory.isEmpty { gameCatSection }
         case "footer":
             footerSection
         default:
@@ -780,6 +783,87 @@ struct StoreView: View {
         .shadow(color: .black.opacity(0.06), radius: 3, x: 0, y: 2)
     }
 
+    // "Danh mục Game": gom sản phẩm theo từng danh mục thành lưới 2 cột (như mẫu)
+    private var gameCatSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(store.t("Danh mục Game", "Game categories"), systemImage: "gamecontroller.fill").font(.headline)
+            ForEach(filteredCategories) { cat in
+                if let prods = productsByCategory[cat.id], !prods.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            if let m = cat.media.first, m.type != "video", let url = URL(string: m.url) {
+                                AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                placeholder: { Color(.tertiarySystemBackground) }
+                                    .frame(width: 38, height: 38).clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                Image(systemName: "folder.fill").foregroundStyle(Theme.gold)
+                                    .frame(width: 38, height: 38)
+                                    .background(Color(.tertiarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(cat.name).font(.subheadline.bold()).lineLimit(1)
+                                Text("\(prods.count) " + store.t("sản phẩm", "products"))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            NavigationLink { StoreFolderListView(category: cat) } label: {
+                                HStack(spacing: 2) {
+                                    Text(store.t("Xem thêm", "See all")).font(.caption.bold())
+                                    Image(systemName: "chevron.right").font(.caption2)
+                                }.foregroundStyle(Theme.accent)
+                            }
+                        }
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                            ForEach(prods.prefix(6)) { p in
+                                NavigationLink { StoreProductDetailView(productId: p.id) } label: {
+                                    productGridCard(p)
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground).opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
+        }
+    }
+
+    // Thẻ sản phẩm co giãn cho lưới 2 cột (badge ACTIVE + khoảng giá + Mua ngay)
+    private func productGridCard(_ p: StoreProduct) -> some View {
+        let inStock = p.availableKeys > 0
+        return VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                StoreThumb(media: p.media, height: 96)
+                HStack(spacing: 3) {
+                    Circle().fill(inStock ? Color.green : Color.red).frame(width: 5, height: 5)
+                    Text(inStock ? "ACTIVE" : store.t("Hết hàng", "Sold out"))
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(.ultraThinMaterial).clipShape(Capsule()).padding(5)
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(p.name).font(.caption.bold()).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !p.prices.isEmpty {
+                    Text(priceRange(p)).font(.caption2.bold()).foregroundStyle(Theme.accent)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "cart.fill").font(.system(size: 10))
+                    Text(store.t("Mua ngay", "Buy now")).font(.caption2.bold())
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 7)
+                .background(inStock ? Theme.accent : Color.gray).foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .padding(8)
+        }
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
     // Hero đầu trang: slogan lớn + nút "Mua ngay" (như mẫu)
     private var heroSection: some View {
         let big = {
@@ -990,7 +1074,8 @@ struct StoreView: View {
         loadingProducts = true
         var seen = Set<Int>()
         var products: [StoreProduct] = []
-        await withTaskGroup(of: [StoreProduct].self) { group in
+        var grouped: [Int: [StoreProduct]] = [:]
+        await withTaskGroup(of: (Int, [StoreProduct]).self) { group in
             for cat in categories {
                 group.addTask {
                     let folders = (try? await self.store.api.storeFolders(categoryId: cat.id)) ?? []
@@ -999,10 +1084,11 @@ struct StoreView: View {
                         let prods = (try? await self.store.api.storeProducts(folderId: folder.id)) ?? []
                         catProducts.append(contentsOf: prods)
                     }
-                    return catProducts
+                    return (cat.id, catProducts)
                 }
             }
-            for await batch in group {
+            for await (catId, batch) in group {
+                grouped[catId] = batch
                 for p in batch where !seen.contains(p.id) {
                     seen.insert(p.id)
                     products.append(p)
@@ -1010,6 +1096,7 @@ struct StoreView: View {
             }
         }
         allProducts = products
+        productsByCategory = grouped
         loadingProducts = false
     }
 }
