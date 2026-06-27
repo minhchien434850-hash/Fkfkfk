@@ -90,10 +90,11 @@ struct StoreBackground: View {
     }
 }
 
-// Video nền lặp vô hạn, tắt tiếng (chạy sâu dưới nền)
+// Video nền lặp vô hạn, tắt tiếng — tự động phát lại khi app lên foreground
 final class LoopingPlayerUIView: UIView {
     private var queuePlayer: AVQueuePlayer?
     private var looper: AVPlayerLooper?
+    private var activeObserver: NSObjectProtocol?
     override class var layerClass: AnyClass { AVPlayerLayer.self }
     private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 
@@ -102,12 +103,24 @@ final class LoopingPlayerUIView: UIView {
         let item = AVPlayerItem(url: url)
         let p = AVQueuePlayer(playerItem: item)
         p.isMuted = true
-        p.actionAtItemEnd = .none
         looper = AVPlayerLooper(player: p, templateItem: item)
         playerLayer.player = p
         playerLayer.videoGravity = .resizeAspectFill
         p.play()
         queuePlayer = p
+        // Tự phát lại khi app quay lại foreground (tránh video dừng khi mở lại)
+        activeObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil, queue: .main) { [weak p] _ in p?.play() }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { queuePlayer?.play() }
+    }
+
+    deinit {
+        if let obs = activeObserver { NotificationCenter.default.removeObserver(obs) }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
 }

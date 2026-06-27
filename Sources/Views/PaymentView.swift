@@ -10,6 +10,7 @@ struct PaymentView: View {
     @State private var error: String?
     @State private var loading = false
     @State private var checking = false
+    @State private var cancelling: Int?
     @State private var info: String?
 
     var body: some View {
@@ -111,7 +112,22 @@ struct PaymentView: View {
                                     Text(h.ref ?? "").font(.caption2).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                statusBadge(h.status)
+                                if h.status == "pending" {
+                                    HStack(spacing: 8) {
+                                        statusBadge(h.status)
+                                        if cancelling == h.id {
+                                            ProgressView().scaleEffect(0.8)
+                                        } else {
+                                            Button(store.t("Huỷ đơn", "Cancel"), role: .destructive) {
+                                                Task { await cancelOrder(h) }
+                                            }
+                                            .font(.caption2.bold())
+                                            .buttonStyle(.borderless)
+                                        }
+                                    }
+                                } else {
+                                    statusBadge(h.status)
+                                }
                             }
                         }
                     }
@@ -166,5 +182,15 @@ struct PaymentView: View {
                            "Payment not received yet. Please wait and check again.")
         }
         checking = false
+    }
+
+    private func cancelOrder(_ h: PaymentRecord) async {
+        cancelling = h.id; error = nil
+        do {
+            _ = try await store.api.cancelPayment(id: h.id)
+            history = try await store.api.paymentHistory()
+            if created != nil { created = nil }
+        } catch { self.error = error.localizedDescription }
+        cancelling = nil
     }
 }

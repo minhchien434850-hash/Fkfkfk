@@ -6,6 +6,7 @@ struct StoreWalletView: View {
     @Environment(\.dismiss) var dismiss
 
     @State private var wallet: StoreWallet?
+    @State private var config: StoreAppConfig?
     @State private var amountText = ""
     @State private var topup: StoreTopupResponse?
     @State private var creating = false
@@ -19,6 +20,28 @@ struct StoreWalletView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let promoUrl = config?.promoImageUrl, !promoUrl.isEmpty, let url = URL(string: promoUrl) {
+                    Section(store.t("Khuyến mãi", "Promotions")) {
+                        if let pid = config?.promoProductId, pid > 0 {
+                            NavigationLink { StoreProductDetailView(productId: pid) } label: {
+                                AsyncImage(url: url) { phase in
+                                    if case .success(let img) = phase { img.resizable().scaledToFit() }
+                                    else { ProgressView().frame(maxWidth: .infinity) }
+                                }
+                                .frame(maxHeight: 120).frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        } else {
+                            AsyncImage(url: url) { phase in
+                                if case .success(let img) = phase { img.resizable().scaledToFit() }
+                                else { ProgressView().frame(maxWidth: .infinity) }
+                            }
+                            .frame(maxHeight: 120).frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+
                 Section(store.t("Số dư ví", "Wallet balance")) {
                     HStack {
                         Image(systemName: "wallet.pass.fill").foregroundStyle(Theme.gold)
@@ -133,7 +156,10 @@ struct StoreWalletView: View {
     }
 
     private func reload() async {
-        wallet = try? await store.api.storeWallet()
+        async let walletTask = store.api.storeWallet()
+        async let cfgTask = store.api.storeConfig()
+        wallet = try? await walletTask
+        config = try? await cfgTask
     }
     private func createTopup() async {
         guard let a = amount else { return }

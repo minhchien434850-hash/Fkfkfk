@@ -37,7 +37,7 @@ func kFormatVND(_ amount: Int) -> String {
     return (f.string(from: NSNumber(value: amount)) ?? "\(amount)") + "đ"
 }
 
-// Carousel ảnh/video (link) — tối đa 5, hỗ trợ GIF động
+// Carousel ảnh/video (link) — tối đa 5, hỗ trợ GIF động + video lặp vô hạn
 struct StoreMediaCarousel: View {
     let media: [StoreMedia]
     var height: CGFloat = 200
@@ -52,7 +52,7 @@ struct StoreMediaCarousel: View {
             TabView {
                 ForEach(Array(media.prefix(5).enumerated()), id: \.offset) { _, m in
                     if m.type == "video", let url = URL(string: m.url) {
-                        VideoPlayer(player: AVPlayer(url: url))
+                        LoopingVideoBackground(url: url)
                             .frame(height: height)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                     } else if let url = URL(string: m.url) {
@@ -87,7 +87,7 @@ private func storeImage(url: URL, height: CGFloat) -> some View {
     }
 }
 
-// Ảnh thu nhỏ TĨNH (không vuốt) — dùng cho thẻ trong lưới để không nuốt thao tác chạm
+// Ảnh/video thu nhỏ — hỗ trợ video lặp vô hạn tự động
 struct StoreThumb: View {
     let media: [StoreMedia]
     var height: CGFloat = 120
@@ -96,24 +96,25 @@ struct StoreThumb: View {
 
     var body: some View {
         ZStack {
-            if let m = first, m.type != "video", let url = URL(string: m.url) {
-                if m.url.lowercased().contains(".gif") {
-                    GIFWebView(url: url)
-                } else {
-                    AsyncImage(url: url) { img in
-                        img.resizable().scaledToFill()
-                    } placeholder: {
-                        Color(.tertiarySystemBackground)
+            if let m = first {
+                if m.type == "video", let url = URL(string: m.url) {
+                    LoopingVideoBackground(url: url)
+                } else if let url = URL(string: m.url) {
+                    if m.url.lowercased().contains(".gif") {
+                        GIFWebView(url: url)
+                    } else {
+                        AsyncImage(url: url) { img in
+                            img.resizable().scaledToFill()
+                        } placeholder: {
+                            Color(.tertiarySystemBackground)
+                        }
                     }
                 }
-            } else if first?.type == "video" {
-                Color.black.opacity(0.85)
-                Image(systemName: "play.circle.fill").font(.largeTitle).foregroundStyle(.white)
             } else {
                 Color(.tertiarySystemBackground)
                 Image(systemName: "photo").font(.title).foregroundStyle(.secondary)
             }
-            if (media.count) > 1 {
+            if media.count > 1 {
                 VStack {
                     HStack {
                         Spacer()
@@ -679,40 +680,64 @@ struct StoreView: View {
 
     // Thanh ví: bấm để nạp tiền / xem số dư
     private var walletBar: some View {
-        Button { showWallet = true } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle().fill(Color.white.opacity(0.2)).frame(width: 44, height: 44)
-                    Image(systemName: "wallet.pass.fill").font(.title3.bold()).foregroundStyle(.white)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(store.t("Ví cửa hàng", "Store wallet"))
-                            .font(.subheadline.bold()).foregroundStyle(.white)
-                        if let pct = config?.topupBonusPercent, pct > 0 {
-                            Text("KM +\(pct)%").font(.caption2.bold())
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.white.opacity(0.2)).foregroundStyle(.white)
-                                .clipShape(Capsule())
-                        }
+        VStack(spacing: 10) {
+            Button { showWallet = true } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle().fill(Color.white.opacity(0.2)).frame(width: 44, height: 44)
+                        Image(systemName: "wallet.pass.fill").font(.title3.bold()).foregroundStyle(.white)
                     }
-                    Text(store.t("Nhấn để nạp tiền & xem số dư", "Tap to top up & view balance"))
-                        .font(.caption2).foregroundStyle(.white.opacity(0.75))
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(store.t("Ví cửa hàng", "Store wallet"))
+                                .font(.subheadline.bold()).foregroundStyle(.white)
+                            if let pct = config?.topupBonusPercent, pct > 0 {
+                                Text("KM +\(pct)%").font(.caption2.bold())
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.white.opacity(0.2)).foregroundStyle(.white)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        Text(store.t("Nhấn để nạp tiền & xem số dư", "Tap to top up & view balance"))
+                            .font(.caption2).foregroundStyle(.white.opacity(0.75))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.bold()).foregroundStyle(.white.opacity(0.8))
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.subheadline.bold()).foregroundStyle(.white.opacity(0.8))
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .background(
+                    LinearGradient(
+                        colors: [Theme.accent, Theme.accent.opacity(0.75), Color.purple.opacity(0.8)],
+                        startPoint: .leading, endPoint: .trailing)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: Theme.accent.opacity(0.35), radius: 8, x: 0, y: 4)
             }
-            .padding(.horizontal, 16).padding(.vertical, 14)
-            .background(
-                LinearGradient(
-                    colors: [Theme.accent, Theme.accent.opacity(0.75), Color.purple.opacity(0.8)],
-                    startPoint: .leading, endPoint: .trailing)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(color: Theme.accent.opacity(0.35), radius: 8, x: 0, y: 4)
+            .buttonStyle(.plain)
+
+            if let promoUrl = config?.promoImageUrl, !promoUrl.isEmpty, let url = URL(string: promoUrl) {
+                if let pid = config?.promoProductId, pid > 0 {
+                    NavigationLink { StoreProductDetailView(productId: pid) } label: {
+                        AsyncImage(url: url) { phase in
+                            if case .success(let img) = phase { img.resizable().scaledToFill() }
+                            else { Color(.secondarySystemBackground) }
+                        }
+                        .frame(maxHeight: 80).frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    AsyncImage(url: url) { phase in
+                        if case .success(let img) = phase { img.resizable().scaledToFill() }
+                        else { Color.clear }
+                    }
+                    .frame(maxHeight: 80).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
         }
-        .buttonStyle(.plain)
     }
 
     private func sectionHeader(title: String, icon: String, color: Color = .primary) -> some View {
@@ -739,6 +764,11 @@ struct StoreView: View {
 
     private func downloadCard(_ d: StoreDownloadItem) -> some View {
         let url = !d.downloadUrl.isEmpty ? URL(string: d.downloadUrl) : store.api.storeDownloadURL(productId: d.id)
+        let filename: String? = {
+            guard let u = url else { return nil }
+            let lc = (u.lastPathComponent.removingPercentEncoding ?? u.lastPathComponent)
+            return lc.contains(".") && lc.count > 3 ? lc : nil
+        }()
         return VStack(alignment: .leading, spacing: 0) {
             StoreThumb(media: d.media, height: 90)
             VStack(alignment: .leading, spacing: 5) {
@@ -747,10 +777,16 @@ struct StoreView: View {
                     Link(destination: url) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle.fill")
-                            Text(store.t("Tải về", "Download"))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(store.t("Tải", "Download") + " " + d.name)
+                                    .font(.caption2.bold()).lineLimit(1)
+                                if let fn = filename {
+                                    Text(fn).font(.system(size: 8, design: .monospaced))
+                                        .foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                                }
+                            }
                         }
-                        .font(.caption2.bold())
-                        .frame(maxWidth: .infinity).padding(.vertical, 7)
+                        .frame(maxWidth: .infinity).padding(.vertical, 7).padding(.horizontal, 4)
                         .background(
                             LinearGradient(
                                 colors: [Theme.accent, Theme.accent.opacity(0.7)],
@@ -762,7 +798,7 @@ struct StoreView: View {
             }
             .padding(8)
         }
-        .frame(width: 150)
+        .frame(width: 160)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
@@ -797,9 +833,9 @@ struct StoreView: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(displayProducts) { product in
+                    ForEach(Array(displayProducts.enumerated()), id: \.element.id) { idx, product in
                         NavigationLink { StoreProductDetailView(productId: product.id) } label: {
-                            allProductCard(product)
+                            allProductCard(product, index: idx)
                         }
                         .buttonStyle(.plain)
                     }
@@ -817,7 +853,7 @@ struct StoreView: View {
         return lo == hi ? kFormatVND(lo) : "\(kFormatVND(lo)) ~ \(kFormatVND(hi))"
     }
 
-    private func allProductCard(_ p: StoreProduct) -> some View {
+    private func allProductCard(_ p: StoreProduct, index: Int = 0) -> some View {
         let inStock = p.availableKeys > 0
         return VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
@@ -844,10 +880,15 @@ struct StoreView: View {
                 .padding(5)
             }
             VStack(alignment: .leading, spacing: 5) {
-                Text(p.name)
-                    .font(.caption2.bold())
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 4) {
+                    Text(String(format: "#%02d", index + 1))
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Theme.accent.opacity(0.7))
+                    Text(p.name)
+                        .font(.caption2.bold())
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 if !p.prices.isEmpty {
                     Text(priceRange(p))
                         .font(.caption2.bold())
@@ -1045,9 +1086,9 @@ struct StoreView: View {
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(wishlistProducts) { product in
+                    ForEach(Array(wishlistProducts.enumerated()), id: \.element.id) { idx, product in
                         NavigationLink { StoreProductDetailView(productId: product.id) } label: {
-                            allProductCard(product)
+                            allProductCard(product, index: idx)
                         }
                         .buttonStyle(.plain)
                     }
@@ -1062,9 +1103,9 @@ struct StoreView: View {
             sectionHeader(title: store.t("Đã xem gần đây", "Recently viewed"), icon: "clock.arrow.circlepath")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(recentProducts) { product in
+                    ForEach(Array(recentProducts.enumerated()), id: \.element.id) { idx, product in
                         NavigationLink { StoreProductDetailView(productId: product.id) } label: {
-                            allProductCard(product)
+                            allProductCard(product, index: idx)
                         }
                         .buttonStyle(.plain)
                     }

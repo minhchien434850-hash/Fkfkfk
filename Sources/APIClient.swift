@@ -428,7 +428,9 @@ struct APIClient {
                              heroEffect: String? = nil, heroFont: String? = nil,
                              heroAnim: String? = nil,
                              sloganEffect: String? = nil,
-                             sloganAnim: String? = nil) async throws -> MessageResponse {
+                             sloganAnim: String? = nil,
+                             promoImageUrl: String? = nil,
+                             promoProductId: Int? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
@@ -454,6 +456,8 @@ struct APIClient {
         if let heroAnim { body["hero_anim"] = heroAnim }
         if let sloganEffect { body["slogan_effect"] = sloganEffect }
         if let sloganAnim { body["slogan_anim"] = sloganAnim }
+        body["promo_image_url"] = promoImageUrl ?? ""
+        if let promoProductId { body["promo_product_id"] = promoProductId }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
     // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)
@@ -743,6 +747,9 @@ struct APIClient {
     }
     func paymentHistory() async throws -> [PaymentRecord] {
         try decode(try await send("/payment/history"))
+    }
+    func cancelPayment(id: Int) async throws -> MessageResponse {
+        try decode(try await send("/payment/cancel", method: "POST", json: ["id": id]))
     }
 
     // ---- Prompt mẫu ----

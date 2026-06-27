@@ -137,7 +137,7 @@ struct StoreAdminView: View {
                     NavigationLink {
                         StoreTopupBonusEditor()
                     } label: {
-                        Label(store.t("Khuyến mãi nạp ví (%)", "Wallet top-up bonus (%)"), systemImage: "percent")
+                        Label(store.t("Khuyến mãi (%)", "Promotions (%)"), systemImage: "percent")
                     }
                     NavigationLink {
                         StoreInventoryView()
@@ -301,6 +301,8 @@ struct StoreConfigEditor: View {
     @State private var heroAnim = "none"
     @State private var sloganEffect = "none"
     @State private var sloganAnim = "none"
+    @State private var promoImageUrl = ""
+    @State private var promoProductId = 0
     @State private var message: String?
     @State private var isError = false
     @AppStorage("storeCfgName") private var cfgName: String = ""
@@ -512,6 +514,32 @@ struct StoreConfigEditor: View {
                     .font(.caption2)
             }
 
+            Section {
+                TextField(store.t("Link ảnh khuyến mãi (PNG/GIF/JPEG)", "Promo image link (PNG/GIF/JPEG)"), text: $promoImageUrl)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                HStack {
+                    Text(store.t("ID sản phẩm liên kết", "Linked product ID"))
+                    Spacer()
+                    TextField("0", value: $promoProductId, format: .number)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 90)
+                }
+                if !promoImageUrl.isEmpty, let url = URL(string: promoImageUrl) {
+                    AsyncImage(url: url) { phase in
+                        if case .success(let img) = phase { img.resizable().scaledToFit() }
+                        else if case .failure = phase { Color(.tertiarySystemBackground) }
+                        else { ProgressView() }
+                    }
+                    .frame(maxHeight: 100).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            } header: {
+                Text(store.t("Khuyến mãi (ảnh trong ví)", "Promo banner (shown in wallet)"))
+            } footer: {
+                Text(store.t("Ảnh này hiển thị trong phần Ví, liên kết đến sản phẩm khi bấm vào.",
+                             "This image appears in the Wallet section and links to the product when tapped."))
+                    .font(.caption2)
+            }
+
             Section { Button(store.t("Lưu giao diện", "Save appearance")) { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
@@ -554,6 +582,8 @@ struct StoreConfigEditor: View {
             heroAnim = c.heroAnim ?? "none"
             sloganEffect = c.sloganEffect ?? "none"
             sloganAnim = c.sloganAnim ?? "none"
+            promoImageUrl = c.promoImageUrl ?? ""
+            promoProductId = c.promoProductId ?? 0
         }
     }
     private func save() async {
@@ -572,7 +602,9 @@ struct StoreConfigEditor: View {
                 flashTitle: flashTitle,
                 heroTitle: heroTitle, heroSubtitle: heroSubtitle,
                 heroEffect: heroEffect, heroFont: heroFont, heroAnim: heroAnim,
-                sloganEffect: sloganEffect, sloganAnim: sloganAnim)
+                sloganEffect: sloganEffect, sloganAnim: sloganAnim,
+                promoImageUrl: promoImageUrl.isEmpty ? nil : promoImageUrl,
+                promoProductId: promoProductId > 0 ? promoProductId : nil)
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message
@@ -2033,7 +2065,7 @@ struct StoreTopupBonusEditor: View {
             Section { Button(store.t("Lưu", "Save")) { Task { await save() } }.disabled(percent == nil) }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
-        .navigationTitle(store.t("Khuyến mãi nạp ví", "Top-up bonus"))
+        .navigationTitle(store.t("Khuyến mãi", "Promotions"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if let r = try? await store.api.adminGetTopupBonus() { percentText = "\(r.percent)" }

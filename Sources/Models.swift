@@ -276,6 +276,9 @@ struct StoreAppConfig: Decodable, Hashable {
     // Slogan / dòng giới thiệu — thêm hiệu ứng màu & chuyển động
     var sloganEffect: String? = nil  // rainbow|gradient|gold|neon|glow|accent|none
     var sloganAnim: String? = nil    // shimmer|wave|pulse|none
+    // Khuyến mãi (banner ảnh trong phần ví nạp tiền)
+    var promoImageUrl: String? = nil
+    var promoProductId: Int? = nil
 }
 
 // ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----
