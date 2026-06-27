@@ -142,13 +142,40 @@ final class AppStore: ObservableObject {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
     }
 
-    /// Gửi local notification khi có sản phẩm mới
+    /// Gửi local notification thông thường
     func postLocalNotification(title: String, body: String) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         let req = UNNotificationRequest(identifier: UUID().uuidString,
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
+
+    /// Thông báo sản phẩm mới — hiện banner + đọc giọng nói khi app đang mở
+    func postProductNotification(title: String = "🛒 KENIOS Cửa hàng", body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "KENIOS_PRODUCT"
+        let req = UNNotificationRequest(identifier: "prod-\(UUID().uuidString)",
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
+
+    /// Thông báo bảo trì — hiện banner + đọc giọng nói khi app đang mở
+    func postMaintenanceNotification(message: String) {
+        let body = message.isEmpty
+            ? "Ứng dụng KENIOS đang được nâng cấp phiên bản. Vui lòng chờ trong giây lát."
+            : message
+        let content = UNMutableNotificationContent()
+        content.title = "🔧 KENIOS - Thông báo bảo trì"
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "KENIOS_MAINTENANCE"
+        let req = UNNotificationRequest(identifier: "maint-\(UUID().uuidString)",
                                         content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
     }
@@ -199,8 +226,13 @@ final class AppStore: ObservableObject {
             d.set(publicId, forKey: "publicId")
         }
         if let st = try? await api.appStatus() {
+            let wasOff = !maintenance
             maintenance = st.maintenance
             maintenanceMessage = st.message
+            // Phát thông báo + giọng khi bảo trì vừa bật (chỉ với người dùng thường)
+            if st.maintenance && wasOff && !isAdmin {
+                postMaintenanceNotification(message: st.message)
+            }
         }
     }
 

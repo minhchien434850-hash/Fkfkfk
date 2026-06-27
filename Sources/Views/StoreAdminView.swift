@@ -526,12 +526,18 @@ struct StoreProductEditor: View {
     private func save() async {
         message = nil
         do {
+            let isNew = product == nil
             let r = try await store.api.adminStoreSaveProduct(
                 id: productId, folderId: folderId, name: name, description: desc,
                 media: editMediaToPayload(media), downloadUrl: downloadUrl,
                 downloadFileId: downloadFileId, kind: kind)
             savedId = r.id ?? savedId
             isError = false; message = "Đã lưu sản phẩm."
+            // Thông báo đến người dùng khi có sản phẩm mới (không phải chỉnh sửa)
+            if isNew {
+                store.postProductNotification(
+                    body: "Sản phẩm mới vừa được thêm vào cửa hàng: \(name)")
+            }
             onDone()
         } catch { isError = true; message = error.localizedDescription }
     }

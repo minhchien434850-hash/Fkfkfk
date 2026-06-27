@@ -1,8 +1,48 @@
 import SwiftUI
 import UserNotifications
+import AVFoundation
 
+// ============================ App Delegate — thông báo nền ============================
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        // Xin quyền thông báo ngay khi khởi động (iOS chỉ hỏi lần đầu)
+        UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .badge, .sound]) { _, _ in }
+        return true
+    }
+
+    // Hiển thị banner + âm thanh ngay cả khi app đang mở ở foreground
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler handler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // Luôn hiển thị banner + huy hiệu + âm thanh dù app đang mở
+        handler([.banner, .badge, .sound])
+
+        // Đọc thông báo bằng giọng nói khi app đang chạy
+        let cat = notification.request.content.categoryIdentifier
+        if cat == "KENIOS_PRODUCT" || cat == "KENIOS_MAINTENANCE" {
+            let text = notification.request.content.body
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                WelcomeVoice.shared.testSpeak(text: text, voiceId: "", rate: 0.48)
+            }
+        }
+    }
+
+    // Xử lý khi người dùng bấm vào thông báo
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler handler: @escaping () -> Void) {
+        handler()
+    }
+}
+
+// ============================ App Entry Point ============================
 @main
 struct KENIOSApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var store = AppStore()
 
     init() {

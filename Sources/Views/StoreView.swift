@@ -273,11 +273,10 @@ struct StoreView: View {
                     try? await Task.sleep(nanoseconds: 30_000_000_000)
                     let oldCount = categories.count
                     await reload()
-                    // Gửi thông báo local nếu có danh mục mới
+                    // Gửi thông báo nếu có danh mục/sản phẩm mới
                     if categories.count > oldCount && oldCount > 0 {
-                        store.postLocalNotification(
-                            title: "Cửa hàng cập nhật",
-                            body: "Có \(categories.count - oldCount) danh mục mới trong cửa hàng!")
+                        store.postProductNotification(
+                            body: "KENIOS vừa cập nhật \(categories.count - oldCount) danh mục sản phẩm mới!")
                     }
                     _ = prevCatCount  // suppress warning
                 }
