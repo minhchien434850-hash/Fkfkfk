@@ -71,6 +71,7 @@ enum HubDest: String, Identifiable {
 struct ExploreHubView: View {
     @EnvironmentObject var store: AppStore
     @State private var dest: HubDest?
+    @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
         var a: [HubDest] = [.library, .read, .fun, .games, .tools, .github, .mediaConverter, .messenger, .settings]
@@ -124,7 +125,7 @@ struct ExploreHubView: View {
         switch d {
         case .library:        LibraryView()
         case .read:           TTSView()
-        case .fun:            MediaWebView()
+        case .fun:            MediaWebView(model: browserModel)
         case .games:          GameZoneView()
         case .tools:          CreatorToolsView()
         case .github:         GitHubView()
@@ -339,6 +340,13 @@ struct MediaConverterView: View {
                 errorMsg = "Không đọc được file đã chọn."; return
             }
             let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
+            // Giới hạn kích thước: ảnh 30MB, video 300MB
+            let maxBytes = isVideo ? 300 * 1024 * 1024 : 30 * 1024 * 1024
+            if data.count > maxBytes {
+                let mb = data.count / (1024 * 1024)
+                let limit = isVideo ? "300MB" : "30MB"
+                errorMsg = "File quá lớn (\(mb)MB). Giới hạn tối đa \(limit) cho \(isVideo ? "video" : "ảnh")."; return
+            }
             let mime = isVideo ? "video/mp4" : "image/jpeg"
             let b64 = data.base64EncodedString()
             let url = try await store.api.mediaUpload(dataBase64: b64, mime: mime,

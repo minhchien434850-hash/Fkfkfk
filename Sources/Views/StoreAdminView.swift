@@ -106,6 +106,11 @@ struct StoreAdminView: View {
                         Label("Sao lưu KEY / ACC đã bán", systemImage: "externaldrive.badge.checkmark")
                     }
                     NavigationLink {
+                        StoreStructureBackupView()
+                    } label: {
+                        Label("Backup toàn bộ cửa hàng (JSON)", systemImage: "arrow.down.doc.fill")
+                    }
+                    NavigationLink {
                         AdminWalletAdjustView()
                     } label: {
                         Label("Nạp / Trừ ví khách hàng", systemImage: "dollarsign.arrow.circlepath")
@@ -932,6 +937,133 @@ struct StoreKeysBackupView: View {
     private func timeText(_ ts: Int) -> String {
         let f = DateFormatter(); f.dateFormat = "dd/MM HH:mm"
         return f.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
+    }
+}
+
+// ======================== Backup toàn bộ cấu trúc cửa hàng (JSON) ========================
+struct StoreStructureBackupView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var loading = false
+    @State private var backupURL: URL?
+    @State private var error: String?
+    @State private var progress = ""
+
+    var body: some View {
+        Form {
+            Section {
+                KHeroHeader(icon: "arrow.down.doc.fill",
+                            title: "Backup cửa hàng",
+                            subtitle: "Xuất toàn bộ danh mục · thư mục · sản phẩm ra file JSON")
+                    .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            }
+
+            Section("Xuất dữ liệu") {
+                Button {
+                    Task { await createBackup() }
+                } label: {
+                    HStack {
+                        if loading { ProgressView().padding(.trailing, 4) }
+                        Label(loading ? "Đang xuất..." : "Tạo file JSON backup",
+                              systemImage: "arrow.down.doc.fill")
+                    }
+                }
+                .disabled(loading)
+                if !progress.isEmpty {
+                    Text(progress).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+
+            if let url = backupURL {
+                Section("Sẵn sàng lưu") {
+                    ShareLink(item: url, preview: SharePreview(url.lastPathComponent,
+                                                               icon: Image(systemName: "doc.badge.arrow.up"))) {
+                        Label("Chia sẻ / Lưu file về máy", systemImage: "square.and.arrow.up")
+                            .foregroundStyle(store.accentColor)
+                    }
+                    Text("File JSON chứa toàn bộ danh mục, thư mục con, sản phẩm và giá. KEY/ACC đã bán → mục \"Sao lưu KEY/ACC\".")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+
+            if let error {
+                Section { Text(error).foregroundStyle(.red).font(.caption) }
+            }
+
+            Section("Hướng dẫn") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Bấm 'Tạo file JSON backup' → app tải toàn bộ dữ liệu từ máy chủ", systemImage: "1.circle.fill")
+                    Label("Bấm 'Lưu file về máy' → chọn vị trí lưu hoặc gửi lên Google Drive/iCloud", systemImage: "2.circle.fill")
+                    Label("Khi chuyển server mới: dùng file để tham khảo và nhập lại cấu trúc", systemImage: "3.circle.fill")
+                    Label("KEY/ACC đã bán xuất riêng ở mục 'Sao lưu KEY/ACC đã bán'", systemImage: "info.circle.fill")
+                        .foregroundStyle(.orange)
+                }
+                .font(.caption)
+            }
+        }
+        .navigationTitle("Backup cửa hàng")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func createBackup() async {
+        loading = true; error = nil; backupURL = nil
+        var out: [String: Any] = [
+            "version": "1.0",
+            "exportedAt": ISO8601DateFormatter().string(from: Date()),
+            "appName": "KENIOS Store Backup"
+        ]
+
+        progress = "Đang tải cấu hình..."
+        if let cfg = try? await store.api.storeConfig() {
+            out["config"] = [
+                "logoName": cfg.logoName, "logoUrl": cfg.logoUrl,
+                "bannerType": cfg.bannerType, "bannerUrl": cfg.bannerUrl
+            ]
+        }
+
+        progress = "Đang tải danh mục..."
+        let cats = (try? await store.api.storeCategories()) ?? []
+        var catsArr: [[String: Any]] = []
+
+        for (i, cat) in cats.enumerated() {
+            progress = "Danh mục \(i+1)/\(cats.count): \(cat.name)"
+            var catObj: [String: Any] = [
+                "id": cat.id, "name": cat.name,
+                "media": cat.media.map { ["type": $0.type, "url": $0.url] }
+            ]
+            let folders = (try? await store.api.storeFolders(categoryId: cat.id)) ?? []
+            var foldersArr: [[String: Any]] = []
+            for folder in folders {
+                var fObj: [String: Any] = [
+                    "id": folder.id, "name": folder.name,
+                    "media": folder.media.map { ["type": $0.type, "url": $0.url] }
+                ]
+                let products = (try? await store.api.storeProducts(folderId: folder.id)) ?? []
+                fObj["products"] = products.map { p -> [String: Any] in [
+                    "id": p.id, "name": p.name, "description": p.description,
+                    "media": p.media.map { ["type": $0.type, "url": $0.url] },
+                    "prices": p.prices.map { ["label": $0.label, "amount": $0.amount] },
+                    "availableKeys": p.availableKeys, "isAcc": p.isAcc
+                ]}
+                foldersArr.append(fObj)
+            }
+            catObj["folders"] = foldersArr
+            catsArr.append(catObj)
+        }
+        out["categories"] = catsArr
+
+        progress = "Đang tạo file..."
+        do {
+            let data = try JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
+            let fmt = DateFormatter(); fmt.dateFormat = "yyyyMMdd_HHmmss"
+            let name = "kenios_backup_\(fmt.string(from: Date())).json"
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try data.write(to: url)
+            backupURL = url
+            progress = "Xong! \(cats.count) danh mục · \(catsArr.flatMap { ($0["folders"] as? [[String: Any]]) ?? [] }.count) thư mục"
+        } catch {
+            self.error = error.localizedDescription; progress = ""
+        }
+        loading = false
     }
 }
 

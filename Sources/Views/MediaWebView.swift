@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AVFoundation
 
 // ======================== Trình duyệt mini: xem phim · nghe nhạc trong app ========================
 final class BrowserModel: ObservableObject {
@@ -27,6 +28,8 @@ struct BrowserWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
+        // Dùng data store dùng chung để cookie/login YouTube/Spotify… tồn tại giữa các lần mở app
+        cfg.websiteDataStore = WKWebsiteDataStore.default()
         cfg.allowsInlineMediaPlayback = true
         cfg.mediaTypesRequiringUserActionForPlayback = []
         cfg.allowsPictureInPictureMediaPlayback = true
@@ -62,7 +65,9 @@ struct BrowserWebView: UIViewRepresentable {
             case .stop:        wv.stopLoading()
             }
         }
-        coord.load(home, in: wv)
+        // Khôi phục URL lần trước thay vì luôn về trang chủ — không bị reload lại từ đầu khi mở lại tab
+        let startURL = model.urlText.isEmpty ? home : model.urlText
+        coord.load(startURL, in: wv)
         return wv
     }
 
@@ -118,7 +123,7 @@ struct WebShortcut: Identifiable, Codable {
 }
 
 struct MediaWebView: View {
-    @StateObject private var model = BrowserModel()
+    @ObservedObject var model: BrowserModel
     @FocusState private var addressFocused: Bool
 
     // Lối tắt tùy chỉnh (thêm game/app của bạn)
@@ -227,6 +232,11 @@ struct MediaWebView: View {
 
                 BrowserWebView(model: model, home: home)
                     .ignoresSafeArea(edges: .bottom)
+                    .onAppear {
+                        // Kích hoạt audio session để âm thanh tiếp tục phát khi khoá màn hình / chuyển app
+                        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+                        try? AVAudioSession.sharedInstance().setActive(true)
+                    }
             }
             .navigationTitle("Giải trí")
             .navigationBarTitleDisplayMode(.inline)
