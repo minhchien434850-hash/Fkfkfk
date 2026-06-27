@@ -52,19 +52,19 @@ struct MainTabView: View {
         // Chỉ 5 tab chính cho gọn & rõ — các mục khác nằm trong "Khám phá"
         TabView(selection: $store.tab) {
             SocialMediaToolsView()
-                .tabItem { Label("Mạng xã hội", systemImage: "network") }
+                .tabItem { Label(store.t("Mạng xã hội", "Social"), systemImage: "network") }
                 .tag(2)
             VideoFeedView() // TikTok của riêng app
-                .tabItem { Label("Video", systemImage: "play.rectangle.on.rectangle.fill") }
+                .tabItem { Label(store.t("Video", "Video"), systemImage: "play.rectangle.on.rectangle.fill") }
                 .tag(14)
             StoreView() // App bán hàng (sản phẩm · key · tải game)
-                .tabItem { Label("Cửa hàng", systemImage: "bag.fill") }
+                .tabItem { Label(store.t("Cửa hàng", "Store"), systemImage: "bag.fill") }
                 .tag(15)
             FriendsView()
-                .tabItem { Label("Bạn bè", systemImage: "person.2.fill") }
+                .tabItem { Label(store.t("Bạn bè", "Friends"), systemImage: "person.2.fill") }
                 .tag(4)
             ExploreHubView() // lưới tất cả tính năng còn lại
-                .tabItem { Label("Khám phá", systemImage: "square.grid.2x2.fill") }
+                .tabItem { Label(store.t("Khám phá", "Explore"), systemImage: "square.grid.2x2.fill") }
                 .tag(16)
         }
         .onAppear {

@@ -126,7 +126,12 @@ final class AppStore: ObservableObject {
         default: return nil
         }
     }
-    func setLanguage(_ v: String) { language = v; d.set(v, forKey: "language") }
+    func setLanguage(_ v: String) {
+        language = v; d.set(v, forKey: "language")
+        objectWillChange.send()   // ép toàn app vẽ lại ngay khi đổi ngôn ngữ
+    }
+    /// Dịch nhanh: trả tiếng Anh nếu đang chọn EN, ngược lại tiếng Việt.
+    func t(_ vi: String, _ en: String) -> String { language == "en" ? en : vi }
     func setSystemPrompt(_ v: String) { systemPrompt = v; d.set(v, forKey: "systemPrompt") }
     func setBiometrics(_ v: Bool) { biometricsEnabled = v; d.set(v, forKey: "biometricsEnabled") }
 

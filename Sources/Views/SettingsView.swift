@@ -70,21 +70,24 @@ struct SettingsView: View {
                     Button("Lưu thay đổi") { Task { await saveProfile() } }
                 }
 
-                Section("Ngôn ngữ & Giao diện") {
-                    Picker("Ngôn ngữ", selection: Binding(
+                Section(store.t("Ngôn ngữ & Giao diện", "Language & Appearance")) {
+                    Picker(store.t("Ngôn ngữ", "Language"), selection: Binding(
                         get: { store.language },
                         set: { store.setLanguage($0) })) {
                         ForEach(kAppLanguages, id: \.0) { code, name in
                             Text(name).tag(code)
                         }
                     }
-                    Picker("Giao diện", selection: Binding(
-                        get: { store.themeMode },
-                        set: { store.setThemeMode($0) })) {
-                        Text("Sáng").tag("light")
-                        Text("Tối").tag("dark")
-                        Text("Tự động (cân bằng)").tag("system")
+                    // Bộ chọn giao diện đẹp hơn — đổi tức thì (không lag)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(store.t("Giao diện", "Theme")).font(.subheadline)
+                        HStack(spacing: 10) {
+                            themeOption("light",  "Sáng",   "Light", "sun.max.fill")
+                            themeOption("dark",   "Tối",    "Dark",  "moon.fill")
+                            themeOption("system", "Cân bằng","Auto",  "circle.lefthalf.filled")
+                        }
                     }
+                    .padding(.vertical, 4)
                 }
 
                 // ===== Màu chủ đạo =====
@@ -203,6 +206,26 @@ struct SettingsView: View {
             }
             .onAppear { email = store.email ?? ""; phone = store.phone ?? "" }
         }
+    }
+
+    // 1 ô chọn giao diện (sáng/tối/cân bằng) — bấm đổi ngay lập tức
+    private func themeOption(_ mode: String, _ vi: String, _ en: String, _ icon: String) -> some View {
+        let selected = store.themeMode == mode
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { store.setThemeMode(mode) }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: icon).font(.title3)
+                Text(store.t(vi, en)).font(.caption2)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 12)
+            .background(selected ? store.accentColor.opacity(0.20) : Color(.secondarySystemBackground))
+            .foregroundStyle(selected ? store.accentColor : .primary)
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .stroke(selected ? store.accentColor : Color.clear, lineWidth: 1.5))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 
     private func clearCache() {
