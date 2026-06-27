@@ -239,6 +239,7 @@ struct WebShortcut: Identifiable, Codable {
 
 // ======================== Main entertainment browser ========================
 struct MediaWebView: View {
+    @EnvironmentObject var store: AppStore
     @ObservedObject var model: BrowserModel
     @FocusState private var addressFocused: Bool
 
@@ -281,7 +282,7 @@ struct MediaWebView: View {
                     HStack(spacing: 6) {
                         Image(systemName: model.isLoading ? "arrow.triangle.2.circlepath" : "globe")
                             .font(.caption).foregroundStyle(.secondary)
-                        TextField("Nhập URL hoặc từ khoá...", text: $model.urlText)
+                        TextField(store.t("Nhập URL hoặc từ khoá...", "Enter URL or keyword..."), text: $model.urlText)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .keyboardType(.webSearch)
@@ -325,11 +326,11 @@ struct MediaWebView: View {
                             .contextMenu {
                                 Button(role: .destructive) {
                                     saveCustom(customShortcuts.filter { $0.id != s.id })
-                                } label: { Label("Xoá", systemImage: "trash") }
+                                } label: { Label(store.t("Xoá", "Delete"), systemImage: "trash") }
                             }
                         }
                         Button { newName = ""; newURL = ""; showAddShortcut = true } label: {
-                            Label("Thêm", systemImage: "plus")
+                            Label(store.t("Thêm", "Add"), systemImage: "plus")
                                 .font(.caption)
                                 .padding(.horizontal, 12).padding(.vertical, 7)
                                 .background(Color(.secondarySystemBackground))
@@ -345,16 +346,17 @@ struct MediaWebView: View {
                 BrowserWebView(model: model)
                     .ignoresSafeArea(edges: .bottom)
             }
-            .navigationTitle("Giải trí")
+            .navigationTitle(store.t("Giải trí", "Entertainment"))
             .navigationBarTitleDisplayMode(.inline)
-            .alert("Thêm game / app (web)", isPresented: $showAddShortcut) {
-                TextField("Tên (vd: Game của tôi)", text: $newName)
-                TextField("Link (vd: crazygames.com)", text: $newURL)
+            .alert(store.t("Thêm lối tắt (web)", "Add shortcut (web)"), isPresented: $showAddShortcut) {
+                TextField(store.t("Tên (vd: Game của tôi)", "Name (e.g. My game)"), text: $newName)
+                TextField(store.t("Link (vd: crazygames.com)", "Link (e.g. crazygames.com)"), text: $newURL)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button("Thêm") { addCustom() }
-                Button("Huỷ", role: .cancel) { }
+                Button(store.t("Thêm", "Add")) { addCustom() }
+                Button(store.t("Huỷ", "Cancel"), role: .cancel) { }
             } message: {
-                Text("Video YouTube tiếp tục phát khi bạn thoát màn hình này hoặc khoá màn hình.")
+                Text(store.t("Video YouTube tiếp tục phát khi bạn thoát màn hình này hoặc khoá màn hình.",
+                             "YouTube videos keep playing when you leave this screen or lock the device."))
             }
         }
     }
