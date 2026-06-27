@@ -199,7 +199,6 @@ struct StoreContactsEditor: View {
 
     @ViewBuilder
     private func groupSection(title: String, social: Binding<EditSocial>) -> some View {
-        let p = socialPlatform(social.wrappedValue.platform)
         Section(title) {
             Toggle("Hiển thị nút này", isOn: social.enabled)
             if social.wrappedValue.enabled {
@@ -212,7 +211,6 @@ struct StoreContactsEditor: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
-            _ = p  // reference to avoid unused-variable warning
         }
     }
 
