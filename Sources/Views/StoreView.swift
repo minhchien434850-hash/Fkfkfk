@@ -216,10 +216,16 @@ struct StoreView: View {
             )
         }
 
-        // Topup xoay theo tick lệch pha
-        let topupAmounts = [500_000, 200_000, 1_000_000, 300_000, 150_000, 800_000, 50_000, 250_000]
+        // Topup xoay theo tick lệch pha — 30 mức số tiền khác nhau
+        let topupAmounts = [
+            50_000, 100_000, 150_000, 200_000, 250_000, 300_000, 350_000, 400_000,
+            450_000, 500_000, 600_000, 700_000, 800_000, 900_000, 1_000_000,
+            1_200_000, 1_500_000, 2_000_000, 2_500_000, 3_000_000,
+            60_000, 120_000, 180_000, 220_000, 280_000, 320_000, 380_000,
+            750_000, 850_000, 950_000,
+        ]
         let topups: [ShowcaseTopup] = (0..<8).map { i in
-            let ai = (tick + i) % topupAmounts.count
+            let ai = (tick * 3 + i * 7 + 5) % topupAmounts.count
             return ShowcaseTopup(
                 user: name(tick + i * 11 + 5),
                 amount: topupAmounts[ai],
