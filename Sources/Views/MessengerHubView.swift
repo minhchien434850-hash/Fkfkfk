@@ -359,6 +359,13 @@ struct MessengerHubView: View {
     @State private var autoFriends: [String] = []
     @State private var loadingFriends = false
     @State private var selectedFriend = ""
+    // Zalo: nhắn từng thành viên nhóm
+    @State private var zaloMembers: [String] = []
+    @State private var scanningMembers = false
+    @State private var blasting = false
+    @State private var blastIdx = 0
+    @State private var blastDone = 0
+    @State private var blastTask: Task<Void, Never>?
 
     // ── UI ──────────────────────────────────
     @State private var activeTab: Int = 0
@@ -755,6 +762,56 @@ struct MessengerHubView: View {
                         }
                     } header: { Text("Kết nối & người nhận") }
 
+                    // ───── Zalo: nhắn từng thành viên nhóm (best-effort) ─────
+                    if autoPlatform == .zalo {
+                        Section {
+                            Text("1) Mở \"Mở Zalo Web\" → vào nhóm (đã bật hiện thành viên) → mở danh sách thành viên. 2) Quay lại, bấm Quét. 3) Bấm gửi cho từng người.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Button {
+                                Task { await scanZaloMembers() }
+                            } label: {
+                                HStack {
+                                    if scanningMembers { ProgressView() }
+                                    Label("Quét thành viên nhóm", systemImage: "person.3.sequence")
+                                }
+                            }.disabled(scanningMembers || blasting)
+
+                            if !zaloMembers.isEmpty {
+                                Text("Đã quét \(zaloMembers.count) thành viên")
+                                    .font(.caption).foregroundStyle(.green)
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 6) {
+                                        ForEach(zaloMembers, id: \.self) { m in
+                                            Text(m).font(.caption2).lineLimit(1)
+                                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                                .background(Color(.tertiarySystemBackground)).clipShape(Capsule())
+                                        }
+                                    }
+                                }
+                                if blasting {
+                                    HStack {
+                                        ProgressView()
+                                        Text("Đang gửi \(blastDone)/\(zaloMembers.count)…").font(.caption)
+                                        Spacer()
+                                        Button("Dừng", role: .destructive) { stopBlast() }
+                                    }
+                                } else {
+                                    Button {
+                                        startBlast()
+                                    } label: {
+                                        Label("Gửi tin cho TỪNG thành viên", systemImage: "paperplane.fill")
+                                            .frame(maxWidth: .infinity).frame(height: 42)
+                                            .background(messages.isEmpty ? Color.gray : store.accentColor)
+                                            .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }.buttonStyle(.plain).disabled(messages.isEmpty)
+                                    if messages.isEmpty {
+                                        Text("Nhập nội dung tin nhắn ở trên trước.").font(.caption2).foregroundStyle(.red)
+                                    }
+                                }
+                            }
+                        } header: { Text("Zalo · Nhắn từng thành viên nhóm (thử nghiệm)") }
+                    }
+
                     // Kết quả
                     if !autoStatuses.isEmpty {
                         Section("Kết quả gửi") {
@@ -823,7 +880,7 @@ struct MessengerHubView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
             .onAppear { activeTab = initialTab }
-            .onDisappear { stopManual(); stopAuto() }
+            .onDisappear { stopManual(); stopAuto(); stopBlast() }
             .sheet(isPresented: $showWebLogin, onDismiss: {
                 Task { await checkConnected(); if autoConnected { await loadFriends() } }
             }) {
@@ -866,6 +923,84 @@ struct MessengerHubView: View {
         selectedFriend = name
         autoRecipient = name
         _ = await evalAuto(autoPlatform.openChatJS(name))   // mở đúng cuộc trò chuyện
+    }
+
+    // MARK: - Zalo: quét & nhắn từng thành viên nhóm (best-effort)
+    private var zaloScanMembersJS: String {
+        """
+        (function(){
+          var out=[],seen={};
+          var sels=['[class*="member-item"]','[class*="group-member"]','[class*="memberItem"]',
+                    '[class*="member"] [class*="name"]','[role="listitem"]'];
+          sels.forEach(function(s){
+            document.querySelectorAll(s).forEach(function(e){
+              var t=(e.getAttribute('title')||e.textContent||'').trim();
+              if(t&&t.length>=1&&t.length<=50&&!seen[t]){seen[t]=1;out.push(t);}
+            });
+          });
+          return JSON.stringify(out.slice(0,300));
+        })();
+        """
+    }
+    private func zaloMessageMemberJS(_ name: String) -> String {
+        let esc = name.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        return """
+        (function(){
+          var target='\(esc)';
+          var rows=document.querySelectorAll('[class*="member"],[role="listitem"],[class*="item"]');
+          for(var i=0;i<rows.length;i++){
+            if((rows[i].textContent||'').indexOf(target)>=0){
+              rows[i].click();
+              setTimeout(function(){
+                var bs=document.querySelectorAll('button,[role="button"],div,a,span');
+                for(var j=0;j<bs.length;j++){
+                  var t=(bs[j].textContent||'').trim().toLowerCase();
+                  if(t==='nhắn tin'||t==='gửi tin nhắn'||t==='message'){bs[j].click();return;}
+                }
+              },700);
+              return 'ok';
+            }
+          }
+          return 'not_found';
+        })();
+        """
+    }
+
+    private func scanZaloMembers() async {
+        scanningMembers = true; defer { scanningMembers = false }
+        let json = await evalAuto(zaloScanMembersJS)
+        if let data = json.data(using: .utf8),
+           let arr = try? JSONDecoder().decode([String].self, from: data) {
+            zaloMembers = arr.filter { !$0.isEmpty }
+        }
+    }
+
+    private func startBlast() {
+        guard !messages.isEmpty, !zaloMembers.isEmpty else { return }
+        blasting = true; blastIdx = 0; blastDone = 0
+        let members = zaloMembers
+        let delay = max(0.1, min(autoDelaySec, 5.0))
+        blastTask = Task { @MainActor in
+            for (i, name) in members.enumerated() {
+                guard blasting, !Task.isCancelled else { break }
+                blastIdx = i
+                _ = await evalAuto(zaloMessageMemberJS(name))     // mở DM với thành viên
+                try? await Task.sleep(nanoseconds: 2_500_000_000) // chờ mở khung chat
+                for msg in messages {
+                    guard blasting, !Task.isCancelled else { break }
+                    _ = await evalAuto(AutoWebPlatform.zalo.sendJS(msg))
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+                blastDone = i + 1
+                // quay lại danh sách thành viên cho người kế tiếp (nếu có nút back)
+                _ = await evalAuto("(function(){var b=document.querySelector('[class*=\"back\"],[aria-label=\"Quay lại\"],[aria-label=\"Back\"]');if(b){b.click();return 'ok';}return '';})();")
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+            blasting = false
+        }
+    }
+    private func stopBlast() {
+        blastTask?.cancel(); blastTask = nil; blasting = false
     }
 
     // MARK: - Computed helpers
