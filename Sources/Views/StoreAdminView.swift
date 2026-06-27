@@ -285,7 +285,14 @@ struct StoreConfigEditor: View {
     @State private var sloganFont = "rounded"
     @State private var cardSize = "medium"
     @State private var cardScale: Double = 1.0
-    @State private var sections: [String] = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
+    @State private var sections: [String] = ["trust", "steps", "flash", "leaderboard", "categories", "products",
+                                             "transactions", "topups", "downloads", "contacts", "wishlist", "recent"]
+    // Flash sale
+    @State private var flashEnabled = false
+    @State private var flashProductId = 0
+    @State private var flashDiscount = 0
+    @State private var flashEnd = Date().addingTimeInterval(3 * 86400)
+    @State private var flashTitle = "FLASH SALE"
     @State private var message: String?
     @State private var isError = false
     @AppStorage("storeCfgName") private var cfgName: String = ""
@@ -295,15 +302,23 @@ struct StoreConfigEditor: View {
 
     private func sectionLabel(_ key: String) -> String {
         switch key {
-        case "categories": return "Danh mục"
-        case "products":   return "Sản phẩm"
-        case "downloads":  return "Tải về"
-        case "contacts":   return "Liên hệ & Cộng đồng"
-        case "wishlist":   return "Yêu thích"
-        case "recent":     return "Đã xem gần đây"
-        default:           return key
+        case "categories":   return "Danh mục"
+        case "products":     return "Sản phẩm"
+        case "downloads":    return "Tải về"
+        case "contacts":     return "Liên hệ & Cộng đồng"
+        case "wishlist":     return "Yêu thích"
+        case "recent":       return "Đã xem gần đây"
+        case "trust":        return "Thẻ tin cậy (4 ô)"
+        case "steps":        return "3 bước mua hàng"
+        case "flash":        return "Flash sale (đếm ngược)"
+        case "leaderboard":  return "Bảng xếp hạng nạp"
+        case "transactions": return "Giao dịch gần đây"
+        case "topups":       return "Nạp tiền gần đây"
+        default:             return key
         }
     }
+    private let allSectionKeys = ["trust", "steps", "flash", "leaderboard", "categories", "products",
+                                  "transactions", "topups", "downloads", "contacts", "wishlist", "recent"]
 
     var body: some View {
         Form {
@@ -424,6 +439,27 @@ struct StoreConfigEditor: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
+            Section {
+                Toggle(store.t("Bật Flash sale (đếm ngược)", "Enable Flash sale (countdown)"), isOn: $flashEnabled)
+                if flashEnabled {
+                    TextField(store.t("Tiêu đề (vd FLASH SALE)", "Title (e.g. FLASH SALE)"), text: $flashTitle)
+                    HStack {
+                        Text(store.t("ID sản phẩm flash", "Flash product ID"))
+                        Spacer()
+                        TextField("0", value: $flashProductId, format: .number)
+                            .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 90)
+                    }
+                    Stepper(store.t("Giảm giá", "Discount") + ": \(flashDiscount)%", value: $flashDiscount, in: 0...99, step: 1)
+                    DatePicker(store.t("Kết thúc lúc", "Ends at"), selection: $flashEnd, in: Date()...)
+                }
+            } header: {
+                Text(store.t("Flash sale", "Flash sale"))
+            } footer: {
+                Text(store.t("Nhập ID sản phẩm muốn flash (xem ID trong phần quản lý sản phẩm). Hết thời gian sẽ tự ẩn.",
+                             "Enter the product ID to feature (see ID in product management). Auto-hides when the countdown ends."))
+                    .font(.caption2)
+            }
+
             Section { Button(store.t("Lưu giao diện", "Save appearance")) { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
@@ -446,12 +482,19 @@ struct StoreConfigEditor: View {
             cardScale = Double(c.cardScale ?? "") ?? ((cardSize == "small") ? 0.8 : (cardSize == "large" ? 1.25 : 1.0))
             if let order = c.sectionOrder, !order.isEmpty {
                 let parts = order.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
-                let all = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
-                // Giữ các mục hợp lệ theo thứ tự lưu, bổ sung mục còn thiếu vào cuối
+                let all = allSectionKeys
+                // Giữ các mục hợp lệ theo thứ tự lưu, chèn mục mới còn thiếu vào đúng vị trí
                 var merged = parts.filter { all.contains($0) }
-                for k in all where !merged.contains(k) { merged.append(k) }
+                for (i, k) in all.enumerated() where !merged.contains(k) {
+                    merged.insert(k, at: min(i, merged.count))
+                }
                 sections = merged
             }
+            flashEnabled = c.flashEnabled ?? false
+            flashProductId = c.flashProductId ?? 0
+            flashDiscount = c.flashDiscount ?? 0
+            flashTitle = c.flashTitle ?? "FLASH SALE"
+            if let end = c.flashEnd, end > 0 { flashEnd = Date(timeIntervalSince1970: TimeInterval(end)) }
         }
     }
     private func save() async {
@@ -464,7 +507,10 @@ struct StoreConfigEditor: View {
                 bgType: bgType, bgUrl: bgUrl,
                 slogan: slogan, sloganFont: sloganFont,
                 sectionOrder: sections.joined(separator: ","),
-                cardSize: cardSize, cardScale: cardScale)
+                cardSize: cardSize, cardScale: cardScale,
+                flashEnabled: flashEnabled, flashProductId: flashProductId,
+                flashEnd: Int(flashEnd.timeIntervalSince1970), flashDiscount: flashDiscount,
+                flashTitle: flashTitle)
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message

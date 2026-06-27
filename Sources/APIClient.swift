@@ -327,6 +327,9 @@ struct APIClient {
     func storeCategories() async throws -> [StoreCategory] {
         try decode(try await send("/store/categories", auth: false))
     }
+    func storeShowcase() async throws -> StoreShowcase {
+        try decode(try await send("/store/showcase", auth: false))
+    }
     func storeFolders(categoryId: Int) async throws -> [StoreFolder] {
         try decode(try await send("/store/categories/\(categoryId)/folders", auth: false))
     }
@@ -389,10 +392,18 @@ struct APIClient {
                              logoAnim: String? = nil, bgType: String? = nil,
                              bgUrl: String? = nil, slogan: String? = nil,
                              sloganFont: String? = nil, sectionOrder: String? = nil,
-                             cardSize: String? = nil, cardScale: Double? = nil) async throws -> MessageResponse {
+                             cardSize: String? = nil, cardScale: Double? = nil,
+                             flashEnabled: Bool? = nil, flashProductId: Int? = nil,
+                             flashEnd: Int? = nil, flashDiscount: Int? = nil,
+                             flashTitle: String? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
+        if let flashEnabled { body["flash_enabled"] = flashEnabled }
+        if let flashProductId { body["flash_product_id"] = flashProductId }
+        if let flashEnd { body["flash_end"] = flashEnd }
+        if let flashDiscount { body["flash_discount"] = flashDiscount }
+        if let flashTitle { body["flash_title"] = flashTitle }
         if let logoEffect { body["logo_effect"] = logoEffect }
         if let logoFont { body["logo_font"] = logoFont }
         if let logoAnim { body["logo_anim"] = logoAnim }

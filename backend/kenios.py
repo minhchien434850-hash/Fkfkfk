@@ -4278,7 +4278,8 @@ def store_config() -> dict[str, Any]:
         "slogan": get_setting("store_slogan", "Cửa hàng sản phẩm số · key · tải về"),
         "slogan_font": get_setting("store_slogan_font", "rounded"),
         "section_order": get_setting("store_section_order",
-                                     "categories,products,downloads,contacts,wishlist,recent"),
+                                     "trust,steps,flash,leaderboard,categories,products,"
+                                     "transactions,topups,downloads,contacts,wishlist,recent"),
         "card_size": get_setting("store_card_size", "medium"),   # small | medium | large
         "card_scale": get_setting("store_card_scale", "1.0"),    # hệ số kéo kích cỡ 0.6–1.6
         # Flash sale (đếm ngược) — admin bật + chọn sản phẩm + thời điểm kết thúc + % giảm

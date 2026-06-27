@@ -161,6 +161,9 @@ struct StoreView: View {
     @State private var productFilter: String = "all"    // all | inStock
     @State private var showCart = false
     @AppStorage("storeCartRaw") private var cartRaw: String = "[]"
+    @State private var showcase: StoreShowcase?
+    @State private var flashNow = Date()   // cập nhật để đồng hồ flash sale đếm ngược
+    private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var displayName: String {
         if let n = config?.logoName, !n.isEmpty { return n }
@@ -239,11 +242,15 @@ struct StoreView: View {
 
     // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
     private var orderedSections: [String] {
-        let all = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
+        let all = ["trust", "steps", "flash", "leaderboard", "categories", "products",
+                   "transactions", "topups", "downloads", "contacts", "wishlist", "recent"]
         guard let raw = (config?.sectionOrder ?? effectiveConfig?.sectionOrder), !raw.isEmpty else { return all }
         let parts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
         var merged = parts.filter { all.contains($0) }
-        for k in all where !merged.contains(k) { merged.append(k) }
+        // Chèn các mục mới (chưa có trong cấu hình cũ) vào đúng vị trí ưu tiên thay vì dồn cuối
+        for (i, k) in all.enumerated() where !merged.contains(k) {
+            merged.insert(k, at: min(i, merged.count))
+        }
         return merged
     }
 
@@ -278,6 +285,18 @@ struct StoreView: View {
             if !wishlistProducts.isEmpty { wishlistSection }
         case "recent":
             if !recentProducts.isEmpty { recentlyViewedSection }
+        case "trust":
+            trustBadgesSection
+        case "steps":
+            stepsSection
+        case "flash":
+            if let p = flashProduct { flashSection(p) }
+        case "leaderboard":
+            if let s = showcase, !s.leaderboard.isEmpty { leaderboardSection(s.leaderboard) }
+        case "transactions":
+            if let s = showcase, !s.recentOrders.isEmpty { transactionsSection(s.recentOrders) }
+        case "topups":
+            if let s = showcase, !s.recentTopups.isEmpty { topupsSection(s.recentTopups) }
         default:
             EmptyView()
         }
@@ -369,10 +388,246 @@ struct StoreView: View {
                 }
             }
             .refreshable { await reload() }
+            .onReceive(flashTimer) { t in
+                if let c = config, (c.flashEnabled ?? false), (c.flashEnd ?? 0) > Int(Date().timeIntervalSince1970) {
+                    flashNow = t
+                }
+            }
         }
     }
 
     private var appearanceMenu: some View { AppearanceMenu() }
+
+    // ======================== Mặt tiền cửa hàng (theo mẫu) ========================
+    // Sản phẩm đang flash sale (nếu admin bật + còn thời gian)
+    private var flashProduct: StoreProduct? {
+        guard let c = config, (c.flashEnabled ?? false),
+              let pid = c.flashProductId, pid > 0,
+              (c.flashEnd ?? 0) > Int(Date().timeIntervalSince1970) else { return nil }
+        return allProducts.first { $0.id == pid }
+    }
+
+    // 4 thẻ tin cậy (2×2)
+    private var trustBadgesSection: some View {
+        let items: [(String, String, String, Color)] = [
+            ("bolt.fill", store.t("Kích hoạt tức thì", "Instant activation"), store.t("Nhận key ngay sau khi thanh toán", "Get key right after payment"), .yellow),
+            ("checkmark.shield.fill", store.t("Bảo hành trọn đời", "Lifetime warranty"), store.t("Hỗ trợ đổi key miễn phí", "Free key replacement"), .purple),
+            ("headphones", store.t("Hỗ trợ 24/7", "24/7 support"), store.t("Luôn sẵn sàng giúp bạn", "Always ready to help"), .blue),
+            ("lock.fill", store.t("An toàn & Bảo mật", "Safe & Secure"), store.t("Mã hoá thông tin tuyệt đối", "Fully encrypted data"), .green),
+        ]
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            ForEach(items, id: \.1) { ic, title, sub, color in
+                HStack(spacing: 10) {
+                    Image(systemName: ic).font(.title3.bold()).foregroundStyle(color)
+                        .frame(width: 40, height: 40)
+                        .background(color.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.caption.bold()).lineLimit(1)
+                        Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    // 3 bước: Chọn game → Thanh toán → Nhận key
+    private var stepsSection: some View {
+        let steps: [(String, String, String)] = [
+            ("magnifyingglass", store.t("Chọn game", "Choose game"), store.t("Tìm & chọn gói phù hợp", "Find & pick a package")),
+            ("creditcard", store.t("Thanh toán", "Payment"), store.t("Nạp qua bank hoặc thẻ", "Pay via bank or card")),
+            ("arrow.down.circle", store.t("Nhận key", "Get key"), store.t("Key gửi tức thì", "Key sent instantly")),
+        ]
+        return HStack(spacing: 10) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { i, s in
+                VStack(spacing: 6) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: s.0).font(.title3)
+                            .frame(width: 46, height: 46)
+                            .background(Theme.accent.opacity(0.15)).foregroundStyle(Theme.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        Text("\(i+1)").font(.system(size: 11, weight: .bold))
+                            .frame(width: 18, height: 18)
+                            .background(Theme.accent).foregroundStyle(.white).clipShape(Circle())
+                            .offset(x: 6, y: -6)
+                    }
+                    Text(s.1).font(.caption.bold()).lineLimit(1)
+                    Text(s.2).font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(2)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    // Flash sale + đếm ngược
+    private func flashSection(_ p: StoreProduct) -> some View {
+        let end = config?.flashEnd ?? 0
+        let remain = max(0, end - Int(flashNow.timeIntervalSince1970))
+        let d = remain / 86400, h = (remain % 86400) / 3600, m = (remain % 3600) / 60, s = remain % 60
+        let disc = config?.flashDiscount ?? 0
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Label(config?.flashTitle ?? "FLASH SALE", systemImage: "bolt.fill")
+                    .font(.headline).foregroundStyle(.orange)
+                Spacer()
+                HStack(spacing: 4) {
+                    ForEach([("\(d)", store.t("Ngày","D")), ("\(h)", store.t("Giờ","H")), ("\(m)", store.t("Phút","M")), ("\(s)", store.t("Giây","S"))], id: \.1) { val, unit in
+                        VStack(spacing: 1) {
+                            Text(val).font(.caption.bold().monospacedDigit())
+                                .frame(minWidth: 26).padding(.vertical, 3)
+                                .background(Color(.tertiarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 6))
+                            Text(unit).font(.system(size: 8)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            NavigationLink { StoreProductDetailView(productId: p.id) } label: {
+                HStack(spacing: 12) {
+                    StoreThumb(media: p.media, height: 80).frame(width: 120).clipShape(RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(p.name).font(.subheadline.bold()).lineLimit(2).foregroundStyle(.primary)
+                        if let pr = p.prices.first {
+                            HStack(spacing: 6) {
+                                if disc > 0 {
+                                    Text(kFormatVND(pr.amount * (100 - disc) / 100)).font(.subheadline.bold()).foregroundStyle(.orange)
+                                    Text(kFormatVND(pr.amount)).font(.caption).strikethrough().foregroundStyle(.secondary)
+                                    Text("-\(disc)%").font(.caption2.bold())
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Color.red).foregroundStyle(.white).clipShape(Capsule())
+                                } else {
+                                    Text(kFormatVND(pr.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+                                }
+                            }
+                        }
+                        stockMini(p.availableKeys)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+                .background(LinearGradient(colors: [Color.orange.opacity(0.12), Color(.secondarySystemBackground)], startPoint: .leading, endPoint: .trailing))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.5), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder private func stockMini(_ n: Int) -> some View {
+        let label = n == 0 ? store.t("Hết hàng","Sold out") : store.t("Còn","Left") + " \(n)"
+        Text(label).font(.caption2.bold())
+            .foregroundStyle(n == 0 ? .red : .green)
+    }
+
+    // Bảng xếp hạng nạp tích luỹ (top 5)
+    private func leaderboardSection(_ leaders: [ShowcaseLeader]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(store.t("Bảng xếp hạng nạp tích luỹ", "Top-up leaderboard"), systemImage: "crown.fill")
+                .font(.headline).foregroundStyle(Theme.gold)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(leaders) { l in
+                        VStack(spacing: 6) {
+                            Text("\(l.rank)").font(.headline.bold()).foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .background(rankColor(l.rank)).clipShape(Circle())
+                            Text(l.user).font(.caption2).lineLimit(1)
+                            Text(kFormatVND(l.total)).font(.caption.bold().monospacedDigit()).foregroundStyle(.green)
+                        }
+                        .frame(width: 96).padding(.vertical, 12)
+                        .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }
+        }
+    }
+    private func rankColor(_ r: Int) -> Color {
+        switch r { case 1: return .orange; case 2: return .gray; case 3: return .brown; default: return Theme.accent }
+    }
+
+    // Giao dịch gần đây (realtime)
+    private func transactionsSection(_ orders: [ShowcaseOrder]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(store.t("Giao dịch gần đây", "Recent purchases"), systemImage: "bag.fill").font(.headline)
+                Spacer(); realtimeBadge
+            }
+            VStack(spacing: 0) {
+                ForEach(orders.prefix(8)) { o in
+                    HStack(spacing: 10) {
+                        Text(String(o.user.prefix(1)).uppercased()).font(.caption.bold())
+                            .frame(width: 30, height: 30).background(Theme.accent.opacity(0.15))
+                            .foregroundStyle(Theme.accent).clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 1) {
+                            (Text(o.user).bold() + Text(" " + store.t("mua","bought") + " ") + Text(o.product).bold())
+                                .font(.caption).lineLimit(1)
+                            Text((o.label.isEmpty ? "" : o.label + " · ") + timeAgo(o.at))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Text(kFormatVND(o.amount)).font(.caption.bold()).foregroundStyle(.primary)
+                    }
+                    .padding(.vertical, 8)
+                    if o.id != orders.prefix(8).last?.id { Divider() }
+                }
+            }
+            .padding(.horizontal, 12)
+            .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    // Nạp tiền gần đây (realtime)
+    private func topupsSection(_ topups: [ShowcaseTopup]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(store.t("Nạp tiền gần đây", "Recent top-ups"), systemImage: "wallet.pass.fill").font(.headline)
+                Spacer(); realtimeBadge
+            }
+            VStack(spacing: 0) {
+                ForEach(topups.prefix(8)) { t in
+                    HStack(spacing: 10) {
+                        Text(String(t.user.prefix(1)).uppercased()).font(.caption.bold())
+                            .frame(width: 30, height: 30).background(Color.green.opacity(0.15))
+                            .foregroundStyle(.green).clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 1) {
+                            (Text(t.user).bold() + Text(" " + store.t("đã nạp","topped up")))
+                                .font(.caption).lineLimit(1)
+                            Text(timeAgo(t.at)).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Text("+" + kFormatVND(t.amount)).font(.caption.bold()).foregroundStyle(.green)
+                    }
+                    .padding(.vertical, 8)
+                    if t.id != topups.prefix(8).last?.id { Divider() }
+                }
+            }
+            .padding(.horizontal, 12)
+            .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var realtimeBadge: some View {
+        HStack(spacing: 4) {
+            Circle().fill(Color.green).frame(width: 6, height: 6)
+            Text("REALTIME").font(.system(size: 9, weight: .bold)).foregroundStyle(.green)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .overlay(Capsule().stroke(Color.green.opacity(0.4), lineWidth: 1))
+    }
+
+    private func timeAgo(_ at: Int) -> String {
+        let s = max(0, Int(Date().timeIntervalSince1970) - at)
+        if s < 60 { return store.t("vừa xong", "just now") }
+        if s < 3600 { return "\(s/60) " + store.t("phút trước", "min ago") }
+        if s < 86400 { return "\(s/3600) " + store.t("giờ trước", "h ago") }
+        return "\(s/86400) " + store.t("ngày trước", "d ago")
+    }
 
     // Thanh ví: bấm để nạp tiền / xem số dư
     private var walletBar: some View {
@@ -631,6 +886,8 @@ struct StoreView: View {
         async let dlTask  = store.api.storeDownloads()
         async let ctTask  = store.api.storeContacts()
         async let catTask = store.api.storeCategories()
+        async let showTask = store.api.storeShowcase()
+        showcase = try? await showTask
         if let c = try? await cfgTask {
             config = c
             // lưu cache để lần sau (kể cả khi offline) vẫn giữ tên/logo/banner

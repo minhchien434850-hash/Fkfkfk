@@ -261,6 +261,39 @@ struct StoreAppConfig: Decodable, Hashable {
     var sectionOrder: String? = nil // thứ tự bố cục: categories,products,downloads,contacts,wishlist,recent
     var cardSize: String? = nil     // small | medium | large — kích cỡ thẻ sản phẩm/danh mục
     var cardScale: String? = nil    // hệ số kéo kích cỡ "0.6"–"1.6" (server trả chuỗi)
+    // Flash sale (đếm ngược)
+    var flashEnabled: Bool? = nil
+    var flashProductId: Int? = nil
+    var flashEnd: Int? = nil         // epoch giây
+    var flashDiscount: Int? = nil    // %
+    var flashTitle: String? = nil
+}
+
+// ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----
+struct ShowcaseOrder: Decodable, Hashable, Identifiable {
+    var id: String { "\(user)-\(product)-\(at)-\(amount)" }
+    let user: String
+    let product: String
+    let label: String
+    let amount: Int
+    let at: Int
+}
+struct ShowcaseTopup: Decodable, Hashable, Identifiable {
+    var id: String { "\(user)-\(at)-\(amount)" }
+    let user: String
+    let amount: Int
+    let at: Int
+}
+struct ShowcaseLeader: Decodable, Hashable, Identifiable {
+    var id: Int { rank }
+    let rank: Int
+    let user: String
+    let total: Int
+}
+struct StoreShowcase: Decodable {
+    let recentOrders: [ShowcaseOrder]
+    let recentTopups: [ShowcaseTopup]
+    let leaderboard: [ShowcaseLeader]
 }
 
 struct MediaUploadResponse: Decodable { let id: Int; let path: String }
