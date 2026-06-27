@@ -286,9 +286,14 @@ struct StoreConfigEditor: View {
     @State private var sloganFont = "rounded"
     @State private var cardSize = "medium"
     @State private var cardScale: Double = 1.0
-    @State private var sections: [String] = ["hero", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
+    @State private var sections: [String] = ["announce", "hero", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
                                              "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "products", "footer"]
     @State private var hiddenSections: Set<String> = ["products"]
+    // Thanh thông báo + số sản phẩm/danh mục
+    @State private var announceEnabled = false
+    @State private var announceText = ""
+    @State private var announceColor = "accent"
+    @State private var gamecatLimit = 6
     // Flash sale
     @State private var flashEnabled = false
     @State private var flashProductId = 0
@@ -328,11 +333,12 @@ struct StoreConfigEditor: View {
         case "topups":       return "Nạp tiền gần đây"
         case "hero":         return "Hero (slogan + Mua ngay)"
         case "gamecat":      return "Danh mục Game (lưới 2 cột)"
+        case "announce":     return "Thanh thông báo"
         case "footer":       return "Footer (logo + slogan)"
         default:             return key
         }
     }
-    private let allSectionKeys = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
+    private let allSectionKeys = ["announce", "hero", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
                                   "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
 
     var body: some View {
@@ -566,6 +572,38 @@ struct StoreConfigEditor: View {
                     .font(.caption2)
             }
 
+            // Thanh thông báo chạy đầu trang
+            Section {
+                Toggle(store.t("Bật thanh thông báo", "Enable announcement bar"), isOn: $announceEnabled)
+                if announceEnabled {
+                    TextField(store.t("Nội dung thông báo (vd: Khuyến mãi cuối tuần -20%!)", "Announcement text (e.g. Weekend sale -20%!)"),
+                              text: $announceText, axis: .vertical).lineLimit(1...3)
+                    Picker(store.t("Màu", "Color"), selection: $announceColor) {
+                        Text(store.t("Chủ đạo", "Accent")).tag("accent")
+                        Text(store.t("Đỏ", "Red")).tag("red")
+                        Text(store.t("Xanh lá", "Green")).tag("green")
+                        Text(store.t("Vàng", "Gold")).tag("gold")
+                        Text(store.t("Tím", "Purple")).tag("purple")
+                    }
+                }
+            } header: {
+                Text(store.t("Thanh thông báo", "Announcement bar"))
+            } footer: {
+                Text(store.t("Dòng thông báo nổi bật ở đầu trang cửa hàng (vd khuyến mãi, lịch nghỉ...).",
+                             "A highlighted notice at the top of the storefront (e.g. promotions, holiday notice)."))
+                    .font(.caption2)
+            }
+
+            // Số sản phẩm hiển thị mỗi danh mục
+            Section {
+                Stepper(store.t("Số sản phẩm mỗi danh mục", "Products per category") + ": \(gamecatLimit)",
+                        value: $gamecatLimit, in: 2...20, step: 1)
+            } footer: {
+                Text(store.t("Số sản phẩm tối đa hiện trong lưới mỗi danh mục ở mục \"Danh mục Game\" (bấm \"Xem thêm\" để xem hết).",
+                             "Max products shown per category in the \"Game categories\" grid (tap \"See all\" for the rest)."))
+                    .font(.caption2)
+            }
+
             Section { Button(store.t("Lưu giao diện", "Save appearance")) { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
@@ -618,6 +656,10 @@ struct StoreConfigEditor: View {
             } else {
                 editSteps = EditStep.defaults
             }
+            announceEnabled = c.announceEnabled ?? false
+            announceText = c.announceText ?? ""
+            announceColor = c.announceColor ?? "accent"
+            gamecatLimit = c.gamecatLimit ?? 6
         }
     }
     private func save() async {
@@ -640,7 +682,9 @@ struct StoreConfigEditor: View {
                 sloganEffect: sloganEffect, sloganAnim: sloganAnim,
                 promoImageUrl: promoImageUrl.isEmpty ? nil : promoImageUrl,
                 promoProductId: promoProductId > 0 ? promoProductId : nil,
-                steps: editSteps.map { ["icon": $0.icon, "title": $0.title, "desc": $0.desc, "badge": $0.badge] })
+                steps: editSteps.map { ["icon": $0.icon, "title": $0.title, "desc": $0.desc, "badge": $0.badge] },
+                announceEnabled: announceEnabled, announceText: announceText,
+                announceColor: announceColor, gamecatLimit: gamecatLimit)
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message

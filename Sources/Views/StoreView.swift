@@ -353,7 +353,7 @@ struct StoreView: View {
     // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
     private var orderedSections: [String] {
         // Thứ tự mặc định gọn gàng, ưu tiên thấy sản phẩm ngay
-        let all = ["hero", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
+        let all = ["announce", "hero", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
                    "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "products", "footer"]
         let hidden = Set((config?.sectionHidden ?? "")
             .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
@@ -416,6 +416,11 @@ struct StoreView: View {
             heroSection
         case "gamecat":
             if !productsByCategory.isEmpty { gameCatSection }
+        case "announce":
+            if (config?.announceEnabled ?? false),
+               let txt = config?.announceText, !txt.trimmingCharacters(in: .whitespaces).isEmpty {
+                announceBar(txt)
+            }
         case "footer":
             footerSection
         default:
@@ -1092,7 +1097,7 @@ struct StoreView: View {
                             }
                         }
                         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                            ForEach(prods.prefix(6)) { p in
+                            ForEach(prods.prefix(max(1, config?.gamecatLimit ?? 6))) { p in
                                 NavigationLink { StoreProductDetailView(productId: p.id) } label: {
                                     productGridCard(p)
                                 }.buttonStyle(.plain)
@@ -1139,6 +1144,33 @@ struct StoreView: View {
             .padding(8)
         }
         .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // Màu cho thanh thông báo theo tên cấu hình
+    private func announceColor(_ name: String?) -> Color {
+        switch name {
+        case "red": return .red
+        case "green": return .green
+        case "gold": return Theme.gold
+        case "purple": return Theme.purple
+        default: return Theme.accent
+        }
+    }
+
+    // Thanh thông báo chạy đầu trang (loa + chữ cuộn ngang)
+    private func announceBar(_ text: String) -> some View {
+        let color = announceColor(config?.announceColor)
+        return HStack(spacing: 8) {
+            Image(systemName: "megaphone.fill").font(.caption).foregroundStyle(color)
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(text).font(.caption.bold()).foregroundStyle(.primary).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.14))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.4), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 

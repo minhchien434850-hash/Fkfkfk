@@ -50,6 +50,8 @@ struct MaintenanceOverlay: View {
 struct MainTabView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("defaultLaunchTab") private var defaultLaunchTab = 2
+    @State private var didInitTab = false
 
     var body: some View {
         // Chỉ 5 tab chính cho gọn & rõ — các mục khác nằm trong "Khám phá"
@@ -71,7 +73,13 @@ struct MainTabView: View {
                 .tag(16)
         }
         .onAppear {
-            if ![2, 14, 15, 4, 16].contains(store.tab) { store.tab = 2 }
+            // Lần mở app đầu: nhảy tới tab mặc định do người dùng chọn (Cài đặt)
+            if !didInitTab {
+                didInitTab = true
+                store.tab = [2, 14, 15, 4, 16].contains(defaultLaunchTab) ? defaultLaunchTab : 2
+            } else if ![2, 14, 15, 4, 16].contains(store.tab) {
+                store.tab = 2
+            }
             if store.welcomeEnabled {
                 WelcomeVoice.shared.playOnce(
                     text: store.welcomeText,

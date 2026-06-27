@@ -17,6 +17,7 @@ struct SettingsView: View {
     @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
     @AppStorage("appLogoFont") private var appLogoFont = "rounded"
     @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
+    @AppStorage("defaultLaunchTab") private var defaultLaunchTab = 2
 
     var body: some View {
         NavigationStack {
@@ -83,6 +84,13 @@ struct SettingsView: View {
                         ForEach(kAppLanguages, id: \.0) { code, name in
                             Text(name).tag(code)
                         }
+                    }
+                    Picker(store.t("Mở app vào tab", "Open app on tab"), selection: $defaultLaunchTab) {
+                        Text(store.t("Mạng xã hội", "Social")).tag(2)
+                        Text(store.t("Video", "Video")).tag(14)
+                        Text(store.t("Cửa hàng", "Store")).tag(15)
+                        Text(store.t("Bạn bè", "Friends")).tag(4)
+                        Text(store.t("Khám phá", "Explore")).tag(16)
                     }
                     // Bộ chọn giao diện đẹp hơn — đổi tức thì (không lag)
                     VStack(alignment: .leading, spacing: 8) {

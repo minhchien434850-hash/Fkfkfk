@@ -4318,6 +4318,12 @@ def store_config() -> dict[str, Any]:
         "promo_product_id": _int_setting("store_promo_product_id", 0),
         # 3 bước hướng dẫn tuỳ chỉnh
         "steps": _load_steps(),
+        # Thanh thông báo chạy (announcement) đầu trang cửa hàng
+        "announce_enabled": get_setting("store_announce_enabled", "0") == "1",
+        "announce_text": get_setting("store_announce_text", ""),
+        "announce_color": get_setting("store_announce_color", "accent"),  # accent|red|green|gold|purple
+        # Số sản phẩm hiển thị tối đa mỗi danh mục ở lưới "Danh mục Game"
+        "gamecat_limit": _int_setting("store_gamecat_limit", 6),
     }
 
 
@@ -4765,6 +4771,12 @@ class StoreConfigIn(BaseModel):
     promo_product_id: Optional[int] = None
     # 3 bước hướng dẫn tuỳ chỉnh: [{icon,title,desc,badge}, ...]
     steps: Optional[list[dict[str, str]]] = None
+    # Thanh thông báo chạy
+    announce_enabled: Optional[bool] = None
+    announce_text: Optional[str] = None
+    announce_color: Optional[str] = None
+    # Số sản phẩm/danh mục trong lưới "Danh mục Game"
+    gamecat_limit: Optional[int] = None
 
 @app.post("/admin/store/config")
 def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
@@ -4818,6 +4830,11 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
                 "badge": str(st.get("badge", "")).strip()[:6],
             })
         set_setting("store_steps", json.dumps(clean, ensure_ascii=False))
+    # Thanh thông báo
+    if b.announce_enabled is not None: set_setting("store_announce_enabled", "1" if b.announce_enabled else "0")
+    if b.announce_text is not None: set_setting("store_announce_text", b.announce_text.strip()[:200])
+    if b.announce_color is not None: set_setting("store_announce_color", b.announce_color.strip()[:20])
+    if b.gamecat_limit is not None: set_setting("store_gamecat_limit", str(max(1, min(int(b.gamecat_limit), 30))))
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
 

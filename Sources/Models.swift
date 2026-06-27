@@ -282,6 +282,12 @@ struct StoreAppConfig: Decodable, Hashable {
     var promoProductId: Int? = nil
     // 3 bước hướng dẫn tuỳ chỉnh
     var steps: [StoreStep]? = nil
+    // Thanh thông báo chạy đầu trang
+    var announceEnabled: Bool? = nil
+    var announceText: String? = nil
+    var announceColor: String? = nil  // accent|red|green|gold|purple
+    // Số sản phẩm tối đa mỗi danh mục ở lưới "Danh mục Game"
+    var gamecatLimit: Int? = nil
 }
 
 struct StoreStep: Codable, Hashable {
