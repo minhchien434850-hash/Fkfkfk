@@ -747,7 +747,7 @@ struct StoreProductEditor: View {
                 }
             }
             .fileImporter(isPresented: $showImporter,
-                          allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
+                          allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
                 if case .success(let urls) = result, let url = urls.first {
                     Task { await uploadFile(url) }
                 }
@@ -983,9 +983,7 @@ struct StoreKeysManager: View {
         .task { await reload() }
         .refreshable { await reload() }
         .fileImporter(isPresented: $showFileImporter,
-                      allowedContentTypes: [.plainText, .text, .data,
-                                            UTType(filenameExtension: "csv") ?? .plainText],
-                      allowsMultipleSelection: false) { result in
+                      allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result, let url = urls.first {
                 Task { await importFromFile(url) }
             }
@@ -1700,8 +1698,7 @@ struct StoreRestoreBackupView: View {
         .navigationTitle(store.t("Khôi phục backup", "Restore backup"))
         .navigationBarTitleDisplayMode(.inline)
         .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.json, .text, .plainText, .data, .item],
-                      allowsMultipleSelection: false) { result in
+                      allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result, let url = urls.first {
                 Task { await parseFile(url) }
             }
