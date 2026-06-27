@@ -779,7 +779,7 @@ struct MessengerHubView: View {
                     // ───── Zalo: nhắn từng thành viên nhóm (best-effort) ─────
                     if autoPlatform == .zalo {
                         Section {
-                            Text("1) Mở \"Mở Zalo Web\" → vào nhóm (đã bật hiện thành viên) → mở danh sách thành viên. 2) Quay lại, bấm Quét. 3) Bấm gửi cho từng người.")
+                            Text("1) Mở \"Mở Zalo Web\" → vào đúng NHÓM cần gửi → quay lại đây. 2) Bấm Quét (app tự mở danh sách thành viên đang ẩn rồi gom tên). 3) Bấm gửi cho từng người.")
                                 .font(.caption2).foregroundStyle(.secondary)
                             Button {
                                 Task { await scanZaloMembers() }
@@ -1009,8 +1009,40 @@ struct MessengerHubView: View {
         """
     }
 
+    // Tự động MỞ danh sách thành viên nhóm (đang ẩn) trước khi quét
+    private func revealZaloMembers() async {
+        // B1: mở panel thông tin nhóm (icon/tên nhóm trên thanh tiêu đề)
+        _ = await evalAuto("""
+        (function(){
+          var sel=['[title*="Thông tin"]','[aria-label*="Thông tin"]','[data-translate-title*="info"]',
+                   '[class*="header"] [class*="info"]','[class*="chat-header"] [class*="icon"]'];
+          for(var i=0;i<sel.length;i++){var e=document.querySelector(sel[i]);if(e){e.click();return 'ok';}}
+          // fallback: bấm vào tên nhóm trên header
+          var h=document.querySelector('[class*="chat-header"] [class*="name"],[class*="conv-header"] [class*="title"]');
+          if(h){h.click();return 'ok';}
+          return 'no';
+        })();
+        """)
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        // B2: bấm mục "Thành viên" để bung danh sách
+        _ = await evalAuto("""
+        (function(){
+          var els=document.querySelectorAll('div,span,a,button,[role="button"]');
+          for(var i=0;i<els.length;i++){
+            var t=(els[i].textContent||'').trim().toLowerCase();
+            if((t.indexOf('thành viên')>=0||t.indexOf('members')>=0||t.indexOf('xem thành viên')>=0)&&t.length<40){
+              els[i].click();return 'ok';
+            }
+          }
+          return 'no';
+        })();
+        """)
+        try? await Task.sleep(nanoseconds: 900_000_000)
+    }
+
     private func scanZaloMembers() async {
         scanningMembers = true; defer { scanningMembers = false }
+        await revealZaloMembers()   // tự mở danh sách thành viên (đang ẩn)
         var seen = Set<String>()
         var ordered: [String] = []
         // Cuộn & gom dần tối đa ~15 lần để lấy hết thành viên (danh sách ảo hoá)
