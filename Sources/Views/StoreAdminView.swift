@@ -118,10 +118,20 @@ struct StoreAdminView: View {
     @State private var error: String?
     @State private var editCategory: StoreCategory?
     @State private var newCategory = false
+    @State private var quickAdd = false
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Button { quickAdd = true } label: {
+                        Label(store.t("➕ Thêm sản phẩm (tất cả trong 1)", "➕ Add product (all-in-one)"), systemImage: "wand.and.stars")
+                            .font(.headline)
+                    }
+                    Text(store.t("Tạo danh mục, thư mục con, sản phẩm, giá & nhập key — tất cả trong 1 màn.",
+                                 "Create category, subfolder, product, prices & keys — all in one screen."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section {
                     NavigationLink {
                         StoreConfigEditor()
@@ -232,6 +242,9 @@ struct StoreAdminView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await reload() }
             .refreshable { await reload() }
+            .sheet(isPresented: $quickAdd) {
+                StoreQuickAddView { Task { await reload() } }
+            }
             .sheet(isPresented: $newCategory) {
                 StoreCategoryEditor(category: nil) { Task { await reload() } }
             }
@@ -785,6 +798,391 @@ struct StoreProductEditor: View {
             isError = false; message = store.t("Đã tải file lên", "File uploaded") + " (#\(r.id)). " + store.t("Nhớ bấm Lưu sản phẩm.", "Remember to tap Save product.")
         } catch { isError = true; message = error.localizedDescription }
         uploading = false
+    }
+}
+
+// ============================ Thêm sản phẩm — TẤT CẢ TRONG 1 ============================
+// Một màn duy nhất: chọn/tạo Danh mục → chọn/tạo Thư mục con → nhập Sản phẩm
+// (ảnh/video, bản tải) → đặt Giá theo thời hạn → nhập Key cho TỪNG mốc.
+// Bắt buộc phải chọn (tích) danh mục & thư mục con trước mới thêm được sản phẩm.
+struct QuickPriceRow: Identifiable, Hashable {
+    let id = UUID()
+    var label: String = ""
+    var amount: String = ""
+    var keys: String = ""      // key nhập riêng cho mốc này (mỗi dòng 1 key)
+}
+
+struct StoreQuickAddView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) var dismiss
+    var onDone: () -> Void
+
+    // Dữ liệu
+    @State private var categories: [StoreCategory] = []
+    @State private var folders: [StoreFolder] = []
+
+    // Lựa chọn (tích)
+    @State private var selectedCategoryId: Int?
+    @State private var selectedFolderId: Int?
+
+    // Tạo danh mục mới
+    @State private var showNewCat = false
+    @State private var newCatName = ""
+    @State private var newCatMedia: [EditMedia] = []
+    @State private var savingCat = false
+
+    // Tạo thư mục con mới
+    @State private var showNewFolder = false
+    @State private var newFolderName = ""
+    @State private var newFolderMedia: [EditMedia] = []
+    @State private var savingFolder = false
+
+    // Sản phẩm
+    @State private var kind = "app"            // app (key) | acc
+    @State private var name = ""
+    @State private var desc = ""
+    @State private var media: [EditMedia] = []
+    @State private var downloadUrl = ""
+    @State private var downloadFileId: Int?
+    @State private var uploading = false
+    @State private var showImporter = false
+
+    // Giá + key
+    @State private var priceRows: [QuickPriceRow] = [QuickPriceRow()]
+    @State private var accPrice = ""
+    @State private var accKeys = ""
+
+    // Trạng thái
+    @State private var saving = false
+    @State private var message: String?
+    @State private var isError = false
+
+    private let presets = ["1 giờ", "1 ngày", "1 tuần", "1 tháng", "Vĩnh viễn"]
+    private var hasCategory: Bool { selectedCategoryId != nil }
+    private var hasFolder: Bool { selectedFolderId != nil }
+    private var isAcc: Bool { kind == "acc" }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                // ---------- BƯỚC 1: DANH MỤC ----------
+                Section {
+                    if categories.isEmpty {
+                        Text(store.t("Chưa có danh mục — hãy tạo mới bên dưới.", "No categories yet — create one below."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    ForEach(categories) { c in
+                        Button {
+                            selectedCategoryId = c.id
+                            selectedFolderId = nil
+                            Task { await loadFolders() }
+                        } label: {
+                            pickRow(thumb: c.media.first, title: c.name, selected: selectedCategoryId == c.id)
+                        }
+                    }
+                    Button { withAnimation { showNewCat.toggle() } } label: {
+                        Label(showNewCat ? store.t("Ẩn tạo danh mục", "Hide create category") : store.t("Tạo danh mục mới", "Create new category"),
+                              systemImage: showNewCat ? "minus.circle" : "plus.circle.fill")
+                    }
+                    if showNewCat {
+                        TextField(store.t("Tên danh mục mới", "New category name"), text: $newCatName)
+                        Button {
+                            Task { await createCategory() }
+                        } label: {
+                            HStack { if savingCat { ProgressView().padding(.trailing, 4) }
+                                Text(store.t("Lưu danh mục", "Save category")) }
+                        }.disabled(newCatName.trimmingCharacters(in: .whitespaces).isEmpty || savingCat)
+                    }
+                } header: {
+                    Label(store.t("Bước 1 · Chọn / tạo danh mục", "Step 1 · Pick / create category"), systemImage: "1.circle.fill")
+                }
+                if showNewCat { MediaEditor(media: $newCatMedia) }
+
+                // ---------- BƯỚC 2: THƯ MỤC CON ----------
+                Section {
+                    if !hasCategory {
+                        Text(store.t("Hãy chọn hoặc tạo danh mục ở Bước 1 trước.", "Pick or create a category in Step 1 first."))
+                            .font(.caption).foregroundStyle(.orange)
+                    } else {
+                        if folders.isEmpty {
+                            Text(store.t("Danh mục này chưa có thư mục con — hãy tạo mới.", "This category has no subfolders — create one."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(folders) { f in
+                            Button {
+                                selectedFolderId = f.id
+                            } label: {
+                                pickRow(thumb: f.media.first, title: f.name, selected: selectedFolderId == f.id)
+                            }
+                        }
+                        Button { withAnimation { showNewFolder.toggle() } } label: {
+                            Label(showNewFolder ? store.t("Ẩn tạo thư mục con", "Hide create subfolder") : store.t("Tạo thư mục con mới", "Create new subfolder"),
+                                  systemImage: showNewFolder ? "minus.circle" : "plus.circle.fill")
+                        }
+                        if showNewFolder {
+                            TextField(store.t("Tên thư mục con mới", "New subfolder name"), text: $newFolderName)
+                            Button {
+                                Task { await createFolder() }
+                            } label: {
+                                HStack { if savingFolder { ProgressView().padding(.trailing, 4) }
+                                    Text(store.t("Lưu thư mục con", "Save subfolder")) }
+                            }.disabled(newFolderName.trimmingCharacters(in: .whitespaces).isEmpty || savingFolder)
+                        }
+                    }
+                } header: {
+                    Label(store.t("Bước 2 · Chọn / tạo thư mục con", "Step 2 · Pick / create subfolder"), systemImage: "2.circle.fill")
+                }
+                if showNewFolder && hasCategory { MediaEditor(media: $newFolderMedia) }
+
+                // ---------- BƯỚC 3: SẢN PHẨM ----------
+                if hasFolder {
+                    Section {
+                        Picker(store.t("Loại", "Type"), selection: $kind) {
+                            Text(store.t("Ứng dụng / Key", "App / Key")).tag("app")
+                            Text(store.t("Acc game", "Game account")).tag("acc")
+                        }.pickerStyle(.segmented)
+                        TextField(store.t("Tên sản phẩm", "Product name"), text: $name)
+                        TextField(store.t("Mô tả (tuỳ chọn)", "Description (optional)"), text: $desc, axis: .vertical).lineLimit(1...4)
+                    } header: {
+                        Label(store.t("Bước 3 · Thông tin sản phẩm", "Step 3 · Product info"), systemImage: "3.circle.fill")
+                    }
+                    MediaEditor(media: $media)
+                    Section(store.t("Bản tải (link hoặc file)", "Download (link or file)")) {
+                        TextField(store.t("Dán link tải game/app", "Paste game/app download link"), text: $downloadUrl)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Button { showImporter = true } label: {
+                            HStack { if uploading { ProgressView().padding(.trailing, 4) }
+                                Label(downloadFileId != nil ? store.t("Đã có file", "File added") + " (#\(downloadFileId!)) — " + store.t("đổi file", "change file")
+                                                            : store.t("Tải file lên (không giới hạn dung lượng)", "Upload file (no size limit)"),
+                                      systemImage: "arrow.up.doc") }
+                        }.disabled(uploading)
+                    }
+
+                    // ---------- BƯỚC 4: GIÁ + KEY ----------
+                    if isAcc {
+                        Section {
+                            HStack {
+                                TextField(store.t("Giá VND", "Price VND"), text: $accPrice).keyboardType(.numberPad)
+                                Text("đ").foregroundStyle(.secondary)
+                            }
+                            TextEditor(text: $accKeys).frame(minHeight: 100)
+                            Text(store.t("Mỗi dòng 1 tài khoản (vd user|pass). Khách mua nhận ngay 1 acc.",
+                                         "One account per line (e.g. user|pass). Buyer instantly receives 1 account."))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        } header: {
+                            Label(store.t("Bước 4 · Giá & kho acc", "Step 4 · Price & account stock"), systemImage: "4.circle.fill")
+                        }
+                    } else {
+                        Section {
+                            ForEach($priceRows) { $r in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        TextField(store.t("Thời hạn (vd 1 ngày)", "Duration (e.g. 1 day)"), text: $r.label)
+                                        TextField(store.t("Giá VND", "Price VND"), text: $r.amount).keyboardType(.numberPad)
+                                            .frame(width: 100)
+                                    }
+                                    DisclosureGroup {
+                                        TextEditor(text: $r.keys).frame(minHeight: 90)
+                                        Text(store.t("Mỗi dòng 1 key — chỉ dùng cho mốc này.", "One key per line — only for this tier."))
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    } label: {
+                                        Label(store.t("Nhập key cho mốc này", "Add keys for this tier"), systemImage: "key")
+                                            .font(.caption)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                            .onDelete { priceRows.remove(atOffsets: $0) }
+                            Button { priceRows.append(QuickPriceRow()) } label: {
+                                Label(store.t("Thêm mốc giá", "Add price tier"), systemImage: "plus.circle")
+                            }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack {
+                                    ForEach(presets, id: \.self) { p in
+                                        Button(p) { priceRows.append(QuickPriceRow(label: p)) }
+                                            .font(.caption)
+                                            .padding(.horizontal, 10).padding(.vertical, 6)
+                                            .background(Color(.secondarySystemBackground))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                        } header: {
+                            Label(store.t("Bước 4 · Giá theo thời hạn + nhập key", "Step 4 · Prices by duration + keys"), systemImage: "4.circle.fill")
+                        } footer: {
+                            Text(store.t("Mỗi mốc có kho key RIÊNG. Mở 'Nhập key cho mốc này' để dán key cho từng mốc. Hết mốc nào → mốc đó hiện 'Hết hàng'.",
+                                         "Each tier has its OWN key stock. Open 'Add keys for this tier' to paste keys per tier. When a tier runs out it shows 'Out of stock'."))
+                                .font(.caption2)
+                        }
+                    }
+
+                    Section {
+                        Button {
+                            Task { await saveAll() }
+                        } label: {
+                            HStack { if saving { ProgressView().padding(.trailing, 4) }
+                                Text(store.t("Lưu tất cả (tạo sản phẩm + giá + key)", "Save all (create product + prices + keys)")).bold() }
+                        }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || saving)
+                    }
+                } else {
+                    Section {
+                        Text(store.t("Hãy chọn hoặc tạo thư mục con ở Bước 2 trước khi thêm sản phẩm.",
+                                     "Pick or create a subfolder in Step 2 before adding a product."))
+                            .font(.caption).foregroundStyle(.orange)
+                    } header: {
+                        Label(store.t("Bước 3 · Sản phẩm", "Step 3 · Product"), systemImage: "3.circle")
+                    }
+                }
+
+                if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
+            }
+            .navigationTitle(store.t("Thêm sản phẩm (tất cả trong 1)", "Add product (all-in-one)"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
+            .task { await loadCategories() }
+            .fileImporter(isPresented: $showImporter,
+                          allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                if case .success(let urls) = result, let url = urls.first { Task { await uploadFile(url) } }
+            }
+        }
+    }
+
+    // Hàng chọn có dấu tích
+    @ViewBuilder private func pickRow(thumb: StoreMedia?, title: String, selected: Bool) -> some View {
+        HStack(spacing: 10) {
+            if let m = thumb, m.type != "video", let url = URL(string: m.url) {
+                AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                placeholder: { Color(.tertiarySystemBackground) }
+                    .frame(width: 34, height: 34).clipShape(RoundedRectangle(cornerRadius: 7))
+            } else {
+                Image(systemName: "folder.fill").foregroundStyle(Theme.gold)
+                    .frame(width: 34, height: 34)
+                    .background(Color(.tertiarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 7))
+            }
+            Text(title).foregroundStyle(.primary)
+            Spacer()
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(selected ? store.accentColor : .secondary)
+        }
+    }
+
+    // ---- Tải dữ liệu ----
+    private func loadCategories() async {
+        categories = (try? await store.api.storeCategories()) ?? []
+    }
+    private func loadFolders() async {
+        guard let cid = selectedCategoryId else { folders = []; return }
+        folders = (try? await store.api.storeFolders(categoryId: cid)) ?? []
+    }
+
+    // ---- Tạo danh mục / thư mục ----
+    private func createCategory() async {
+        savingCat = true; message = nil
+        do {
+            let r = try await store.api.adminStoreSaveCategory(id: nil, name: newCatName,
+                                                               media: editMediaToPayload(newCatMedia))
+            await loadCategories()
+            selectedCategoryId = r.id
+            selectedFolderId = nil
+            await loadFolders()
+            newCatName = ""; newCatMedia = []; withAnimation { showNewCat = false }
+            isError = false; message = store.t("Đã tạo danh mục.", "Category created.")
+        } catch { isError = true; message = error.localizedDescription }
+        savingCat = false
+    }
+    private func createFolder() async {
+        guard let cid = selectedCategoryId else { return }
+        savingFolder = true; message = nil
+        do {
+            let r = try await store.api.adminStoreSaveFolder(id: nil, categoryId: cid, name: newFolderName,
+                                                             media: editMediaToPayload(newFolderMedia))
+            await loadFolders()
+            selectedFolderId = r.id
+            newFolderName = ""; newFolderMedia = []; withAnimation { showNewFolder = false }
+            isError = false; message = store.t("Đã tạo thư mục con.", "Subfolder created.")
+        } catch { isError = true; message = error.localizedDescription }
+        savingFolder = false
+    }
+
+    private func uploadFile(_ url: URL) async {
+        uploading = true; message = nil
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let r = try await store.api.uploadFileRaw(name: url.lastPathComponent, category: "store", fileURL: url)
+            downloadFileId = r.id
+            isError = false; message = store.t("Đã tải file lên", "File uploaded") + " (#\(r.id))."
+        } catch { isError = true; message = error.localizedDescription }
+        uploading = false
+    }
+
+    // ---- Lưu tất cả ----
+    private func saveAll() async {
+        guard let fid = selectedFolderId else { return }
+        saving = true; message = nil
+        do {
+            // 1) Tạo sản phẩm
+            let prod = try await store.api.adminStoreSaveProduct(
+                id: nil, folderId: fid, name: name, description: desc,
+                media: editMediaToPayload(media), downloadUrl: downloadUrl,
+                downloadFileId: downloadFileId, kind: kind)
+            guard let pid = prod.id else {
+                isError = true; message = store.t("Không tạo được sản phẩm.", "Could not create product."); saving = false; return
+            }
+
+            // 2) Giá
+            var pricePayload: [[String: Any]] = []
+            if isAcc {
+                let amount = Int(accPrice.filter { $0.isNumber }) ?? -1
+                if amount >= 0 { pricePayload = [["label": "Mua acc", "amount": amount]] }
+            } else {
+                pricePayload = priceRows.compactMap { r in
+                    let label = r.label.trimmingCharacters(in: .whitespaces)
+                    let amount = Int(r.amount.filter { $0.isNumber }) ?? -1
+                    guard !label.isEmpty, amount >= 0 else { return nil }
+                    return ["label": label, "amount": amount]
+                }
+            }
+            if !pricePayload.isEmpty {
+                _ = try await store.api.adminStoreSetPrices(productId: pid, prices: pricePayload)
+            }
+
+            // 3) Lấy lại sản phẩm để biết id từng mốc giá rồi nhập key đúng mốc
+            var keysAdded = 0
+            if let saved = try? await store.api.storeProduct(pid) {
+                if isAcc {
+                    let txt = accKeys.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !txt.isEmpty, let firstPid = saved.prices.first?.id {
+                        let r = try await store.api.adminStoreAddKeys(productId: pid, text: txt, priceId: firstPid)
+                        keysAdded += countLines(txt); _ = r
+                    }
+                } else {
+                    for row in priceRows {
+                        let txt = row.keys.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let label = row.label.trimmingCharacters(in: .whitespaces)
+                        guard !txt.isEmpty, !label.isEmpty,
+                              let priceId = saved.prices.first(where: { $0.label == label })?.id else { continue }
+                        _ = try await store.api.adminStoreAddKeys(productId: pid, text: txt, priceId: priceId)
+                        keysAdded += countLines(txt)
+                    }
+                }
+            }
+
+            store.postProductNotification(
+                body: store.t("Sản phẩm mới vừa được thêm vào cửa hàng:", "A new product was added to the store:") + " \(name)")
+            onDone()
+            isError = false
+            message = store.t("Đã lưu xong!", "All saved!") + " \(name)" +
+                      (keysAdded > 0 ? " · \(keysAdded) " + store.t("key/acc", "keys/accounts") : "")
+            // Reset phần sản phẩm để thêm cái khác (giữ nguyên danh mục/thư mục đã chọn)
+            name = ""; desc = ""; media = []; downloadUrl = ""; downloadFileId = nil
+            priceRows = [QuickPriceRow()]; accPrice = ""; accKeys = ""
+        } catch { isError = true; message = error.localizedDescription }
+        saving = false
+    }
+
+    private func countLines(_ s: String) -> Int {
+        s.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
     }
 }
 
