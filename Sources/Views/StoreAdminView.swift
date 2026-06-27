@@ -230,8 +230,18 @@ struct StoreAdminView: View {
                     .onDelete { idx in
                         Task { await deleteCategories(idx) }
                     }
-                    Button { newCategory = true } label: {
-                        Label(store.t("Thêm danh mục mới", "Add new category"), systemImage: "plus.circle.fill")
+                    Button { quickAdd = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "wand.and.stars")
+                                .font(.title3).foregroundStyle(Theme.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(store.t("➕ Thêm sản phẩm (tất cả trong 1)", "➕ Add product (all-in-one)"))
+                                    .font(.headline).foregroundStyle(.primary)
+                                Text(store.t("Tạo danh mục, thư mục con, sản phẩm, giá & nhập key — tất cả trong 1 màn.",
+                                             "Create category, subfolder, product, prices & keys — all in one screen."))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
 
