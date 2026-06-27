@@ -63,6 +63,10 @@ struct MediaEditor: View {
                     .font(.caption)
                     .foregroundStyle(store.accentColor)
             }
+            // Gắn .sheet vào chính nút (không gắn vào Section) để mở được màn Chuyển đổi
+            .sheet(isPresented: $showConverter) {
+                MediaConverterView().environmentObject(store)
+            }
             if let uploadError {
                 Text(uploadError).font(.caption2).foregroundStyle(.red)
             }
@@ -76,9 +80,6 @@ struct MediaEditor: View {
         .onChange(of: picker) { item in
             guard let item else { return }
             Task { await uploadPicked(item) }
-        }
-        .sheet(isPresented: $showConverter) {
-            MediaConverterView().environmentObject(store)
         }
     }
 
