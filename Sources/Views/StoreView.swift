@@ -187,27 +187,14 @@ struct StoreView: View {
         let now = Int(Date().timeIntervalSince1970)
         let tick = showcaseTick
 
-        // Gom tất cả combo (tên sản phẩm + gói giá)
-        var combos: [(String, Int)] = []
-        for p in allProducts {
-            if p.prices.isEmpty {
-                combos.append((p.name, 0))
-            } else {
-                for price in p.prices where price.amount > 0 {
-                    combos.append(("\(p.name) \(price.label)", price.amount))
-                }
-            }
-        }
-
-        // Fallback nếu chưa có sản phẩm
-        if combos.isEmpty {
-            combos = [
-                ("VINGOLD tháng", 500_000), ("VINGOLD tuần", 250_000), ("VINGOLD ngày", 60_000),
-                ("KINGMOD tháng", 900_000), ("KINGMOD tuần", 450_000), ("KINGMOD ngày", 200_000),
-                ("DRACULA tháng", 500_000), ("DRACULA tuần", 250_000), ("DRACULA ngày", 70_000),
-                ("OASIS tháng",   800_000), ("OASIS tuần",   400_000), ("OASIS ngày",   200_000),
-            ]
-        }
+        // Danh sách sản phẩm cố định (ảo — xoay vòng khi chưa có giao dịch thật)
+        let combos: [(String, Int)] = [
+            ("VINGOLD tháng", 500_000), ("VINGOLD tuần", 250_000), ("VINGOLD ngày",  60_000),
+            ("KINGMOD tháng", 900_000), ("KINGMOD tuần", 450_000), ("KINGMOD ngày", 200_000),
+            ("DRACULA tháng", 500_000), ("DRACULA tuần", 250_000), ("DRACULA ngày",  70_000),
+            ("OASIS tháng",   800_000), ("OASIS tuần",   400_000), ("OASIS ngày",   200_000),
+            ("Liên Quân acc", 150_000), ("PUBG Mobile acc", 200_000), ("Free Fire acc", 120_000),
+        ]
 
         let timeAgo = [35, 120, 310, 620, 900, 1500, 2200, 3600, 4800, 7200]
         let count = min(8, combos.count)
