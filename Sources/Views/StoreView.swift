@@ -353,8 +353,10 @@ struct StoreView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         storeHeader
                         walletBar
-                        // Các mục hiển thị theo thứ tự admin sắp xếp (Sắp xếp bố cục trang)
-                        ForEach(orderedSections, id: \.self) { key in
+                        // Nút tải xuống cố định ngay dưới ví (luôn hiển thị nếu có file/link)
+                        if !downloads.isEmpty { downloadsSection.id("downloads") }
+                        // Các mục hiển thị theo thứ tự admin sắp xếp (bỏ qua "downloads" vì đã hiện ở trên)
+                        ForEach(orderedSections.filter { $0 != "downloads" }, id: \.self) { key in
                             sectionView(key).id(key)
                         }
                         if let error {
