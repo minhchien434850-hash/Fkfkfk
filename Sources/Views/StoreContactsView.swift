@@ -9,18 +9,33 @@ struct SocialPlatform: Identifiable {
 }
 
 let kSocialPlatforms: [SocialPlatform] = [
-    .init(id: "telegram",  label: "Telegram",   icon: "paperplane.fill",                  color: .blue),
-    .init(id: "zalo",      label: "Zalo",        icon: "message.fill",                     color: .cyan),
-    .init(id: "facebook",  label: "Facebook",    icon: "f.square.fill",                    color: Color(red: 0.23, green: 0.35, blue: 0.71)),
-    .init(id: "messenger", label: "Messenger",   icon: "ellipsis.message.fill",            color: .purple),
-    .init(id: "instagram", label: "Instagram",   icon: "camera.fill",                      color: .pink),
-    .init(id: "tiktok",    label: "TikTok",      icon: "music.note",                       color: .primary),
-    .init(id: "youtube",   label: "YouTube",     icon: "play.rectangle.fill",              color: .red),
-    .init(id: "discord",   label: "Discord",     icon: "bubble.left.and.bubble.right.fill", color: .indigo),
-    .init(id: "whatsapp",  label: "WhatsApp",    icon: "phone.circle.fill",                color: .green),
-    .init(id: "phone",     label: "Điện thoại",  icon: "phone.fill",                       color: .green),
-    .init(id: "email",     label: "Email",       icon: "envelope.fill",                    color: .orange),
-    .init(id: "website",   label: "Website",     icon: "globe",                            color: .teal),
+    // ── Nhắn tin tức thì ──
+    .init(id: "telegram",  label: "Telegram",    icon: "paperplane.fill",                   color: .blue),
+    .init(id: "zalo",      label: "Zalo",         icon: "message.fill",                      color: .cyan),
+    .init(id: "messenger", label: "Messenger",    icon: "ellipsis.message.fill",             color: .purple),
+    .init(id: "whatsapp",  label: "WhatsApp",     icon: "phone.circle.fill",                 color: .green),
+    .init(id: "viber",     label: "Viber",        icon: "phone.badge.waveform.fill",         color: Color(red: 0.47, green: 0.24, blue: 0.70)),
+    .init(id: "line",      label: "LINE",         icon: "bubble.left.and.text.bubble.right.fill", color: Color(red: 0.10, green: 0.76, blue: 0.24)),
+    .init(id: "signal",    label: "Signal",       icon: "lock.shield.fill",                  color: Color(red: 0.24, green: 0.56, blue: 0.96)),
+    .init(id: "wechat",    label: "WeChat",       icon: "bubble.left.and.bubble.right.fill", color: Color(red: 0.07, green: 0.71, blue: 0.11)),
+    .init(id: "kakao",     label: "KakaoTalk",    icon: "face.smiling.fill",                 color: Color(red: 0.98, green: 0.86, blue: 0.05)),
+    .init(id: "skype",     label: "Skype",        icon: "video.circle.fill",                 color: Color(red: 0.01, green: 0.67, blue: 0.93)),
+    // ── Mạng xã hội ──
+    .init(id: "facebook",  label: "Facebook",     icon: "f.square.fill",                     color: Color(red: 0.23, green: 0.35, blue: 0.71)),
+    .init(id: "instagram", label: "Instagram",    icon: "camera.fill",                       color: .pink),
+    .init(id: "tiktok",    label: "TikTok",       icon: "music.note",                        color: .primary),
+    .init(id: "youtube",   label: "YouTube",      icon: "play.rectangle.fill",               color: .red),
+    .init(id: "twitter",   label: "X (Twitter)",  icon: "x.circle.fill",                     color: Color(red: 0.05, green: 0.05, blue: 0.05)),
+    .init(id: "threads",   label: "Threads",      icon: "at.circle.fill",                    color: Color(red: 0.05, green: 0.05, blue: 0.05)),
+    .init(id: "linkedin",  label: "LinkedIn",     icon: "briefcase.fill",                    color: Color(red: 0.05, green: 0.46, blue: 0.73)),
+    .init(id: "discord",   label: "Discord",      icon: "headphones.circle.fill",            color: .indigo),
+    .init(id: "snapchat",  label: "Snapchat",     icon: "camera.aperture",                   color: Color(red: 1.0,  green: 0.93, blue: 0.0)),
+    .init(id: "pinterest", label: "Pinterest",    icon: "pin.circle.fill",                   color: Color(red: 0.91, green: 0.12, blue: 0.14)),
+    .init(id: "reddit",    label: "Reddit",       icon: "chart.bar.fill",                    color: Color(red: 1.0,  green: 0.36, blue: 0.0)),
+    // ── Liên hệ trực tiếp ──
+    .init(id: "phone",     label: "Điện thoại",   icon: "phone.fill",                        color: .green),
+    .init(id: "email",     label: "Email",        icon: "envelope.fill",                     color: .orange),
+    .init(id: "website",   label: "Website",      icon: "globe",                             color: .teal),
 ]
 
 func socialPlatform(_ id: String) -> SocialPlatform {
@@ -86,29 +101,38 @@ struct StoreContactsBlock: View {
                     }
                 }
 
-                // Group buttons (max 2, side by side)
+                // Group buttons (max 4, 2 per row)
                 if !enabledGroups.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(Array(enabledGroups.prefix(2).enumerated()), id: \.offset) { i, link in
-                            let p = socialPlatform(link.platform)
-                            if let url = socialOpenURL(link.platform, link.url) {
-                                Link(destination: url) {
-                                    HStack(spacing: 5) {
-                                        Image(systemName: "person.3.fill")
-                                            .font(.system(size: 10))
-                                        Image(systemName: p.icon)
-                                            .font(.system(size: 11))
-                                            .foregroundStyle(p.color)
-                                        Text("Nhóm \(i + 1) \(p.label)")
-                                            .font(.caption.bold())
-                                            .lineLimit(1)
+                    let rows = stride(from: 0, to: enabledGroups.count, by: 2).map {
+                        Array(enabledGroups[$0..<min($0 + 2, enabledGroups.count)])
+                    }
+                    VStack(spacing: 8) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                            HStack(spacing: 8) {
+                                ForEach(Array(row.enumerated()), id: \.offset) { _, link in
+                                    let p = socialPlatform(link.platform)
+                                    if let url = socialOpenURL(link.platform, link.url) {
+                                        Link(destination: url) {
+                                            HStack(spacing: 5) {
+                                                Image(systemName: "person.3.fill")
+                                                    .font(.system(size: 10))
+                                                Image(systemName: p.icon)
+                                                    .font(.system(size: 11))
+                                                    .foregroundStyle(p.color)
+                                                Text("Nhóm \(p.label)")
+                                                    .font(.caption.bold())
+                                                    .lineLimit(1)
+                                            }
+                                            .foregroundStyle(.primary)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 9)
+                                            .background(p.color.opacity(0.13))
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                        }
                                     }
-                                    .foregroundStyle(.primary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 9)
-                                    .background(p.color.opacity(0.13))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
                                 }
+                                // Fill empty slot if odd number of groups in a row
+                                if row.count == 1 { Spacer().frame(maxWidth: .infinity) }
                             }
                         }
                     }
@@ -133,8 +157,13 @@ struct StoreContactsEditor: View {
     @EnvironmentObject var store: AppStore
     @State private var tab = 0       // 0 = Liên hệ admin, 1 = Nhóm cộng đồng
     @State private var contact: [EditSocial] = []
-    @State private var group1 = EditSocial(platform: "telegram")
-    @State private var group2 = EditSocial(platform: "zalo")
+    // Up to 4 group slots
+    @State private var groups: [EditSocial] = [
+        EditSocial(platform: "telegram"),
+        EditSocial(platform: "zalo"),
+        EditSocial(platform: "facebook"),
+        EditSocial(platform: "discord"),
+    ]
     @State private var message: String?
     @State private var isError = false
     @State private var loaded = false
@@ -147,8 +176,8 @@ struct StoreContactsEditor: View {
                     Text("Nhóm cộng đồng").tag(1)
                 }.pickerStyle(.segmented)
                 Text(tab == 0
-                     ? "Hiển thị các nút liên hệ TRỰC TIẾP với admin. Khách bấm để mở Zalo/Telegram/... của bạn."
-                     : "2 nút nhóm cộng đồng nằm cạnh nhau ở dưới cửa hàng. Chọn nền tảng & dán link nhóm.")
+                     ? "Hiển thị các nút liên hệ TRỰC TIẾP với admin. Bật nền tảng nào, dán link tương ứng."
+                     : "Tối đa 4 nút nhóm cộng đồng. Bật nút, chọn nền tảng, dán link nhóm.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -171,20 +200,27 @@ struct StoreContactsEditor: View {
                     }
                 }
             } else {
-                // Nhóm cộng đồng — 2 slot cố định
-                groupSection(title: "Nút Nhóm 1", social: $group1)
-                groupSection(title: "Nút Nhóm 2", social: $group2)
+                // Nhóm cộng đồng — 4 slot động
+                ForEach(groups.indices, id: \.self) { i in
+                    groupSection(title: "Nút Nhóm \(i + 1)", index: i)
+                }
 
                 Section {
-                    Label("Preview — nút sẽ hiển thị thế này trong cửa hàng:", systemImage: "eye")
+                    Label("Preview — các nút sẽ hiển thị thế này:", systemImage: "eye")
                         .font(.caption).foregroundStyle(.secondary)
-                    HStack(spacing: 8) {
-                        groupPreviewButton(group1)
-                        groupPreviewButton(group2)
+                    let enabledGroups = groups.filter { $0.enabled }
+                    if enabledGroups.isEmpty {
+                        Text("Chưa bật nút nào.").font(.caption2).foregroundStyle(.secondary)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                            ForEach(Array(enabledGroups.enumerated()), id: \.offset) { _, g in
+                                groupPreviewButton(g)
+                            }
+                        }
                     }
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
                 }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             }
 
             Section { Button("Lưu thay đổi") { Task { await save() } } }
@@ -198,16 +234,16 @@ struct StoreContactsEditor: View {
     }
 
     @ViewBuilder
-    private func groupSection(title: String, social: Binding<EditSocial>) -> some View {
+    private func groupSection(title: String, index i: Int) -> some View {
         Section(title) {
-            Toggle("Hiển thị nút này", isOn: social.enabled)
-            if social.wrappedValue.enabled {
-                Picker("Nền tảng", selection: social.platform) {
+            Toggle("Hiển thị nút này", isOn: $groups[i].enabled)
+            if groups[i].enabled {
+                Picker("Nền tảng", selection: $groups[i].platform) {
                     ForEach(kSocialPlatforms) { sp in
                         Label(sp.label, systemImage: sp.icon).tag(sp.id)
                     }
                 }
-                TextField(contactPlaceholder(social.wrappedValue.platform), text: social.url)
+                TextField(contactPlaceholder(groups[i].platform), text: $groups[i].url)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
@@ -216,30 +252,46 @@ struct StoreContactsEditor: View {
 
     @ViewBuilder
     private func groupPreviewButton(_ s: EditSocial) -> some View {
-        if s.enabled {
-            let p = socialPlatform(s.platform)
-            HStack(spacing: 5) {
-                Image(systemName: "person.3.fill").font(.caption2)
-                Image(systemName: p.icon).font(.caption2).foregroundStyle(p.color)
-                Text("Nhóm \(p.label)").font(.caption.bold()).lineLimit(1)
-            }
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .background(p.color.opacity(0.13))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-        } else {
-            Color.clear.frame(maxWidth: .infinity, maxHeight: 36)
+        let p = socialPlatform(s.platform)
+        HStack(spacing: 5) {
+            Image(systemName: "person.3.fill").font(.caption2)
+            Image(systemName: p.icon).font(.caption2).foregroundStyle(p.color)
+            Text("Nhóm \(p.label)").font(.caption.bold()).lineLimit(1)
         }
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
+        .background(p.color.opacity(0.13))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func contactPlaceholder(_ platform: String) -> String {
         switch platform {
-        case "phone":    return "Số điện thoại (vd 0901234567)"
-        case "email":    return "Email (vd shop@gmail.com)"
-        case "zalo":     return "Link Zalo (vd https://zalo.me/0901234567)"
-        case "website":  return "URL website (vd https://kenios.app)"
-        default:         return "Dán link \(socialPlatform(platform).label)"
+        case "phone":     return "Số điện thoại (vd 0901234567)"
+        case "email":     return "Email (vd shop@gmail.com)"
+        case "zalo":      return "Link Zalo (vd https://zalo.me/0901234567)"
+        case "website":   return "URL website (vd https://kenios.app)"
+        case "telegram":  return "Link Telegram (vd https://t.me/username)"
+        case "messenger": return "Link Messenger (vd https://m.me/username)"
+        case "whatsapp":  return "Số WhatsApp hoặc link (vd https://wa.me/84901234567)"
+        case "viber":     return "Số Viber hoặc link (vd https://viber.com/username)"
+        case "line":      return "Link LINE (vd https://line.me/ti/p/username)"
+        case "signal":    return "Link Signal (vd https://signal.me/#p/+84...)"
+        case "wechat":    return "ID WeChat (vd username)"
+        case "kakao":     return "Link KakaoTalk (vd https://open.kakao.com/...)"
+        case "skype":     return "ID Skype (vd live:username)"
+        case "facebook":  return "Link Facebook (vd https://fb.com/username)"
+        case "instagram": return "Link Instagram (vd https://instagram.com/username)"
+        case "tiktok":    return "Link TikTok (vd https://tiktok.com/@username)"
+        case "youtube":   return "Link YouTube (vd https://youtube.com/c/channel)"
+        case "twitter":   return "Link X/Twitter (vd https://x.com/username)"
+        case "threads":   return "Link Threads (vd https://threads.net/@username)"
+        case "linkedin":  return "Link LinkedIn (vd https://linkedin.com/in/name)"
+        case "discord":   return "Link Discord (vd https://discord.gg/invite)"
+        case "snapchat":  return "Link Snapchat (vd https://snapchat.com/add/name)"
+        case "pinterest": return "Link Pinterest (vd https://pinterest.com/username)"
+        case "reddit":    return "Link Reddit (vd https://reddit.com/u/username)"
+        default:          return "Dán link \(socialPlatform(platform).label)"
         }
     }
 
@@ -255,33 +307,25 @@ struct StoreContactsEditor: View {
     private func load() async {
         if let r = try? await store.api.adminGetContacts() {
             contact = merge(r.contact)
-            if r.groups.indices.contains(0) {
-                let g = r.groups[0]
-                group1 = EditSocial(platform: g.platform, url: g.url, enabled: g.enabled)
-            }
-            if r.groups.indices.contains(1) {
-                let g = r.groups[1]
-                group2 = EditSocial(platform: g.platform, url: g.url, enabled: g.enabled)
+            for (i, g) in r.groups.prefix(4).enumerated() {
+                groups[i] = EditSocial(platform: g.platform, url: g.url, enabled: g.enabled)
             }
         } else {
             contact = merge([])
         }
     }
 
-    private func contactPayload(_ rows: [EditSocial]) -> [[String: Any]] {
+    private func socialPayload(_ rows: [EditSocial]) -> [[String: Any]] {
         rows.map { ["platform": $0.platform, "url": $0.url.trimmingCharacters(in: .whitespaces),
                     "enabled": $0.enabled] }
     }
 
     private func save() async {
         message = nil
-        let groupsPayload: [[String: Any]] = [
-            ["platform": group1.platform, "url": group1.url.trimmingCharacters(in: .whitespaces), "enabled": group1.enabled],
-            ["platform": group2.platform, "url": group2.url.trimmingCharacters(in: .whitespaces), "enabled": group2.enabled],
-        ]
         do {
             let r = try await store.api.adminSetContacts(
-                contact: contactPayload(contact), groups: groupsPayload)
+                contact: socialPayload(contact),
+                groups: socialPayload(groups))
             isError = false; message = r.message
         } catch { isError = true; message = error.localizedDescription }
     }

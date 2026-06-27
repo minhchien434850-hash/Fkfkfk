@@ -137,8 +137,16 @@ final class AppStore: ObservableObject {
         language = v; d.set(v, forKey: "language")
         objectWillChange.send()   // ép toàn app vẽ lại ngay khi đổi ngôn ngữ
     }
-    /// Dịch nhanh: trả tiếng Anh nếu đang chọn EN, ngược lại tiếng Việt.
-    func t(_ vi: String, _ en: String) -> String { language == "en" ? en : vi }
+
+    /// Dịch sang ngôn ngữ hiện tại.
+    /// vi = chuỗi tiếng Việt, en = chuỗi tiếng Anh (cũng là khoá tra cứu bảng dịch).
+    func t(_ vi: String, _ en: String) -> String {
+        switch language {
+        case "vi": return vi
+        case "en": return en
+        default:   return L10n.translate(en, to: language) ?? en
+        }
+    }
 
     // ===== Nhớ tài khoản & mật khẩu (lưu trong Keychain, có mã hoá) =====
     var rememberLogin: Bool {

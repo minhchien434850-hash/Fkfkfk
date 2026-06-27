@@ -1572,14 +1572,20 @@ struct StoreCartView: View {
     }
 }
 
-// Danh sách ngôn ngữ (đa ngôn ngữ)
+// Danh sách ngôn ngữ hỗ trợ
 let kAppLanguages: [(String, String)] = [
-    ("vi", "Tiếng Việt"),
-    ("en", "English"),
-    ("zh", "中文"),
-    ("ko", "한국어"),
-    ("ja", "日本語"),
-    ("th", "ไทย"),
-    ("fr", "Français"),
-    ("es", "Español"),
+    ("vi", "🇻🇳 Tiếng Việt"),
+    ("en", "🇺🇸 English"),
+    ("zh", "🇨🇳 中文 (简体)"),
+    ("ko", "🇰🇷 한국어"),
+    ("ja", "🇯🇵 日本語"),
+    ("th", "🇹🇭 ภาษาไทย"),
+    ("fr", "🇫🇷 Français"),
+    ("es", "🇪🇸 Español"),
+    ("de", "🇩🇪 Deutsch"),
+    ("pt", "🇧🇷 Português"),
+    ("ru", "🇷🇺 Русский"),
+    ("id", "🇮🇩 Bahasa Indonesia"),
+    ("ar", "🇸🇦 العربية"),
+    ("hi", "🇮🇳 हिन्दी"),
 ]
