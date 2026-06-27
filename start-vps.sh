@@ -30,12 +30,16 @@ echo ""
 
 # 1. Cài đặt hệ thống
 echo "▸ [1/7] Cài đặt packages hệ thống..."
-sudo apt update -y
+sudo apt update -y || true
+# Gói BẮT BUỘC để chạy backend (Python). Dùng || true để không vỡ cả script nếu 1 gói lỗi.
 sudo apt install -y python3 python3-venv python3-dev python3-pip \
     nginx certbot python3-certbot-nginx \
-    nodejs npm gcc g++ golang-go default-jdk \
-    ffmpeg \
-    zip unzip curl wget git
+    ffmpeg zip unzip curl wget git || true
+# Gói TUỲ CHỌN cho tính năng chạy code (.js/.go/.java). Bỏ "npm" vì hay xung đột nodejs.
+# Mỗi gói cài riêng + bỏ qua nếu lỗi → KHÔNG làm hỏng quá trình cài chính.
+for pkg in nodejs gcc g++ golang-go default-jdk; do
+    sudo apt install -y "$pkg" 2>/dev/null || echo "  (bỏ qua $pkg — không bắt buộc)"
+done
 
 # 2. Tạo thư mục làm việc
 echo "▸ [2/7] Tạo thư mục làm việc..."
