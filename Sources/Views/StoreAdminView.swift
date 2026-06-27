@@ -2333,60 +2333,24 @@ struct StoreStructureBackupView: View {
 
     private func createBackup() async {
         loading = true; error = nil; backupURL = nil
-        var out: [String: Any] = [
-            "version": "1.0",
-            "exportedAt": ISO8601DateFormatter().string(from: Date()),
-            "appName": "KENIOS Store Backup"
-        ]
-
-        progress = "Đang tải cấu hình..."
-        if let cfg = try? await store.api.storeConfig() {
-            out["config"] = [
-                "logoName": cfg.logoName, "logoUrl": cfg.logoUrl,
-                "bannerType": cfg.bannerType, "bannerUrl": cfg.bannerUrl
-            ]
-        }
-
-        progress = "Đang tải danh mục..."
-        let cats = (try? await store.api.storeCategories()) ?? []
-        var catsArr: [[String: Any]] = []
-
-        for (i, cat) in cats.enumerated() {
-            progress = "Danh mục \(i+1)/\(cats.count): \(cat.name)"
-            var catObj: [String: Any] = [
-                "id": cat.id, "name": cat.name,
-                "media": cat.media.map { ["type": $0.type, "url": $0.url] }
-            ]
-            let folders = (try? await store.api.storeFolders(categoryId: cat.id)) ?? []
-            var foldersArr: [[String: Any]] = []
-            for folder in folders {
-                var fObj: [String: Any] = [
-                    "id": folder.id, "name": folder.name,
-                    "media": folder.media.map { ["type": $0.type, "url": $0.url] }
-                ]
-                let products = (try? await store.api.storeProducts(folderId: folder.id)) ?? []
-                fObj["products"] = products.map { p -> [String: Any] in [
-                    "id": p.id, "name": p.name, "description": p.description,
-                    "media": p.media.map { ["type": $0.type, "url": $0.url] },
-                    "prices": p.prices.map { ["label": $0.label, "amount": $0.amount] },
-                    "availableKeys": p.availableKeys, "isAcc": p.isAcc
-                ]}
-                foldersArr.append(fObj)
-            }
-            catObj["folders"] = foldersArr
-            catsArr.append(catObj)
-        }
-        out["categories"] = catsArr
-
-        progress = "Đang tạo file..."
+        progress = store.t("Đang xuất từ máy chủ...", "Exporting from server...")
         do {
-            let data = try JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
+            // Lấy toàn bộ cửa hàng trong 1 request (đáng tin, không sót dữ liệu)
+            let data = try await store.api.adminStoreExportData()
             let fmt = DateFormatter(); fmt.dateFormat = "yyyyMMdd_HHmmss"
             let name = "kenios_backup_\(fmt.string(from: Date())).json"
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
             try data.write(to: url)
             backupURL = url
-            progress = "Xong! \(cats.count) danh mục · \(catsArr.flatMap { ($0["folders"] as? [[String: Any]]) ?? [] }.count) thư mục"
+            // Đếm nhanh để hiển thị
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let cats = obj["categories"] as? [[String: Any]] {
+                let folders = cats.flatMap { ($0["folders"] as? [[String: Any]]) ?? [] }
+                let prods = folders.flatMap { ($0["products"] as? [[String: Any]]) ?? [] }
+                progress = store.t("Xong!", "Done!") + " \(cats.count) " + store.t("danh mục", "categories") + " · \(folders.count) " + store.t("thư mục", "folders") + " · \(prods.count) " + store.t("sản phẩm", "products")
+            } else {
+                progress = store.t("Xong!", "Done!")
+            }
         } catch {
             self.error = error.localizedDescription; progress = ""
         }
@@ -2691,6 +2655,7 @@ struct StoreRestoreBackupView: View {
     @State private var message: String?
     @State private var isError = false
     @State private var restored = false
+    @State private var wipeFirst = false
 
     var body: some View {
         Form {
@@ -2715,6 +2680,11 @@ struct StoreRestoreBackupView: View {
 
             if !parsedCategories.isEmpty && !restored {
                 Section(store.t("Thực hiện", "Run")) {
+                    Toggle(isOn: $wipeFirst) {
+                        Label(store.t("Xoá sạch cửa hàng cũ trước khi khôi phục", "Wipe old store before restoring"),
+                              systemImage: "trash")
+                            .foregroundStyle(wipeFirst ? .red : .primary)
+                    }
                     Button {
                         Task { await restore() }
                     } label: {
@@ -2728,6 +2698,11 @@ struct StoreRestoreBackupView: View {
                     if !progress.isEmpty {
                         Text(progress).font(.caption2).foregroundStyle(.secondary)
                     }
+                    if wipeFirst {
+                        Text(store.t("⚠️ Sẽ XOÁ hết danh mục/sản phẩm/key hiện có (giữ ví & tài khoản khách) rồi nhập lại từ file.",
+                                     "⚠️ This DELETES all current categories/products/keys (keeps wallets & customer accounts), then imports from the file."))
+                            .font(.caption2).foregroundStyle(.red)
+                    }
                 }
             }
 
@@ -2737,11 +2712,11 @@ struct StoreRestoreBackupView: View {
 
             Section(store.t("Lưu ý", "Notes")) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label(store.t("Chỉ tạo mới — không ghi đè cấu trúc đã có", "Only creates new — won't overwrite existing structure"), systemImage: "info.circle")
-                    Label(store.t("KEY/ACC cũ KHÔNG được khôi phục từ file này", "Old KEY/ACC are NOT restored from this file"), systemImage: "exclamationmark.triangle")
+                    Label(store.t("Tắt 'Xoá sạch' = chỉ thêm mới vào cửa hàng hiện có.", "'Wipe' off = only add into the current store."), systemImage: "info.circle")
+                    Label(store.t("Bật 'Xoá sạch' = làm cửa hàng MỚI hoàn toàn từ file.", "'Wipe' on = a completely fresh store from the file."), systemImage: "sparkles")
+                        .foregroundStyle(store.accentColor)
+                    Label(store.t("KEY/ACC cũ KHÔNG nằm trong file này (sao lưu riêng ở mục KEY/ACC).", "Old KEY/ACC are NOT in this file (backed up separately in the KEY/ACC section)."), systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
-                    Label(store.t("Nên xoá cửa hàng cũ trước khi khôi phục (nếu muốn sạch)", "Delete the old store before restoring (for a clean state)"), systemImage: "trash.circle")
-                        .foregroundStyle(.red)
                 }
                 .font(.caption)
             }
@@ -2774,41 +2749,17 @@ struct StoreRestoreBackupView: View {
 
     private func restore() async {
         loading = true; isError = false; message = nil
-        var doneCount = 0
-        for cat in parsedCategories {
-            guard let name = cat["name"] as? String, !name.isEmpty else { continue }
-            let media = (cat["media"] as? [[String: String]]) ?? []
-            progress = "Danh mục: \(name)"
-            guard let catRes = try? await store.api.adminStoreSaveCategory(id: nil, name: name, media: media),
-                  let catId = catRes.id, catId > 0 else { continue }
-            doneCount += 1
-            for folder in (cat["folders"] as? [[String: Any]]) ?? [] {
-                guard let fName = folder["name"] as? String, !fName.isEmpty else { continue }
-                let fMedia = (folder["media"] as? [[String: String]]) ?? []
-                progress = "  Thư mục: \(fName)"
-                guard let fRes = try? await store.api.adminStoreSaveFolder(id: nil, categoryId: catId,
-                                                                            name: fName, media: fMedia),
-                      let fId = fRes.id, fId > 0 else { continue }
-                for product in (folder["products"] as? [[String: Any]]) ?? [] {
-                    guard let pName = product["name"] as? String, !pName.isEmpty else { continue }
-                    let pDesc = (product["description"] as? String) ?? ""
-                    let pMedia = (product["media"] as? [[String: String]]) ?? []
-                    let kind = (product["isAcc"] as? Bool) == true ? "acc" : "app"
-                    progress = "    Sản phẩm: \(pName)"
-                    guard let pRes = try? await store.api.adminStoreSaveProduct(
-                        id: nil, folderId: fId, name: pName, description: pDesc,
-                        media: pMedia, downloadUrl: "", downloadFileId: nil, kind: kind),
-                          let pId = pRes.id, pId > 0 else { continue }
-                    if let prices = product["prices"] as? [[String: Any]], !prices.isEmpty {
-                        _ = try? await store.api.adminStoreSetPrices(productId: pId, prices: prices)
-                    }
-                }
-            }
+        progress = store.t("Đang khôi phục trên máy chủ...", "Restoring on server...")
+        do {
+            // Gửi cả cây dữ liệu lên server xử lý 1 lần (atomic, không sót/đứt giữa chừng)
+            let r = try await store.api.adminStoreImport(categories: parsedCategories, wipe: wipeFirst)
+            isError = false; message = r.message
+            restored = true
+        } catch {
+            isError = true; message = error.localizedDescription
         }
         progress = ""
-        isError = false
-        message = store.t("Khôi phục xong! Đã tạo", "Restore complete! Created") + " \(doneCount)/\(catCount) " + store.t("danh mục.", "categories.")
-        loading = false; restored = true
+        loading = false
     }
 }
 

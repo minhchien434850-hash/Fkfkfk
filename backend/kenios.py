@@ -5071,6 +5071,91 @@ def admin_store_set_prices(pid: int, b: StorePricesIn, admin=Depends(get_admin))
     return {"message": "Đã cập nhật bảng giá."}
 
 
+# -------------------- Admin: Xuất / Nhập (backup) toàn bộ cửa hàng trong 1 request --------------------
+@app.get("/admin/store/export")
+def admin_store_export(admin=Depends(get_admin)) -> dict[str, Any]:
+    """Xuất TẤT CẢ danh mục → thư mục → sản phẩm → giá ra JSON (1 request, đáng tin)."""
+    with db() as c:
+        out_cats = []
+        for cat in c.execute("SELECT * FROM store_categories ORDER BY sort, id").fetchall():
+            out_folders = []
+            for f in c.execute("SELECT * FROM store_folders WHERE category_id=? ORDER BY sort, id",
+                               (cat["id"],)).fetchall():
+                out_prods = []
+                for p in c.execute("SELECT * FROM store_products WHERE folder_id=? ORDER BY sort, id",
+                                   (f["id"],)).fetchall():
+                    prices = c.execute("SELECT label, amount FROM store_prices WHERE product_id=? "
+                                       "ORDER BY sort, amount", (p["id"],)).fetchall()
+                    out_prods.append({
+                        "name": p["name"], "description": p["description"] or "",
+                        "media": _load_media(p["media"]),
+                        "download_url": p["download_url"] or "",
+                        "kind": _row_kind(p),
+                        "prices": [{"label": pr["label"], "amount": pr["amount"]} for pr in prices],
+                    })
+                out_folders.append({"name": f["name"], "media": _load_media(f["media"]),
+                                    "products": out_prods})
+            out_cats.append({"name": cat["name"], "media": _load_media(cat["media"]),
+                             "folders": out_folders})
+    return {"version": "2.0", "app": "KENIOS Store", "exported_at": int(time.time()),
+            "categories": out_cats}
+
+
+class StoreImportIn(BaseModel):
+    categories: list[dict[str, Any]] = []
+    wipe: bool = False   # True = xoá toàn bộ hàng hoá cũ trước khi nhập (giữ ví/tài khoản khách)
+
+@app.post("/admin/store/import")
+def admin_store_import(b: StoreImportIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    """Nhập lại cấu trúc cửa hàng từ JSON (1 request, atomic). Tương thích cả backup cũ (isAcc)."""
+    nc = nf = np_ = 0
+    now = int(time.time())
+    with db() as c:
+        if b.wipe:
+            c.execute("DELETE FROM store_keys")
+            c.execute("DELETE FROM store_prices")
+            c.execute("DELETE FROM store_products")
+            c.execute("DELETE FROM store_folders")
+            c.execute("DELETE FROM store_categories")
+        for cat in (b.categories or []):
+            cname = str(cat.get("name", "")).strip()
+            if not cname:
+                continue
+            cur = c.execute("INSERT INTO store_categories(name,media,created_at) VALUES(?,?,?)",
+                            (cname, _dump_media(cat.get("media")), now))
+            cid = cur.lastrowid; nc += 1
+            for f in (cat.get("folders") or []):
+                fname = str(f.get("name", "")).strip()
+                if not fname:
+                    continue
+                fcur = c.execute("INSERT INTO store_folders(category_id,name,media,created_at) VALUES(?,?,?,?)",
+                                 (cid, fname, _dump_media(f.get("media")), now))
+                fid = fcur.lastrowid; nf += 1
+                for p in (f.get("products") or []):
+                    pname = str(p.get("name", "")).strip()
+                    if not pname:
+                        continue
+                    kind = "acc" if (str(p.get("kind", "")) == "acc" or p.get("isAcc") is True) else "app"
+                    pcur = c.execute(
+                        "INSERT INTO store_products(folder_id,name,description,media,download_url,"
+                        "download_file_id,kind,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                        (fid, pname, str(p.get("description", "")), _dump_media(p.get("media")),
+                         str(p.get("download_url", "")), None, kind, now))
+                    pid = pcur.lastrowid; np_ += 1
+                    for i, pr in enumerate(p.get("prices") or []):
+                        label = str(pr.get("label", "")).strip()
+                        if not label:
+                            continue
+                        try:
+                            amount = int(pr.get("amount", 0))
+                        except (TypeError, ValueError):
+                            amount = 0
+                        c.execute("INSERT INTO store_prices(product_id,label,amount,sort) VALUES(?,?,?,?)",
+                                  (pid, label, max(0, amount), i))
+    return {"message": f"Đã khôi phục: {nc} danh mục · {nf} thư mục · {np_} sản phẩm.",
+            "categories": nc, "folders": nf, "products": np_}
+
+
 # -------------------- Admin: kho KEY --------------------
 class StoreKeysIn(BaseModel):
     text: str = ""   # mỗi dòng 1 key
