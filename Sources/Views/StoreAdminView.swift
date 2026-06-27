@@ -1549,9 +1549,11 @@ struct AdminPromoCodesView: View {
 
     var body: some View {
         List {
+            if loading {
+                Section { ProgressView() }
+            }
             Section {
-                if loading { ProgressView() }
-                ForEach(codes) { code in
+                ForEach(codes, id: \.id) { code in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(code.code).font(.headline.monospaced())

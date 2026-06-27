@@ -1120,56 +1120,6 @@ struct StoreProductDetailView: View {
         buying = false
     }
 
-    private var ratingSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Divider()
-            Text("Đánh giá sản phẩm").font(.headline)
-            HStack(spacing: 12) {
-                ForEach(1...5, id: \.self) { star in
-                    Button { saveRating(star) } label: {
-                        Image(systemName: star <= myRating ? "star.fill" : "star")
-                            .font(.title2)
-                            .foregroundStyle(star <= myRating ? .yellow : .secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-                if myRating > 0 {
-                    Text(["", "Rất tệ", "Tệ", "Bình thường", "Tốt", "Rất tốt"][myRating])
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func contactSellerSection(_ c: StoreContacts) -> some View {
-        let enabled = c.contact.filter { $0.enabled } + c.groups.filter { $0.enabled }
-        if !enabled.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Divider()
-                Label("Liên hệ người bán", systemImage: "bubble.left.and.bubble.right.fill")
-                    .font(.headline)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(enabled) { link in
-                            if let url = URL(string: link.url) {
-                                Link(destination: url) {
-                                    Label(link.platform,
-                                          systemImage: c.groups.contains(where: { $0.platform == link.platform })
-                                          ? "person.3.fill" : "arrow.up.right.circle")
-                                        .font(.caption.bold())
-                                        .padding(.horizontal, 12).padding(.vertical, 7)
-                                        .background(Theme.accent.opacity(0.14))
-                                        .foregroundStyle(Theme.accent)
-                                        .clipShape(Capsule())
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 // Nút tải file (sản phẩm dùng file upload thay vì link)
