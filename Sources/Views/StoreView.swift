@@ -171,14 +171,16 @@ struct StoreView: View {
     private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let showcaseTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
-    // Tên Việt Nam đầy đủ (họ + chữ đệm viết tắt) — hiển thị dạng "Nguyễn T***"
-    private let showcaseNames: [(String, String)] = [
-        ("Nguyễn", "M"), ("Trần", "V"), ("Lê", "T"), ("Phạm", "H"), ("Hoàng", "A"),
-        ("Huỳnh", "N"), ("Phan", "K"), ("Vũ", "L"), ("Võ", "B"), ("Đặng", "P"),
-        ("Bùi", "Q"), ("Đỗ", "T"), ("Hồ", "V"), ("Ngô", "H"), ("Dương", "M"),
-        ("Lý", "T"), ("Đinh", "C"), ("Trương", "Đ"), ("Tô", "S"), ("Lưu", "G"),
-        ("Cao", "T"), ("Mai", "N"), ("Tạ", "V"), ("Lâm", "K"), ("Thái", "H"),
-        ("Đoàn", "L"), ("Quách", "B"), ("Châu", "P"), ("Tiêu", "T"), ("Từ", "M"),
+    // Tên hiển thị trong showcase — họ tên đầy đủ dạng "Nguyễn Văn M***"
+    private let showcaseNames: [String] = [
+        "Nguyễn Văn M", "Trần Thị L", "Lê Văn H", "Phạm Thị A", "Hoàng Văn T",
+        "Huỳnh Thị N", "Phan Văn K", "Vũ Thị B", "Võ Văn Q", "Đặng Thị P",
+        "Bùi Văn C", "Đỗ Thị T", "Hồ Văn S", "Ngô Thị D", "Dương Văn G",
+        "Lý Thị Th", "Đinh Văn Ph", "Trương Thị H", "Tô Văn Nh", "Lưu Thị X",
+        "Cao Văn R", "Mai Thị Ch", "Tạ Văn Kh", "Lâm Thị Ph", "Thái Văn Tr",
+        "Đoàn Thị Ng", "Quách Văn H", "Châu Thị B", "Tiêu Văn Đ", "Từ Thị V",
+        "Nguyễn Thị H", "Trần Văn Kh", "Lê Thị T", "Phạm Văn L", "Hoàng Thị M",
+        "Huỳnh Văn An", "Phan Thị Nh", "Vũ Văn Tu", "Võ Thị Qu", "Đặng Văn Bi",
     ]
 
     // Tự sinh từ sản phẩm thật, xoay vòng theo tick (5 phút/lần)
@@ -201,8 +203,7 @@ struct StoreView: View {
         let offset = tick % combos.count
 
         func name(_ seed: Int) -> String {
-            let n = showcaseNames[seed % showcaseNames.count]
-            return "\(n.0) \(n.1)***"
+            "\(showcaseNames[seed % showcaseNames.count])***"
         }
 
         let orders: [ShowcaseOrder] = (0..<count).map { i in
