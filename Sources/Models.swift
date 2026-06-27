@@ -667,7 +667,7 @@ struct UserSearchResult: Identifiable, Decodable, Hashable {
 struct PostItem: Identifiable, Decodable, Hashable {
     let id: Int
     let caption: String?
-    let likes: Int
+    var likes: Int
     let createdAt: Int?
     let fileId: Int
     let userId: Int?
@@ -675,8 +675,21 @@ struct PostItem: Identifiable, Decodable, Hashable {
     let publicId: String?
     let name: String?
     let mime: String?
-    let liked: Bool
-    let following: Bool?
+    var liked: Bool
+    var following: Bool?
+    var views: Int?
+    var comments: Int?
+    var shares: Int?
+    let isPublic: Bool?
+    let avatarUrl: String?
+}
+
+struct PostComment: Identifiable, Decodable, Hashable {
+    let id: Int
+    let userId: Int?
+    let username: String
+    let content: String
+    let createdAt: Int?
 }
 
 struct FollowResponse: Decodable { let following: Bool }
@@ -688,6 +701,9 @@ struct UserProfile: Decodable {
     let following: Int
     let posts: Int
     let isFollowing: Bool
+    let totalLikes: Int?
+    let avatarUrl: String?
+    let bio: String?
 }
 
 struct PostCreateResponse: Decodable { let id: Int; let message: String }

@@ -222,18 +222,46 @@ struct APIClient {
     }
 
     // ---- Video feed ----
-    func createPost(fileId: Int, caption: String) async throws -> PostCreateResponse {
+    func createPost(fileId: Int, caption: String, isPublic: Bool = true) async throws -> PostCreateResponse {
         try decode(try await send("/posts", method: "POST",
-                                  json: ["file_id": fileId, "caption": caption]))
+                                  json: ["file_id": fileId, "caption": caption, "is_public": isPublic]))
     }
     func getFeed() async throws -> [PostItem] {
         try decode(try await send("/feed"))
+    }
+    func getMyPosts() async throws -> [PostItem] {
+        try decode(try await send("/me/posts"))
+    }
+    func getUserPosts(_ uid: Int) async throws -> [PostItem] {
+        try decode(try await send("/users/\(uid)/posts"))
     }
     func likePost(_ pid: Int) async throws -> LikeResponse {
         try decode(try await send("/posts/\(pid)/like", method: "POST"))
     }
     func deletePost(_ pid: Int) async throws -> MessageResponse {
         try decode(try await send("/posts/\(pid)", method: "DELETE"))
+    }
+    func getComments(_ postId: Int) async throws -> [PostComment] {
+        try decode(try await send("/posts/\(postId)/comments"))
+    }
+    func addComment(postId: Int, content: String) async throws -> PostComment {
+        try decode(try await send("/posts/\(postId)/comments", method: "POST", json: ["content": content]))
+    }
+    func deleteComment(_ cid: Int) async throws -> MessageResponse {
+        try decode(try await send("/comments/\(cid)", method: "DELETE"))
+    }
+    func incrementView(_ postId: Int) async throws {
+        _ = try await send("/posts/\(postId)/view", method: "POST")
+    }
+    func myProfile() async throws -> UserProfile {
+        try decode(try await send("/me/profile"))
+    }
+    func updateProfile(publicId: String?, avatarUrl: String?, bio: String?) async throws -> MessageResponse {
+        var body: [String: Any] = [:]
+        if let v = publicId { body["public_id"] = v }
+        if let v = avatarUrl { body["avatar_url"] = v }
+        if let v = bio { body["bio"] = v }
+        return try decode(try await send("/me/profile", method: "PUT", json: body))
     }
 
     // ---- Live ----

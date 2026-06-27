@@ -27,6 +27,7 @@ final class AppStore: ObservableObject {
     @Published var plan: String = "free"
     @Published var credits: Int = 0
     @Published var publicId: String = ""
+    @Published var userId: Int?
 
     // Bảo trì (admin bật → khoá app người dùng)
     @Published var maintenance: Bool = false
@@ -97,6 +98,8 @@ final class AppStore: ObservableObject {
         plan = d.string(forKey: "plan") ?? "free"
         credits = d.integer(forKey: "credits")
         publicId = d.string(forKey: "publicId") ?? ""
+        let uid = d.integer(forKey: "userId")
+        userId = uid > 0 ? uid : nil
         isDark = d.object(forKey: "isDark") as? Bool ?? true
         themeMode = d.string(forKey: "themeMode") ?? ((d.object(forKey: "isDark") as? Bool ?? true) ? "dark" : "light")
         language = d.string(forKey: "language") ?? "vi"
@@ -246,6 +249,7 @@ final class AppStore: ObservableObject {
         plan = resp.user.plan ?? "free"
         credits = resp.user.credits ?? 0
         publicId = resp.user.publicId ?? ""
+        userId = resp.user.id
         Keychain.save("token", resp.token)
         d.set(resp.user.username, forKey: "username")
         d.set(resp.user.email ?? "", forKey: "email")
@@ -254,6 +258,7 @@ final class AppStore: ObservableObject {
         d.set(plan, forKey: "plan")
         d.set(credits, forKey: "credits")
         d.set(publicId, forKey: "publicId")
+        d.set(resp.user.id, forKey: "userId")
         showPlanIntro = true   // hiện màn giới thiệu gói PRO/Free sau khi đăng nhập
     }
 
@@ -263,8 +268,10 @@ final class AppStore: ObservableObject {
             isAdmin = me.isAdmin ?? false
             plan = me.plan ?? "free"
             publicId = me.publicId ?? publicId
+            userId = me.id
             d.set(isAdmin, forKey: "isAdmin"); d.set(plan, forKey: "plan")
             d.set(publicId, forKey: "publicId")
+            d.set(me.id, forKey: "userId")
         }
         if let st = try? await api.appStatus() {
             let wasOff = !maintenance
