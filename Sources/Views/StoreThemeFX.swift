@@ -43,6 +43,9 @@ struct AnimatedStoreLogo: View {
         case "rainbow":
             base.foregroundStyle(LinearGradient(colors: rainbow, startPoint: .leading, endPoint: .trailing))
                 .hueRotation(.degrees(anim == "none" ? 0 : phase * 360))
+        case "gradient":
+            base.foregroundStyle(LinearGradient(colors: [Theme.accent, .cyan, .purple],
+                                                startPoint: .leading, endPoint: .trailing))
         case "gold":
             base.foregroundStyle(LinearGradient(
                 colors: [Color(red: 0.95, green: 0.78, blue: 0.25), .yellow, Color(red: 0.82, green: 0.6, blue: 0.12)],
@@ -54,6 +57,8 @@ struct AnimatedStoreLogo: View {
         case "glow":
             base.foregroundStyle(.white)
                 .shadow(color: .white.opacity(0.85), radius: anim == "none" ? 4 : 4 + 6 * abs(sin(phase * .pi)))
+        case "accent":
+            base.foregroundStyle(Theme.accent)
         default:
             base.foregroundStyle(.primary)
         }
@@ -132,10 +137,58 @@ extension View {
     func iosTapEffect() -> some View { buttonStyle(PressableButtonStyle()) }
 }
 
+// ============================ Chữ có hiệu ứng linh hoạt (dùng cho slogan / hero text) ============================
+// Không giới hạn font/weight — truyền font tuỳ ý từ bên ngoài.
+struct AnimatedStoreText: View {
+    let text: String
+    var effect: String = "none"
+    var font: Font = .body
+    var anim: String = "none"
+
+    private let rainbow: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red]
+
+    var body: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let phase = (t.truncatingRemainder(dividingBy: 3)) / 3
+            styled(phase)
+                .scaleEffect(anim == "pulse" ? 1 + 0.06 * sin(phase * 2 * .pi) : 1)
+                .rotationEffect(.degrees(anim == "wave" ? 2.5 * sin(phase * 2 * .pi) : 0))
+        }
+    }
+
+    @ViewBuilder private func styled(_ phase: Double) -> some View {
+        let base = Text(text).font(font)
+        switch effect {
+        case "rainbow":
+            base.foregroundStyle(LinearGradient(colors: rainbow, startPoint: .leading, endPoint: .trailing))
+                .hueRotation(.degrees(anim == "none" ? 0 : phase * 360))
+        case "gradient":
+            base.foregroundStyle(LinearGradient(colors: [Theme.accent, .cyan, .purple],
+                                                startPoint: .leading, endPoint: .trailing))
+        case "gold":
+            base.foregroundStyle(LinearGradient(
+                colors: [Color(red: 0.95, green: 0.78, blue: 0.25), .yellow,
+                         Color(red: 0.82, green: 0.6, blue: 0.12)],
+                startPoint: .top, endPoint: .bottom))
+        case "neon":
+            base.foregroundStyle(.cyan).shadow(color: .cyan, radius: 8).shadow(color: .blue, radius: 14)
+        case "glow":
+            base.foregroundStyle(.white)
+                .shadow(color: .white.opacity(0.85), radius: anim == "none" ? 4 : 4 + 6 * abs(sin(phase * .pi)))
+        case "accent":
+            base.foregroundStyle(Theme.accent)
+        default:
+            base.foregroundStyle(.secondary)
+        }
+    }
+}
+
 // Danh sách tuỳ chọn hiệu ứng / font (dùng cho cả cửa hàng & cài đặt app)
 let kLogoEffects: [(String, String)] = [
-    ("rainbow", "7 màu chạy"), ("gold", "Vàng kim"), ("neon", "Neon"),
-    ("glow", "Phát sáng"), ("none", "Không")
+    ("rainbow", "7 màu chạy"), ("gradient", "Gradient màu app"),
+    ("gold", "Vàng kim"), ("neon", "Neon"),
+    ("glow", "Phát sáng"), ("accent", "Màu accent"), ("none", "Không")
 ]
 let kLogoFonts: [(String, String)] = [
     ("rounded", "Bo tròn"), ("default", "Mặc định"), ("serif", "Có chân"), ("mono", "Đơn cách")

@@ -267,6 +267,15 @@ struct StoreAppConfig: Decodable, Hashable {
     var flashEnd: Int? = nil         // epoch giây
     var flashDiscount: Int? = nil    // %
     var flashTitle: String? = nil
+    // Hero section (banner chính đầu trang)
+    var heroTitle: String? = nil     // tiêu đề lớn (nil = dùng slogan hoặc mặc định)
+    var heroSubtitle: String? = nil  // dòng phụ (nil = mặc định)
+    var heroEffect: String? = nil    // rainbow|gradient|gold|neon|glow|accent|none
+    var heroFont: String? = nil      // font cho tiêu đề hero
+    var heroAnim: String? = nil      // shimmer|wave|pulse|none
+    // Slogan / dòng giới thiệu — thêm hiệu ứng màu & chuyển động
+    var sloganEffect: String? = nil  // rainbow|gradient|gold|neon|glow|accent|none
+    var sloganAnim: String? = nil    // shimmer|wave|pulse|none
 }
 
 // ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----

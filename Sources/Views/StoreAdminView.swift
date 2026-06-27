@@ -294,6 +294,13 @@ struct StoreConfigEditor: View {
     @State private var flashDiscount = 0
     @State private var flashEnd = Date().addingTimeInterval(3 * 86400)
     @State private var flashTitle = "FLASH SALE"
+    @State private var heroTitle = ""
+    @State private var heroSubtitle = ""
+    @State private var heroEffect = "gradient"
+    @State private var heroFont = "rounded-bold"
+    @State private var heroAnim = "none"
+    @State private var sloganEffect = "none"
+    @State private var sloganAnim = "none"
     @State private var message: String?
     @State private var isError = false
     @AppStorage("storeCfgName") private var cfgName: String = ""
@@ -339,9 +346,50 @@ struct StoreConfigEditor: View {
                 Picker(store.t("Font chữ", "Font"), selection: $sloganFont) {
                     ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
                 }
-                Text(slogan.isEmpty ? "Cửa hàng sản phẩm số · key · tải về" : slogan)
-                    .font(keniosFont(sloganFont, size: 14))
-                    .foregroundStyle(.secondary)
+                Picker(store.t("Hiệu ứng màu slogan", "Slogan color effect"), selection: $sloganEffect) {
+                    ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker(store.t("Chuyển động slogan", "Slogan animation"), selection: $sloganAnim) {
+                    ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                HStack { Spacer()
+                    AnimatedStoreText(
+                        text: slogan.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : slogan,
+                        effect: sloganEffect,
+                        font: keniosFont(sloganFont, size: 14),
+                        anim: sloganAnim)
+                    Spacer() }
+            }
+
+            // Phần hero (banner chính): tiêu đề lớn + dòng phụ + hiệu ứng
+            Section {
+                HStack { Spacer()
+                    AnimatedStoreText(
+                        text: heroTitle.isEmpty ? store.t("GAME CHẤT LƯỢNG CAO · GIÁ TỐT NHẤT", "TOP QUALITY · BEST PRICE") : heroTitle,
+                        effect: heroEffect,
+                        font: keniosFont(heroFont, size: 17),
+                        anim: heroAnim)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Spacer() }
+                TextField(store.t("Tiêu đề lớn (bỏ trống = dùng slogan)", "Hero title (blank = use slogan)"), text: $heroTitle, axis: .vertical)
+                    .lineLimit(1...3)
+                TextField(store.t("Dòng phụ (bỏ trống = mặc định)", "Subtitle (blank = default)"), text: $heroSubtitle, axis: .vertical)
+                    .lineLimit(1...3)
+                Picker(store.t("Hiệu ứng màu tiêu đề", "Title color effect"), selection: $heroEffect) {
+                    ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker(store.t("Font tiêu đề", "Title font"), selection: $heroFont) {
+                    ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker(store.t("Chuyển động tiêu đề", "Title animation"), selection: $heroAnim) {
+                    ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                }
+            } header: {
+                Text(store.t("Phần hero (banner chính)", "Hero section (main banner)"))
+            } footer: {
+                Text(store.t("Tiêu đề lớn và dòng phụ trong banner đầu trang. Hỗ trợ 7 màu liên tục, gradient và hiệu ứng động.",
+                             "Large title and subtitle in the top hero banner. Supports 7-color rainbow, gradient, and animations."))
+                    .font(.caption2)
             }
 
             // Kích cỡ thẻ sản phẩm / danh mục ngoài trang — KÉO để chỉnh mượt
@@ -499,6 +547,13 @@ struct StoreConfigEditor: View {
             flashDiscount = c.flashDiscount ?? 0
             flashTitle = c.flashTitle ?? "FLASH SALE"
             if let end = c.flashEnd, end > 0 { flashEnd = Date(timeIntervalSince1970: TimeInterval(end)) }
+            heroTitle = c.heroTitle ?? ""
+            heroSubtitle = c.heroSubtitle ?? ""
+            heroEffect = c.heroEffect ?? "gradient"
+            heroFont = c.heroFont ?? "rounded-bold"
+            heroAnim = c.heroAnim ?? "none"
+            sloganEffect = c.sloganEffect ?? "none"
+            sloganAnim = c.sloganAnim ?? "none"
         }
     }
     private func save() async {
@@ -514,7 +569,10 @@ struct StoreConfigEditor: View {
                 cardSize: cardSize, cardScale: cardScale,
                 flashEnabled: flashEnabled, flashProductId: flashProductId,
                 flashEnd: Int(flashEnd.timeIntervalSince1970), flashDiscount: flashDiscount,
-                flashTitle: flashTitle)
+                flashTitle: flashTitle,
+                heroTitle: heroTitle, heroSubtitle: heroSubtitle,
+                heroEffect: heroEffect, heroFont: heroFont, heroAnim: heroAnim,
+                sloganEffect: sloganEffect, sloganAnim: sloganAnim)
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message

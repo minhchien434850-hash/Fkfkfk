@@ -964,16 +964,24 @@ struct StoreView: View {
 
     // Hero đầu trang: slogan lớn + nút "Mua ngay" (như mẫu)
     private var heroSection: some View {
-        let big = {
+        let heroText: String = {
+            if let t = config?.heroTitle, !t.trimmingCharacters(in: .whitespaces).isEmpty { return t }
             let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
             return s.isEmpty ? store.t("GAME CHẤT LƯỢNG CAO · GIÁ TỐT NHẤT", "TOP QUALITY · BEST PRICE") : s
         }()
+        let heroSub: String = {
+            if let s = config?.heroSubtitle, !s.trimmingCharacters(in: .whitespaces).isEmpty { return s }
+            return store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty")
+        }()
         return VStack(alignment: .leading, spacing: 12) {
-            Text(big)
-                .font(.title2.bold())
-                .foregroundStyle(LinearGradient(colors: [Theme.accent, .cyan, .purple], startPoint: .leading, endPoint: .trailing))
+            AnimatedStoreText(
+                text: heroText,
+                effect: config?.heroEffect ?? "gradient",
+                font: keniosFont(config?.heroFont ?? "rounded-bold", size: 20),
+                anim: config?.heroAnim ?? "none")
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(3)
-            Text(store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty"))
+            Text(heroSub)
                 .font(.subheadline).foregroundStyle(.secondary)
             Button { scrollTarget = "products" } label: {
                 HStack(spacing: 6) {
@@ -995,18 +1003,31 @@ struct StoreView: View {
 
     // Footer cuối trang: logo + slogan
     private var footerSection: some View {
-        VStack(spacing: 8) {
+        let sloganText: String = {
+            let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
+            return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
+        }()
+        let sloganEff = config?.sloganEffect ?? "none"
+        let sloganAnim = config?.sloganAnim ?? "none"
+        return VStack(spacing: 8) {
             AnimatedStoreLogo(
                 text: displayName,
                 effect: effectiveConfig?.logoEffect ?? "rainbow",
                 fontStyle: effectiveConfig?.logoFont ?? "rounded",
                 anim: effectiveConfig?.logoAnim ?? "shimmer",
                 size: 22)
-            Text({
-                    let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
-                    return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
-                 }())
-                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            if sloganEff != "none" {
+                AnimatedStoreText(
+                    text: sloganText,
+                    effect: sloganEff,
+                    font: keniosFont(config?.sloganFont ?? "rounded", size: 12),
+                    anim: sloganAnim)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text(sloganText)
+                    .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
             Text("© " + String(Calendar.current.component(.year, from: Date())) + " " + displayName)
                 .font(.caption2).foregroundStyle(.tertiary)
         }
@@ -1119,12 +1140,21 @@ struct StoreView: View {
                                 fontStyle: c.logoFont ?? "rounded",
                                 anim: c.logoAnim ?? "shimmer",
                                 size: 22)
-                            Text({
+                            let sloganText: String = {
                                 let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
                                 return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
-                            }())
-                            .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
-                            .foregroundStyle(.white.opacity(0.85))
+                            }()
+                            if let eff = config?.sloganEffect, eff != "none" {
+                                AnimatedStoreText(
+                                    text: sloganText,
+                                    effect: eff,
+                                    font: keniosFont(config?.sloganFont ?? "rounded", size: 12),
+                                    anim: config?.sloganAnim ?? "none")
+                            } else {
+                                Text(sloganText)
+                                    .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
+                                    .foregroundStyle(.white.opacity(0.85))
+                            }
                         }
                         Spacer()
                     }
@@ -1158,12 +1188,21 @@ struct StoreView: View {
                             fontStyle: effectiveConfig?.logoFont ?? "rounded",
                             anim: effectiveConfig?.logoAnim ?? "shimmer",
                             size: 22)
-                        Text({
+                        let sloganText: String = {
                             let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
                             return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
-                        }())
-                        .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
-                        .foregroundStyle(.secondary)
+                        }()
+                        if let eff = config?.sloganEffect, eff != "none" {
+                            AnimatedStoreText(
+                                text: sloganText,
+                                effect: eff,
+                                font: keniosFont(config?.sloganFont ?? "rounded", size: 12),
+                                anim: config?.sloganAnim ?? "none")
+                        } else {
+                            Text(sloganText)
+                                .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                 }
