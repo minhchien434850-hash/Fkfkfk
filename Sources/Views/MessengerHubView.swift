@@ -116,6 +116,59 @@ private enum AutoWebPlatform: String, CaseIterable {
         }
     }
 
+    // JS kiểm tra đã đăng nhập web chưa → trả 'in' nếu rồi
+    var loginCheckJS: String {
+        switch self {
+        case .telegram:  return "(function(){return (document.querySelector('.chatlist, .chatlist-container, #column-left .chatlist'))?'in':'out';})();"
+        case .whatsapp:  return "(function(){return document.querySelector('#pane-side')?'in':'out';})();"
+        case .zalo:      return "(function(){return document.querySelector('.conv-list, [class*=\"conv-item\"], #conversation-list')?'in':'out';})();"
+        case .messenger: return "(function(){return document.querySelector('[aria-label][role=\"navigation\"], a[href*=\"/t/\"]')?'in':'out';})();"
+        case .instagram: return "(function(){return document.querySelector('div[role=\"list\"] a[href*=\"/direct/t/\"], a[href*=\"/direct/t/\"]')?'in':'out';})();"
+        }
+    }
+
+    // JS đọc danh sách cuộc trò chuyện (tên hiển thị) → trả JSON mảng tên
+    var chatListJS: String {
+        let sel: String
+        switch self {
+        case .telegram:  sel = ".chatlist .peer-title, .chatlist .user-title, .chatlist-chat .peer-title"
+        case .whatsapp:  sel = "#pane-side [role=\"listitem\"] span[title]"
+        case .zalo:      sel = "[class*=\"conv-item\"] [class*=\"name\"], .conv-item .truncate"
+        case .messenger: sel = "a[href*=\"/t/\"] span[dir=\"auto\"], a[href*=\"/t/\"]"
+        case .instagram: sel = "div[role=\"list\"] a[href*=\"/direct/t/\"] span, a[href*=\"/direct/t/\"]"
+        }
+        return """
+        (function(){
+          var seen={},out=[];
+          document.querySelectorAll('\(sel)').forEach(function(e){
+            var t=(e.getAttribute('title')||e.textContent||'').trim();
+            if(t&&t.length<=60&&!seen[t]){seen[t]=1;out.push(t);}
+          });
+          return JSON.stringify(out.slice(0,40));
+        })();
+        """
+    }
+
+    // JS mở đúng cuộc trò chuyện theo tên (click vào dòng chat khớp tên)
+    func openChatJS(_ name: String) -> String {
+        let esc = name.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        return """
+        (function(){
+          var target='\(esc)';
+          var rows=document.querySelectorAll('a,[role="listitem"],[class*="conv-item"],.chatlist-chat,.ListItem');
+          for(var i=0;i<rows.length;i++){
+            var t=(rows[i].getAttribute('title')||rows[i].textContent||'').trim();
+            if(t.indexOf(target)>=0){
+              var c=rows[i].querySelector('a')||rows[i];
+              c.click();
+              return 'ok';
+            }
+          }
+          return 'not_found';
+        })();
+        """
+    }
+
     func sendJS(_ message: String) -> String {
         let esc = message
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -301,6 +354,11 @@ struct MessengerHubView: View {
     @State private var autoStatuses: [HubSendState] = []
     @State private var autoTask: Task<Void, Never>?
     @State private var showWebLogin = false
+    // Trạng thái kết nối web + danh sách bạn bè/cuộc trò chuyện đọc từ phiên web
+    @State private var autoConnected = false
+    @State private var autoFriends: [String] = []
+    @State private var loadingFriends = false
+    @State private var selectedFriend = ""
 
     // ── UI ──────────────────────────────────
     @State private var activeTab: Int = 0
@@ -655,6 +713,48 @@ struct MessengerHubView: View {
                             .font(.caption2)
                     }
 
+                    // Trạng thái kết nối + danh sách bạn bè
+                    Section {
+                        HStack {
+                            Circle().fill(autoConnected ? .green : .gray).frame(width: 10, height: 10)
+                            Text(autoConnected ? "Đã kết nối \(autoPlatform.label)" : "Chưa kết nối")
+                                .font(.subheadline.bold())
+                                .foregroundStyle(autoConnected ? .green : .secondary)
+                            Spacer()
+                            Button {
+                                Task { await loadFriends() }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    if loadingFriends { ProgressView() }
+                                    Text("Tải danh sách").font(.caption)
+                                }
+                            }
+                        }
+                        if !autoFriends.isEmpty {
+                            Text("Chọn người để nhắn:").font(.caption).foregroundStyle(.secondary)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(autoFriends, id: \.self) { name in
+                                        Button {
+                                            Task { await pickFriend(name) }
+                                        } label: {
+                                            Label(name, systemImage: "person.crop.circle")
+                                                .font(.caption)
+                                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                                .background(selectedFriend == name
+                                                            ? store.accentColor.opacity(0.25)
+                                                            : Color(.tertiarySystemBackground))
+                                                .clipShape(Capsule()).lineLimit(1)
+                                        }.buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        } else if autoConnected {
+                            Text("Bấm \"Tải danh sách\" để lấy bạn bè/cuộc trò chuyện.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    } header: { Text("Kết nối & người nhận") }
+
                     // Kết quả
                     if !autoStatuses.isEmpty {
                         Section("Kết quả gửi") {
@@ -724,14 +824,48 @@ struct MessengerHubView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
             .onAppear { activeTab = initialTab }
             .onDisappear { stopManual(); stopAuto() }
-            .sheet(isPresented: $showWebLogin) {
+            .sheet(isPresented: $showWebLogin, onDismiss: {
+                Task { await checkConnected(); if autoConnected { await loadFriends() } }
+            }) {
                 HubBrowserSheet(
                     webView: HubWebViews.shared.view(for: autoPlatform),
                     initialURL: autoPlatform.chatURL(recipient: autoRecipient) ?? autoPlatform.homeURL,
                     platformLabel: autoPlatform.label
                 )
             }
+            .onChange(of: autoPlatformRaw) { _ in
+                autoConnected = false; autoFriends = []; selectedFriend = ""
+                Task { await checkConnected() }
+            }
+            .task { await checkConnected() }
         }
+    }
+
+    // MARK: - Web: kết nối & danh sách bạn bè
+    @MainActor private func evalAuto(_ js: String) async -> String {
+        let wv = HubWebViews.shared.view(for: autoPlatform)
+        let r = try? await wv.evaluateJavaScript(js)
+        return (r as? String) ?? ""
+    }
+    private func checkConnected() async {
+        guard autoPlatform.supportsAutoNav || autoPlatform == .zalo || autoPlatform == .messenger || autoPlatform == .instagram else {
+            autoConnected = false; return
+        }
+        autoConnected = (await evalAuto(autoPlatform.loginCheckJS)) == "in"
+    }
+    private func loadFriends() async {
+        loadingFriends = true; defer { loadingFriends = false }
+        await checkConnected()
+        let json = await evalAuto(autoPlatform.chatListJS)
+        if let data = json.data(using: .utf8),
+           let arr = try? JSONDecoder().decode([String].self, from: data) {
+            autoFriends = arr.filter { !$0.isEmpty }
+        }
+    }
+    private func pickFriend(_ name: String) async {
+        selectedFriend = name
+        autoRecipient = name
+        _ = await evalAuto(autoPlatform.openChatJS(name))   // mở đúng cuộc trò chuyện
     }
 
     // MARK: - Computed helpers
@@ -812,11 +946,15 @@ struct MessengerHubView: View {
         autoIdx = 0; autoRunning = true
 
         let wv = HubWebViews.shared.view(for: autoPlatform)
-        if autoPlatform.supportsAutoNav, let url = autoPlatform.chatURL(recipient: autoRecipient) {
+        let usePicked = !selectedFriend.isEmpty
+        if usePicked {
+            // Đã chọn bạn từ danh sách → mở đúng cuộc trò chuyện đó (không điều hướng theo username)
+            _ = wv.evaluateJavaScript(autoPlatform.openChatJS(selectedFriend))
+        } else if autoPlatform.supportsAutoNav, let url = autoPlatform.chatURL(recipient: autoRecipient) {
             wv.load(URLRequest(url: url))
         }
         autoTask = Task { @MainActor in
-            let wait: UInt64 = autoPlatform.supportsAutoNav ? 5_000_000_000 : 2_000_000_000
+            let wait: UInt64 = (usePicked || autoPlatform.supportsAutoNav) ? 4_000_000_000 : 2_000_000_000
             try? await Task.sleep(nanoseconds: wait)
             await autoLoop()
         }
