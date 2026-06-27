@@ -441,34 +441,6 @@ struct StoreView: View {
                 Label(store.t("Tất cả sản phẩm", "All products"), systemImage: "bag.fill")
                     .font(.headline)
                 Spacer()
-                Menu {
-                    Section(store.t("Sắp xếp", "Sort")) {
-                        Button { productSort = "default" } label: {
-                            Label(store.t("Mặc định", "Default"), systemImage: productSort == "default" ? "checkmark" : "list.number")
-                        }
-                        Button { productSort = "priceAsc" } label: {
-                            Label(store.t("Giá tăng dần", "Price: low to high"), systemImage: productSort == "priceAsc" ? "checkmark" : "arrow.up.circle")
-                        }
-                        Button { productSort = "priceDesc" } label: {
-                            Label(store.t("Giá giảm dần", "Price: high to low"), systemImage: productSort == "priceDesc" ? "checkmark" : "arrow.down.circle")
-                        }
-                        Button { productSort = "name" } label: {
-                            Label(store.t("Tên A-Z", "Name A-Z"), systemImage: productSort == "name" ? "checkmark" : "textformat.abc")
-                        }
-                    }
-                    Section(store.t("Lọc", "Filter")) {
-                        Button {
-                            productFilter = productFilter == "inStock" ? "all" : "inStock"
-                        } label: {
-                            Label(store.t("Chỉ còn hàng", "In stock only"), systemImage: productFilter == "inStock" ? "checkmark.circle.fill" : "shippingbox")
-                        }
-                    }
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .foregroundStyle(productSort != "default" || productFilter != "all" ? Theme.accent : .secondary)
-                }
-                Text("\(displayProducts.count) sp")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
