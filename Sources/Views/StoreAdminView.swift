@@ -1553,34 +1553,35 @@ struct AdminPromoCodesView: View {
                 Section { ProgressView() }
             }
             Section {
-                ForEach(codes, id: \.id) { code in
+                ForEach(codes.indices, id: \.self) { i in
+                    let promo = codes[i]
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(code.code).font(.headline.monospaced())
+                            Text(promo.code).font(.headline.monospaced())
                             Spacer()
-                            Text(code.discountType == "percent"
-                                 ? "-\(code.discountValue)%"
-                                 : "-\(kFormatVND(code.discountValue))")
+                            Text(promo.discountType == "percent"
+                                 ? "-\(promo.discountValue)%"
+                                 : "-\(kFormatVND(promo.discountValue))")
                                 .font(.caption.bold()).foregroundStyle(.green)
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(Color.green.opacity(0.15))
                                 .clipShape(Capsule())
                         }
                         HStack(spacing: 12) {
-                            Label("\(code.usedCount)\(code.maxUses > 0 ? "/\(code.maxUses)" : "") lượt",
+                            Label("\(promo.usedCount)\(promo.maxUses > 0 ? "/\(promo.maxUses)" : "") lượt",
                                   systemImage: "person.2")
-                            if code.minAmount > 0 {
-                                Label("Tối thiểu \(kFormatVND(code.minAmount))", systemImage: "cart")
+                            if promo.minAmount > 0 {
+                                Label("Tối thiểu \(kFormatVND(promo.minAmount))", systemImage: "cart")
                             }
-                            if code.expiresAt > 0 {
-                                Label(Date(timeIntervalSince1970: TimeInterval(code.expiresAt)),
+                            if promo.expiresAt > 0 {
+                                Label(Date(timeIntervalSince1970: TimeInterval(promo.expiresAt)),
                                       format: .dateTime.day().month().year())
                             }
                         }
                         .font(.caption2).foregroundStyle(.secondary)
                     }
                     .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) { Task { await deleteCode(code.id) } } label: {
+                        Button(role: .destructive) { Task { await deleteCode(promo.id) } } label: {
                             Label("Xoá", systemImage: "trash")
                         }
                     }
