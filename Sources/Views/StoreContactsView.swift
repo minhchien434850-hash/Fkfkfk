@@ -155,15 +155,9 @@ struct EditSocial: Identifiable, Hashable {
 
 struct StoreContactsEditor: View {
     @EnvironmentObject var store: AppStore
-    @State private var tab = 0       // 0 = Liên hệ admin, 1 = Nhóm cộng đồng
+    @State private var tab = 0          // 0 = Liên hệ admin, 1 = Nhóm cộng đồng
     @State private var contact: [EditSocial] = []
-    // Up to 4 group slots
-    @State private var groups: [EditSocial] = [
-        EditSocial(platform: "telegram"),
-        EditSocial(platform: "zalo"),
-        EditSocial(platform: "facebook"),
-        EditSocial(platform: "discord"),
-    ]
+    @State private var groupList: [EditSocial] = []   // cùng cấu trúc như contact
     @State private var message: String?
     @State private var isError = false
     @State private var loaded = false
@@ -177,50 +171,26 @@ struct StoreContactsEditor: View {
                 }.pickerStyle(.segmented)
                 Text(tab == 0
                      ? "Hiển thị các nút liên hệ TRỰC TIẾP với admin. Bật nền tảng nào, dán link tương ứng."
-                     : "Tối đa 4 nút nhóm cộng đồng. Bật nút, chọn nền tảng, dán link nhóm.")
+                     : "Bật nền tảng nào, dán link NHÓM tương ứng. Khách bấm vào để vào nhóm.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
-            if tab == 0 {
-                // Liên hệ admin — danh sách tất cả platform
-                Section("Bật/tắt & dán link liên hệ") {
-                    ForEach($contact) { $row in
-                        let p = socialPlatform(row.platform)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Toggle(isOn: $row.enabled) {
-                                Label(p.label, systemImage: p.icon).foregroundStyle(.primary)
-                            }
-                            if row.enabled {
-                                TextField(contactPlaceholder(row.platform), text: $row.url)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .font(.caption)
-                            }
+            // Cả hai tab dùng cùng một layout: danh sách đầy đủ nền tảng + toggle + link
+            Section("Bật/tắt & dán link") {
+                ForEach(tab == 0 ? $contact : $groupList) { $row in
+                    let p = socialPlatform(row.platform)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle(isOn: $row.enabled) {
+                            Label(p.label, systemImage: p.icon).foregroundStyle(.primary)
+                        }
+                        if row.enabled {
+                            TextField(contactPlaceholder(row.platform), text: $row.url)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.caption)
                         }
                     }
                 }
-            } else {
-                // Nhóm cộng đồng — 4 slot động
-                ForEach(groups.indices, id: \.self) { i in
-                    groupSection(title: "Nút Nhóm \(i + 1)", index: i)
-                }
-
-                Section {
-                    Label("Preview — các nút sẽ hiển thị thế này:", systemImage: "eye")
-                        .font(.caption).foregroundStyle(.secondary)
-                    let enabledGroups = groups.filter { $0.enabled }
-                    if enabledGroups.isEmpty {
-                        Text("Chưa bật nút nào.").font(.caption2).foregroundStyle(.secondary)
-                    } else {
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                            ForEach(Array(enabledGroups.enumerated()), id: \.offset) { _, g in
-                                groupPreviewButton(g)
-                            }
-                        }
-                    }
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             }
 
             Section { Button("Lưu thay đổi") { Task { await save() } } }
@@ -231,38 +201,6 @@ struct StoreContactsEditor: View {
         .navigationTitle("Liên hệ & Nhóm")
         .navigationBarTitleDisplayMode(.inline)
         .task { if !loaded { await load(); loaded = true } }
-    }
-
-    @ViewBuilder
-    private func groupSection(title: String, index i: Int) -> some View {
-        Section(title) {
-            Toggle("Hiển thị nút này", isOn: $groups[i].enabled)
-            if groups[i].enabled {
-                Picker("Nền tảng", selection: $groups[i].platform) {
-                    ForEach(kSocialPlatforms) { sp in
-                        Label(sp.label, systemImage: sp.icon).tag(sp.id)
-                    }
-                }
-                TextField(contactPlaceholder(groups[i].platform), text: $groups[i].url)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func groupPreviewButton(_ s: EditSocial) -> some View {
-        let p = socialPlatform(s.platform)
-        HStack(spacing: 5) {
-            Image(systemName: "person.3.fill").font(.caption2)
-            Image(systemName: p.icon).font(.caption2).foregroundStyle(p.color)
-            Text("Nhóm \(p.label)").font(.caption.bold()).lineLimit(1)
-        }
-        .foregroundStyle(.primary)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 9)
-        .background(p.color.opacity(0.13))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func contactPlaceholder(_ platform: String) -> String {
@@ -306,17 +244,17 @@ struct StoreContactsEditor: View {
 
     private func load() async {
         if let r = try? await store.api.adminGetContacts() {
-            contact = merge(r.contact)
-            for (i, g) in r.groups.prefix(4).enumerated() {
-                groups[i] = EditSocial(platform: g.platform, url: g.url, enabled: g.enabled)
-            }
+            contact   = merge(r.contact)
+            groupList = merge(r.groups)
         } else {
-            contact = merge([])
+            contact   = merge([])
+            groupList = merge([])
         }
     }
 
     private func socialPayload(_ rows: [EditSocial]) -> [[String: Any]] {
-        rows.map { ["platform": $0.platform, "url": $0.url.trimmingCharacters(in: .whitespaces),
+        rows.map { ["platform": $0.platform,
+                    "url": $0.url.trimmingCharacters(in: .whitespaces),
                     "enabled": $0.enabled] }
     }
 
@@ -325,7 +263,7 @@ struct StoreContactsEditor: View {
         do {
             let r = try await store.api.adminSetContacts(
                 contact: socialPayload(contact),
-                groups: socialPayload(groups))
+                groups: socialPayload(groupList))
             isError = false; message = r.message
         } catch { isError = true; message = error.localizedDescription }
     }
