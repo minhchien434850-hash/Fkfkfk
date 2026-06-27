@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
@@ -136,6 +137,21 @@ struct ExploreHubView: View {
 }
 
 // ======================== Chuyển đổi ảnh/video → link GIF/PNG ========================
+struct MediaLinkRecord: Codable, Identifiable {
+    var id: UUID
+    var url: String
+    var type: String   // "image" "gif" "png" "jpeg" "webp" "video"
+    var name: String?
+    var createdAt: Date
+    init(url: String, type: String, name: String? = nil) {
+        self.id = UUID()
+        self.url = url
+        self.type = type
+        self.name = name
+        self.createdAt = Date()
+    }
+}
+
 struct MediaConverterView: View {
     @EnvironmentObject var store: AppStore
     @State private var inputURL = ""
@@ -145,6 +161,11 @@ struct MediaConverterView: View {
     @State private var errorMsg: String?
     @State private var picker: PhotosPickerItem?
     @State private var uploading = false
+    @AppStorage("mediaLinkHistory") private var historyRaw: String = "[]"
+
+    private var history: [MediaLinkRecord] {
+        (try? JSONDecoder().decode([MediaLinkRecord].self, from: Data(historyRaw.utf8))) ?? []
+    }
 
     var body: some View {
         NavigationStack {
@@ -156,16 +177,16 @@ struct MediaConverterView: View {
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
 
-                Section("Chọn ảnh từ máy → tạo link") {
-                    PhotosPicker(selection: $picker, matching: .images) {
+                Section("Chọn ảnh/video từ máy → tạo link") {
+                    PhotosPicker(selection: $picker, matching: .any(of: [.images, .videos])) {
                         HStack {
                             if uploading { ProgressView().padding(.trailing, 4) }
-                            Label(uploading ? "Đang tải ảnh lên..." : "Chọn ảnh từ thư viện",
+                            Label(uploading ? "Đang tải lên..." : "Chọn ảnh hoặc video",
                                   systemImage: "photo.on.rectangle.angled")
                         }
                     }
                     .disabled(uploading)
-                    Text("Chọn 1 ảnh từ máy → app tự tải lên máy chủ và trả về 1 link dùng được ngay.")
+                    Text("Chọn 1 ảnh hoặc video → app tự tải lên máy chủ và trả về link dùng được ngay.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
@@ -228,6 +249,25 @@ struct MediaConverterView: View {
                     Section { Text(errorMsg).foregroundStyle(.red).font(.caption) }
                 }
 
+                let records = history
+                if !records.isEmpty {
+                    Section(header: HStack {
+                        Text("Lịch sử link (\(records.count))")
+                        Spacer()
+                        Button("Xoá hết") { historyRaw = "[]" }
+                            .font(.caption2).foregroundStyle(.red)
+                    }) {
+                        ForEach(records) { rec in historyRow(rec) }
+                            .onDelete { idx in
+                                var r = history
+                                r.remove(atOffsets: idx)
+                                if let data = try? JSONEncoder().encode(r) {
+                                    historyRaw = String(data: data, encoding: .utf8) ?? "[]"
+                                }
+                            }
+                    }
+                }
+
                 Section("Hướng dẫn") {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("Dán link ảnh/video (từ internet hoặc Google Drive)", systemImage: "1.circle.fill")
@@ -248,18 +288,64 @@ struct MediaConverterView: View {
         }
     }
 
+    @ViewBuilder
+    private func historyRow(_ rec: MediaLinkRecord) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                typeBadge(rec.type)
+                Text(rec.url)
+                    .font(.caption2).foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                Spacer(minLength: 4)
+                Button {
+                    UIPasteboard.general.string = rec.url
+                    inputURL = rec.url
+                } label: {
+                    Image(systemName: "doc.on.doc").font(.caption)
+                }
+                .buttonStyle(.borderless)
+            }
+            Text(rec.createdAt, style: .relative)
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func typeBadge(_ type: String) -> some View {
+        let (label, bgColor): (String, Color) = {
+            switch type.lowercased() {
+            case "video":       return ("VIDEO", .purple)
+            case "gif":         return ("GIF",   .orange)
+            case "png":         return ("PNG",   .blue)
+            case "jpg", "jpeg": return ("JPEG",  .green)
+            case "webp":        return ("WEBP",  .teal)
+            default:            return ("IMG",   Color(.systemGray))
+            }
+        }()
+        return Text(label)
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(bgColor.opacity(0.18))
+            .foregroundStyle(bgColor)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
     private func uploadPicked(_ item: PhotosPickerItem) async {
         uploading = true; errorMsg = nil
         defer { uploading = false }
         do {
             guard let data = try await item.loadTransferable(type: Data.self) else {
-                errorMsg = "Không đọc được ảnh đã chọn."; return
+                errorMsg = "Không đọc được file đã chọn."; return
             }
+            let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
+            let mime = isVideo ? "video/mp4" : "image/jpeg"
             let b64 = data.base64EncodedString()
-            let url = try await store.api.mediaUpload(dataBase64: b64, mime: "image/jpeg",
-                                                      name: "upload_\(Int(Date().timeIntervalSince1970))")
+            let url = try await store.api.mediaUpload(dataBase64: b64, mime: mime,
+                                                      name: "\(isVideo ? "video" : "img")_\(Int(Date().timeIntervalSince1970))")
             resultLink = url
             inputURL = url
+            saveToHistory(url: url, type: isVideo ? "video" : "image")
         } catch {
             errorMsg = error.localizedDescription
         }
@@ -270,14 +356,13 @@ struct MediaConverterView: View {
         let trimmed = inputURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { errorMsg = "Vui lòng nhập link ảnh hoặc video."; return }
 
-        // Nếu link đã là GIF/PNG/JPG → trả về trực tiếp
         let lower = trimmed.lowercased()
         if lower.hasSuffix(".\(outputFormat)") || lower.contains(".\(outputFormat)?") {
             resultLink = trimmed
+            saveToHistory(url: trimmed, type: outputFormat)
             return
         }
 
-        // Tạo link chuyển đổi qua dịch vụ images.weserv.nl (miễn phí, không cần API key)
         converting = true
         let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
         var params = "url=\(encoded)"
@@ -290,7 +375,17 @@ struct MediaConverterView: View {
         }
         let serviceURL = "https://images.weserv.nl/?\(params)"
         resultLink = serviceURL
+        saveToHistory(url: serviceURL, type: outputFormat)
         converting = false
+    }
+
+    private func saveToHistory(url: String, type: String, name: String? = nil) {
+        var records = history
+        records.insert(MediaLinkRecord(url: url, type: type, name: name), at: 0)
+        if records.count > 50 { records = Array(records.prefix(50)) }
+        if let data = try? JSONEncoder().encode(records) {
+            historyRaw = String(data: data, encoding: .utf8) ?? "[]"
+        }
     }
 }
 

@@ -156,6 +156,7 @@ struct StoreView: View {
     @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
     @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
     @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
+    @State private var storeHasData: Bool = false
 
     private var displayName: String {
         if let n = config?.logoName, !n.isEmpty { return n }
@@ -572,8 +573,12 @@ struct StoreView: View {
         }
         downloads = (try? await dlTask) ?? []
         contacts  = try? await ctTask
-        do { categories = try await catTask }
-        catch { self.error = error.localizedDescription }
+        if let cats = try? await catTask {
+            categories = cats
+            if !cats.isEmpty { storeHasData = true }
+        } else if !storeHasData && categories.isEmpty {
+            error = "Không kết nối được máy chủ. Kiểm tra IP/URL & mạng."
+        }
         loading = false
         // Lưu số danh mục hiện tại để background task so sánh lần sau
         UserDefaults.standard.set(categories.count, forKey: "bgLastCatCount")
