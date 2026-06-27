@@ -675,7 +675,7 @@ struct APIClient {
     // ---- Tìm kiếm tin nhắn ----
     func searchMessages(query: String) async throws -> [SearchResult] {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        return try decode(try await send("/messages/search?q=\(encoded)"))
+        return try decode(try await send("/search?q=\(encoded)"))
     }
 
     // ---- Tin nhắn yêu thích ----
