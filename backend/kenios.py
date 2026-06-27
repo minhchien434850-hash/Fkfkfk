@@ -4493,11 +4493,17 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
             raise HTTPException(status_code=400,
                 detail=f"Số dư ví không đủ (cần {amount:,}đ, còn {balance:,}đ). Vui lòng nạp thêm vào ví."
                        .replace(",", "."))
-        # Giành 1 key khả dụng (atomic)
+        # Giành 1 key khả dụng (atomic). Ưu tiên key gắn đúng mốc thời hạn đã chọn,
+        # nếu không có thì dùng key "dùng chung" (price_id IS NULL).
         key = None
         for _ in range(50):
-            cand = c.execute("SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
-                             "ORDER BY id ASC LIMIT 1", (b.product_id,)).fetchone()
+            cand = c.execute(
+                "SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
+                "AND price_id=? ORDER BY id ASC LIMIT 1", (b.product_id, price["id"])).fetchone()
+            if not cand:
+                cand = c.execute(
+                    "SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
+                    "AND price_id IS NULL ORDER BY id ASC LIMIT 1", (b.product_id,)).fetchone()
             if not cand:
                 break
             got = c.execute("UPDATE store_keys SET status='sold' WHERE id=? AND status='available'",
@@ -4506,7 +4512,7 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
                 key = cand
                 break
         if not key:
-            raise HTTPException(status_code=400, detail="Sản phẩm tạm hết hàng. Vui lòng quay lại sau.")
+            raise HTTPException(status_code=400, detail="Mốc thời hạn này tạm hết hàng. Vui lòng chọn mốc khác hoặc quay lại sau.")
         # Trừ ví (atomic, chống âm)
         ded = c.execute("UPDATE users SET wallet=wallet-? WHERE id=? AND wallet>=?",
                         (amount, user["id"], amount))
@@ -4871,17 +4877,18 @@ def admin_store_set_prices(pid: int, b: StorePricesIn, admin=Depends(get_admin))
 # -------------------- Admin: kho KEY --------------------
 class StoreKeysIn(BaseModel):
     text: str = ""   # mỗi dòng 1 key
+    price_id: Optional[int] = None   # gắn key vào 1 mốc thời hạn (giờ/ngày/tuần/tháng). None = dùng chung
 
 @app.get("/admin/store/products/{pid}/keys")
 def admin_store_list_keys(pid: int, admin=Depends(get_admin)) -> dict[str, Any]:
     with db() as c:
-        rows = c.execute("SELECT id,key_text,status,sold_at FROM store_keys WHERE product_id=? "
+        rows = c.execute("SELECT id,key_text,status,sold_at,price_id FROM store_keys WHERE product_id=? "
                          "ORDER BY id DESC", (pid,)).fetchall()
         avail = sum(1 for r in rows if r["status"] == "available")
     return {
         "available": avail, "total": len(rows),
         "keys": [{"id": r["id"], "key_text": r["key_text"], "status": r["status"],
-                  "sold_at": r["sold_at"]} for r in rows],
+                  "sold_at": r["sold_at"], "price_id": r["price_id"]} for r in rows],
     }
 
 @app.post("/admin/store/products/{pid}/keys")
@@ -4893,8 +4900,9 @@ def admin_store_add_keys(pid: int, b: StoreKeysIn, admin=Depends(get_admin)) -> 
         for ln in lines:
             if not ln:
                 continue
-            c.execute("INSERT INTO store_keys(product_id,key_text,status,created_at) VALUES(?,?,'available',?)",
-                      (pid, ln, now))
+            c.execute("INSERT INTO store_keys(product_id,key_text,status,price_id,created_at) "
+                      "VALUES(?,?,'available',?,?)",
+                      (pid, ln, b.price_id, now))
             added += 1
     return {"message": f"Đã thêm {added} key.", "added": added}
 

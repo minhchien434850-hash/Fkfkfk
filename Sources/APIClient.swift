@@ -444,9 +444,11 @@ struct APIClient {
     func adminStoreListKeys(productId: Int) async throws -> StoreKeysInfo {
         try decode(try await send("/admin/store/products/\(productId)/keys"))
     }
-    func adminStoreAddKeys(productId: Int, text: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/products/\(productId)/keys",
-                                  method: "POST", json: ["text": text]))
+    func adminStoreAddKeys(productId: Int, text: String, priceId: Int? = nil) async throws -> MessageResponse {
+        var body: [String: Any] = ["text": text]
+        if let priceId { body["price_id"] = priceId }
+        return try decode(try await send("/admin/store/products/\(productId)/keys",
+                                  method: "POST", json: body))
     }
     func adminStoreDeleteKey(_ keyId: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/store/keys/\(keyId)", method: "DELETE"))

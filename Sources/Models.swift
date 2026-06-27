@@ -395,6 +395,7 @@ struct StoreKeyItem: Identifiable, Decodable, Hashable {
     let keyText: String
     let status: String
     let soldAt: Int?
+    let priceId: Int?   // mốc thời hạn key thuộc về (nil = dùng chung)
 }
 
 struct StoreKeysInfo: Decodable {

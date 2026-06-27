@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PhotosUI
 
 // Media có thể chỉnh sửa (admin) — link ảnh/video, tối đa 5
 struct EditMedia: Identifiable, Hashable {
@@ -22,6 +23,9 @@ struct MediaEditor: View {
     @Binding var media: [EditMedia]
     @EnvironmentObject var store: AppStore
     @State private var showConverter = false
+    @State private var picker: PhotosPickerItem?
+    @State private var uploading = false
+    @State private var uploadError: String?
 
     var body: some View {
         Section {
@@ -36,9 +40,20 @@ struct MediaEditor: View {
                 }
             }
             .onDelete { media.remove(atOffsets: $0) }
+
+            // Tải ảnh/video TRỰC TIẾP từ máy → tự lên máy chủ → tự điền link
             if media.count < 5 {
+                PhotosPicker(selection: $picker, matching: .any(of: [.images, .videos])) {
+                    HStack {
+                        if uploading { ProgressView().padding(.trailing, 4) }
+                        Label(uploading ? "Đang tải lên..." : "Chọn ảnh / video từ máy",
+                              systemImage: "photo.badge.plus")
+                    }
+                }
+                .disabled(uploading)
+
                 Button { media.append(EditMedia()) } label: {
-                    Label("Thêm ảnh / video", systemImage: "plus.circle")
+                    Label("Thêm ô dán link thủ công", systemImage: "plus.circle")
                 }
             }
             Button {
@@ -48,15 +63,46 @@ struct MediaEditor: View {
                     .font(.caption)
                     .foregroundStyle(store.accentColor)
             }
+            if let uploadError {
+                Text(uploadError).font(.caption2).foregroundStyle(.red)
+            }
         } header: {
-            Text("Ảnh / Video (dán link, tối đa 5)")
+            Text("Ảnh / Video (tối đa 5)")
         } footer: {
-            Text("Dán link từ bất kỳ dịch vụ nào: Imgur, Cloudinary, Giphy, v.v. Hoặc bấm \"Chuyển đổi\" để tạo link từ ảnh.")
+            Text("Chọn ảnh/video từ máy để tự tải lên, hoặc dán link từ Imgur, Cloudinary, Giphy... Hoặc bấm \"Chuyển đổi\" để tạo link từ ảnh.")
                 .font(.caption2)
+        }
+        .onChange(of: picker) { item in
+            guard let item else { return }
+            Task { await uploadPicked(item) }
         }
         .sheet(isPresented: $showConverter) {
             MediaConverterView().environmentObject(store)
         }
+    }
+
+    private func uploadPicked(_ item: PhotosPickerItem) async {
+        uploading = true; uploadError = nil
+        defer { uploading = false; picker = nil }
+        let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
+        do {
+            if isVideo {
+                guard let movie = try await item.loadTransferable(type: EditMovie.self),
+                      let data = try? Data(contentsOf: movie.url) else {
+                    uploadError = "Không đọc được video."; return
+                }
+                let url = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                    mime: "video/mp4", name: "v_\(Int(Date().timeIntervalSince1970)).mp4")
+                if media.count < 5 { media.append(EditMedia(type: "video", url: url)) }
+            } else {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    uploadError = "Không đọc được ảnh."; return
+                }
+                let url = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                    mime: "image/jpeg", name: "i_\(Int(Date().timeIntervalSince1970)).jpg")
+                if media.count < 5 { media.append(EditMedia(type: "image", url: url)) }
+            }
+        } catch { uploadError = error.localizedDescription }
     }
 }
 
@@ -78,7 +124,7 @@ struct StoreAdminView: View {
                     NavigationLink {
                         StoreConfigEditor()
                     } label: {
-                        Label("Giao diện cửa hàng (logo, banner)", systemImage: "paintpalette")
+                        Label("Giao diện cửa hàng (logo, nền)", systemImage: "paintpalette")
                     }
                     NavigationLink {
                         StoreContactsEditor()
@@ -234,17 +280,6 @@ struct StoreConfigEditor: View {
                 TextField("Link ảnh logo (PNG / GIF / JPEG / WEBP)", text: $logoUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
-            Section("Banner đầu trang") {
-                Picker("Loại banner", selection: $bannerType) {
-                    Text("Ảnh / GIF").tag("image")
-                    Text("Video / MP4").tag("video")
-                }.pickerStyle(.segmented)
-                TextField("Dán link banner (GIF / PNG / JPEG / MP4...)", text: $bannerUrl)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Text("Hỗ trợ GIF động, PNG, JPEG, WEBP, MP4. Dùng Khám phá → Chuyển đổi để tạo link GIF/PNG từ ảnh bất kỳ.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-
             Section("Hiệu ứng tên/logo cửa hàng") {
                 HStack { Spacer()
                     AnimatedStoreLogo(text: logoName.isEmpty ? "KENIOS STORE" : logoName,
@@ -567,14 +602,20 @@ struct StoreProductEditor: View {
                 if let pid = productId {
                     Section("Cấu hình bán") {
                         NavigationLink {
-                            StorePricesEditor(productId: pid, initial: product?.prices ?? [])
-                        } label: { Label("Bảng giá theo thời hạn", systemImage: "tag") }
+                            StorePricesEditor(productId: pid, initial: product?.prices ?? [], kind: kind)
+                        } label: {
+                            Label(kind == "acc" ? "Giá bán acc" : "Bảng giá theo thời hạn",
+                                  systemImage: "tag")
+                        }
                         NavigationLink {
                             StoreKeysManager(productId: pid)
-                        } label: { Label("Kho KEY sản phẩm", systemImage: "key") }
+                        } label: {
+                            Label(kind == "acc" ? "Kho tài khoản (ACC)" : "Kho KEY sản phẩm",
+                                  systemImage: kind == "acc" ? "person.text.rectangle" : "key")
+                        }
                     }
                 } else {
-                    Text("Lưu sản phẩm trước để thêm bảng giá & key.")
+                    Text("Lưu sản phẩm trước để thêm giá & key/tài khoản.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -642,47 +683,64 @@ struct StorePricesEditor: View {
     @EnvironmentObject var store: AppStore
     let productId: Int
     let initial: [StorePrice]
+    var kind: String = "app"
     @State private var rows: [EditPrice] = []
+    @State private var accPrice = ""          // acc: chỉ 1 giá tiền, không cần thời hạn
     @State private var message: String?
     @State private var isError = false
 
+    private var isAcc: Bool { kind == "acc" }
     private let presets = ["1 giờ", "1 ngày", "1 tuần", "1 tháng", "Vĩnh viễn"]
 
     var body: some View {
         Form {
-            Section("Các mốc giá") {
-                ForEach($rows) { $r in
+            if isAcc {
+                // Acc game: chỉ cần giá tiền, KHÔNG có mốc thời hạn.
+                Section("Giá bán acc") {
                     HStack {
-                        TextField("Thời hạn (vd 1 ngày)", text: $r.label)
-                        TextField("Giá VND", text: $r.amount).keyboardType(.numberPad)
-                            .frame(width: 110)
+                        TextField("Giá VND", text: $accPrice).keyboardType(.numberPad)
+                        Text("đ").foregroundStyle(.secondary)
+                    }
+                    Text("Acc game bán 1 giá cố định, khách mua xong nhận ngay 1 tài khoản.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            } else {
+                Section("Các mốc giá (theo thời hạn)") {
+                    ForEach($rows) { $r in
+                        HStack {
+                            TextField("Thời hạn (vd 1 ngày)", text: $r.label)
+                            TextField("Giá VND", text: $r.amount).keyboardType(.numberPad)
+                                .frame(width: 110)
+                        }
+                    }
+                    .onDelete { rows.remove(atOffsets: $0) }
+                    Button { rows.append(EditPrice()) } label: {
+                        Label("Thêm mốc giá", systemImage: "plus.circle")
                     }
                 }
-                .onDelete { rows.remove(atOffsets: $0) }
-                Button { rows.append(EditPrice()) } label: {
-                    Label("Thêm mốc giá", systemImage: "plus.circle")
-                }
-            }
-            Section("Mẫu nhanh") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(presets, id: \.self) { p in
-                            Button(p) { rows.append(EditPrice(label: p, amount: "")) }
-                                .font(.caption)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(Capsule())
+                Section("Mẫu nhanh") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(presets, id: \.self) { p in
+                                Button(p) { rows.append(EditPrice(label: p, amount: "")) }
+                                    .font(.caption)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .background(Color(.secondarySystemBackground))
+                                    .clipShape(Capsule())
+                            }
                         }
                     }
                 }
             }
-            Section { Button("Lưu bảng giá") { Task { await save() } } }
+            Section { Button(isAcc ? "Lưu giá" : "Lưu bảng giá") { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
-        .navigationTitle("Bảng giá")
+        .navigationTitle(isAcc ? "Giá bán acc" : "Bảng giá")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            if rows.isEmpty {
+            if isAcc {
+                if accPrice.isEmpty, let first = initial.first { accPrice = "\(first.amount)" }
+            } else if rows.isEmpty {
                 rows = initial.map { EditPrice(label: $0.label, amount: "\($0.amount)") }
                 if rows.isEmpty { rows = [EditPrice()] }
             }
@@ -691,11 +749,17 @@ struct StorePricesEditor: View {
 
     private func save() async {
         message = nil
-        let payload: [[String: Any]] = rows.compactMap { r in
-            let label = r.label.trimmingCharacters(in: .whitespaces)
-            let amount = Int(r.amount.filter { $0.isNumber }) ?? -1
-            guard !label.isEmpty, amount >= 0 else { return nil }
-            return ["label": label, "amount": amount]
+        var payload: [[String: Any]] = []
+        if isAcc {
+            let amount = Int(accPrice.filter { $0.isNumber }) ?? -1
+            if amount >= 0 { payload = [["label": "Mua acc", "amount": amount]] }
+        } else {
+            payload = rows.compactMap { r in
+                let label = r.label.trimmingCharacters(in: .whitespaces)
+                let amount = Int(r.amount.filter { $0.isNumber }) ?? -1
+                guard !label.isEmpty, amount >= 0 else { return nil }
+                return ["label": label, "amount": amount]
+            }
         }
         do {
             let r = try await store.api.adminStoreSetPrices(productId: productId, prices: payload)
@@ -704,48 +768,84 @@ struct StorePricesEditor: View {
     }
 }
 
-// ---- Kho KEY ----
+// ---- Kho KEY / ACC ----
 struct StoreKeysManager: View {
     @EnvironmentObject var store: AppStore
     let productId: Int
     @State private var info: StoreKeysInfo?
+    @State private var prices: [StorePrice] = []
+    @State private var kind = "app"            // app | acc
+    @State private var selectedPriceId: Int?   // nil = dùng chung (mọi mốc)
     @State private var newKeys = ""
     @State private var message: String?
     @State private var isError = false
-    @State private var loading = false
     @State private var showFileImporter = false
+
+    private var isAcc: Bool { kind == "acc" }
+    private func priceLabel(_ id: Int?) -> String {
+        guard let id, let p = prices.first(where: { $0.id == id }) else { return "Dùng chung" }
+        return p.label
+    }
 
     var body: some View {
         Form {
-            Section("Thêm key (mỗi dòng 1 key)") {
+            // Với Ứng dụng/Key: chọn mốc thời hạn để nhập key riêng cho từng khung giờ.
+            if !isAcc && !prices.isEmpty {
+                Section("Nhập key cho mốc thời hạn nào?") {
+                    Picker("Mốc thời hạn", selection: $selectedPriceId) {
+                        Text("Dùng chung (mọi mốc)").tag(Int?.none)
+                        ForEach(prices) { p in
+                            Text("\(p.label) · \(kFormatVND(p.amount))").tag(Int?.some(p.id))
+                        }
+                    }
+                    Text("Mỗi mốc (giờ/ngày/tuần/tháng) có kho key riêng. Khách mua mốc nào sẽ nhận key của mốc đó; nếu mốc đó hết thì lấy key 'Dùng chung'.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            } else if !isAcc && prices.isEmpty {
+                Section {
+                    Text("Chưa có mốc giá. Hãy vào 'Bảng giá theo thời hạn' tạo các mốc (1 giờ/ngày/tuần/tháng) trước, rồi quay lại nhập key cho từng mốc.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            }
+
+            Section(isAcc ? "Thêm tài khoản (mỗi dòng: user|pass)" : "Thêm key (mỗi dòng 1 key)") {
                 TextEditor(text: $newKeys).frame(minHeight: 120)
+                if isAcc {
+                    Text("Ví dụ mỗi dòng: taikhoan1|matkhau1 — khách mua xong tự nhận 1 tài khoản.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 HStack {
-                    Button("Thêm key") { Task { await addKeys() } }
+                    Button(isAcc ? "Thêm tài khoản" : "Thêm key") { Task { await addKeys() } }
                         .disabled(newKeys.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Spacer()
                     Button { showFileImporter = true } label: {
-                        Label("Nhập file CSV/TXT", systemImage: "doc.badge.plus")
-                            .font(.caption)
+                        Label("Nhập file CSV/TXT", systemImage: "doc.badge.plus").font(.caption)
                     }
                 }
             }
             if let info {
                 Section("Tồn kho: \(info.available) khả dụng / \(info.total) tổng") {
-                    Button("Xoá tất cả key khả dụng", role: .destructive) {
+                    Button(isAcc ? "Xoá tất cả tài khoản khả dụng" : "Xoá tất cả key khả dụng", role: .destructive) {
                         Task { await deleteAvailable() }
                     }
                 }
-                Section("Danh sách key") {
+                Section(isAcc ? "Danh sách tài khoản" : "Danh sách key") {
                     if info.keys.isEmpty {
-                        Text("Chưa có key nào.").foregroundStyle(.secondary)
+                        Text(isAcc ? "Chưa có tài khoản nào." : "Chưa có key nào.").foregroundStyle(.secondary)
                     } else {
                         ForEach(info.keys) { k in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(k.keyText).font(.caption.monospaced()).lineLimit(1)
-                                    Text(k.status == "sold" ? "đã bán" : "khả dụng")
-                                        .font(.caption2)
-                                        .foregroundStyle(k.status == "sold" ? .orange : .green)
+                                    HStack(spacing: 6) {
+                                        Text(k.status == "sold" ? "đã bán" : "khả dụng")
+                                            .font(.caption2)
+                                            .foregroundStyle(k.status == "sold" ? .orange : .green)
+                                        if !isAcc {
+                                            Text("· \(priceLabel(k.priceId))")
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
                                 }
                                 Spacer()
                                 Button(role: .destructive) {
@@ -759,12 +859,13 @@ struct StoreKeysManager: View {
             }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
-        .navigationTitle("Kho KEY")
+        .navigationTitle(isAcc ? "Kho tài khoản (ACC)" : "Kho KEY")
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
         .refreshable { await reload() }
         .fileImporter(isPresented: $showFileImporter,
-                      allowedContentTypes: [.plainText, UTType(filenameExtension: "csv") ?? .plainText],
+                      allowedContentTypes: [.plainText, .text, .data,
+                                            UTType(filenameExtension: "csv") ?? .plainText],
                       allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let url = urls.first {
                 Task { await importFromFile(url) }
@@ -774,6 +875,9 @@ struct StoreKeysManager: View {
 
     private func reload() async {
         info = try? await store.api.adminStoreListKeys(productId: productId)
+        if let p = try? await store.api.storeProduct(productId) {
+            prices = p.prices; kind = p.kind ?? "app"
+        }
     }
     private func importFromFile(_ url: URL) async {
         let access = url.startAccessingSecurityScopedResource()
@@ -791,7 +895,9 @@ struct StoreKeysManager: View {
     private func addKeys() async {
         message = nil
         do {
-            let r = try await store.api.adminStoreAddKeys(productId: productId, text: newKeys)
+            // ACC: không gắn mốc thời hạn. App/Key: gắn theo mốc đã chọn (nil = dùng chung).
+            let pid = isAcc ? nil : selectedPriceId
+            let r = try await store.api.adminStoreAddKeys(productId: productId, text: newKeys, priceId: pid)
             isError = false; message = r.message; newKeys = ""
             await reload()
         } catch { isError = true; message = error.localizedDescription }
@@ -1468,7 +1574,7 @@ struct StoreRestoreBackupView: View {
         .navigationTitle("Khôi phục backup")
         .navigationBarTitleDisplayMode(.inline)
         .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.json],
+                      allowedContentTypes: [.json, .text, .plainText, .data, .item],
                       allowsMultipleSelection: false) { result in
             if case .success(let urls) = result, let url = urls.first {
                 Task { await parseFile(url) }
