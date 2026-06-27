@@ -711,3 +711,22 @@ struct DirectMessageItem: Identifiable, Decodable, Hashable {
     let isRead: Int
 }
 
+// ---- Giỏ hàng ----
+struct CartItem: Identifiable, Codable, Hashable {
+    var id: UUID
+    let productId: Int
+    let productName: String
+    let priceId: Int?
+    let priceAmount: Int
+    let priceLabel: String
+
+    init(productId: Int, productName: String, priceId: Int?, priceAmount: Int, priceLabel: String) {
+        self.id = UUID()
+        self.productId = productId
+        self.productName = productName
+        self.priceId = priceId
+        self.priceAmount = priceAmount
+        self.priceLabel = priceLabel
+    }
+}
+

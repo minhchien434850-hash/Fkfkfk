@@ -111,6 +111,16 @@ struct StoreAdminView: View {
                         Label("Backup toàn bộ cửa hàng (JSON)", systemImage: "arrow.down.doc.fill")
                     }
                     NavigationLink {
+                        StoreRestoreBackupView()
+                    } label: {
+                        Label("Khôi phục backup JSON", systemImage: "arrow.up.doc.fill")
+                    }
+                    NavigationLink {
+                        AdminAnalyticsView()
+                    } label: {
+                        Label("Thống kê & Phân tích", systemImage: "chart.bar.xaxis")
+                    }
+                    NavigationLink {
                         AdminWalletAdjustView()
                     } label: {
                         Label("Nạp / Trừ ví khách hàng", systemImage: "dollarsign.arrow.circlepath")
@@ -693,13 +703,21 @@ struct StoreKeysManager: View {
     @State private var message: String?
     @State private var isError = false
     @State private var loading = false
+    @State private var showFileImporter = false
 
     var body: some View {
         Form {
             Section("Thêm key (mỗi dòng 1 key)") {
                 TextEditor(text: $newKeys).frame(minHeight: 120)
-                Button("Thêm key") { Task { await addKeys() } }
-                    .disabled(newKeys.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                HStack {
+                    Button("Thêm key") { Task { await addKeys() } }
+                        .disabled(newKeys.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Spacer()
+                    Button { showFileImporter = true } label: {
+                        Label("Nhập file CSV/TXT", systemImage: "doc.badge.plus")
+                            .font(.caption)
+                    }
+                }
             }
             if let info {
                 Section("Tồn kho: \(info.available) khả dụng / \(info.total) tổng") {
@@ -735,10 +753,30 @@ struct StoreKeysManager: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload() }
         .refreshable { await reload() }
+        .fileImporter(isPresented: $showFileImporter,
+                      allowedContentTypes: [.plainText, UTType(filenameExtension: "csv") ?? .plainText],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task { await importFromFile(url) }
+            }
+        }
     }
 
     private func reload() async {
         info = try? await store.api.adminStoreListKeys(productId: productId)
+    }
+    private func importFromFile(_ url: URL) async {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            isError = true; message = "Không đọc được file."; return
+        }
+        let lines = content.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        newKeys = lines.joined(separator: "\n")
+        isError = false
+        message = "Đã tải \(lines.count) key từ file. Bấm 'Thêm key' để lưu."
     }
     private func addKeys() async {
         message = nil
@@ -1202,4 +1240,281 @@ struct WalletAdjustRecord: Identifiable {
     let user: String
     let delta: Int
     let note: String
+}
+
+// ======================== Thống kê & Phân tích (Admin) ========================
+struct AdminAnalyticsView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var stats: AdminStats?
+    @State private var orders: [StoreAdminOrder] = []
+    @State private var loading = false
+
+    private var topProducts: [(name: String, count: Int, revenue: Int)] {
+        var map: [String: (Int, Int)] = [:]
+        for o in orders where o.status == "completed" {
+            let cur = map[o.productName] ?? (0, 0)
+            map[o.productName] = (cur.0 + 1, cur.1 + o.amount)
+        }
+        return map.map { (name: $0.key, count: $0.value.0, revenue: $0.value.1) }
+            .sorted { $0.revenue > $1.revenue }
+            .prefix(5).map { $0 }
+    }
+
+    private var storeRevenue: Int {
+        orders.filter { $0.status == "completed" }.reduce(0) { $0 + $1.amount }
+    }
+
+    var body: some View {
+        List {
+            if loading && stats == nil {
+                HStack { Spacer(); ProgressView("Đang tải..."); Spacer() }
+            } else if let s = stats {
+                Section("Doanh thu cửa hàng") {
+                    HStack(spacing: 10) {
+                        analyticsCard("Tổng cộng", kFormatVND(storeRevenue), .green)
+                        analyticsCard("Đơn hoàn tất", "\(orders.filter { $0.status == \"completed\" }.count)", .blue)
+                    }
+                    .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                }
+                Section("Người dùng") {
+                    HStack(spacing: 10) {
+                        analyticsCard("Tổng users", "\(s.totalUsers)", .purple)
+                        analyticsCard("7 ngày mới", "+\(s.newUsers7d)", .orange)
+                    }
+                    .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                }
+                Section("AI & Hội thoại") {
+                    HStack(spacing: 10) {
+                        analyticsCard("Hội thoại", "\(s.totalConversations)", .teal)
+                        analyticsCard("Tin nhắn", "\(s.totalMessages)", Theme.accent)
+                    }
+                    .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                    HStack(spacing: 10) {
+                        analyticsCard("Doanh thu AI", kFormatVND(s.revenueTotal), .green)
+                        analyticsCard("30 ngày", kFormatVND(s.revenue30d), .mint)
+                    }
+                    .listRowBackground(Color.clear).listRowInsets(EdgeInsets())
+                }
+                if !topProducts.isEmpty {
+                    Section("Top sản phẩm bán chạy") {
+                        let maxRev = topProducts.first.map { $0.revenue } ?? 1
+                        ForEach(topProducts.indices, id: \.self) { i in
+                            let item = topProducts[i]
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(item.name).font(.subheadline.bold()).lineLimit(1)
+                                    Spacer()
+                                    Text(kFormatVND(item.revenue))
+                                        .font(.caption.bold()).foregroundStyle(Theme.accent)
+                                }
+                                HStack(spacing: 6) {
+                                    GeometryReader { geo in
+                                        ZStack(alignment: .leading) {
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(Color(.tertiarySystemBackground))
+                                                .frame(height: 6)
+                                            RoundedRectangle(cornerRadius: 3)
+                                                .fill(Theme.accent)
+                                                .frame(width: geo.size.width * CGFloat(item.revenue) / CGFloat(maxRev),
+                                                       height: 6)
+                                        }
+                                    }
+                                    .frame(height: 6)
+                                    Text("\(item.count) đơn").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+                if !s.topProviders.isEmpty {
+                    Section("AI provider phổ biến") {
+                        let maxCount = s.topProviders.first?.count ?? 1
+                        ForEach(s.topProviders, id: \.provider) { p in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(p.provider).font(.subheadline)
+                                    Spacer()
+                                    Text("\(p.count) lượt").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                GeometryReader { geo in
+                                    ZStack(alignment: .leading) {
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(Color(.tertiarySystemBackground))
+                                            .frame(height: 6)
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(Theme.purple)
+                                            .frame(width: geo.size.width * CGFloat(p.count) / CGFloat(maxCount),
+                                                   height: 6)
+                                    }
+                                }
+                                .frame(height: 6)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
+            } else if !loading {
+                Text("Không tải được thống kê.").foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Thống kê & Phân tích")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .refreshable { await load() }
+    }
+
+    private func analyticsCard(_ label: String, _ value: String, _ color: Color) -> some View {
+        VStack(spacing: 6) {
+            Text(value).font(.headline.monospacedDigit()).foregroundStyle(color).lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func load() async {
+        loading = true
+        async let s = store.api.adminStats()
+        async let o = store.api.adminStoreOrders()
+        stats = try? await s
+        orders = (try? await o) ?? []
+        loading = false
+    }
+}
+
+// ======================== Khôi phục backup JSON ========================
+struct StoreRestoreBackupView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var showImporter = false
+    @State private var parsedCategories: [[String: Any]] = []
+    @State private var catCount = 0
+    @State private var folderCount = 0
+    @State private var productCount = 0
+    @State private var loading = false
+    @State private var progress = ""
+    @State private var message: String?
+    @State private var isError = false
+    @State private var restored = false
+
+    var body: some View {
+        Form {
+            Section {
+                KHeroHeader(icon: "arrow.up.doc.fill",
+                            title: "Khôi phục backup",
+                            subtitle: "Nhập file JSON backup để tạo lại cấu trúc cửa hàng")
+                    .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            }
+
+            Section("Chọn file backup") {
+                Button { showImporter = true } label: {
+                    Label("Chọn file JSON backup", systemImage: "doc.badge.plus")
+                }
+                if !parsedCategories.isEmpty {
+                    Label("\(catCount) danh mục · \(folderCount) thư mục · \(productCount) sản phẩm",
+                          systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(.green)
+                }
+            }
+
+            if !parsedCategories.isEmpty && !restored {
+                Section("Thực hiện") {
+                    Button {
+                        Task { await restore() }
+                    } label: {
+                        HStack {
+                            if loading { ProgressView().padding(.trailing, 4) }
+                            Label(loading ? "Đang khôi phục..." : "Bắt đầu khôi phục",
+                                  systemImage: "arrow.counterclockwise")
+                        }
+                    }
+                    .disabled(loading)
+                    if !progress.isEmpty {
+                        Text(progress).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if let message {
+                Section { Text(message).foregroundStyle(isError ? .red : .green).font(.footnote) }
+            }
+
+            Section("Lưu ý") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Chỉ tạo mới — không ghi đè cấu trúc đã có", systemImage: "info.circle")
+                    Label("KEY/ACC cũ KHÔNG được khôi phục từ file này", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                    Label("Nên xoá cửa hàng cũ trước khi khôi phục (nếu muốn sạch)", systemImage: "trash.circle")
+                        .foregroundStyle(.red)
+                }
+                .font(.caption)
+            }
+        }
+        .navigationTitle("Khôi phục backup")
+        .navigationBarTitleDisplayMode(.inline)
+        .fileImporter(isPresented: $showImporter,
+                      allowedContentTypes: [.json],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task { await parseFile(url) }
+            }
+        }
+    }
+
+    private func parseFile(_ url: URL) async {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cats = json["categories"] as? [[String: Any]] else {
+            isError = true; message = "File không hợp lệ hoặc sai định dạng."; return
+        }
+        parsedCategories = cats
+        catCount = cats.count
+        let folders = cats.flatMap { ($0["folders"] as? [[String: Any]]) ?? [] }
+        folderCount = folders.count
+        productCount = folders.flatMap { ($0["products"] as? [[String: Any]]) ?? [] }.count
+        message = nil; isError = false; restored = false
+    }
+
+    private func restore() async {
+        loading = true; isError = false; message = nil
+        var doneCount = 0
+        for cat in parsedCategories {
+            guard let name = cat["name"] as? String, !name.isEmpty else { continue }
+            let media = (cat["media"] as? [[String: String]]) ?? []
+            progress = "Danh mục: \(name)"
+            guard let catRes = try? await store.api.adminStoreSaveCategory(id: nil, name: name, media: media),
+                  let catId = catRes.id, catId > 0 else { continue }
+            doneCount += 1
+            for folder in (cat["folders"] as? [[String: Any]]) ?? [] {
+                guard let fName = folder["name"] as? String, !fName.isEmpty else { continue }
+                let fMedia = (folder["media"] as? [[String: String]]) ?? []
+                progress = "  Thư mục: \(fName)"
+                guard let fRes = try? await store.api.adminStoreSaveFolder(id: nil, categoryId: catId,
+                                                                            name: fName, media: fMedia),
+                      let fId = fRes.id, fId > 0 else { continue }
+                for product in (folder["products"] as? [[String: Any]]) ?? [] {
+                    guard let pName = product["name"] as? String, !pName.isEmpty else { continue }
+                    let pDesc = (product["description"] as? String) ?? ""
+                    let pMedia = (product["media"] as? [[String: String]]) ?? []
+                    let kind = (product["isAcc"] as? Bool) == true ? "acc" : "app"
+                    progress = "    Sản phẩm: \(pName)"
+                    guard let pRes = try? await store.api.adminStoreSaveProduct(
+                        id: nil, folderId: fId, name: pName, description: pDesc,
+                        media: pMedia, downloadUrl: "", downloadFileId: nil, kind: kind),
+                          let pId = pRes.id, pId > 0 else { continue }
+                    if let prices = product["prices"] as? [[String: Any]], !prices.isEmpty {
+                        _ = try? await store.api.adminStoreSetPrices(productId: pId, prices: prices)
+                    }
+                }
+            }
+        }
+        progress = ""
+        isError = false
+        message = "Khôi phục xong! Đã tạo \(doneCount)/\(catCount) danh mục."
+        loading = false; restored = true
+    }
 }

@@ -157,6 +157,10 @@ struct StoreView: View {
     @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
     @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
     @State private var storeHasData: Bool = false
+    @State private var productSort: String = "default"  // default | priceAsc | priceDesc | name
+    @State private var productFilter: String = "all"    // all | inStock
+    @State private var showCart = false
+    @AppStorage("storeCartRaw") private var cartRaw: String = "[]"
 
     private var displayName: String {
         if let n = config?.logoName, !n.isEmpty { return n }
@@ -169,6 +173,22 @@ struct StoreView: View {
         return StoreAppConfig(logoName: cfgName, logoUrl: cfgLogo,
                               bannerType: cfgBannerType, bannerUrl: cfgBannerUrl,
                               topupBonusPercent: nil)
+    }
+
+    private var cartItems: [CartItem] {
+        (try? JSONDecoder().decode([CartItem].self, from: Data(cartRaw.utf8))) ?? []
+    }
+
+    private var displayProducts: [StoreProduct] {
+        var prods = allProducts
+        if productFilter == "inStock" { prods = prods.filter { $0.availableKeys > 0 } }
+        switch productSort {
+        case "priceAsc":  prods.sort { ($0.prices.first?.amount ?? 0) < ($1.prices.first?.amount ?? 0) }
+        case "priceDesc": prods.sort { ($0.prices.first?.amount ?? 0) > ($1.prices.first?.amount ?? 0) }
+        case "name":      prods.sort { $0.name.localizedCompare($1.name) == .orderedAscending }
+        default: break
+        }
+        return prods
     }
 
     private var wishlistIds: Set<Int> {
@@ -272,6 +292,20 @@ struct StoreView: View {
                         Button { showSearch = true } label: {
                             Image(systemName: "magnifyingglass")
                         }
+                        Button { showCart = true } label: {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "cart")
+                                if !cartItems.isEmpty {
+                                    Text("\(cartItems.count)")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 4).padding(.vertical, 2)
+                                        .background(Color.red)
+                                        .foregroundStyle(.white)
+                                        .clipShape(Capsule())
+                                        .offset(x: 8, y: -6)
+                                }
+                            }
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -290,6 +324,7 @@ struct StoreView: View {
             .sheet(isPresented: $showMyOrders) { StoreMyOrdersView() }
             .sheet(isPresented: $showWallet) { StoreWalletView() }
             .sheet(isPresented: $showSearch) { StoreGlobalSearchView(categories: categories) }
+            .sheet(isPresented: $showCart) { StoreCartView() }
             .task {
                 await reload()
                 // Polling mỗi 30 giây để cập nhật sản phẩm mới real-time
@@ -375,16 +410,42 @@ struct StoreView: View {
     // Toàn bộ sản phẩm — hiện ngay khi vào cửa hàng
     private var allProductsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
+            HStack(spacing: 8) {
                 Label("Tất cả sản phẩm", systemImage: "bag.fill")
                     .font(.headline)
                 Spacer()
-                Text("\(allProducts.count) sản phẩm")
+                Menu {
+                    Section("Sắp xếp") {
+                        Button { productSort = "default" } label: {
+                            Label("Mặc định", systemImage: productSort == "default" ? "checkmark" : "list.number")
+                        }
+                        Button { productSort = "priceAsc" } label: {
+                            Label("Giá tăng dần", systemImage: productSort == "priceAsc" ? "checkmark" : "arrow.up.circle")
+                        }
+                        Button { productSort = "priceDesc" } label: {
+                            Label("Giá giảm dần", systemImage: productSort == "priceDesc" ? "checkmark" : "arrow.down.circle")
+                        }
+                        Button { productSort = "name" } label: {
+                            Label("Tên A-Z", systemImage: productSort == "name" ? "checkmark" : "textformat.abc")
+                        }
+                    }
+                    Section("Lọc") {
+                        Button {
+                            productFilter = productFilter == "inStock" ? "all" : "inStock"
+                        } label: {
+                            Label("Chỉ còn hàng", systemImage: productFilter == "inStock" ? "checkmark.circle.fill" : "shippingbox")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .foregroundStyle(productSort != "default" || productFilter != "all" ? Theme.accent : .secondary)
+                }
+                Text("\(displayProducts.count) sp")
                     .font(.caption).foregroundStyle(.secondary)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(allProducts) { product in
+                    ForEach(displayProducts) { product in
                         NavigationLink { StoreProductDetailView(productId: product.id) } label: {
                             allProductCard(product)
                         }
@@ -755,6 +816,8 @@ struct StoreProductDetailView: View {
     let productId: Int
 
     @AppStorage("storeRecentViews") private var recentViewsRaw: String = ""
+    @AppStorage("storeCartRaw") private var cartRaw: String = "[]"
+    @AppStorage("productRatings") private var ratingsRaw: String = "{}"
     @State private var product: StoreProduct?
     @State private var mine: StoreProductMine?
     @State private var selectedPrice: StorePrice?
@@ -764,6 +827,30 @@ struct StoreProductDetailView: View {
     @State private var error: String?
     @State private var info: String?
     @State private var showWallet = false
+    @State private var contacts: StoreContacts?
+
+    private var cartItems: [CartItem] {
+        (try? JSONDecoder().decode([CartItem].self, from: Data(cartRaw.utf8))) ?? []
+    }
+    private func isInCart(_ id: Int) -> Bool { cartItems.contains { $0.productId == id } }
+    private func addToCart(_ p: StoreProduct) {
+        let price = selectedPrice ?? p.prices.first
+        guard let pr = price else { return }
+        var items = cartItems
+        guard !items.contains(where: { $0.productId == p.id }) else { return }
+        items.append(CartItem(productId: p.id, productName: p.name,
+                              priceId: pr.id, priceAmount: pr.amount, priceLabel: pr.label))
+        if let d = try? JSONEncoder().encode(items) { cartRaw = String(data: d, encoding: .utf8) ?? "[]" }
+    }
+    private var myRating: Int {
+        let dict = (try? JSONDecoder().decode([String: Int].self, from: Data(ratingsRaw.utf8))) ?? [:]
+        return dict["\(productId)"] ?? 0
+    }
+    private func saveRating(_ stars: Int) {
+        var dict = (try? JSONDecoder().decode([String: Int].self, from: Data(ratingsRaw.utf8))) ?? [:]
+        dict["\(productId)"] = stars
+        if let d = try? JSONEncoder().encode(dict) { ratingsRaw = String(data: d, encoding: .utf8) ?? "{}" }
+    }
 
     var body: some View {
         ScrollView {
@@ -788,8 +875,13 @@ struct StoreProductDetailView: View {
 
                     if let m = mine, m.owned {
                         ownedSection(m)
+                        ratingSection
                     } else {
                         buySection(p)
+                    }
+
+                    if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
+                        contactSellerSection(c)
                     }
 
                     if let info { Text(info).font(.footnote).foregroundStyle(.green) }
@@ -807,6 +899,64 @@ struct StoreProductDetailView: View {
         .task { await reload(); trackRecentView(productId) }
         .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) {
             StoreWalletView()
+        }
+    }
+
+    private var ratingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            Text("Đánh giá sản phẩm").font(.headline)
+            HStack(spacing: 12) {
+                ForEach(1...5, id: \.self) { star in
+                    Button { saveRating(star) } label: {
+                        Image(systemName: star <= myRating ? "star.fill" : "star")
+                            .font(.title2)
+                            .foregroundStyle(star <= myRating ? .yellow : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if myRating > 0 {
+                    Text(["", "Rất tệ", "Tệ", "Bình thường", "Tốt", "Rất tốt"][myRating])
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func contactSellerSection(_ c: StoreContacts) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            Label("Liên hệ người bán", systemImage: "bubble.left.and.bubble.right.fill")
+                .font(.headline)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(c.contact.filter(\.enabled)) { link in
+                        if let url = URL(string: link.url) {
+                            Link(destination: url) {
+                                Label(link.platform, systemImage: "arrow.up.right.circle")
+                                    .font(.caption.bold())
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .background(Theme.accent.opacity(0.14))
+                                    .foregroundStyle(Theme.accent)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    ForEach(c.groups.filter(\.enabled)) { link in
+                        if let url = URL(string: link.url) {
+                            Link(destination: url) {
+                                Label(link.platform, systemImage: "person.3.fill")
+                                    .font(.caption.bold())
+                                    .padding(.horizontal, 12).padding(.vertical, 7)
+                                    .background(Theme.purple.opacity(0.14))
+                                    .foregroundStyle(Theme.purple)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -907,6 +1057,20 @@ struct StoreProductDetailView: View {
                 }
                 .disabled(buying || p.availableKeys <= 0)
 
+                if p.availableKeys > 0 && !p.prices.isEmpty {
+                    Button { addToCart(p) } label: {
+                        Label(isInCart(p.id) ? "Đã thêm vào giỏ hàng" : "Thêm vào giỏ hàng",
+                              systemImage: isInCart(p.id) ? "cart.badge.checkmark" : "cart.badge.plus")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(Theme.accent)
+                            .frame(maxWidth: .infinity).frame(height: 44)
+                            .background(Theme.accent.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isInCart(p.id))
+                }
+
                 Text("Mua bằng số dư ví — giao key/acc ngay lập tức.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
@@ -915,11 +1079,14 @@ struct StoreProductDetailView: View {
 
     private func reload() async {
         loading = true; error = nil
+        async let pTask = store.api.storeProduct(productId)
+        async let cTask = store.api.storeContacts()
         do {
-            let p = try await store.api.storeProduct(productId)
+            let p = try await pTask
             product = p
             if selectedPrice == nil { selectedPrice = p.prices.first }
         } catch { self.error = error.localizedDescription }
+        contacts = try? await cTask
         mine = try? await store.api.storeProductMine(productId)
         await reloadBalance()
         loading = false
@@ -951,6 +1118,57 @@ struct StoreProductDetailView: View {
             }
         }
         buying = false
+    }
+
+    private var ratingSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            Text("Đánh giá sản phẩm").font(.headline)
+            HStack(spacing: 12) {
+                ForEach(1...5, id: \.self) { star in
+                    Button { saveRating(star) } label: {
+                        Image(systemName: star <= myRating ? "star.fill" : "star")
+                            .font(.title2)
+                            .foregroundStyle(star <= myRating ? .yellow : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if myRating > 0 {
+                    Text(["", "Rất tệ", "Tệ", "Bình thường", "Tốt", "Rất tốt"][myRating])
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func contactSellerSection(_ c: StoreContacts) -> some View {
+        let enabled = c.contact.filter { $0.enabled } + c.groups.filter { $0.enabled }
+        if !enabled.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Divider()
+                Label("Liên hệ người bán", systemImage: "bubble.left.and.bubble.right.fill")
+                    .font(.headline)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(enabled) { link in
+                            if let url = URL(string: link.url) {
+                                Link(destination: url) {
+                                    Label(link.platform,
+                                          systemImage: c.groups.contains(where: { $0.platform == link.platform })
+                                          ? "person.3.fill" : "arrow.up.right.circle")
+                                        .font(.caption.bold())
+                                        .padding(.horizontal, 12).padding(.vertical, 7)
+                                        .background(Theme.accent.opacity(0.14))
+                                        .foregroundStyle(Theme.accent)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1207,6 +1425,139 @@ struct StoreGlobalSearchView: View {
         folders = allFolders
         products = allProducts
         loading = false
+    }
+}
+
+// ============================ Giỏ hàng ============================
+struct StoreCartView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) var dismiss
+    @AppStorage("storeCartRaw") private var cartRaw: String = "[]"
+    @State private var balance: Int = 0
+    @State private var buying = false
+    @State private var progress = ""
+    @State private var message: String?
+    @State private var isError = false
+    @State private var showWallet = false
+
+    private var cartItems: [CartItem] {
+        (try? JSONDecoder().decode([CartItem].self, from: Data(cartRaw.utf8))) ?? []
+    }
+    private var total: Int { cartItems.reduce(0) { $0 + $1.priceAmount } }
+
+    private func removeItem(_ id: UUID) {
+        var items = cartItems; items.removeAll { $0.id == id }
+        if let d = try? JSONEncoder().encode(items) { cartRaw = String(data: d, encoding: .utf8) ?? "[]" }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if cartItems.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "cart").font(.system(size: 60)).foregroundStyle(.secondary)
+                        Text("Giỏ hàng trống").font(.title3.bold())
+                        Text("Bấm 'Thêm vào giỏ' ở trang chi tiết sản phẩm để mua nhiều cùng lúc.")
+                            .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List {
+                        Section("Sản phẩm (\(cartItems.count))") {
+                            ForEach(cartItems) { item in
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(item.productName).font(.subheadline.bold()).lineLimit(2)
+                                        Text(item.priceLabel).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(kFormatVND(item.priceAmount))
+                                        .font(.caption.bold()).foregroundStyle(Theme.accent)
+                                    Button { removeItem(item.id) } label: {
+                                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+
+                        Section {
+                            HStack {
+                                Text("Tổng cộng").font(.headline)
+                                Spacer()
+                                Text(kFormatVND(total)).font(.headline.bold()).foregroundStyle(Theme.accent)
+                            }
+                            HStack {
+                                Text("Số dư ví: \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Nạp ví") { showWallet = true }.font(.caption.bold())
+                            }
+                            Button {
+                                Task { await checkout() }
+                            } label: {
+                                HStack {
+                                    if buying { ProgressView().tint(.white).padding(.trailing, 4) }
+                                    Text(buying ? "Đang thanh toán..."
+                                         : (balance >= total ? "Thanh toán \(kFormatVND(total))" : "Số dư không đủ — Nạp ví"))
+                                }
+                                .font(.headline).foregroundStyle(.white)
+                                .frame(maxWidth: .infinity).frame(height: 50)
+                                .background(balance >= total && !buying ? Theme.purple : Color.gray)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(buying)
+                        }
+
+                        if !progress.isEmpty {
+                            Section { Text(progress).font(.caption).foregroundStyle(.secondary) }
+                        }
+                        if let message {
+                            Section { Text(message).foregroundStyle(isError ? .red : .green).font(.footnote) }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Giỏ hàng")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !cartItems.isEmpty {
+                        Button("Xoá hết", role: .destructive) { cartRaw = "[]" }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } }
+            }
+            .task { await reloadBalance() }
+            .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) { StoreWalletView() }
+        }
+    }
+
+    private func reloadBalance() async {
+        if let w = try? await store.api.storeWallet() { balance = w.balance }
+    }
+
+    private func checkout() async {
+        buying = true; isError = false; message = nil
+        let items = cartItems
+        var successCount = 0
+        for item in items {
+            progress = "Đang mua: \(item.productName)..."
+            if (try? await store.api.storeBuy(productId: item.productId, priceId: item.priceId)) != nil {
+                removeItem(item.id)
+                successCount += 1
+            }
+        }
+        progress = ""
+        let remaining = cartItems.count
+        if remaining == 0 {
+            isError = false; message = "Mua thành công \(successCount) sản phẩm!"
+        } else {
+            isError = true
+            message = "Thành công: \(successCount). Thất bại: \(remaining) (hết hàng hoặc số dư không đủ)."
+        }
+        await reloadBalance()
+        buying = false
     }
 }
 
