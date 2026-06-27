@@ -167,41 +167,80 @@ struct StoreView: View {
     @State private var showcase: StoreShowcase?
     @State private var scrollTarget: String?   // dùng cho ScrollViewReader scroll đến section
     @State private var flashNow = Date()   // cập nhật để đồng hồ flash sale đếm ngược
+    @State private var showcaseTick: Int = 0   // tăng mỗi 5 phút → xoay vòng showcase
     private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private let showcaseTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
-    // Demo data hiện khi chưa có dữ liệu thực từ server
+    // Danh sách tên hiển thị trong showcase (xoay vòng)
+    private let showcaseNames = ["Minh", "Huy", "Linh", "An", "Tùng", "Mai", "Dũng", "Thu",
+                                  "Nam", "Trang", "Bình", "Khoa", "Lan", "Phong", "Quân",
+                                  "Bảo", "Hà", "Việt", "Trung", "Khánh", "Ken", "Tony",
+                                  "Alex", "Bin", "Rin", "Sơn", "Cường", "Đức", "Long", "Thắng"]
+
+    // Tự sinh từ sản phẩm thật, xoay vòng theo tick (5 phút/lần)
     private var effectiveShowcase: StoreShowcase {
         if let s = showcase { return s }
         let now = Int(Date().timeIntervalSince1970)
-        return StoreShowcase(
-            recentOrders: [
-                ShowcaseOrder(user: "Minh***", product: "Free Fire 100 Kim Cương", label: "Thành công", amount: 25000, at: now - 35),
-                ShowcaseOrder(user: "Huy***",  product: "PUBG Mobile UC 325",      label: "Thành công", amount: 89000, at: now - 120),
-                ShowcaseOrder(user: "Linh***", product: "Valorant 475 VP",          label: "Thành công", amount: 120000, at: now - 310),
-                ShowcaseOrder(user: "An***",   product: "Genshin 60 Genesis",       label: "Thành công", amount: 55000, at: now - 620),
-                ShowcaseOrder(user: "Tùng***", product: "LOL 650 RP",               label: "Thành công", amount: 99000, at: now - 900),
-                ShowcaseOrder(user: "Mai***",  product: "Steam Wallet 100k",        label: "Thành công", amount: 100000, at: now - 1500),
-                ShowcaseOrder(user: "Dũng***", product: "Mobile Legends 50 Kim",    label: "Thành công", amount: 18000, at: now - 2200),
-                ShowcaseOrder(user: "Thu***",  product: "Garena Shell 100",         label: "Thành công", amount: 30000, at: now - 3600),
-            ],
-            recentTopups: [
-                ShowcaseTopup(user: "Minh***",  amount: 500000,  at: now - 60),
-                ShowcaseTopup(user: "Linh***",  amount: 200000,  at: now - 200),
-                ShowcaseTopup(user: "Huy***",   amount: 1000000, at: now - 480),
-                ShowcaseTopup(user: "An***",    amount: 300000,  at: now - 750),
-                ShowcaseTopup(user: "Nam***",   amount: 150000,  at: now - 1300),
-                ShowcaseTopup(user: "Trang***", amount: 800000,  at: now - 2000),
-                ShowcaseTopup(user: "Dũng***",  amount: 50000,   at: now - 3200),
-                ShowcaseTopup(user: "Bình***",  amount: 250000,  at: now - 5400),
-            ],
-            leaderboard: [
-                ShowcaseLeader(rank: 1, user: "Minh***",  total: 5_200_000),
-                ShowcaseLeader(rank: 2, user: "Huy***",   total: 3_800_000),
-                ShowcaseLeader(rank: 3, user: "Linh***",  total: 2_900_000),
-                ShowcaseLeader(rank: 4, user: "Nam***",   total: 1_750_000),
-                ShowcaseLeader(rank: 5, user: "Trang***", total: 980_000),
+        let tick = showcaseTick
+
+        // Gom tất cả combo (tên sản phẩm + gói giá)
+        var combos: [(String, Int)] = []
+        for p in allProducts {
+            if p.prices.isEmpty {
+                combos.append((p.name, 0))
+            } else {
+                for price in p.prices where price.amount > 0 {
+                    combos.append(("\(p.name) \(price.label)", price.amount))
+                }
+            }
+        }
+
+        // Fallback nếu chưa có sản phẩm
+        if combos.isEmpty {
+            combos = [
+                ("VINGOLD tháng", 500_000), ("VINGOLD tuần", 250_000), ("VINGOLD ngày", 60_000),
+                ("KINGMOD tháng", 900_000), ("KINGMOD tuần", 450_000), ("KINGMOD ngày", 200_000),
+                ("DRACULA tháng", 500_000), ("DRACULA tuần", 250_000), ("DRACULA ngày", 70_000),
+                ("OASIS tháng",   800_000), ("OASIS tuần",   400_000), ("OASIS ngày",   200_000),
             ]
-        )
+        }
+
+        let timeAgo = [35, 120, 310, 620, 900, 1500, 2200, 3600, 4800, 7200]
+        let count = min(8, combos.count)
+        let offset = tick % combos.count
+
+        let orders: [ShowcaseOrder] = (0..<count).map { i in
+            let ci = (offset + i) % combos.count
+            let ni = (tick + i * 7) % showcaseNames.count
+            return ShowcaseOrder(
+                user: "\(showcaseNames[ni])***",
+                product: combos[ci].0,
+                label: "Thành công",
+                amount: combos[ci].1,
+                at: now - timeAgo[i % timeAgo.count]
+            )
+        }
+
+        // Topup xoay theo tick lệch pha
+        let topupAmounts = [500_000, 200_000, 1_000_000, 300_000, 150_000, 800_000, 50_000, 250_000]
+        let topups: [ShowcaseTopup] = (0..<8).map { i in
+            let ni = (tick + i * 11 + 5) % showcaseNames.count
+            let ai = (tick + i) % topupAmounts.count
+            return ShowcaseTopup(
+                user: "\(showcaseNames[ni])***",
+                amount: topupAmounts[ai],
+                at: now - timeAgo[i % timeAgo.count] * 2
+            )
+        }
+
+        // Leaderboard tổng chi dùng combo để tính tổng ảo
+        let leaders: [ShowcaseLeader] = (0..<5).map { i in
+            let ni = (tick * 3 + i * 13) % showcaseNames.count
+            let total = [5_200_000, 3_800_000, 2_900_000, 1_750_000, 980_000][(tick + i) % 5]
+            return ShowcaseLeader(rank: i + 1, user: "\(showcaseNames[ni])***", total: total)
+        }
+
+        return StoreShowcase(recentOrders: orders, recentTopups: topups, leaderboard: leaders)
     }
 
     private var displayName: String {
@@ -448,6 +487,7 @@ struct StoreView: View {
                     flashNow = t
                 }
             }
+            .onReceive(showcaseTimer) { _ in showcaseTick += 1 }
         }
     }
 
