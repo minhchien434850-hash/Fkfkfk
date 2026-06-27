@@ -57,8 +57,8 @@ struct VideoFeedView: View {
             VStack(spacing: 0) {
                 // Tab chọn: Video / Reels
                 Picker("", selection: $selectedTab) {
-                    Text("Video").tag(0)
-                    Text("Reels").tag(1)
+                    Text(store.t("Video", "Video")).tag(0)
+                    Text(store.t("Reels", "Reels")).tag(1)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
@@ -70,7 +70,7 @@ struct VideoFeedView: View {
                     ReelsFeedView()
                 }
             }
-            .navigationTitle("Video")
+            .navigationTitle(store.t("Video", "Video"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { ThreeDLogoText(size: 20) }
@@ -95,11 +95,12 @@ struct VideoListView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 KHeroHeader(icon: "play.rectangle.on.rectangle.fill",
-                            title: "Video KENIOS",
-                            subtitle: "Đăng & xem video ngay trong app của bạn")
+                            title: store.t("Video KENIOS", "KENIOS Video"),
+                            subtitle: store.t("Đăng & xem video ngay trong app của bạn",
+                                              "Post & watch videos right in your app"))
 
                 Button { showCompose = true } label: {
-                    Label("Đăng video mới", systemImage: "plus.circle.fill")
+                    Label(store.t("Đăng video mới", "New video"), systemImage: "plus.circle.fill")
                         .frame(maxWidth: .infinity).frame(height: 46)
                         .background(store.accentColor).foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -108,7 +109,8 @@ struct VideoListView: View {
                 if loading { ProgressView().frame(maxWidth: .infinity) }
                 if let error { Text(error).foregroundStyle(.red).font(.caption) }
                 if posts.isEmpty && !loading {
-                    Text("Chưa có video nào. Hãy đăng video đầu tiên!")
+                    Text(store.t("Chưa có video nào. Hãy đăng video đầu tiên!",
+                                 "No videos yet. Post the first one!"))
                         .font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity).padding(.top, 30)
                 }
@@ -136,7 +138,7 @@ struct VideoListView: View {
                 Spacer()
                 if let uid = p.userId, p.username != store.username {
                     Button { Task { await toggleFollow(p) } } label: {
-                        Text((p.following ?? false) ? "Đang theo dõi" : "Theo dõi")
+                        Text((p.following ?? false) ? store.t("Đang theo dõi", "Following") : store.t("Theo dõi", "Follow"))
                             .font(.caption.bold())
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background((p.following ?? false) ? Color.gray.opacity(0.3) : store.accentColor)
@@ -176,30 +178,31 @@ struct VideoListView: View {
     private var composeSheet: some View {
         NavigationStack {
             Form {
-                Section("Chọn video") {
+                Section(store.t("Chọn video", "Choose video")) {
                     PhotosPicker(selection: $picker, matching: .videos) {
-                        Label(picker == nil ? "Chọn video từ máy" : "Đã chọn — đổi video",
+                        Label(picker == nil ? store.t("Chọn video từ máy", "Choose video from device")
+                                            : store.t("Đã chọn — đổi video", "Selected — change video"),
                               systemImage: "film")
                     }
                 }
-                Section("Mô tả") {
-                    TextField("Viết mô tả cho video...", text: $caption, axis: .vertical)
+                Section(store.t("Mô tả", "Description")) {
+                    TextField(store.t("Viết mô tả cho video...", "Write a caption..."), text: $caption, axis: .vertical)
                         .lineLimit(2...5)
                 }
                 Section {
                     Button { Task { await submitPost() } } label: {
                         HStack {
                             if posting { ProgressView().padding(.trailing, 4) }
-                            Text(posting ? "Đang đăng..." : "Đăng video")
+                            Text(posting ? store.t("Đang đăng...", "Posting...") : store.t("Đăng video", "Post video"))
                         }
                     }.disabled(picker == nil || posting)
                 }
                 if let error { Text(error).foregroundStyle(.red).font(.caption) }
             }
-            .navigationTitle("Đăng video")
+            .navigationTitle(store.t("Đăng video", "Post video"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { showCompose = false } }
+                ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { showCompose = false } }
             }
         }
     }
@@ -331,13 +334,13 @@ struct ReelsFeedView: View {
         GeometryReader { geo in
             Group {
                 if loading && posts.isEmpty {
-                    ProgressView("Đang tải Reels...")
+                    ProgressView(store.t("Đang tải Reels...", "Loading Reels..."))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if posts.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "play.rectangle.fill")
                             .font(.system(size: 56)).foregroundStyle(.secondary)
-                        Text("Chưa có Reels nào.").foregroundStyle(.secondary)
+                        Text(store.t("Chưa có Reels nào.", "No Reels yet.")).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {

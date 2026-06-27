@@ -17,16 +17,17 @@ struct FriendsView: View {
             VStack(spacing: 0) {
                 // Banner sang trọng
                 KHeroHeader(icon: "person.2.fill",
-                            title: "Bạn bè",
-                            subtitle: "Kết bạn · Lời mời · Nhắn tin trực tiếp")
+                            title: store.t("Bạn bè", "Friends"),
+                            subtitle: store.t("Kết bạn · Lời mời · Nhắn tin trực tiếp",
+                                              "Add friends · Requests · Direct messages"))
                     .padding(.horizontal)
                     .padding(.top, 8)
 
                 // Segmented picker
                 Picker("", selection: $selectedSegment) {
-                    Text("Bạn bè").tag(0)
-                    Text("Lời mời").tag(1)
-                    Text("Tìm kiếm").tag(2)
+                    Text(store.t("Bạn bè", "Friends")).tag(0)
+                    Text(store.t("Lời mời", "Requests")).tag(1)
+                    Text(store.t("Tìm kiếm", "Search")).tag(2)
                 }
                 .pickerStyle(.segmented)
                 .padding()
@@ -43,7 +44,7 @@ struct FriendsView: View {
                 
                 Spacer()
             }
-            .navigationTitle("Bạn bè")
+            .navigationTitle(store.t("Bạn bè", "Friends"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -72,7 +73,7 @@ struct FriendsView: View {
                 if loadingFriends {
                     HStack {
                         Spacer()
-                        ProgressView("Đang tải danh sách...")
+                        ProgressView(store.t("Đang tải danh sách...", "Loading list..."))
                         Spacer()
                     }
                     .padding(.top, 40)
@@ -81,10 +82,11 @@ struct FriendsView: View {
                         Image(systemName: "person.2.slash.fill")
                             .font(.system(size: 48))
                             .foregroundStyle(.secondary)
-                        Text("Chưa có bạn bè")
+                        Text(store.t("Chưa có bạn bè", "No friends yet"))
                             .font(.headline)
                             .foregroundStyle(.secondary)
-                        Text("Hãy qua tab 'Tìm kiếm' để kết bạn với những người khác!")
+                        Text(store.t("Hãy qua tab 'Tìm kiếm' để kết bạn với những người khác!",
+                                     "Go to the 'Search' tab to add other people!"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -102,7 +104,7 @@ struct FriendsView: View {
                                     Text(friend.username)
                                         .font(.headline)
                                         .foregroundStyle(.primary)
-                                    Text("Bấm để nhắn tin")
+                                    Text(store.t("Bấm để nhắn tin", "Tap to message"))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -137,14 +139,14 @@ struct FriendsView: View {
                     let outgoingRequests = store.friendRequests.filter { $0.senderName.lowercased() == username.lowercased() }
                     
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Lời mời nhận được (\(incomingRequests.count))")
+                        Text(store.t("Lời mời nhận được", "Received requests") + " (\(incomingRequests.count))")
                             .font(.subheadline)
                             .bold()
                             .foregroundStyle(.secondary)
                             .padding(.horizontal)
-                        
+
                         if incomingRequests.isEmpty {
-                            Text("Không có lời mời nào")
+                            Text(store.t("Không có lời mời nào", "No requests"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding()
@@ -160,7 +162,7 @@ struct FriendsView: View {
                                     Text(req.senderName)
                                         .font(.headline)
                                     Spacer()
-                                    Button("Từ chối") {
+                                    Button(store.t("Từ chối", "Decline")) {
                                         Task { await respond(reqId: req.id, action: "decline") }
                                     }
                                     .font(.caption)
@@ -169,7 +171,7 @@ struct FriendsView: View {
                                     .background(Color(.systemGray5))
                                     .cornerRadius(8)
                                     
-                                    Button("Đồng ý") {
+                                    Button(store.t("Đồng ý", "Accept")) {
                                         Task { await respond(reqId: req.id, action: "accept") }
                                     }
                                     .font(.caption)
@@ -189,15 +191,15 @@ struct FriendsView: View {
                     
                     // Outgoing requests
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Yêu cầu đã gửi (\(outgoingRequests.count))")
+                        Text(store.t("Yêu cầu đã gửi", "Sent requests") + " (\(outgoingRequests.count))")
                             .font(.subheadline)
                             .bold()
                             .foregroundStyle(.secondary)
                             .padding(.horizontal)
                             .padding(.top, 10)
-                        
+
                         if outgoingRequests.isEmpty {
-                            Text("Không có yêu cầu đang chờ")
+                            Text(store.t("Không có yêu cầu đang chờ", "No pending requests"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding()
@@ -213,7 +215,7 @@ struct FriendsView: View {
                                     Text(req.receiverName)
                                         .font(.body)
                                     Spacer()
-                                    Text("Đang chờ phản hồi")
+                                    Text(store.t("Đang chờ phản hồi", "Awaiting response"))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -236,7 +238,7 @@ struct FriendsView: View {
             HStack {
                 Image(systemName: "qrcode").foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("ID của bạn").font(.caption2).foregroundStyle(.secondary)
+                    Text(store.t("ID của bạn", "Your ID")).font(.caption2).foregroundStyle(.secondary)
                     Text(store.publicId.isEmpty ? "—" : store.publicId)
                         .font(.subheadline.bold()).foregroundStyle(Theme.accent)
                 }
@@ -249,7 +251,7 @@ struct FriendsView: View {
 
             // Search Input
             HStack {
-                TextField("Nhập tên · SĐT · ID (KEN...)", text: $searchQuery)
+                TextField(store.t("Nhập tên · SĐT · ID (KEN...)", "Enter name · phone · ID (KEN...)"), text: $searchQuery)
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
@@ -280,7 +282,7 @@ struct FriendsView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     if searchResults.isEmpty && !searchQuery.isEmpty && !isSearching {
-                        Text("Không tìm thấy kết quả phù hợp")
+                        Text(store.t("Không tìm thấy kết quả phù hợp", "No matching results"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.top, 40)
@@ -321,10 +323,10 @@ struct FriendsView: View {
         if isFriend {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text("Bạn bè").font(.caption).foregroundStyle(.secondary)
+                Text(store.t("Bạn bè", "Friends")).font(.caption).foregroundStyle(.secondary)
             }
         } else if let incReq = incomingRequest {
-            Button("Chấp nhận") {
+            Button(store.t("Chấp nhận", "Accept")) {
                 Task { await respond(reqId: incReq.id, action: "accept") }
             }
             .font(.caption)
@@ -335,11 +337,11 @@ struct FriendsView: View {
             .background(Theme.accent)
             .cornerRadius(8)
         } else if outgoingRequest != nil {
-            Text("Đã gửi lời mời")
+            Text(store.t("Đã gửi lời mời", "Request sent"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            Button("Thêm bạn") {
+            Button(store.t("Thêm bạn", "Add friend")) {
                 Task { await sendRequest(friendId: user.id) }
             }
             .font(.caption)
