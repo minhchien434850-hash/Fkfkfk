@@ -4534,6 +4534,36 @@ def admin_set_topup_bonus(b: TopupBonusIn, admin=Depends(get_admin)) -> dict[str
     return {"message": f"Đã đặt khuyến mãi nạp ví {p}%.", "percent": p}
 
 
+# -------------------- Admin: cộng/trừ ví khách (thủ công) --------------------
+class WalletAdjustIn(BaseModel):
+    user: str            # public_id / username / id
+    delta: int           # +nạp / -trừ (VND)
+    note: str = ""
+
+@app.post("/admin/store/wallet/adjust")
+def admin_store_wallet_adjust(b: WalletAdjustIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    ident = (b.user or "").strip()
+    if not ident:
+        raise HTTPException(status_code=400, detail="Thiếu thông tin người dùng (ID / username).")
+    with db() as c:
+        row = c.execute(
+            "SELECT id,username,wallet FROM users WHERE public_id=? OR username=? OR CAST(id AS TEXT)=?",
+            (ident, ident, ident)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy người dùng '{ident}'.")
+        delta = int(b.delta)
+        cur_bal = row["wallet"] or 0
+        if delta < 0 and cur_bal + delta < 0:
+            delta = -cur_bal   # không cho âm
+        kind = "topup" if delta >= 0 else "purchase"
+        note = b.note.strip() or ("Admin nạp ví" if delta >= 0 else "Admin trừ ví")
+        _wallet_add(c, row["id"], delta, kind, note)
+        bal = _wallet_balance(c, row["id"])
+    sign = "+" if delta >= 0 else ""
+    return {"message": f"Đã cập nhật ví của {row['username']}: {sign}{delta:,}đ. Số dư hiện tại: {bal:,}đ"
+            .replace(",", ".")}
+
+
 # -------------------- Liên hệ admin & Nhóm cộng đồng (mạng xã hội) --------------------
 class SocialLink(BaseModel):
     platform: str

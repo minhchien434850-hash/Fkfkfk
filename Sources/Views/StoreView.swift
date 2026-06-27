@@ -151,6 +151,24 @@ struct StoreView: View {
     @State private var loadingProducts = false
     @AppStorage("storeWishlist") private var wishlistRaw: String = ""
     @AppStorage("storeRecentViews") private var recentViewsRaw: String = ""
+    // Cache cấu hình cửa hàng — giữ tên/logo/banner khi mất kết nối, không bị reset về mặc định
+    @AppStorage("storeCfgName") private var cfgName: String = ""
+    @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
+    @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
+    @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
+
+    private var displayName: String {
+        if let n = config?.logoName, !n.isEmpty { return n }
+        return cfgName.isEmpty ? "Cửa hàng" : cfgName
+    }
+    // Cấu hình hiệu lực: ưu tiên server, fallback cache (để banner/logo không biến mất khi offline)
+    private var effectiveConfig: StoreAppConfig? {
+        if let c = config { return c }
+        if cfgName.isEmpty && cfgLogo.isEmpty && cfgBannerUrl.isEmpty { return nil }
+        return StoreAppConfig(logoName: cfgName, logoUrl: cfgLogo,
+                              bannerType: cfgBannerType, bannerUrl: cfgBannerUrl,
+                              topupBonusPercent: nil)
+    }
 
     private var wishlistIds: Set<Int> {
         Set(wishlistRaw.split(separator: ",").compactMap { Int($0) })
@@ -236,7 +254,7 @@ struct StoreView: View {
                 }
                 .padding()
             }
-            .navigationTitle(config?.logoName ?? "Cửa hàng")
+            .navigationTitle(displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -486,11 +504,11 @@ struct StoreView: View {
 
     private var storeHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let c = config, !c.bannerUrl.isEmpty {
+            if let c = effectiveConfig, !c.bannerUrl.isEmpty {
                 StoreMediaCarousel(media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)], height: 170)
             }
             HStack(spacing: 12) {
-                if let c = config, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
+                if let c = effectiveConfig, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
                     Group {
                         if c.logoUrl.lowercased().contains(".gif") {
                             GIFWebView(url: url, contentMode: "cover")
@@ -507,7 +525,7 @@ struct StoreView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(config?.logoName ?? "KENIOS Store").font(.title3.bold())
+                    Text(displayName).font(.title3.bold())
                     Text("Cửa hàng sản phẩm số · key · tải về").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -535,7 +553,12 @@ struct StoreView: View {
         async let dlTask  = store.api.storeDownloads()
         async let ctTask  = store.api.storeContacts()
         async let catTask = store.api.storeCategories()
-        config    = try? await cfgTask
+        if let c = try? await cfgTask {
+            config = c
+            // lưu cache để lần sau (kể cả khi offline) vẫn giữ tên/logo/banner
+            cfgName = c.logoName; cfgLogo = c.logoUrl
+            cfgBannerType = c.bannerType; cfgBannerUrl = c.bannerUrl
+        }
         downloads = (try? await dlTask) ?? []
         contacts  = try? await ctTask
         do { categories = try await catTask }

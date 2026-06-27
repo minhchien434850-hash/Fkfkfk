@@ -192,6 +192,10 @@ struct StoreConfigEditor: View {
     @State private var bannerUrl = ""
     @State private var message: String?
     @State private var isError = false
+    @AppStorage("storeCfgName") private var cfgName: String = ""
+    @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
+    @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
+    @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
 
     var body: some View {
         Form {
@@ -219,6 +223,8 @@ struct StoreConfigEditor: View {
     }
 
     private func load() async {
+        // Hiện ngay giá trị đã lưu (cache) để không bị trống/khôi phục mặc định khi mạng chậm
+        logoName = cfgName; logoUrl = cfgLogo; bannerType = cfgBannerType; bannerUrl = cfgBannerUrl
         if let c = try? await store.api.storeConfig() {
             logoName = c.logoName; logoUrl = c.logoUrl
             bannerType = c.bannerType; bannerUrl = c.bannerUrl
@@ -229,6 +235,8 @@ struct StoreConfigEditor: View {
         do {
             let r = try await store.api.adminStoreSetConfig(logoName: logoName, logoUrl: logoUrl,
                                                             bannerType: bannerType, bannerUrl: bannerUrl)
+            // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
+            cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message
         } catch { isError = true; message = error.localizedDescription }
     }
@@ -888,6 +896,7 @@ struct StoreKeysBackupView: View {
 // ======================== Nạp/Trừ ví khách hàng thủ công ========================
 struct AdminWalletAdjustView: View {
     @EnvironmentObject var store: AppStore
+    var prefillUser: String = ""              // mở sẵn với 1 khách (từ danh sách người dùng)
     @State private var userIdentifier = ""    // username hoặc publicId
     @State private var amountText = ""
     @State private var note = ""
@@ -913,6 +922,7 @@ struct AdminWalletAdjustView: View {
                 TextField("Username hoặc ID khách hàng", text: $userIdentifier)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
+            .onAppear { if userIdentifier.isEmpty && !prefillUser.isEmpty { userIdentifier = prefillUser } }
 
             Section("Loại thao tác") {
                 Picker("", selection: $isDeduct) {

@@ -6,6 +6,7 @@ struct AdminView: View {
     @State private var error: String?
     @State private var message: String?
     @State private var pwUser: AdminUser?
+    @State private var walletUser: AdminUser?
     @State private var paymentId = ""
     @State private var showBank = false
     @State private var showErrors = false
@@ -175,6 +176,7 @@ struct AdminView: View {
                                         }
                                     }
                                     Button("Đổi mật khẩu giúp") { pwUser = u }
+                                    Button("Cộng / Trừ tiền ví") { walletUser = u }
                                 }
                                 .font(.caption)
                             }
@@ -200,6 +202,9 @@ struct AdminView: View {
                 await loadPendingPayments()
             }
             .sheet(item: $pwUser) { u in AdminPasswordSheet(user: u) { Task { await reload() } } }
+            .sheet(item: $walletUser) { u in
+                NavigationStack { AdminWalletAdjustView(prefillUser: u.publicId ?? u.username) }
+            }
             .sheet(isPresented: $showBank) { BankSettingsSheet() }
             .sheet(isPresented: $showErrors) { ErrorLogView() }
             .sheet(isPresented: $showPro) { ProPriceSheet() }
