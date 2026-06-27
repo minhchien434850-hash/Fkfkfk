@@ -224,6 +224,14 @@ struct SettingsView: View {
 
                 if let message { Text(message).foregroundStyle(.green).font(.footnote) }
 
+                Section(store.t("Pháp lý", "Legal")) {
+                    NavigationLink {
+                        LegalView()
+                    } label: {
+                        Label(store.t("Điều khoản & Chính sách bảo mật", "Terms & Privacy Policy"), systemImage: "doc.text.magnifyingglass")
+                    }
+                }
+
                 Section {
                     Button(store.t("Đăng xuất", "Logout"), role: .destructive) {
                         dismiss()                 // đóng màn Cài đặt (sheet) ngay

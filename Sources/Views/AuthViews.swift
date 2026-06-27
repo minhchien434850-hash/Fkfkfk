@@ -78,6 +78,11 @@ struct LoginView: View {
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(.secondary.opacity(0.4)))
                     }.padding(.horizontal)
 
+                    NavigationLink { LegalView() } label: {
+                        Text(store.t("Điều khoản & Chính sách bảo mật", "Terms & Privacy Policy"))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }.padding(.top, 4)
+
                     // Ẩn hoàn toàn phần liên kết máy chủ khi đã cài sẵn URL mặc định (Config.defaultServerURL)
                     if Config.defaultServerURL.isEmpty {
                         if store.baseURL.isEmpty {
