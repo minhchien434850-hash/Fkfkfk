@@ -509,7 +509,10 @@ struct GitHubRepoView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadRuns(); await loadRelease() }
         .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                      allowedContentTypes: [.data, .image, .movie, .pdf, .text,
+                                            .spreadsheet, .presentation, .archive,
+                                            .sourceCode, .json, .xml, .html],
+                      allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
                 Task { await upload(urls) }
