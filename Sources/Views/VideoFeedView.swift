@@ -55,7 +55,6 @@ struct VideoFeedView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Tab chọn: Video / Reels
                 Picker("", selection: $selectedTab) {
                     Text(store.t("Video", "Video")).tag(0)
                     Text(store.t("Reels", "Reels")).tag(1)
@@ -64,11 +63,7 @@ struct VideoFeedView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-                if selectedTab == 0 {
-                    VideoListView()
-                } else {
-                    ReelsFeedView()
-                }
+                VideoListView()
             }
             .navigationTitle(store.t("Video", "Video"))
             .navigationBarTitleDisplayMode(.inline)
@@ -76,6 +71,13 @@ struct VideoFeedView: View {
                 ToolbarItem(placement: .topBarLeading) { ThreeDLogoText(size: 20) }
                 ToolbarItem(placement: .topBarTrailing) { AppearanceMenu() }
             }
+        }
+        // Reels phải fullscreen để GeometryReader nhận đúng kích thước màn hình
+        .fullScreenCover(isPresented: Binding(
+            get: { selectedTab == 1 },
+            set: { if !$0 { selectedTab = 0 } }
+        )) {
+            ReelsFeedView().environmentObject(store)
         }
     }
 }
@@ -325,27 +327,33 @@ struct InlineVideoPlayer: View {
 // ======================== Reels — fullscreen, CUỘN DỌC như TikTok ========================
 struct ReelsFeedView: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) var dismiss
     @State private var posts: [PostItem] = []
     @State private var loading = false
     @State private var error: String?
     @State private var currentIndex = 0
 
     var body: some View {
-        GeometryReader { geo in
-            Group {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+
+            // GeometryReader với ignoresSafeArea → nhận đúng kích thước toàn màn hình
+            GeometryReader { geo in
                 if loading && posts.isEmpty {
                     ProgressView(store.t("Đang tải Reels...", "Loading Reels..."))
+                        .tint(.white)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if posts.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "play.rectangle.fill")
                             .font(.system(size: 56)).foregroundStyle(.secondary)
-                        Text(store.t("Chưa có Reels nào.", "No Reels yet.")).foregroundStyle(.secondary)
+                        Text(store.t("Chưa có Reels nào.", "No Reels yet."))
+                            .foregroundStyle(.secondary)
+                        Button(store.t("Đóng", "Close")) { dismiss() }
+                            .foregroundStyle(.white)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    // Mẹo xoay: TabView .page mặc định cuộn NGANG → xoay -90° để thành
-                    // cuộn DỌC (vuốt lên/xuống), từng ô được xoay bù +90° cho đúng chiều.
                     TabView(selection: $currentIndex) {
                         ForEach(Array(posts.enumerated()), id: \.offset) { idx, p in
                             ReelCard(post: p, token: store.token, baseURL: store.baseURL,
@@ -363,18 +371,31 @@ struct ReelsFeedView: View {
                     .tabViewStyle(.page(indexDisplayMode: .never))
                 }
             }
-        }
-        .ignoresSafeArea(edges: .bottom)
-        .task { await load() }
-        .refreshable { await load() }
-        .overlay(alignment: .topTrailing) {
+            .ignoresSafeArea()
+
+            // Nút đóng góc trên phải
+            HStack {
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .background(Circle().fill(.black.opacity(0.35)).padding(2))
+                        .shadow(radius: 4)
+                }
+                .padding(.trailing, 16)
+                .padding(.top, 60)
+            }
+
+            // Lỗi
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
-                    .padding(8).background(.black.opacity(0.6))
+                    .padding(8).background(.black.opacity(0.7))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .padding()
+                    .padding(.top, 60)
             }
         }
+        .task { await load() }
     }
 
     private func load() async {
