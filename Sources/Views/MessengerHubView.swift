@@ -292,6 +292,8 @@ struct MessengerHubView: View {
     @AppStorage("mhAutoSpeed")      private var speedPresetRaw  = "normal"
     // Tốc độ tinh chỉnh 0.1 – 5.0 giây giữa các tin (ưu tiên dùng giá trị này)
     @AppStorage("mhAutoDelaySec")   private var autoDelaySec: Double = 1.0
+    // Danh bạ người nhận đã lưu (mỗi dòng "Tên|định danh") — chọn nhanh, khỏi gõ lại
+    @AppStorage("mhSavedRecipients") private var savedRecipientsRaw = ""
 
     @State private var autoRunning  = false
     @State private var autoIdx      = 0
@@ -321,6 +323,68 @@ struct MessengerHubView: View {
     }
     private var selectedSpeed: SpeedPreset {
         SpeedPreset(rawValue: speedPresetRaw) ?? .normal
+    }
+
+    // ── Danh bạ người nhận đã lưu ──
+    struct SavedRecipient: Identifiable, Hashable { let id = UUID(); let name: String; let value: String }
+    private var savedRecipients: [SavedRecipient] {
+        savedRecipientsRaw.components(separatedBy: "\n").compactMap { line in
+            let parts = line.components(separatedBy: "|")
+            let value = (parts.count > 1 ? parts[1] : parts[0]).trimmingCharacters(in: .whitespaces)
+            guard !value.isEmpty else { return nil }
+            let name = parts.count > 1 ? parts[0].trimmingCharacters(in: .whitespaces) : value
+            return SavedRecipient(name: name.isEmpty ? value : name, value: value)
+        }
+    }
+    private func saveRecipient(_ value: String) {
+        let v = value.trimmingCharacters(in: .whitespaces)
+        guard !v.isEmpty else { return }
+        var lines = savedRecipientsRaw.components(separatedBy: "\n").filter { !$0.isEmpty }
+        if !lines.contains(where: { $0.components(separatedBy: "|").last?.trimmingCharacters(in: .whitespaces) == v }) {
+            lines.append(v)   // lưu dạng "định danh" (tên = chính nó)
+            savedRecipientsRaw = lines.joined(separator: "\n")
+        }
+    }
+    private func removeRecipient(_ r: SavedRecipient) {
+        let lines = savedRecipientsRaw.components(separatedBy: "\n").filter {
+            ($0.components(separatedBy: "|").last?.trimmingCharacters(in: .whitespaces) ?? $0) != r.value
+        }
+        savedRecipientsRaw = lines.joined(separator: "\n")
+    }
+
+    // Khối chọn người nhận đã lưu + nút lưu người nhận hiện tại (dùng cho cả 2 tab)
+    @ViewBuilder private func recipientPicker(_ current: Binding<String>) -> some View {
+        if !savedRecipients.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(savedRecipients) { r in
+                        HStack(spacing: 4) {
+                            Button {
+                                current.wrappedValue = r.value
+                            } label: {
+                                Label(r.name, systemImage: "person.crop.circle")
+                                    .font(.caption)
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .background(current.wrappedValue == r.value
+                                                ? store.accentColor.opacity(0.25)
+                                                : Color(.tertiarySystemBackground))
+                                    .clipShape(Capsule())
+                            }.buttonStyle(.plain)
+                            Button { removeRecipient(r) } label: {
+                                Image(systemName: "xmark.circle.fill").font(.caption2).foregroundStyle(.secondary)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        Button {
+            saveRecipient(current.wrappedValue)
+        } label: {
+            Label("Lưu người nhận này vào danh bạ", systemImage: "person.badge.plus")
+                .font(.caption)
+        }
+        .disabled(current.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
     var body: some View {
@@ -417,6 +481,7 @@ struct MessengerHubView: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .keyboardType(manualPlatformId == "telegram" ? .default : .phonePad)
+                        recipientPicker($manualRecipient)
                     }
 
                     Section {
@@ -515,6 +580,7 @@ struct MessengerHubView: View {
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .keyboardType(autoPlatform == .whatsapp ? .phonePad : .default)
+                            recipientPicker($autoRecipient)
                         }
                     }
 
