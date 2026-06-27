@@ -202,12 +202,18 @@ struct FilesPane: View {
                 else if ["swift", "py", "js", "ts", "java", "c", "cpp", "go", "rs", "rb", "json", "html", "css"].contains(ext) { cat = "code" }
                 else if ["pdf", "doc", "docx", "txt", "md", "xls", "xlsx", "ppt", "pptx"].contains(ext) { cat = "document" }
                 else { cat = "other" }
+                // Copy sang temp trước khi await để không mất security scope
+                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                try? FileManager.default.removeItem(at: tmp)
+                let copied = (try? FileManager.default.copyItem(at: url, to: tmp)) != nil
+                if access { url.stopAccessingSecurityScopedResource() }
+                guard copied else { failed.append(url.lastPathComponent); continue }
                 do {
-                    _ = try await store.api.uploadFileRaw(name: url.lastPathComponent, category: cat, fileURL: url)
+                    _ = try await store.api.uploadFileRaw(name: url.lastPathComponent, category: cat, fileURL: tmp)
                 } catch {
                     failed.append(url.lastPathComponent)
                 }
-                if access { url.stopAccessingSecurityScopedResource() }
+                try? FileManager.default.removeItem(at: tmp)
             }
             await reload()
             if !failed.isEmpty { self.error = "Lỗi tải lên: \(failed.joined(separator: ", "))" }
