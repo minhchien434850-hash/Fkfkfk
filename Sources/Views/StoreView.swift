@@ -1145,6 +1145,52 @@ struct StoreView: View {
         .frame(maxWidth: .infinity).padding(.top, 40)
     }
 
+    // Icon liên hệ nhanh: tối đa 4 nút tròn màu cho các kênh admin đã bật
+    @ViewBuilder private var headerContactIcons: some View {
+        let enabled = (contacts?.contact ?? []).filter {
+            $0.enabled && !$0.url.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        if !enabled.isEmpty {
+            VStack(alignment: .trailing, spacing: 5) {
+                HStack(spacing: 6) {
+                    ForEach(Array(enabled.prefix(4).enumerated()), id: \.offset) { _, link in
+                        let p = socialPlatform(link.platform)
+                        if let url = socialOpenURL(link.platform, link.url) {
+                            Link(destination: url) {
+                                Image(systemName: p.icon)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 34, height: 34)
+                                    .background(p.color)
+                                    .clipShape(Circle())
+                                    .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 1)
+                            }
+                        }
+                    }
+                }
+                if enabled.count > 4 {
+                    let rest = enabled.dropFirst(4).prefix(4)
+                    HStack(spacing: 6) {
+                        ForEach(Array(rest.enumerated()), id: \.offset) { _, link in
+                            let p = socialPlatform(link.platform)
+                            if let url = socialOpenURL(link.platform, link.url) {
+                                Link(destination: url) {
+                                    Image(systemName: p.icon)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 34, height: 34)
+                                        .background(p.color)
+                                        .clipShape(Circle())
+                                        .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 1)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var storeHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let c = effectiveConfig, !c.bannerUrl.isEmpty {
@@ -1200,11 +1246,12 @@ struct StoreView: View {
                             }
                         }
                         Spacer()
+                        headerContactIcons
                     }
                     .padding(.horizontal, 14).padding(.bottom, 14)
                 }
             } else {
-                HStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     if let c = effectiveConfig, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
                         Group {
                             if c.logoUrl.lowercased().contains(".gif") {
@@ -1248,6 +1295,7 @@ struct StoreView: View {
                         }
                     }
                     Spacer()
+                    headerContactIcons
                 }
                 .padding(.vertical, 8)
             }
