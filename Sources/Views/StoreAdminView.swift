@@ -121,6 +121,16 @@ struct StoreAdminView: View {
                         Label("Thống kê & Phân tích", systemImage: "chart.bar.xaxis")
                     }
                     NavigationLink {
+                        AdminPromoCodesView()
+                    } label: {
+                        Label("Mã khuyến mãi", systemImage: "tag.fill")
+                    }
+                    NavigationLink {
+                        AdminPushNotificationView()
+                    } label: {
+                        Label("Gửi thông báo (Push)", systemImage: "bell.badge.fill")
+                    }
+                    NavigationLink {
                         AdminWalletAdjustView()
                     } label: {
                         Label("Nạp / Trừ ví khách hàng", systemImage: "dollarsign.arrow.circlepath")
@@ -1516,5 +1526,211 @@ struct StoreRestoreBackupView: View {
         isError = false
         message = "Khôi phục xong! Đã tạo \(doneCount)/\(catCount) danh mục."
         loading = false; restored = true
+    }
+}
+
+// ======================== Quản lý mã khuyến mãi (Admin) ========================
+struct AdminPromoCodesView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var codes: [PromoCode] = []
+    @State private var loading = false
+    @State private var showAdd = false
+    @State private var message: String?
+
+    // Form tạo mới
+    @State private var newCode = ""
+    @State private var discountType = "percent"
+    @State private var discountValue = ""
+    @State private var minAmount = ""
+    @State private var maxUses = ""
+
+    var body: some View {
+        List {
+            Section {
+                if loading { ProgressView() }
+                ForEach(codes) { code in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(code.code).font(.headline.monospaced())
+                            Spacer()
+                            Text(code.discountType == "percent"
+                                 ? "-\(code.discountValue)%"
+                                 : "-\(kFormatVND(code.discountValue))")
+                                .font(.caption.bold()).foregroundStyle(.green)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Color.green.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                        HStack(spacing: 12) {
+                            Label("\(code.usedCount)\(code.maxUses > 0 ? "/\(code.maxUses)" : "") lượt",
+                                  systemImage: "person.2")
+                            if code.minAmount > 0 {
+                                Label("Tối thiểu \(kFormatVND(code.minAmount))", systemImage: "cart")
+                            }
+                            if code.expiresAt > 0 {
+                                Label(Date(timeIntervalSince1970: TimeInterval(code.expiresAt)),
+                                      format: .dateTime.day().month().year())
+                            }
+                        }
+                        .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) { Task { await deleteCode(code.id) } } label: {
+                            Label("Xoá", systemImage: "trash")
+                        }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Danh sách mã (\(codes.count))")
+                    Spacer()
+                    Button { showAdd = true } label: { Image(systemName: "plus") }
+                }
+            }
+
+            if let message {
+                Section { Text(message).font(.footnote).foregroundStyle(.secondary) }
+            }
+        }
+        .navigationTitle("Mã khuyến mãi")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+        .sheet(isPresented: $showAdd) { addSheet }
+    }
+
+    private var addSheet: some View {
+        NavigationStack {
+            Form {
+                Section("Mã giảm giá") {
+                    TextField("Tên mã (VD: SALE50)", text: $newCode)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                    Picker("Loại giảm", selection: $discountType) {
+                        Text("Phần trăm (%)").tag("percent")
+                        Text("Số tiền cố định (đ)").tag("fixed")
+                    }
+                    TextField(discountType == "percent" ? "Giảm bao nhiêu % (VD: 20)" : "Giảm bao nhiêu đ (VD: 10000)",
+                              text: $discountValue)
+                        .keyboardType(.numberPad)
+                }
+                Section("Điều kiện") {
+                    TextField("Đơn tối thiểu (VD: 50000, để trống = không giới hạn)", text: $minAmount)
+                        .keyboardType(.numberPad)
+                    TextField("Số lần dùng tối đa (để trống = không giới hạn)", text: $maxUses)
+                        .keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Tạo mã mới")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Huỷ") { showAdd = false } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Tạo") { Task { await createCode() } }
+                        .bold()
+                        .disabled(newCode.trimmingCharacters(in: .whitespaces).isEmpty || discountValue.isEmpty)
+                }
+            }
+        }
+    }
+
+    private func reload() async {
+        loading = true
+        codes = (try? await store.api.adminListPromoCodes()) ?? []
+        loading = false
+    }
+
+    private func createCode() async {
+        let code = newCode.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !code.isEmpty, let value = Int(discountValue), value > 0 else { return }
+        let min = Int(minAmount) ?? 0
+        let max = Int(maxUses) ?? 0
+        do {
+            _ = try await store.api.adminCreatePromoCode(
+                code: code, discountType: discountType, discountValue: value,
+                minAmount: min, maxUses: max, expiresAt: 0)
+            showAdd = false
+            newCode = ""; discountValue = ""; minAmount = ""; maxUses = ""
+            await reload()
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    private func deleteCode(_ id: Int) async {
+        _ = try? await store.api.adminDeletePromoCode(id)
+        await reload()
+    }
+}
+
+// ======================== Gửi Push Notification (Admin) ========================
+struct AdminPushNotificationView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var notifTitle = ""
+    @State private var notifBody = ""
+    @State private var sending = false
+    @State private var result: String?
+    @State private var isError = false
+    @State private var deviceStats: PushDeviceStats?
+
+    var body: some View {
+        Form {
+            if let stats = deviceStats {
+                Section("Thiết bị đã đăng ký") {
+                    Label("\(stats.totalDevices) thiết bị", systemImage: "iphone")
+                    Label("\(stats.totalUsers) người dùng", systemImage: "person.2")
+                }
+            }
+
+            Section("Nội dung thông báo") {
+                TextField("Tiêu đề", text: $notifTitle)
+                TextField("Nội dung", text: $notifBody, axis: .vertical)
+                    .lineLimit(3...6)
+            }
+
+            Section {
+                Button {
+                    Task { await sendNotif() }
+                } label: {
+                    HStack {
+                        if sending { ProgressView().padding(.trailing, 4) }
+                        Text(sending ? "Đang gửi..." : "Gửi cho tất cả người dùng")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(sending || notifTitle.isEmpty || notifBody.isEmpty)
+            }
+
+            if let result {
+                Section {
+                    Text(result).foregroundStyle(isError ? .red : .green).font(.footnote)
+                }
+            }
+
+            Section("Hướng dẫn cấu hình APNs") {
+                Text("""
+                Để gửi push notification thật, cần cấu hình các biến môi trường trên server:
+                • APNS_KEY_ID — Key ID từ Apple Developer
+                • APNS_TEAM_ID — Team ID của tài khoản
+                • APNS_BUNDLE_ID — Bundle ID của app
+                • APNS_KEY_PATH — Đường dẫn file .p8
+                """)
+                .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Gửi thông báo")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { deviceStats = try? await store.api.adminPushDeviceStats() }
+    }
+
+    private func sendNotif() async {
+        sending = true; result = nil; isError = false
+        do {
+            let r = try await store.api.adminSendPushNotification(title: notifTitle, body: notifBody)
+            result = r.message; isError = false
+        } catch {
+            result = error.localizedDescription; isError = true
+        }
+        sending = false
     }
 }

@@ -730,3 +730,37 @@ struct CartItem: Identifiable, Codable, Hashable {
     }
 }
 
+// ---- Mã khuyến mãi ----
+struct PromoCode: Identifiable, Decodable, Hashable {
+    let id: Int
+    let code: String
+    let discountType: String
+    let discountValue: Int
+    let minAmount: Int
+    let maxUses: Int
+    let usedCount: Int
+    let expiresAt: Int
+    let isActive: Int
+    let createdAt: Int
+}
+
+struct PromoValidateResult: Decodable {
+    let valid: Bool
+    let discount: Int
+    let label: String
+    let discountType: String
+    let discountValue: Int
+}
+
+// ---- Push Notification ----
+struct PushSendResult: Decodable {
+    let sent: Int
+    let failed: Int
+    let message: String
+}
+
+struct PushDeviceStats: Decodable {
+    let totalDevices: Int
+    let totalUsers: Int
+}
+

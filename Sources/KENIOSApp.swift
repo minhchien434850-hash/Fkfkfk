@@ -8,14 +8,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     static let bgTaskId = "com.kenios.codebox.refresh"
 
+    weak var appStore: AppStore?
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Đặt delegate thông báo
         UNUserNotificationCenter.current().delegate = self
 
-        // Xin quyền thông báo ngay khi khởi động (iOS chỉ hỏi lần đầu)
+        // Xin quyền thông báo + đăng ký APNs để nhận push thật
         UNUserNotificationCenter.current().requestAuthorization(
-            options: [.alert, .badge, .sound]) { _, _ in }
+            options: [.alert, .badge, .sound]) { granted, _ in
+            if granted {
+                DispatchQueue.main.async { application.registerForRemoteNotifications() }
+            }
+        }
 
         // Đăng ký background task để kiểm tra server khi app bị tắt
         BGTaskScheduler.shared.register(
@@ -25,6 +31,21 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         return true
+    }
+
+    // MARK: - APNs device token
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let tokenStr = deviceToken.map { String(format: "%02x", $0) }.joined()
+        UserDefaults.standard.set(tokenStr, forKey: "apnsDeviceToken")
+        // Gửi token lên server nếu đã đăng nhập
+        if let store = appStore, let token = Keychain.load("token"), !token.isEmpty {
+            let api = store.api
+            Task { _ = try? await api.registerDeviceToken(tokenStr) }
+        }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // Thiết bị simulator hoặc chưa cấu hình APNs — bỏ qua
     }
 
     // MARK: - Background refresh
@@ -175,6 +196,13 @@ struct KENIOSApp: App {
                 .environmentObject(store)
                 .tint(store.accentColor)
                 .onAppear {
+                    // Wire appStore vào delegate để có thể gửi device token khi đăng nhập
+                    appDelegate.appStore = store
+                    // Nếu đã đăng nhập và có device token, gửi lên server
+                    if let savedToken = UserDefaults.standard.string(forKey: "apnsDeviceToken"),
+                       !savedToken.isEmpty, let token = Keychain.load("token"), !token.isEmpty {
+                        Task { _ = try? await store.api.registerDeviceToken(savedToken) }
+                    }
                     // Lên lịch background refresh ngay khi app mở
                     AppDelegate.scheduleNextRefresh()
                     // Đồng bộ trạng thái hiện tại vào UserDefaults cho background task dùng

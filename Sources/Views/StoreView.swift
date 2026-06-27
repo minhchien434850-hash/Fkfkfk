@@ -1439,15 +1439,22 @@ struct StoreCartView: View {
     @State private var message: String?
     @State private var isError = false
     @State private var showWallet = false
+    @State private var promoCode = ""
+    @State private var promoResult: PromoValidateResult?
+    @State private var promoError = ""
+    @State private var validatingPromo = false
 
     private var cartItems: [CartItem] {
         (try? JSONDecoder().decode([CartItem].self, from: Data(cartRaw.utf8))) ?? []
     }
-    private var total: Int { cartItems.reduce(0) { $0 + $1.priceAmount } }
+    private var rawTotal: Int { cartItems.reduce(0) { $0 + $1.priceAmount } }
+    private var discount: Int { promoResult?.discount ?? 0 }
+    private var total: Int { max(0, rawTotal - discount) }
 
     private func removeItem(_ id: UUID) {
         var items = cartItems; items.removeAll { $0.id == id }
         if let d = try? JSONEncoder().encode(items) { cartRaw = String(data: d, encoding: .utf8) ?? "[]" }
+        promoResult = nil; promoError = ""
     }
 
     var body: some View {
@@ -1481,7 +1488,47 @@ struct StoreCartView: View {
                             }
                         }
 
+                        Section("Mã khuyến mãi") {
+                            HStack(spacing: 8) {
+                                TextField("Nhập mã giảm giá...", text: $promoCode)
+                                    .textInputAutocapitalization(.characters)
+                                    .autocorrectionDisabled()
+                                    .submitLabel(.done)
+                                    .onSubmit { Task { await applyPromo() } }
+                                if validatingPromo {
+                                    ProgressView().scaleEffect(0.8)
+                                } else if promoResult != nil {
+                                    Button { promoResult = nil; promoCode = ""; promoError = "" } label: {
+                                        Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                                    }.buttonStyle(.borderless)
+                                } else {
+                                    Button("Áp dụng") { Task { await applyPromo() } }
+                                        .font(.caption.bold())
+                                        .disabled(promoCode.trimmingCharacters(in: .whitespaces).isEmpty)
+                                }
+                            }
+                            if let r = promoResult {
+                                Label("Giảm \(r.label) — tiết kiệm \(kFormatVND(discount))", systemImage: "checkmark.seal.fill")
+                                    .font(.caption).foregroundStyle(.green)
+                            }
+                            if !promoError.isEmpty {
+                                Text(promoError).font(.caption).foregroundStyle(.red)
+                            }
+                        }
+
                         Section {
+                            if discount > 0 {
+                                HStack {
+                                    Text("Giá gốc").font(.subheadline).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(kFormatVND(rawTotal)).font(.subheadline).strikethrough().foregroundStyle(.secondary)
+                                }
+                                HStack {
+                                    Text("Giảm giá").font(.subheadline).foregroundStyle(.green)
+                                    Spacer()
+                                    Text("-\(kFormatVND(discount))").font(.subheadline.bold()).foregroundStyle(.green)
+                                }
+                            }
                             HStack {
                                 Text("Tổng cộng").font(.headline)
                                 Spacer()
@@ -1533,6 +1580,19 @@ struct StoreCartView: View {
         }
     }
 
+    private func applyPromo() async {
+        let code = promoCode.trimmingCharacters(in: .whitespaces)
+        guard !code.isEmpty else { return }
+        validatingPromo = true; promoError = ""; promoResult = nil
+        do {
+            let r = try await store.api.storeValidatePromo(code: code, amount: rawTotal)
+            promoResult = r
+        } catch {
+            promoError = error.localizedDescription
+        }
+        validatingPromo = false
+    }
+
     private func reloadBalance() async {
         if let w = try? await store.api.storeWallet() { balance = w.balance }
     }
@@ -1540,10 +1600,11 @@ struct StoreCartView: View {
     private func checkout() async {
         buying = true; isError = false; message = nil
         let items = cartItems
+        let code = promoResult != nil ? promoCode.trimmingCharacters(in: .whitespaces) : nil
         var successCount = 0
         for item in items {
             progress = "Đang mua: \(item.productName)..."
-            if (try? await store.api.storeBuy(productId: item.productId, priceId: item.priceId)) != nil {
+            if (try? await store.api.storeBuy(productId: item.productId, priceId: item.priceId, promoCode: code)) != nil {
                 removeItem(item.id)
                 successCount += 1
             }

@@ -340,9 +340,10 @@ struct APIClient {
         try decode(try await send("/store/products/\(pid)/mine"))
     }
     // Mua bằng số dư ví (giao hàng tức thì)
-    func storeBuy(productId: Int, priceId: Int?) async throws -> StoreBuyResponse {
+    func storeBuy(productId: Int, priceId: Int?, promoCode: String? = nil) async throws -> StoreBuyResponse {
         var body: [String: Any] = ["product_id": productId]
         if let priceId { body["price_id"] = priceId }
+        if let promoCode, !promoCode.isEmpty { body["promo_code"] = promoCode }
         return try decode(try await send("/store/orders", method: "POST", json: body))
     }
     func storeMyOrders() async throws -> [StoreOrder] {
@@ -492,6 +493,41 @@ struct APIClient {
     // ---- Admin thống kê ----
     func adminStats() async throws -> AdminStats {
         try decode(try await send("/admin/stats"))
+    }
+
+    // ---- Mã khuyến mãi ----
+    func storeValidatePromo(code: String, amount: Int) async throws -> PromoValidateResult {
+        try decode(try await send("/store/promo/validate", method: "POST",
+                                  json: ["code": code, "amount": amount]))
+    }
+    func adminListPromoCodes() async throws -> [PromoCode] {
+        try decode(try await send("/admin/store/promo-codes"))
+    }
+    func adminCreatePromoCode(code: String, discountType: String, discountValue: Int,
+                              minAmount: Int, maxUses: Int, expiresAt: Int) async throws -> IdResponse {
+        try decode(try await send("/admin/store/promo-codes", method: "POST", json: [
+            "code": code, "discount_type": discountType, "discount_value": discountValue,
+            "min_amount": minAmount, "max_uses": maxUses, "expires_at": expiresAt
+        ]))
+    }
+    func adminDeletePromoCode(_ id: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/promo-codes/\(id)", method: "DELETE"))
+    }
+
+    // ---- Push Notification ----
+    func registerDeviceToken(_ token: String) async throws -> MessageResponse {
+        try decode(try await send("/device-token", method: "POST",
+                                  json: ["token": token, "platform": "ios"]))
+    }
+    func unregisterDeviceToken(_ token: String) async throws -> MessageResponse {
+        try decode(try await send("/device-token", method: "DELETE", json: ["token": token]))
+    }
+    func adminSendPushNotification(title: String, body: String, target: String = "all") async throws -> PushSendResult {
+        try decode(try await send("/admin/push-notification", method: "POST",
+                                  json: ["title": title, "body": body, "target": target]))
+    }
+    func adminPushDeviceStats() async throws -> PushDeviceStats {
+        try decode(try await send("/admin/push-notification/devices"))
     }
 
     // ---- File ----

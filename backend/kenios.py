@@ -37,7 +37,7 @@ import sqlite3, logging, asyncio, subprocess, tempfile, sys, shutil
 from typing import Any, Optional
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException, Header, Depends, UploadFile, File as FastAPIFile, Form, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, Header, Depends, UploadFile, File as FastAPIFile, Form, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse, Response
 from pydantic import BaseModel
@@ -584,6 +584,27 @@ def init_db() -> None:
                 kind TEXT NOT NULL,              -- topup | purchase
                 amount INTEGER NOT NULL,         -- +nạp / -mua
                 note TEXT DEFAULT '',
+                created_at INTEGER
+            );
+            -- Mã khuyến mãi / giảm giá
+            CREATE TABLE IF NOT EXISTS store_promo_codes(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                discount_type TEXT DEFAULT 'percent',  -- percent | fixed
+                discount_value INTEGER NOT NULL,
+                min_amount INTEGER DEFAULT 0,
+                max_uses INTEGER DEFAULT 0,            -- 0 = không giới hạn
+                used_count INTEGER DEFAULT 0,
+                expires_at INTEGER DEFAULT 0,          -- 0 = không hết hạn
+                is_active INTEGER DEFAULT 1,
+                created_at INTEGER
+            );
+            -- Device tokens cho push notification
+            CREATE TABLE IF NOT EXISTS device_tokens(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                platform TEXT DEFAULT 'ios',
                 created_at INTEGER
             );
         """)
@@ -4427,6 +4448,7 @@ def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
 class StoreOrderIn(BaseModel):
     product_id: int
     price_id: Optional[int] = None
+    promo_code: Optional[str] = None
 
 @app.post("/store/orders")
 def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
@@ -4443,6 +4465,29 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
         if price is None:
             price = prices[0]
         amount = price["amount"]
+        # Áp dụng mã khuyến mãi nếu có
+        discount = 0
+        promo_row = None
+        if b.promo_code:
+            now = int(time.time())
+            promo_row = c.execute(
+                "SELECT * FROM store_promo_codes WHERE code=? AND is_active=1",
+                (b.promo_code.strip().upper(),)
+            ).fetchone()
+            if not promo_row:
+                raise HTTPException(status_code=400, detail="Mã khuyến mãi không hợp lệ hoặc đã hết hạn.")
+            if promo_row["expires_at"] and promo_row["expires_at"] < now:
+                raise HTTPException(status_code=400, detail="Mã khuyến mãi đã hết hạn.")
+            if promo_row["max_uses"] and promo_row["used_count"] >= promo_row["max_uses"]:
+                raise HTTPException(status_code=400, detail="Mã khuyến mãi đã hết lượt sử dụng.")
+            if amount < promo_row["min_amount"]:
+                raise HTTPException(status_code=400,
+                    detail=f"Đơn hàng tối thiểu {promo_row['min_amount']:,}đ để dùng mã này.".replace(",", "."))
+            if promo_row["discount_type"] == "percent":
+                discount = int(amount * promo_row["discount_value"] / 100)
+            else:
+                discount = min(promo_row["discount_value"], amount)
+            amount = max(0, amount - discount)
         balance = _wallet_balance(c, user["id"])
         if balance < amount:
             raise HTTPException(status_code=400,
@@ -4468,6 +4513,8 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
         if ded.rowcount != 1:
             c.execute("UPDATE store_keys SET status='available' WHERE id=?", (key["id"],))  # trả key
             raise HTTPException(status_code=400, detail="Số dư ví không đủ. Vui lòng nạp thêm.")
+        if promo_row:
+            c.execute("UPDATE store_promo_codes SET used_count=used_count+1 WHERE id=?", (promo_row["id"],))
         cur = c.execute(
             "INSERT INTO store_orders(user_id,product_id,price_id,key_id,key_text,amount,status,ref,created_at) "
             "VALUES(?,?,?,?,?,?,'completed',?,?)",
@@ -4486,7 +4533,9 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
         "download_url": prod["download_url"] or "",
         "download_file_id": prod["download_file_id"],
         "balance": new_balance,
-        "message": "Mua thành công! Key đã được giao.",
+        "discount": discount,
+        "message": ("Mua thành công! Key đã được giao." if not discount else
+                    f"Mua thành công! Đã giảm {discount:,}đ.".replace(",", ".")),
     }
 
 
@@ -4930,6 +4979,164 @@ def admin_store_keys_backup_download(admin=Depends(get_admin)):
         return PlainTextResponse("", media_type="text/plain")
     return FileResponse(STORE_KEYS_BACKUP, media_type="application/x-ndjson",
                         filename="store_sold_keys_backup.jsonl")
+
+
+# ======================== Mã khuyến mãi (Promo Codes) ========================
+class PromoCodeIn(BaseModel):
+    code: str
+    discount_type: str = "percent"   # percent | fixed
+    discount_value: int
+    min_amount: int = 0
+    max_uses: int = 0
+    expires_at: int = 0              # unix timestamp, 0 = không hết hạn
+
+@app.get("/admin/store/promo-codes")
+def admin_list_promo_codes(admin=Depends(get_admin)) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute("SELECT * FROM store_promo_codes ORDER BY id DESC").fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/admin/store/promo-codes")
+def admin_create_promo_code(b: PromoCodeIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    code = b.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Mã không được để trống.")
+    if b.discount_value <= 0:
+        raise HTTPException(status_code=400, detail="Giá trị giảm phải lớn hơn 0.")
+    if b.discount_type == "percent" and b.discount_value > 100:
+        raise HTTPException(status_code=400, detail="% giảm không được quá 100.")
+    with db() as c:
+        try:
+            cur = c.execute(
+                "INSERT INTO store_promo_codes(code,discount_type,discount_value,min_amount,max_uses,"
+                "expires_at,is_active,created_at) VALUES(?,?,?,?,?,?,1,?)",
+                (code, b.discount_type, b.discount_value, b.min_amount,
+                 b.max_uses, b.expires_at, int(time.time())))
+            return {"id": cur.lastrowid, "message": "Đã tạo mã khuyến mãi."}
+        except Exception:
+            raise HTTPException(status_code=400, detail="Mã này đã tồn tại.")
+
+@app.delete("/admin/store/promo-codes/{cid}")
+def admin_delete_promo_code(cid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        c.execute("DELETE FROM store_promo_codes WHERE id=?", (cid,))
+    return {"message": "Đã xoá mã khuyến mãi."}
+
+@app.post("/store/promo/validate")
+def store_validate_promo(body: dict = Body(...), user=Depends(get_user)) -> dict[str, Any]:
+    code = str(body.get("code", "")).strip().upper()
+    amount = int(body.get("amount", 0))
+    if not code:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập mã.")
+    with db() as c:
+        row = c.execute(
+            "SELECT * FROM store_promo_codes WHERE code=? AND is_active=1", (code,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Mã không tồn tại hoặc đã vô hiệu hoá.")
+    now = int(time.time())
+    if row["expires_at"] and row["expires_at"] < now:
+        raise HTTPException(status_code=400, detail="Mã đã hết hạn.")
+    if row["max_uses"] and row["used_count"] >= row["max_uses"]:
+        raise HTTPException(status_code=400, detail="Mã đã hết lượt sử dụng.")
+    if amount and amount < row["min_amount"]:
+        raise HTTPException(status_code=400,
+            detail=f"Đơn tối thiểu {row['min_amount']:,}đ.".replace(",", "."))
+    if row["discount_type"] == "percent":
+        discount = int(amount * row["discount_value"] / 100) if amount else 0
+        label = f"-{row['discount_value']}%"
+    else:
+        discount = min(row["discount_value"], amount) if amount else row["discount_value"]
+        label = f"-{row['discount_value']:,}đ".replace(",", ".")
+    return {"valid": True, "discount": discount, "label": label,
+            "discount_type": row["discount_type"], "discount_value": row["discount_value"]}
+
+
+# ======================== Push Notification (Device Tokens) ========================
+class DeviceTokenIn(BaseModel):
+    token: str
+    platform: str = "ios"
+
+@app.post("/device-token")
+def register_device_token(b: DeviceTokenIn, user=Depends(get_user)) -> dict[str, Any]:
+    if not b.token.strip():
+        raise HTTPException(status_code=400, detail="Token không hợp lệ.")
+    with db() as c:
+        c.execute(
+            "INSERT INTO device_tokens(user_id,token,platform,created_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(token) DO UPDATE SET user_id=excluded.user_id, created_at=excluded.created_at",
+            (user["id"], b.token.strip(), b.platform, int(time.time())))
+    return {"message": "Đã đăng ký thiết bị."}
+
+@app.delete("/device-token")
+def unregister_device_token(body: dict = Body(...), user=Depends(get_user)) -> dict[str, Any]:
+    token = str(body.get("token", "")).strip()
+    if token:
+        with db() as c:
+            c.execute("DELETE FROM device_tokens WHERE token=? AND user_id=?", (token, user["id"]))
+    return {"message": "Đã huỷ đăng ký thiết bị."}
+
+class PushNotifIn(BaseModel):
+    title: str
+    body: str
+    target: str = "all"   # all | uid:<id>
+
+@app.post("/admin/push-notification")
+def admin_send_push(b: PushNotifIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    """Gửi push notification qua APNs. Cần cấu hình APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_KEY_PATH."""
+    import httpx, jwt as pyjwt
+    key_id    = os.getenv("APNS_KEY_ID", "")
+    team_id   = os.getenv("APNS_TEAM_ID", "")
+    bundle_id = os.getenv("APNS_BUNDLE_ID", "")
+    key_path  = os.getenv("APNS_KEY_PATH", "")
+    if not all([key_id, team_id, bundle_id, key_path]):
+        raise HTTPException(status_code=501,
+            detail="Chưa cấu hình APNs (APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_KEY_PATH).")
+    try:
+        with open(key_path, "r") as f:
+            private_key = f.read()
+    except Exception:
+        raise HTTPException(status_code=500, detail="Không đọc được file APNs key.")
+    now = int(time.time())
+    token = pyjwt.encode({"iss": team_id, "iat": now}, private_key,
+                         algorithm="ES256", headers={"kid": key_id})
+    with db() as c:
+        if b.target == "all":
+            tokens = [r["token"] for r in c.execute("SELECT token FROM device_tokens").fetchall()]
+        elif b.target.startswith("uid:"):
+            uid = int(b.target.split(":")[1])
+            tokens = [r["token"] for r in
+                      c.execute("SELECT token FROM device_tokens WHERE user_id=?", (uid,)).fetchall()]
+        else:
+            tokens = []
+    if not tokens:
+        return {"sent": 0, "message": "Không có thiết bị nào để gửi."}
+    payload = {"aps": {"alert": {"title": b.title, "body": b.body}, "sound": "default"}}
+    sent, failed = 0, 0
+    apns_url = f"https://api.push.apple.com/3/device"
+    headers = {
+        "authorization": f"bearer {token}",
+        "apns-topic": bundle_id,
+        "apns-push-type": "alert",
+    }
+    with httpx.Client(http2=True, timeout=10) as client:
+        for t in tokens:
+            try:
+                r = client.post(f"{apns_url}/{t}", json=payload, headers=headers)
+                if r.status_code == 200:
+                    sent += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+    return {"sent": sent, "failed": failed, "message": f"Đã gửi {sent}/{len(tokens)} thiết bị."}
+
+@app.get("/admin/push-notification/devices")
+def admin_list_devices(admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        total = c.execute("SELECT COUNT(*) as n FROM device_tokens").fetchone()["n"]
+        users = c.execute("SELECT COUNT(DISTINCT user_id) as n FROM device_tokens").fetchone()["n"]
+    return {"total_devices": total, "total_users": users}
 
 
 # ======================== Prompt Templates ========================
