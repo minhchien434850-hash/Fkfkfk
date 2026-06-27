@@ -4279,6 +4279,7 @@ def store_config() -> dict[str, Any]:
         "slogan_font": get_setting("store_slogan_font", "rounded"),
         "section_order": get_setting("store_section_order",
                                      "categories,products,downloads,contacts,wishlist,recent"),
+        "card_size": get_setting("store_card_size", "medium"),   # small | medium | large
     }
 
 
@@ -4636,6 +4637,7 @@ class StoreConfigIn(BaseModel):
     slogan: Optional[str] = None
     slogan_font: Optional[str] = None
     section_order: Optional[str] = None
+    card_size: Optional[str] = None
 
 @app.post("/admin/store/config")
 def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
@@ -4653,6 +4655,8 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.slogan is not None: set_setting("store_slogan", b.slogan.strip()[:120])
     if b.slogan_font is not None: set_setting("store_slogan_font", b.slogan_font.strip()[:20])
     if b.section_order is not None: set_setting("store_section_order", b.section_order.strip()[:200])
+    if b.card_size is not None:
+        set_setting("store_card_size", b.card_size if b.card_size in ("small", "medium", "large") else "medium")
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
 

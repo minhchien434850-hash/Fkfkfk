@@ -268,6 +268,7 @@ struct StoreConfigEditor: View {
     @State private var bgUrl = ""
     @State private var slogan = ""
     @State private var sloganFont = "rounded"
+    @State private var cardSize = "medium"
     @State private var sections: [String] = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
     @State private var message: String?
     @State private var isError = false
@@ -306,6 +307,17 @@ struct StoreConfigEditor: View {
                 Text(slogan.isEmpty ? "Cửa hàng sản phẩm số · key · tải về" : slogan)
                     .font(keniosFont(sloganFont, size: 14))
                     .foregroundStyle(.secondary)
+            }
+
+            // Kích cỡ thẻ sản phẩm / danh mục ngoài trang
+            Section("Kích cỡ thẻ hiển thị") {
+                Picker("Kích cỡ", selection: $cardSize) {
+                    Text("Nhỏ").tag("small")
+                    Text("Vừa").tag("medium")
+                    Text("Lớn").tag("large")
+                }.pickerStyle(.segmented)
+                Text("Nhỏ: nhiều thẻ/hàng, gọn. Lớn: thẻ to, ảnh rõ. Áp cho thẻ danh mục & sản phẩm ngoài trang.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
 
             // Sắp xếp thứ tự các mục hiển thị ngoài trang cửa hàng (kéo để đổi vị trí)
@@ -376,6 +388,7 @@ struct StoreConfigEditor: View {
             logoAnim = c.logoAnim ?? "shimmer"
             bgType = c.bgType ?? "none"; bgUrl = c.bgUrl ?? ""
             slogan = c.slogan ?? ""; sloganFont = c.sloganFont ?? "rounded"
+            cardSize = c.cardSize ?? "medium"
             if let order = c.sectionOrder, !order.isEmpty {
                 let parts = order.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
                 let all = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
@@ -395,7 +408,8 @@ struct StoreConfigEditor: View {
                 logoEffect: logoEffect, logoFont: logoFont, logoAnim: logoAnim,
                 bgType: bgType, bgUrl: bgUrl,
                 slogan: slogan, sloganFont: sloganFont,
-                sectionOrder: sections.joined(separator: ","))
+                sectionOrder: sections.joined(separator: ","),
+                cardSize: cardSize)
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message

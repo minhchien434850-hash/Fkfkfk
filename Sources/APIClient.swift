@@ -388,7 +388,8 @@ struct APIClient {
                              logoEffect: String? = nil, logoFont: String? = nil,
                              logoAnim: String? = nil, bgType: String? = nil,
                              bgUrl: String? = nil, slogan: String? = nil,
-                             sloganFont: String? = nil, sectionOrder: String? = nil) async throws -> MessageResponse {
+                             sloganFont: String? = nil, sectionOrder: String? = nil,
+                             cardSize: String? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
@@ -400,6 +401,7 @@ struct APIClient {
         if let slogan { body["slogan"] = slogan }
         if let sloganFont { body["slogan_font"] = sloganFont }
         if let sectionOrder { body["section_order"] = sectionOrder }
+        if let cardSize { body["card_size"] = cardSize }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
     // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)

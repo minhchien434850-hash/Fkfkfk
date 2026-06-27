@@ -212,12 +212,20 @@ struct StoreView: View {
         wishlistRaw = ids.map(String.init).joined(separator: ",")
     }
 
-    private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-
     private var filteredCategories: [StoreCategory] {
         let q = search.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return categories }
         return categories.filter { $0.name.localizedCaseInsensitiveContains(q) }
+    }
+
+    // Kích cỡ thẻ — theo cấu hình admin (Kích cỡ thẻ hiển thị)
+    private var cardSize: String { config?.cardSize ?? effectiveConfig?.cardSize ?? "medium" }
+    private var productCardWidth: CGFloat { cardSize == "small" ? 104 : (cardSize == "large" ? 156 : 124) }
+    private var productThumbHeight: CGFloat { cardSize == "small" ? 68 : (cardSize == "large" ? 108 : 84) }
+    private var categoryThumbHeight: CGFloat { cardSize == "small" ? 92 : (cardSize == "large" ? 156 : 120) }
+    private var categoryGrid: [GridItem] {
+        let n = cardSize == "small" ? 3 : 2
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: n)
     }
 
     // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
@@ -240,7 +248,7 @@ struct StoreView: View {
             } else if categories.isEmpty {
                 emptyState
             } else {
-                LazyVGrid(columns: grid, spacing: 12) {
+                LazyVGrid(columns: categoryGrid, spacing: 12) {
                     ForEach(filteredCategories) { cat in
                         NavigationLink {
                             StoreFolderListView(category: cat)
@@ -470,7 +478,7 @@ struct StoreView: View {
     private func allProductCard(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                StoreThumb(media: p.media, height: 84)
+                StoreThumb(media: p.media, height: productThumbHeight)
                 Button { toggleWishlist(p.id) } label: {
                     Image(systemName: wishlistIds.contains(p.id) ? "heart.fill" : "heart")
                         .font(.caption2.bold())
@@ -506,7 +514,7 @@ struct StoreView: View {
             }
             .padding(7)
         }
-        .frame(width: 124)
+        .frame(width: productCardWidth)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.06), radius: 3, x: 0, y: 2)
@@ -624,9 +632,9 @@ struct StoreView: View {
 
     private func categoryCard(_ cat: StoreCategory) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            StoreThumb(media: cat.media, height: 120)
+            StoreThumb(media: cat.media, height: categoryThumbHeight)
             Text(cat.name)
-                .font(.subheadline.bold())
+                .font(cardSize == "small" ? .caption.bold() : .subheadline.bold())
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
