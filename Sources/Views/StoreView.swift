@@ -352,7 +352,7 @@ struct StoreView: View {
         Button { showWallet = true } label: {
             HStack {
                 Image(systemName: "wallet.pass.fill").foregroundStyle(Theme.gold)
-                Text("Ví cửa hàng").font(.subheadline.bold())
+                Text(store.t("Ví cửa hàng", "Store wallet")).font(.subheadline.bold())
                 if let pct = config?.topupBonusPercent, pct > 0 {
                     Text("KM +\(pct)%").font(.caption2.bold())
                         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -360,7 +360,7 @@ struct StoreView: View {
                         .clipShape(Capsule())
                 }
                 Spacer()
-                Text("Nạp tiền").font(.caption).foregroundStyle(Theme.accent)
+                Text(store.t("Nạp tiền", "Top up")).font(.caption).foregroundStyle(Theme.accent)
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
             }
             .padding(12)
@@ -373,7 +373,7 @@ struct StoreView: View {
     // Mục "Tải về" hiện ngay khi vào cửa hàng (bản tải miễn phí)
     private var downloadsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Tải về", systemImage: "arrow.down.circle.fill").font(.headline)
+            Label(store.t("Tải về", "Downloads"), systemImage: "arrow.down.circle.fill").font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(downloads) { d in
@@ -392,7 +392,7 @@ struct StoreView: View {
                 Text(d.name).font(.caption.bold()).lineLimit(2)
                 if let url {
                     Link(destination: url) {
-                        Label("Tải", systemImage: "arrow.down.circle")
+                        Label(store.t("Tải", "Get"), systemImage: "arrow.down.circle")
                             .font(.caption2.bold())
                             .frame(maxWidth: .infinity).padding(.vertical, 6)
                             .background(Theme.accent.opacity(0.15)).foregroundStyle(Theme.accent)
@@ -411,29 +411,29 @@ struct StoreView: View {
     private var allProductsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Label("Tất cả sản phẩm", systemImage: "bag.fill")
+                Label(store.t("Tất cả sản phẩm", "All products"), systemImage: "bag.fill")
                     .font(.headline)
                 Spacer()
                 Menu {
-                    Section("Sắp xếp") {
+                    Section(store.t("Sắp xếp", "Sort")) {
                         Button { productSort = "default" } label: {
-                            Label("Mặc định", systemImage: productSort == "default" ? "checkmark" : "list.number")
+                            Label(store.t("Mặc định", "Default"), systemImage: productSort == "default" ? "checkmark" : "list.number")
                         }
                         Button { productSort = "priceAsc" } label: {
-                            Label("Giá tăng dần", systemImage: productSort == "priceAsc" ? "checkmark" : "arrow.up.circle")
+                            Label(store.t("Giá tăng dần", "Price: low to high"), systemImage: productSort == "priceAsc" ? "checkmark" : "arrow.up.circle")
                         }
                         Button { productSort = "priceDesc" } label: {
-                            Label("Giá giảm dần", systemImage: productSort == "priceDesc" ? "checkmark" : "arrow.down.circle")
+                            Label(store.t("Giá giảm dần", "Price: high to low"), systemImage: productSort == "priceDesc" ? "checkmark" : "arrow.down.circle")
                         }
                         Button { productSort = "name" } label: {
-                            Label("Tên A-Z", systemImage: productSort == "name" ? "checkmark" : "textformat.abc")
+                            Label(store.t("Tên A-Z", "Name A-Z"), systemImage: productSort == "name" ? "checkmark" : "textformat.abc")
                         }
                     }
-                    Section("Lọc") {
+                    Section(store.t("Lọc", "Filter")) {
                         Button {
                             productFilter = productFilter == "inStock" ? "all" : "inStock"
                         } label: {
-                            Label("Chỉ còn hàng", systemImage: productFilter == "inStock" ? "checkmark.circle.fill" : "shippingbox")
+                            Label(store.t("Chỉ còn hàng", "In stock only"), systemImage: productFilter == "inStock" ? "checkmark.circle.fill" : "shippingbox")
                         }
                     }
                 } label: {
@@ -485,7 +485,7 @@ struct StoreView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.system(size: 11))
-                    Text("Tải xuống")
+                    Text(store.t("Tải xuống", "Download"))
                         .font(.caption2.bold())
                 }
                 .frame(maxWidth: .infinity)
@@ -505,10 +505,10 @@ struct StoreView: View {
     private var wishlistSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Yêu thích", systemImage: "heart.fill")
+                Label(store.t("Yêu thích", "Wishlist"), systemImage: "heart.fill")
                     .font(.headline).foregroundStyle(.red)
                 Spacer()
-                Text("\(wishlistProducts.count) sản phẩm")
+                Text("\(wishlistProducts.count) " + store.t("sản phẩm", "products"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             ScrollView(.horizontal, showsIndicators: false) {
@@ -527,7 +527,7 @@ struct StoreView: View {
 
     private var recentlyViewedSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Đã xem gần đây", systemImage: "clock.arrow.circlepath")
+            Label(store.t("Đã xem gần đây", "Recently viewed"), systemImage: "clock.arrow.circlepath")
                 .font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
@@ -546,7 +546,7 @@ struct StoreView: View {
     private var searchField: some View {
         HStack {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Tìm danh mục…", text: $search)
+            TextField(store.t("Tìm danh mục…", "Search categories…"), text: $search)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
             if !search.isEmpty {
                 Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
@@ -560,9 +560,10 @@ struct StoreView: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "bag").font(.largeTitle).foregroundStyle(.secondary)
-            Text("Chưa có danh mục sản phẩm nào.").foregroundStyle(.secondary)
+            Text(store.t("Chưa có danh mục sản phẩm nào.", "No product categories yet.")).foregroundStyle(.secondary)
             if store.isAdmin {
-                Text("Bấm biểu tượng ⚙️ ở góc trên để thêm danh mục, sản phẩm.")
+                Text(store.t("Bấm biểu tượng ⚙️ ở góc trên để thêm danh mục, sản phẩm.",
+                             "Tap the ⚙️ icon at the top to add categories and products."))
                     .font(.caption).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -599,7 +600,7 @@ struct StoreView: View {
                         fontStyle: effectiveConfig?.logoFont ?? "rounded",
                         anim: effectiveConfig?.logoAnim ?? "shimmer",
                         size: 24)
-                    Text("Cửa hàng sản phẩm số · key · tải về").font(.caption).foregroundStyle(.secondary)
+                    Text(store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads")).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
@@ -692,7 +693,7 @@ struct StoreFolderListView: View {
                 if loading && folders.isEmpty {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 } else if folders.isEmpty {
-                    Text("Chưa có thư mục con nào.").foregroundStyle(.secondary)
+                    Text(store.t("Chưa có thư mục con nào.", "No subfolders yet.")).foregroundStyle(.secondary)
                 } else {
                     ForEach(folders) { f in
                         NavigationLink {
@@ -754,7 +755,7 @@ struct StoreProductListView: View {
             if loading && products.isEmpty {
                 HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
             } else if products.isEmpty {
-                Text("Chưa có sản phẩm nào.").foregroundStyle(.secondary)
+                Text(store.t("Chưa có sản phẩm nào.", "No products yet.")).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).padding(.top, 40)
             } else {
                 LazyVGrid(columns: grid, spacing: 12) {
@@ -780,12 +781,12 @@ struct StoreProductListView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(p.name).font(.subheadline.bold()).lineLimit(2)
                 if let cheapest = p.prices.map(\.amount).min() {
-                    Text("Từ \(kFormatVND(cheapest))").font(.caption.bold()).foregroundStyle(Theme.accent)
+                    Text(store.t("Từ", "From") + " \(kFormatVND(cheapest))").font(.caption.bold()).foregroundStyle(Theme.accent)
                 } else {
-                    Text("Chưa có giá").font(.caption2).foregroundStyle(.secondary)
+                    Text(store.t("Chưa có giá", "No price")).font(.caption2).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 6) {
-                    Text(p.availableKeys > 0 ? "Còn \(p.availableKeys)" : "Hết hàng")
+                    Text(p.availableKeys > 0 ? store.t("Còn", "Left") + " \(p.availableKeys)" : store.t("Hết hàng", "Out of stock"))
                         .font(.caption2)
                         .foregroundStyle(p.availableKeys > 0 ? .green : .red)
                     if p.isAcc {
@@ -889,12 +890,12 @@ struct StoreProductDetailView: View {
                 } else if loading {
                     HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
                 } else {
-                    Text("Không tải được sản phẩm.").foregroundStyle(.secondary)
+                    Text(store.t("Không tải được sản phẩm.", "Could not load product.")).foregroundStyle(.secondary)
                 }
             }
             .padding()
         }
-        .navigationTitle(product?.name ?? "Sản phẩm")
+        .navigationTitle(product?.name ?? store.t("Sản phẩm", "Product"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload(); trackRecentView(productId) }
         .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) {
@@ -905,7 +906,7 @@ struct StoreProductDetailView: View {
     private var ratingSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
-            Text("Đánh giá sản phẩm").font(.headline)
+            Text(store.t("Đánh giá sản phẩm", "Rate this product")).font(.headline)
             HStack(spacing: 12) {
                 ForEach(1...5, id: \.self) { star in
                     Button { saveRating(star) } label: {
@@ -916,7 +917,8 @@ struct StoreProductDetailView: View {
                     .buttonStyle(.plain)
                 }
                 if myRating > 0 {
-                    Text(["", "Rất tệ", "Tệ", "Bình thường", "Tốt", "Rất tốt"][myRating])
+                    Text(store.t(["", "Rất tệ", "Tệ", "Bình thường", "Tốt", "Rất tốt"][myRating],
+                                 ["", "Very bad", "Bad", "Okay", "Good", "Excellent"][myRating]))
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
@@ -927,7 +929,7 @@ struct StoreProductDetailView: View {
     private func contactSellerSection(_ c: StoreContacts) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
-            Label("Liên hệ người bán", systemImage: "bubble.left.and.bubble.right.fill")
+            Label(store.t("Liên hệ người bán", "Contact seller"), systemImage: "bubble.left.and.bubble.right.fill")
                 .font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -971,11 +973,11 @@ struct StoreProductDetailView: View {
     // Đã mua: hiện key + nút tải game
     @ViewBuilder private func ownedSection(_ m: StoreProductMine) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Bạn đã sở hữu sản phẩm này", systemImage: "checkmark.seal.fill")
+            Label(store.t("Bạn đã sở hữu sản phẩm này", "You already own this product"), systemImage: "checkmark.seal.fill")
                 .font(.headline).foregroundStyle(.green)
             if let key = m.key, !key.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(product?.itemLabel ?? "KEY") của bạn").font(.caption).foregroundStyle(.secondary)
+                    Text("\(product?.itemLabel ?? "KEY") " + store.t("của bạn", "(yours)")).font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Text(key).font(.body.monospaced()).textSelection(.enabled)
                         Spacer()
@@ -996,7 +998,7 @@ struct StoreProductDetailView: View {
     @ViewBuilder private func downloadButton(url: String?, fileId: Int?) -> some View {
         if let url, !url.isEmpty, let u = URL(string: url) {
             Link(destination: u) {
-                Label("Tải game", systemImage: "arrow.down.circle.fill")
+                Label(store.t("Tải game", "Download game"), systemImage: "arrow.down.circle.fill")
                     .frame(maxWidth: .infinity).frame(height: 48)
                     .background(Theme.accent).foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -1004,7 +1006,7 @@ struct StoreProductDetailView: View {
         } else if let fileId {
             StoreFileDownloadButton(fileId: fileId)
         } else if !(product?.isAcc ?? false) {
-            Text("Sản phẩm chưa có bản tải. Liên hệ admin.")
+            Text(store.t("Sản phẩm chưa có bản tải. Liên hệ admin.", "This product has no download yet. Contact admin."))
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -1013,15 +1015,15 @@ struct StoreProductDetailView: View {
     @ViewBuilder private func buySection(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if p.prices.isEmpty {
-                Text("Sản phẩm chưa có giá bán.").foregroundStyle(.secondary)
+                Text(store.t("Sản phẩm chưa có giá bán.", "This product has no price yet.")).foregroundStyle(.secondary)
             } else {
                 HStack {
-                    Text("Số dư ví: \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
+                    Text(store.t("Số dư ví", "Wallet balance") + ": \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Nạp ví") { showWallet = true }.font(.caption.bold())
+                    Button(store.t("Nạp ví", "Top up")) { showWallet = true }.font(.caption.bold())
                 }
 
-                Text("Chọn gói thời hạn").font(.headline)
+                Text(store.t("Chọn gói thời hạn", "Choose a plan")).font(.headline)
                 ForEach(p.prices) { price in
                     Button {
                         selectedPrice = price
@@ -1059,7 +1061,7 @@ struct StoreProductDetailView: View {
 
                 if p.availableKeys > 0 && !p.prices.isEmpty {
                     Button { addToCart(p) } label: {
-                        Label(isInCart(p.id) ? "Đã thêm vào giỏ hàng" : "Thêm vào giỏ hàng",
+                        Label(isInCart(p.id) ? store.t("Đã thêm vào giỏ hàng", "Added to cart") : store.t("Thêm vào giỏ hàng", "Add to cart"),
                               systemImage: isInCart(p.id) ? "cart.badge.checkmark" : "cart.badge.plus")
                             .font(.subheadline.bold())
                             .foregroundStyle(Theme.accent)
@@ -1071,7 +1073,7 @@ struct StoreProductDetailView: View {
                     .disabled(isInCart(p.id))
                 }
 
-                Text("Mua bằng số dư ví — giao key/acc ngay lập tức.")
+                Text(store.t("Mua bằng số dư ví — giao key/acc ngay lập tức.", "Pay with wallet balance — key/account delivered instantly."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -1099,7 +1101,7 @@ struct StoreProductDetailView: View {
     private func buy(_ p: StoreProduct) async {
         let priceAmt = selectedPrice?.amount ?? p.prices.first?.amount ?? 0
         if balance < priceAmt {
-            info = nil; error = "Số dư ví không đủ. Hãy nạp thêm vào ví."
+            info = nil; error = store.t("Số dư ví không đủ. Hãy nạp thêm vào ví.", "Insufficient wallet balance. Please top up.")
             showWallet = true
             return
         }
@@ -1134,7 +1136,7 @@ struct StoreFileDownloadButton: View {
         VStack {
             if let localURL {
                 ShareLink(item: localURL) {
-                    Label("Lưu / mở file đã tải", systemImage: "square.and.arrow.up")
+                    Label(store.t("Lưu / mở file đã tải", "Save / open downloaded file"), systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity).frame(height: 48)
                         .background(Theme.accent).foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -1143,7 +1145,7 @@ struct StoreFileDownloadButton: View {
                 Button { Task { await download() } } label: {
                     HStack {
                         if downloading { ProgressView().tint(.white) }
-                        Text(downloading ? "Đang tải..." : "Tải game")
+                        Text(downloading ? store.t("Đang tải...", "Downloading...") : store.t("Tải game", "Download game"))
                     }
                     .frame(maxWidth: .infinity).frame(height: 48)
                     .background(Theme.accent).foregroundStyle(.white)
@@ -1178,14 +1180,14 @@ struct StoreMyOrdersView: View {
                 if loading && orders.isEmpty {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 } else if orders.isEmpty {
-                    Text("Bạn chưa mua sản phẩm nào.").foregroundStyle(.secondary)
+                    Text(store.t("Bạn chưa mua sản phẩm nào.", "You haven't bought any products.")).foregroundStyle(.secondary)
                 } else {
                     ForEach(orders) { o in orderRow(o) }
                 }
             }
-            .navigationTitle("Đơn của tôi")
+            .navigationTitle(store.t("Đơn của tôi", "My orders"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await reload() }
             .refreshable { await reload() }
         }
@@ -1214,7 +1216,7 @@ struct StoreMyOrdersView: View {
             if o.status == "completed" {
                 if let url = o.downloadUrl, !url.isEmpty, let u = URL(string: url) {
                     Link(destination: u) {
-                        Label("Tải game", systemImage: "arrow.down.circle.fill").font(.caption.bold())
+                        Label(store.t("Tải game", "Download game"), systemImage: "arrow.down.circle.fill").font(.caption.bold())
                     }
                 } else if let fid = o.downloadFileId {
                     StoreFileDownloadButton(fileId: fid)
@@ -1236,18 +1238,18 @@ struct AppearanceMenu: View {
     @EnvironmentObject var store: AppStore
     var body: some View {
         Menu {
-            Menu("Giao diện") {
+            Menu(store.t("Giao diện", "Theme")) {
                 Button { store.setThemeMode("light") } label: {
-                    Label("Sáng", systemImage: store.themeMode == "light" ? "checkmark" : "sun.max")
+                    Label(store.t("Sáng", "Light"), systemImage: store.themeMode == "light" ? "checkmark" : "sun.max")
                 }
                 Button { store.setThemeMode("dark") } label: {
-                    Label("Tối", systemImage: store.themeMode == "dark" ? "checkmark" : "moon")
+                    Label(store.t("Tối", "Dark"), systemImage: store.themeMode == "dark" ? "checkmark" : "moon")
                 }
                 Button { store.setThemeMode("system") } label: {
-                    Label("Tự động (cân bằng)", systemImage: store.themeMode == "system" ? "checkmark" : "circle.lefthalf.filled")
+                    Label(store.t("Tự động (cân bằng)", "Auto (balanced)"), systemImage: store.themeMode == "system" ? "checkmark" : "circle.lefthalf.filled")
                 }
             }
-            Menu("Ngôn ngữ") {
+            Menu(store.t("Ngôn ngữ", "Language")) {
                 ForEach(kAppLanguages, id: \.0) { code, name in
                     Button { store.setLanguage(code) } label: {
                         Label(name, systemImage: store.language == code ? "checkmark" : "globe")
@@ -1284,7 +1286,7 @@ struct StoreGlobalSearchView: View {
                 }
 
                 if !matchingCategories.isEmpty {
-                    Section("Danh mục (\(matchingCategories.count))") {
+                    Section(store.t("Danh mục", "Categories") + " (\(matchingCategories.count))") {
                         ForEach(matchingCategories) { cat in
                             NavigationLink(cat.name) {
                                 StoreFolderListView(category: cat)
@@ -1295,7 +1297,7 @@ struct StoreGlobalSearchView: View {
 
                 let matchFolders = folders.filter { $0.name.localizedCaseInsensitiveContains(query) }
                 if !matchFolders.isEmpty {
-                    Section("Thư mục (\(matchFolders.count))") {
+                    Section(store.t("Thư mục", "Folders") + " (\(matchFolders.count))") {
                         ForEach(matchFolders) { f in
                             NavigationLink(f.name) {
                                 StoreProductListView(folder: f)
@@ -1309,7 +1311,7 @@ struct StoreGlobalSearchView: View {
                     p.description.localizedCaseInsensitiveContains(query)
                 }
                 if !matchProducts.isEmpty {
-                    Section("Sản phẩm (\(matchProducts.count))") {
+                    Section(store.t("Sản phẩm", "Products") + " (\(matchProducts.count))") {
                         ForEach(matchProducts) { p in
                             NavigationLink {
                                 StoreProductDetailView(productId: p.id)
@@ -1317,11 +1319,11 @@ struct StoreGlobalSearchView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(p.name).font(.subheadline.bold())
                                     if let cheapest = p.prices.map(\.amount).min() {
-                                        Text("Từ \(kFormatVND(cheapest))")
+                                        Text(store.t("Từ", "From") + " \(kFormatVND(cheapest))")
                                             .font(.caption).foregroundStyle(Theme.accent)
                                     }
                                     HStack {
-                                        Text(p.availableKeys > 0 ? "Còn \(p.availableKeys)" : "Hết hàng")
+                                        Text(p.availableKeys > 0 ? store.t("Còn", "Left") + " \(p.availableKeys)" : store.t("Hết hàng", "Out of stock"))
                                             .font(.caption2)
                                             .foregroundStyle(p.availableKeys > 0 ? .green : .red)
                                     }
@@ -1334,7 +1336,7 @@ struct StoreGlobalSearchView: View {
                 if !loading && !query.isEmpty && matchingCategories.isEmpty &&
                     folders.filter({ $0.name.localizedCaseInsensitiveContains(query) }).isEmpty &&
                     products.filter({ $0.name.localizedCaseInsensitiveContains(query) }).isEmpty {
-                    Text("Không tìm thấy kết quả nào cho \"\(query)\".")
+                    Text(store.t("Không tìm thấy kết quả nào cho", "No results found for") + " \"\(query)\".")
                         .foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
                 }
@@ -1342,7 +1344,8 @@ struct StoreGlobalSearchView: View {
                 if query.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
-                        Text("Nhập tên sản phẩm, danh mục hoặc thư mục để tìm kiếm.")
+                        Text(store.t("Nhập tên sản phẩm, danh mục hoặc thư mục để tìm kiếm.",
+                                     "Type a product, category, or folder name to search."))
                             .font(.caption).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
@@ -1351,10 +1354,10 @@ struct StoreGlobalSearchView: View {
                     .listRowBackground(Color.clear)
                 }
             }
-            .navigationTitle("Tìm kiếm")
+            .navigationTitle(store.t("Tìm kiếm", "Search"))
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Tìm sản phẩm, danh mục...")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: store.t("Tìm sản phẩm, danh mục...", "Search products, categories..."))
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await loadAll() }
             .onChange(of: query) { _ in }
         }
@@ -1413,14 +1416,15 @@ struct StoreCartView: View {
                 if cartItems.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "cart").font(.system(size: 60)).foregroundStyle(.secondary)
-                        Text("Giỏ hàng trống").font(.title3.bold())
-                        Text("Bấm 'Thêm vào giỏ' ở trang chi tiết sản phẩm để mua nhiều cùng lúc.")
+                        Text(store.t("Giỏ hàng trống", "Cart is empty")).font(.title3.bold())
+                        Text(store.t("Bấm 'Thêm vào giỏ' ở trang chi tiết sản phẩm để mua nhiều cùng lúc.",
+                                     "Tap 'Add to cart' on a product page to buy several at once."))
                             .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
-                        Section("Sản phẩm (\(cartItems.count))") {
+                        Section(store.t("Sản phẩm", "Products") + " (\(cartItems.count))") {
                             ForEach(cartItems) { item in
                                 HStack(spacing: 10) {
                                     VStack(alignment: .leading, spacing: 4) {
@@ -1438,9 +1442,9 @@ struct StoreCartView: View {
                             }
                         }
 
-                        Section("Mã khuyến mãi") {
+                        Section(store.t("Mã khuyến mãi", "Promo code")) {
                             HStack(spacing: 8) {
-                                TextField("Nhập mã giảm giá...", text: $promoCode)
+                                TextField(store.t("Nhập mã giảm giá...", "Enter discount code..."), text: $promoCode)
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .submitLabel(.done)
@@ -1452,13 +1456,13 @@ struct StoreCartView: View {
                                         Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
                                     }.buttonStyle(.borderless)
                                 } else {
-                                    Button("Áp dụng") { Task { await applyPromo() } }
+                                    Button(store.t("Áp dụng", "Apply")) { Task { await applyPromo() } }
                                         .font(.caption.bold())
                                         .disabled(promoCode.trimmingCharacters(in: .whitespaces).isEmpty)
                                 }
                             }
                             if let r = promoResult {
-                                Label("Giảm \(r.label) — tiết kiệm \(kFormatVND(discount))", systemImage: "checkmark.seal.fill")
+                                Label(store.t("Giảm", "Off") + " \(r.label) — " + store.t("tiết kiệm", "save") + " \(kFormatVND(discount))", systemImage: "checkmark.seal.fill")
                                     .font(.caption).foregroundStyle(.green)
                             }
                             if !promoError.isEmpty {
@@ -1469,33 +1473,33 @@ struct StoreCartView: View {
                         Section {
                             if discount > 0 {
                                 HStack {
-                                    Text("Giá gốc").font(.subheadline).foregroundStyle(.secondary)
+                                    Text(store.t("Giá gốc", "Subtotal")).font(.subheadline).foregroundStyle(.secondary)
                                     Spacer()
                                     Text(kFormatVND(rawTotal)).font(.subheadline).strikethrough().foregroundStyle(.secondary)
                                 }
                                 HStack {
-                                    Text("Giảm giá").font(.subheadline).foregroundStyle(.green)
+                                    Text(store.t("Giảm giá", "Discount")).font(.subheadline).foregroundStyle(.green)
                                     Spacer()
                                     Text("-\(kFormatVND(discount))").font(.subheadline.bold()).foregroundStyle(.green)
                                 }
                             }
                             HStack {
-                                Text("Tổng cộng").font(.headline)
+                                Text(store.t("Tổng cộng", "Total")).font(.headline)
                                 Spacer()
                                 Text(kFormatVND(total)).font(.headline.bold()).foregroundStyle(Theme.accent)
                             }
                             HStack {
-                                Text("Số dư ví: \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
+                                Text(store.t("Số dư ví", "Wallet balance") + ": \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
-                                Button("Nạp ví") { showWallet = true }.font(.caption.bold())
+                                Button(store.t("Nạp ví", "Top up")) { showWallet = true }.font(.caption.bold())
                             }
                             Button {
                                 Task { await checkout() }
                             } label: {
                                 HStack {
                                     if buying { ProgressView().tint(.white).padding(.trailing, 4) }
-                                    Text(buying ? "Đang thanh toán..."
-                                         : (balance >= total ? "Thanh toán \(kFormatVND(total))" : "Số dư không đủ — Nạp ví"))
+                                    Text(buying ? store.t("Đang thanh toán...", "Paying...")
+                                         : (balance >= total ? store.t("Thanh toán", "Pay") + " \(kFormatVND(total))" : store.t("Số dư không đủ — Nạp ví", "Insufficient balance — Top up")))
                                 }
                                 .font(.headline).foregroundStyle(.white)
                                 .frame(maxWidth: .infinity).frame(height: 50)
@@ -1515,15 +1519,15 @@ struct StoreCartView: View {
                     }
                 }
             }
-            .navigationTitle("Giỏ hàng")
+            .navigationTitle(store.t("Giỏ hàng", "Cart"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if !cartItems.isEmpty {
-                        Button("Xoá hết", role: .destructive) { cartRaw = "[]" }
+                        Button(store.t("Xoá hết", "Clear all"), role: .destructive) { cartRaw = "[]" }
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } }
             }
             .task { await reloadBalance() }
             .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) { StoreWalletView() }
