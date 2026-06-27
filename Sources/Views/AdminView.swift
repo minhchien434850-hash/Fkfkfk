@@ -38,46 +38,46 @@ struct AdminView: View {
                         .listRowBackground(Color.clear)
                     } else if let statsError {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label("Không tải được thống kê", systemImage: "exclamationmark.triangle")
+                            Label(store.t("Không tải được thống kê", "Could not load stats"), systemImage: "exclamationmark.triangle")
                                 .font(.subheadline.bold()).foregroundStyle(.orange)
                             Text(statsError).font(.caption2).foregroundStyle(.secondary)
-                            Button("Thử lại") { Task { await loadStats() } }
+                            Button(store.t("Thử lại", "Retry")) { Task { await loadStats() } }
                                 .font(.caption)
                         }
                     } else {
-                        HStack { Spacer(); ProgressView("Đang tải thống kê..."); Spacer() }
+                        HStack { Spacer(); ProgressView(store.t("Đang tải thống kê...", "Loading stats...")); Spacer() }
                     }
                 } header: {
-                    Text("📊 Thống kê")
+                    Text("📊 " + store.t("Thống kê", "Statistics"))
                 }
 
                 // ==================== Hệ thống ====================
-                Section("Hệ thống") {
+                Section(store.t("Hệ thống", "System")) {
                     Button { showBank = true } label: {
-                        Label("Thông tin ngân hàng / nạp tiền", systemImage: "banknote")
+                        Label(store.t("Thông tin ngân hàng / nạp tiền", "Bank info / top-up"), systemImage: "banknote")
                     }
                     Button { showPro = true } label: {
-                        Label("Giá gói nâng cấp PRO (VND)", systemImage: "crown.fill")
+                        Label(store.t("Giá gói nâng cấp PRO (VND)", "PRO upgrade price (VND)"), systemImage: "crown.fill")
                     }
                     Button { showErrors = true } label: {
-                        Label("Log lỗi hệ thống", systemImage: "exclamationmark.triangle")
+                        Label(store.t("Log lỗi hệ thống", "System error log"), systemImage: "exclamationmark.triangle")
                     }
                 }
 
                 // ==================== Thanh toán chờ duyệt ====================
-                Section("Thanh toán chờ duyệt") {
+                Section(store.t("Thanh toán chờ duyệt", "Payments awaiting approval")) {
                     if pendingPayments.isEmpty {
-                        Text("Không có thanh toán nào chờ duyệt.")
+                        Text(store.t("Không có thanh toán nào chờ duyệt.", "No payments awaiting approval."))
                             .foregroundStyle(.secondary).font(.footnote)
                     } else {
                         ForEach(pendingPayments) { payment in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Đơn #\(payment.id)")
+                                    Text(store.t("Đơn", "Order") + " #\(payment.id)")
                                         .font(.subheadline.bold())
                                     Text(payment.credits > 0
                                          ? "\(payment.amount)đ → \(payment.credits) credits"
-                                         : "\(payment.amount)đ → Nâng cấp PRO")
+                                         : "\(payment.amount)đ → " + store.t("Nâng cấp PRO", "PRO upgrade"))
                                         .font(.caption).foregroundStyle(.secondary)
                                     if let ref = payment.ref, !ref.isEmpty {
                                         Text(ref).font(.caption2).foregroundStyle(.secondary)
@@ -87,7 +87,7 @@ struct AdminView: View {
                                 Button {
                                     Task { await confirmPaymentById(payment.id) }
                                 } label: {
-                                    Text("Xác nhận")
+                                    Text(store.t("Xác nhận", "Confirm"))
                                         .font(.caption.bold())
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 6)
@@ -101,29 +101,30 @@ struct AdminView: View {
                 }
 
                 // ==================== Xác nhận thanh toán thủ công ====================
-                Section("Xác nhận bằng ID") {
+                Section(store.t("Xác nhận bằng ID", "Confirm by ID")) {
                     HStack {
-                        TextField("ID đơn thanh toán", text: $paymentId)
+                        TextField(store.t("ID đơn thanh toán", "Payment order ID"), text: $paymentId)
                             .keyboardType(.numberPad)
-                        Button("Xác nhận") { Task { await confirmPayment() } }
+                        Button(store.t("Xác nhận", "Confirm")) { Task { await confirmPayment() } }
                             .disabled(paymentId.isEmpty)
                     }
                     if let message { Text(message).font(.footnote).foregroundStyle(.green) }
                 }
 
                 // ==================== Chế độ bảo trì ====================
-                Section("Chế độ bảo trì") {
-                    Toggle("Bật bảo trì (khoá app người dùng)", isOn: Binding(
+                Section(store.t("Chế độ bảo trì", "Maintenance mode")) {
+                    Toggle(store.t("Bật bảo trì (khoá app người dùng)", "Enable maintenance (lock users out)"), isOn: Binding(
                         get: { store.maintenance },
                         set: { on in Task { await setMaintenance(on) } }))
-                    TextField("Thông báo bảo trì", text: $maintMsg, axis: .vertical)
+                    TextField(store.t("Thông báo bảo trì", "Maintenance message"), text: $maintMsg, axis: .vertical)
                         .lineLimit(1...3)
-                    Text("Khi bật, mọi người dùng (trừ admin) thấy màn hình khoá tới khi bạn tắt.")
+                    Text(store.t("Khi bật, mọi người dùng (trừ admin) thấy màn hình khoá tới khi bạn tắt.",
+                                 "When on, all users (except admins) see a lock screen until you turn it off."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
                 // ==================== Danh sách người dùng ====================
-                Section("Người dùng (\(users.count))") {
+                Section(store.t("Người dùng", "Users") + " (\(users.count))") {
                     ForEach(users) { u in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -153,30 +154,30 @@ struct AdminView: View {
                                 Text(p).font(.caption).foregroundStyle(.secondary)
                             }
                             if let lf = u.lastFeature, !lf.isEmpty {
-                                Text("Đang dùng: \(lf)").font(.caption2).foregroundStyle(.green)
+                                Text(store.t("Đang dùng:", "Using:") + " \(lf)").font(.caption2).foregroundStyle(.green)
                             }
                             HStack {
-                                Menu("Thao tác") {
-                                    Button((u.banned ?? 0) == 1 ? "Mở khóa" : "Khóa tài khoản",
+                                Menu(store.t("Thao tác", "Actions")) {
+                                    Button((u.banned ?? 0) == 1 ? store.t("Mở khóa", "Unban") : store.t("Khóa tài khoản", "Ban account"),
                                            role: (u.banned ?? 0) == 1 ? nil : .destructive) {
                                         Task { await ban(u, !((u.banned ?? 0) == 1)) }
                                     }
-                                    Menu("Đặt gói") {
+                                    Menu(store.t("Đặt gói", "Set plan")) {
                                         Button("Free") { Task { await setPlan(u, "free") } }
                                         Button("Pro") { Task { await setPlan(u, "pro") } }
                                     }
                                     if (u.status ?? "active") == "suspended" {
-                                        Button("Mở lại hoạt động") { Task { await unsuspend(u) } }
+                                        Button(store.t("Mở lại hoạt động", "Re-activate")) { Task { await unsuspend(u) } }
                                     } else {
-                                        Menu("Tạm ngưng") {
-                                            Button("15 phút") { Task { await suspend(u, 15) } }
-                                            Button("1 giờ") { Task { await suspend(u, 60) } }
-                                            Button("1 ngày") { Task { await suspend(u, 1440) } }
-                                            Button("Vô thời hạn") { Task { await suspend(u, 0) } }
+                                        Menu(store.t("Tạm ngưng", "Suspend")) {
+                                            Button(store.t("15 phút", "15 minutes")) { Task { await suspend(u, 15) } }
+                                            Button(store.t("1 giờ", "1 hour")) { Task { await suspend(u, 60) } }
+                                            Button(store.t("1 ngày", "1 day")) { Task { await suspend(u, 1440) } }
+                                            Button(store.t("Vô thời hạn", "Indefinitely")) { Task { await suspend(u, 0) } }
                                         }
                                     }
-                                    Button("Đổi mật khẩu giúp") { pwUser = u }
-                                    Button("Cộng / Trừ tiền ví") { walletUser = u }
+                                    Button(store.t("Đổi mật khẩu giúp", "Reset password")) { pwUser = u }
+                                    Button(store.t("Cộng / Trừ tiền ví", "Adjust wallet")) { walletUser = u }
                                 }
                                 .font(.caption)
                             }
@@ -185,7 +186,7 @@ struct AdminView: View {
                     }
                 }
             }
-            .navigationTitle("Quản trị")
+            .navigationTitle(store.t("Quản trị", "Admin"))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ThreeDLogoText(size: 20)
@@ -401,15 +402,15 @@ struct AdminPasswordSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Đổi mật khẩu cho \(user.username)") {
-                    SecureField("Mật khẩu mới (≥6 ký tự)", text: $newPassword)
-                    Button("Xác nhận") { Task { await save() } }.disabled(newPassword.count < 6)
+                Section(store.t("Đổi mật khẩu cho", "Reset password for") + " \(user.username)") {
+                    SecureField(store.t("Mật khẩu mới (≥6 ký tự)", "New password (≥6 chars)"), text: $newPassword)
+                    Button(store.t("Xác nhận", "Confirm")) { Task { await save() } }.disabled(newPassword.count < 6)
                 }
                 if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             }
-            .navigationTitle("Đổi mật khẩu")
+            .navigationTitle(store.t("Đổi mật khẩu", "Change password"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
         }
     }
     private func save() async {
