@@ -3019,13 +3019,13 @@ struct StoreStepsEditor: View {
                             Image(systemName: step.icon).font(.title3)
                                 .frame(width: 46, height: 46)
                                 .background(Color.accentColor.opacity(0.15))
-                                .foregroundStyle(.accentColor)
+                                .foregroundColor(.accentColor)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             let badgeText = step.badge.isEmpty ? "\(idx)" : step.badge
                             Text(badgeText).font(.system(size: 10, weight: .bold))
                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                 .frame(minWidth: 18, minHeight: 18)
-                                .background(Color.accentColor).foregroundStyle(.white)
+                                .background(Color.accentColor).foregroundColor(.white)
                                 .clipShape(Capsule())
                                 .offset(x: badgeText.count > 2 ? 10 : 6, y: -6)
                         }

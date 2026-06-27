@@ -4,9 +4,9 @@ import AVFoundation
 final class WelcomeVoice: NSObject, AVSpeechSynthesizerDelegate {
     static let shared = WelcomeVoice()
 
-    private let synth = AVSpeechSynthesizer()
-    private var spokenOnce = false
-    private var googlePlayer: AVPlayer?   // giọng "chị Google" (online, như TTS Live)
+    nonisolated(unsafe) private let synth = AVSpeechSynthesizer()
+    nonisolated(unsafe) private var spokenOnce = false
+    nonisolated(unsafe) private var googlePlayer: AVPlayer?   // giọng "chị Google" (online, như TTS Live)
 
     override init() {
         super.init()
