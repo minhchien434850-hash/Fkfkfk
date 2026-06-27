@@ -538,18 +538,6 @@ struct APIClient {
     func adminStoreOrders() async throws -> [StoreAdminOrder] {
         try decode(try await send("/admin/store/orders"))
     }
-    func adminStoreKeysBackup() async throws -> StoreKeysBackup {
-        try decode(try await send("/admin/store/keys-backup"))
-    }
-    // Xuất toàn bộ cửa hàng ra JSON (trả thẳng dữ liệu file)
-    func adminStoreExportData() async throws -> Data {
-        try await send("/admin/store/export")
-    }
-    // Nhập lại cửa hàng từ JSON (wipe = xoá hàng cũ trước)
-    func adminStoreImport(categories: [[String: Any]], wipe: Bool) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/import", method: "POST",
-                                  json: ["categories": categories, "wipe": wipe]))
-    }
     func adminStoreInventory() async throws -> StoreInventory {
         try decode(try await send("/admin/store/inventory"))
     }

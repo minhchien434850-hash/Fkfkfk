@@ -94,9 +94,6 @@ KENIOS_AI_KEY    = os.getenv("KENIOS_AI_KEY", "ollama")   # Ollama bỏ qua, ch�
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# File backup các KEY / ACC đã bán (mỗi dòng 1 JSON). Admin xem trong cài đặt cửa hàng.
-STORE_KEYS_BACKUP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "store_sold_keys_backup.jsonl")
-
 # Kích thước tệp giới hạn (1KB - 4GB)
 MIN_FILE_SIZE = 1024
 MAX_FILE_SIZE = 4_294_967_296  # 4GB
@@ -3942,23 +3939,6 @@ def _finalize_payment_row(c, pay) -> bool:
     return True
 
 
-def _backup_sold_key(c, order, key_text: str) -> None:
-    """Ghi 1 dòng JSON sao lưu key/acc đã bán vào file backup (admin xem được)."""
-    prod = c.execute("SELECT name,kind FROM store_products WHERE id=?", (order["product_id"],)).fetchone()
-    usr = c.execute("SELECT username,public_id FROM users WHERE id=?", (order["user_id"],)).fetchone()
-    entry = {
-        "time": int(time.time()), "order_id": order["id"], "product_id": order["product_id"],
-        "product_name": prod["name"] if prod else "", "kind": (prod["kind"] if prod else "app"),
-        "user_id": order["user_id"], "username": usr["username"] if usr else "",
-        "public_id": usr["public_id"] if usr else "", "amount": order["amount"], "key": key_text,
-    }
-    try:
-        with open(STORE_KEYS_BACKUP, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception as e:
-        log.error("Backup key lỗi: %s", e)
-
-
 def _finalize_store_order_row(c, order) -> bool:
     """Hoàn tất 1 đơn mua sản phẩm: cấp 1 key khả dụng, sao lưu rồi XOÁ key khỏi kho.
 
@@ -3985,7 +3965,6 @@ def _finalize_store_order_row(c, order) -> bool:
         log.warning("Store: đơn #%d đã thanh toán nhưng HẾT key (product=%d)",
                     order["id"], order["product_id"])
         return True
-    _backup_sold_key(c, order, key["key_text"])
     c.execute("UPDATE store_orders SET key_id=?, key_text=? WHERE id=?",
               (key["id"], key["key_text"], order["id"]))
     # Khách đã nhận key → tự động xoá key khỏi kho (không bao giờ bán lại)
@@ -4679,8 +4658,6 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
             (user["id"], b.product_id, price["id"], key["id"], key["key_text"], amount,
              "wallet", int(time.time())))
         oid = cur.lastrowid
-        _backup_sold_key(c, {"id": oid, "product_id": b.product_id, "user_id": user["id"],
-                             "amount": amount}, key["key_text"])
         c.execute("DELETE FROM store_keys WHERE id=?", (key["id"],))   # đã giao → xoá khỏi kho
         c.execute("INSERT INTO store_wallet_tx(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",
                   (user["id"], "purchase", -amount, f"Mua {prod['name']}", int(time.time())))
@@ -5105,91 +5082,6 @@ def admin_store_set_prices(pid: int, b: StorePricesIn, admin=Depends(get_admin))
     return {"message": "Đã cập nhật bảng giá."}
 
 
-# -------------------- Admin: Xuất / Nhập (backup) toàn bộ cửa hàng trong 1 request --------------------
-@app.get("/admin/store/export")
-def admin_store_export(admin=Depends(get_admin)) -> dict[str, Any]:
-    """Xuất TẤT CẢ danh mục → thư mục → sản phẩm → giá ra JSON (1 request, đáng tin)."""
-    with db() as c:
-        out_cats = []
-        for cat in c.execute("SELECT * FROM store_categories ORDER BY sort, id").fetchall():
-            out_folders = []
-            for f in c.execute("SELECT * FROM store_folders WHERE category_id=? ORDER BY sort, id",
-                               (cat["id"],)).fetchall():
-                out_prods = []
-                for p in c.execute("SELECT * FROM store_products WHERE folder_id=? ORDER BY sort, id",
-                                   (f["id"],)).fetchall():
-                    prices = c.execute("SELECT label, amount FROM store_prices WHERE product_id=? "
-                                       "ORDER BY sort, amount", (p["id"],)).fetchall()
-                    out_prods.append({
-                        "name": p["name"], "description": p["description"] or "",
-                        "media": _load_media(p["media"]),
-                        "download_url": p["download_url"] or "",
-                        "kind": _row_kind(p),
-                        "prices": [{"label": pr["label"], "amount": pr["amount"]} for pr in prices],
-                    })
-                out_folders.append({"name": f["name"], "media": _load_media(f["media"]),
-                                    "products": out_prods})
-            out_cats.append({"name": cat["name"], "media": _load_media(cat["media"]),
-                             "folders": out_folders})
-    return {"version": "2.0", "app": "KENIOS Store", "exported_at": int(time.time()),
-            "categories": out_cats}
-
-
-class StoreImportIn(BaseModel):
-    categories: list[dict[str, Any]] = []
-    wipe: bool = False   # True = xoá toàn bộ hàng hoá cũ trước khi nhập (giữ ví/tài khoản khách)
-
-@app.post("/admin/store/import")
-def admin_store_import(b: StoreImportIn, admin=Depends(get_admin)) -> dict[str, Any]:
-    """Nhập lại cấu trúc cửa hàng từ JSON (1 request, atomic). Tương thích cả backup cũ (isAcc)."""
-    nc = nf = np_ = 0
-    now = int(time.time())
-    with db() as c:
-        if b.wipe:
-            c.execute("DELETE FROM store_keys")
-            c.execute("DELETE FROM store_prices")
-            c.execute("DELETE FROM store_products")
-            c.execute("DELETE FROM store_folders")
-            c.execute("DELETE FROM store_categories")
-        for cat in (b.categories or []):
-            cname = str(cat.get("name", "")).strip()
-            if not cname:
-                continue
-            cur = c.execute("INSERT INTO store_categories(name,media,created_at) VALUES(?,?,?)",
-                            (cname, _dump_media(cat.get("media")), now))
-            cid = cur.lastrowid; nc += 1
-            for f in (cat.get("folders") or []):
-                fname = str(f.get("name", "")).strip()
-                if not fname:
-                    continue
-                fcur = c.execute("INSERT INTO store_folders(category_id,name,media,created_at) VALUES(?,?,?,?)",
-                                 (cid, fname, _dump_media(f.get("media")), now))
-                fid = fcur.lastrowid; nf += 1
-                for p in (f.get("products") or []):
-                    pname = str(p.get("name", "")).strip()
-                    if not pname:
-                        continue
-                    kind = "acc" if (str(p.get("kind", "")) == "acc" or p.get("isAcc") is True) else "app"
-                    pcur = c.execute(
-                        "INSERT INTO store_products(folder_id,name,description,media,download_url,"
-                        "download_file_id,kind,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                        (fid, pname, str(p.get("description", "")), _dump_media(p.get("media")),
-                         str(p.get("download_url", "")), None, kind, now))
-                    pid = pcur.lastrowid; np_ += 1
-                    for i, pr in enumerate(p.get("prices") or []):
-                        label = str(pr.get("label", "")).strip()
-                        if not label:
-                            continue
-                        try:
-                            amount = int(pr.get("amount", 0))
-                        except (TypeError, ValueError):
-                            amount = 0
-                        c.execute("INSERT INTO store_prices(product_id,label,amount,sort) VALUES(?,?,?,?)",
-                                  (pid, label, max(0, amount), i))
-    return {"message": f"Đã khôi phục: {nc} danh mục · {nf} thư mục · {np_} sản phẩm.",
-            "categories": nc, "folders": nf, "products": np_}
-
-
 # -------------------- Admin: kho KEY --------------------
 class StoreKeysIn(BaseModel):
     text: str = ""   # mỗi dòng 1 key
@@ -5275,36 +5167,6 @@ def admin_store_inventory(admin=Depends(get_admin)) -> dict[str, Any]:
 
 
 # -------------------- Admin: sao lưu key/acc đã bán --------------------
-@app.get("/admin/store/keys-backup")
-def admin_store_keys_backup(admin=Depends(get_admin)) -> dict[str, Any]:
-    """Đọc file backup các key/acc đã bán (mỗi dòng 1 JSON), trả về danh sách mới nhất trước."""
-    entries: list[dict[str, Any]] = []
-    if os.path.exists(STORE_KEYS_BACKUP):
-        try:
-            with open(STORE_KEYS_BACKUP, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entries.append(json.loads(line))
-                    except Exception:
-                        pass
-        except Exception as e:
-            log.error("Đọc backup key lỗi: %s", e)
-    entries.reverse()
-    return {"total": len(entries), "entries": entries[:500]}
-
-
-@app.get("/admin/store/keys-backup/download")
-def admin_store_keys_backup_download(admin=Depends(get_admin)):
-    from fastapi.responses import FileResponse, PlainTextResponse
-    if not os.path.exists(STORE_KEYS_BACKUP):
-        return PlainTextResponse("", media_type="text/plain")
-    return FileResponse(STORE_KEYS_BACKUP, media_type="application/x-ndjson",
-                        filename="store_sold_keys_backup.jsonl")
-
-
 # ======================== Mã khuyến mãi (Promo Codes) ========================
 class PromoCodeIn(BaseModel):
     code: str
