@@ -2,6 +2,51 @@ import SwiftUI
 import AVKit
 import PhotosUI
 
+// ======================== Helpers chung cho video ========================
+/// Tạo URL stream video kèm token ở dạng query (?token=) — đáng tin cậy hơn
+/// header tuỳ chỉnh với AVPlayer (header hay bị bỏ qua → video chỉ hiện đen).
+func keniosVideoURL(postId: Int, token: String?, baseURL: String) -> URL? {
+    var s = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !s.lowercased().hasPrefix("http") { s = "http://" + s }
+    while s.hasSuffix("/") { s.removeLast() }
+    var comp = URLComponents(string: s + "/posts/\(postId)/video")
+    if let token, !token.isEmpty {
+        comp?.queryItems = [URLQueryItem(name: "token", value: token)]
+    }
+    return comp?.url
+}
+
+/// Bộ nhớ đệm ảnh thumbnail (khung hình đầu video) để cuộn mượt, đỡ tải lại.
+final class VideoThumbCache {
+    static let shared = VideoThumbCache()
+    private let cache = NSCache<NSNumber, UIImage>()
+    func image(for postId: Int) -> UIImage? { cache.object(forKey: NSNumber(value: postId)) }
+    func set(_ img: UIImage, for postId: Int) { cache.setObject(img, forKey: NSNumber(value: postId)) }
+}
+
+/// Trích khung hình đầu video làm ảnh bìa (poster) cho đẹp & không bị màn đen.
+func generateThumbnail(postId: Int, url: URL, completion: @escaping (UIImage?) -> Void) {
+    if let cached = VideoThumbCache.shared.image(for: postId) { completion(cached); return }
+    DispatchQueue.global(qos: .userInitiated).async {
+        let asset = AVURLAsset(url: url)
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 720, height: 1280)
+        // Lấy khung ~0.3s để tránh khung đen đầu video
+        let times = [CMTime(seconds: 0.3, preferredTimescale: 600),
+                     CMTime(seconds: 0.0, preferredTimescale: 600)]
+        for t in times {
+            if let cg = try? gen.copyCGImage(at: t, actualTime: nil) {
+                let img = UIImage(cgImage: cg)
+                VideoThumbCache.shared.set(img, for: postId)
+                DispatchQueue.main.async { completion(img) }
+                return
+            }
+        }
+        DispatchQueue.main.async { completion(nil) }
+    }
+}
+
 // ======================== Video feed — "TikTok của riêng app" ========================
 struct VideoFeedView: View {
     @EnvironmentObject var store: AppStore
@@ -45,7 +90,6 @@ struct VideoListView: View {
     @State private var caption = ""
     @State private var posting = false
     @State private var showCompose = false
-    @State private var playingId: Int?
 
     var body: some View {
         ScrollView {
@@ -109,9 +153,9 @@ struct VideoListView: View {
                 }
             }
 
-            // Player nhúng trực tiếp (stream, không download trước)
+            // Player nhúng trực tiếp (stream, có ảnh bìa khung hình đầu video)
             InlineVideoPlayer(postId: p.id, token: store.token, baseURL: store.baseURL)
-                .frame(height: 220)
+                .frame(height: 240)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
 
             if let cap = p.caption, !cap.isEmpty {
@@ -209,55 +253,73 @@ struct VideoListView: View {
     }
 }
 
-// ======================== Player nhúng — stream với Auth header, không download trước ========================
+// ======================== Player nhúng — ảnh bìa + stream khi bấm phát ========================
 struct InlineVideoPlayer: View {
     let postId: Int
     let token: String?
     let baseURL: String
 
     @State private var player: AVPlayer?
-    @State private var isPlaying = false
+    @State private var thumb: UIImage?
+    @State private var isMuted = false
 
-    private var streamURL: URL? {
-        var s = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !s.lowercased().hasPrefix("http") { s = "http://" + s }
-        while s.hasSuffix("/") { s.removeLast() }
-        return URL(string: s + "/posts/\(postId)/video")
-    }
+    private var streamURL: URL? { keniosVideoURL(postId: postId, token: token, baseURL: baseURL) }
 
     var body: some View {
         ZStack {
             Color.black
+            // Ảnh bìa khung hình đầu video — luôn hiện trước khi phát
+            if let thumb, player == nil {
+                Image(uiImage: thumb)
+                    .resizable().scaledToFill()
+                    .clipped()
+            }
             if let player {
                 VideoPlayer(player: player)
-                    .onAppear { player.play() }
                     .onDisappear { player.pause() }
+                // Nút tắt/bật tiếng
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button {
+                            isMuted.toggle(); player.isMuted = isMuted
+                        } label: {
+                            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                .font(.subheadline).foregroundStyle(.white)
+                                .padding(8).background(.black.opacity(0.45))
+                                .clipShape(Circle())
+                        }.padding(8)
+                    }
+                    Spacer()
+                }
             } else {
-                Button {
-                    setupPlayer()
-                } label: {
+                Button { setupPlayer() } label: {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 60))
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.white.opacity(0.95))
+                        .shadow(radius: 6)
                 }
             }
         }
+        .onAppear { loadThumb() }
+    }
+
+    private func loadThumb() {
+        guard thumb == nil, let url = streamURL else { return }
+        generateThumbnail(postId: postId, url: url) { img in self.thumb = img }
     }
 
     private func setupPlayer() {
         guard let url = streamURL else { return }
-        // Dùng AVURLAsset với Authorization header để stream có auth, không download trước
-        var headers: [String: String] = [:]
-        if let token { headers["Authorization"] = "Bearer \(token)" }
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-        let item = AVPlayerItem(asset: asset)
+        let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
+        p.isMuted = isMuted
         player = p
         p.play()
     }
 }
 
-// ======================== Reels — dạng fullscreen cuộn dọc ========================
+// ======================== Reels — fullscreen, CUỘN DỌC như TikTok ========================
 struct ReelsFeedView: View {
     @EnvironmentObject var store: AppStore
     @State private var posts: [PostItem] = []
@@ -266,28 +328,40 @@ struct ReelsFeedView: View {
     @State private var currentIndex = 0
 
     var body: some View {
-        Group {
-            if loading && posts.isEmpty {
-                ProgressView("Đang tải Reels...").frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if posts.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "play.rectangle.fill")
-                        .font(.system(size: 56)).foregroundStyle(.secondary)
-                    Text("Chưa có Reels nào.").foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                TabView(selection: $currentIndex) {
-                    ForEach(Array(posts.enumerated()), id: \.offset) { idx, p in
-                        ReelCard(post: p, token: store.token, baseURL: store.baseURL,
-                                 isActive: currentIndex == idx) { Task { await like(p) } }
-                            .tag(idx)
+        GeometryReader { geo in
+            Group {
+                if loading && posts.isEmpty {
+                    ProgressView("Đang tải Reels...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if posts.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.system(size: 56)).foregroundStyle(.secondary)
+                        Text("Chưa có Reels nào.").foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    // Mẹo xoay: TabView .page mặc định cuộn NGANG → xoay -90° để thành
+                    // cuộn DỌC (vuốt lên/xuống), từng ô được xoay bù +90° cho đúng chiều.
+                    TabView(selection: $currentIndex) {
+                        ForEach(Array(posts.enumerated()), id: \.offset) { idx, p in
+                            ReelCard(post: p, token: store.token, baseURL: store.baseURL,
+                                     isActive: currentIndex == idx,
+                                     onLike: { Task { await like(p) } })
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .rotationEffect(.degrees(90))
+                                .tag(idx)
+                        }
+                    }
+                    .frame(width: geo.size.height, height: geo.size.width)
+                    .rotationEffect(.degrees(-90))
+                    .offset(x: (geo.size.width - geo.size.height) / 2,
+                            y: (geo.size.height - geo.size.width) / 2)
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .ignoresSafeArea(edges: .bottom)
             }
         }
+        .ignoresSafeArea(edges: .bottom)
         .task { await load() }
         .refreshable { await load() }
         .overlay(alignment: .topTrailing) {
@@ -329,26 +403,39 @@ struct ReelCard: View {
     var onLike: () -> Void
 
     @State private var player: AVPlayer?
+    @State private var thumb: UIImage?
+    @State private var isMuted = false
+    @State private var showLikeBurst = false
+    @State private var endObserver: NSObjectProtocol?
 
-    private var streamURL: URL? {
-        var s = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !s.lowercased().hasPrefix("http") { s = "http://" + s }
-        while s.hasSuffix("/") { s.removeLast() }
-        return URL(string: s + "/posts/\(post.id)/video")
-    }
+    private var streamURL: URL? { keniosVideoURL(postId: post.id, token: token, baseURL: baseURL) }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+            // Ảnh bìa khung hình đầu video — hiện trong lúc tải/khi chưa phát
+            if let thumb {
+                Image(uiImage: thumb)
+                    .resizable().scaledToFill()
+                    .ignoresSafeArea()
+            }
             if let player {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
+                    .allowsHitTesting(false)   // để cử chỉ chạm/cuộn đi tới lớp dưới
             } else {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 70)).foregroundStyle(.white.opacity(0.7))
             }
 
-            // Thông tin bài đăng
+            // Trái tim bay khi chạm 2 lần
+            if showLikeBurst {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 110)).foregroundStyle(.red)
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            // Thông tin bài đăng + nút tương tác
             VStack {
                 Spacer()
                 HStack(alignment: .bottom) {
@@ -360,7 +447,7 @@ struct ReelCard: View {
                         }
                     }
                     Spacer()
-                    VStack(spacing: 20) {
+                    VStack(spacing: 22) {
                         Button(action: onLike) {
                             VStack(spacing: 4) {
                                 Image(systemName: post.liked ? "heart.fill" : "heart")
@@ -369,37 +456,64 @@ struct ReelCard: View {
                                 Text("\(post.likes)").font(.caption).foregroundStyle(.white)
                             }
                         }
+                        Button {
+                            isMuted.toggle(); player?.isMuted = isMuted
+                        } label: {
+                            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                .font(.title3).foregroundStyle(.white)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 40)
+                .padding(.bottom, 56)
                 .background(
                     LinearGradient(colors: [.clear, .black.opacity(0.7)],
                                    startPoint: .top, endPoint: .bottom)
                 )
             }
         }
-        .onAppear { setupPlayer() }
-        .onDisappear { player?.pause(); player = nil }
+        // Chạm 1 lần: tạm dừng / phát ; Chạm 2 lần: thích
+        .onTapGesture(count: 2) {
+            onLike()
+            withAnimation(.spring(response: 0.3)) { showLikeBurst = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                withAnimation { showLikeBurst = false }
+            }
+        }
+        .onTapGesture {
+            guard let player else { return }
+            if player.timeControlStatus == .paused { player.play() } else { player.pause() }
+        }
+        .onAppear { loadThumb(); setupPlayer() }
+        .onDisappear { teardown() }
         .onChange(of: isActive) { active in
-            if active { player?.play() } else { player?.pause() }
+            if active { player?.seek(to: .zero); player?.play() } else { player?.pause() }
         }
     }
 
+    private func loadThumb() {
+        guard thumb == nil, let url = streamURL else { return }
+        generateThumbnail(postId: post.id, url: url) { img in self.thumb = img }
+    }
+
     private func setupPlayer() {
-        guard let url = streamURL else { return }
-        var headers: [String: String] = [:]
-        if let token { headers["Authorization"] = "Bearer \(token)" }
-        let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-        let item = AVPlayerItem(asset: asset)
+        guard player == nil, let url = streamURL else { return }
+        let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
+        p.isMuted = isMuted
         // Lặp lại Reels tự động
-        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
-                                               object: item, queue: .main) { _ in
-            p.seek(to: .zero)
-            p.play()
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
+            p.seek(to: .zero); p.play()
         }
         player = p
         if isActive { p.play() }
+    }
+
+    private func teardown() {
+        player?.pause()
+        if let o = endObserver { NotificationCenter.default.removeObserver(o) }
+        endObserver = nil
+        player = nil
     }
 }

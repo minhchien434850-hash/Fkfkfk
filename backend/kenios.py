@@ -5335,25 +5335,64 @@ def feed(user=Depends(get_user)) -> list[dict[str, Any]]:
     } for r in rows]
 
 
+def _vmime(name: str, mime: Optional[str]) -> str:
+    """Chuẩn hoá mime cho video để AVPlayer (iOS) nhận diện & render được khung hình.
+    Nhiều file lưu mime sai (application/octet-stream) khiến video chỉ hiện màn đen."""
+    m = (mime or "").lower().strip()
+    if m.startswith("video/"):
+        return mime
+    ext = os.path.splitext(name or "")[1].lower()
+    table = {
+        ".mp4": "video/mp4", ".mov": "video/quicktime", ".m4v": "video/x-m4v",
+        ".webm": "video/webm", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
+        ".3gp": "video/3gpp", ".hevc": "video/mp4", ".ts": "video/mp2t",
+    }
+    return table.get(ext, "video/mp4")
+
+
+def _user_from_token_or_header(authorization: Optional[str], token: Optional[str]):
+    """Cho phép xác thực qua header HOẶC query ?token= — cần cho AVPlayer (iOS)
+    stream video bằng URL trực tiếp (header tuỳ chỉnh hay bị bỏ qua → màn đen)."""
+    raw = ""
+    if authorization and authorization.startswith("Bearer "):
+        raw = authorization.split(" ", 1)[1]
+    elif token:
+        raw = token.strip()
+    if not raw:
+        raise HTTPException(status_code=401, detail="Thiếu token đăng nhập.")
+    uid = verify_token(raw)
+    with db() as c:
+        row = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="Tài khoản không tồn tại.")
+    if row["banned"]:
+        raise HTTPException(status_code=403, detail="Tài khoản đã bị khóa.")
+    return row
+
+
 @app.get("/posts/{pid}/video")
-def post_video(pid: int, background_tasks: BackgroundTasks, user=Depends(get_user)):
+def post_video(pid: int, background_tasks: BackgroundTasks,
+               authorization: Optional[str] = Header(default=None),
+               token: Optional[str] = None):
+    # AVPlayer của iOS stream qua URL trực tiếp nên dùng ?token= cho chắc ăn.
+    _user_from_token_or_header(authorization, token)
     with db() as c:
         row = c.execute(
             "SELECT f.name,f.mime,f.data,f.id as fid FROM posts p "
             "JOIN files f ON p.file_id=f.id WHERE p.id=?", (pid,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy video.")
+    media = _vmime(row["name"], row["mime"])
     file_path = os.path.join(UPLOAD_DIR, str(row["fid"]))
     if os.path.exists(file_path):
-        return FileResponse(path=file_path, filename=row["name"],
-                            media_type=row["mime"] or "video/mp4")
+        # FileResponse hỗ trợ HTTP Range (tua/stream) — cần thiết để iOS phát mượt.
+        return FileResponse(path=file_path, filename=row["name"], media_type=media)
     if row["data"]:
         temp_path = os.path.join(UPLOAD_DIR, f"feed_{pid}_{secrets.token_hex(4)}")
         with open(temp_path, "wb") as f:
             f.write(base64.b64decode(row["data"]))
         background_tasks.add_task(os.unlink, temp_path)
-        return FileResponse(path=temp_path, filename=row["name"],
-                            media_type=row["mime"] or "video/mp4")
+        return FileResponse(path=temp_path, filename=row["name"], media_type=media)
     raise HTTPException(status_code=404, detail="Không có nội dung video.")
 
 
