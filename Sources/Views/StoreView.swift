@@ -228,26 +228,10 @@ struct StoreView: View {
 
                     walletBar
 
-                    if !downloads.isEmpty {
-                        downloadsSection
-                    }
-
-                    if !allProducts.isEmpty {
-                        allProductsSection
-                    }
-
-                    if !wishlistProducts.isEmpty {
-                        wishlistSection
-                    }
-
-                    if !recentProducts.isEmpty {
-                        recentlyViewedSection
-                    }
-
+                    // 1. DANH MỤC — luôn nằm trên đầu
                     if !categories.isEmpty {
                         searchField
                     }
-
                     if loading && categories.isEmpty {
                         HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
                     } else if categories.isEmpty {
@@ -263,6 +247,26 @@ struct StoreView: View {
                                 .buttonStyle(.plain)
                             }
                         }
+                    }
+
+                    // 2. SẢN PHẨM
+                    if !allProducts.isEmpty {
+                        allProductsSection
+                    }
+
+                    // 3. TẢI VỀ
+                    if !downloads.isEmpty {
+                        downloadsSection
+                    }
+
+                    // 4. YÊU THÍCH
+                    if !wishlistProducts.isEmpty {
+                        wishlistSection
+                    }
+
+                    // 5. ĐÃ XEM GẦN ĐÂY
+                    if !recentProducts.isEmpty {
+                        recentlyViewedSection
                     }
 
                     if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
@@ -460,22 +464,22 @@ struct StoreView: View {
     private func allProductCard(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                StoreThumb(media: p.media, height: 100)
+                StoreThumb(media: p.media, height: 84)
                 Button { toggleWishlist(p.id) } label: {
                     Image(systemName: wishlistIds.contains(p.id) ? "heart.fill" : "heart")
-                        .font(.caption.bold())
+                        .font(.caption2.bold())
                         .foregroundStyle(wishlistIds.contains(p.id) ? .red : .white)
-                        .padding(6)
+                        .padding(5)
                         .background(.ultraThinMaterial)
                         .clipShape(Circle())
-                        .padding(6)
+                        .padding(5)
                 }
                 .buttonStyle(.plain)
             }
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(p.name)
-                    .font(.caption.bold())
-                    .lineLimit(2)
+                    .font(.caption2.bold())
+                    .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if !p.prices.isEmpty {
                     Text(kFormatVND(p.prices[0].amount))
@@ -483,23 +487,23 @@ struct StoreView: View {
                         .foregroundStyle(Theme.accent)
                 }
                 HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 11))
-                    Text(store.t("Tải xuống", "Download"))
+                    Image(systemName: "cart.fill")
+                        .font(.system(size: 10))
+                    Text(store.t("Mua", "Buy"))
                         .font(.caption2.bold())
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(Theme.accent.opacity(0.13))
-                .foregroundStyle(Theme.accent)
+                .padding(.vertical, 6)
+                .background(Theme.accent)
+                .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .padding(8)
+            .padding(7)
         }
-        .frame(width: 150)
+        .frame(width: 124)
         .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.06), radius: 3, x: 0, y: 2)
     }
 
     private var wishlistSection: some View {
@@ -1025,41 +1029,59 @@ struct StoreProductDetailView: View {
 
                 Text(store.t("Chọn gói thời hạn", "Choose a plan")).font(.headline)
                 ForEach(p.prices) { price in
+                    let outOfStock = !price.inStock
                     Button {
-                        selectedPrice = price
+                        if !outOfStock { selectedPrice = price }
                     } label: {
                         HStack {
                             Image(systemName: selectedPrice?.id == price.id ? "largecircle.fill.circle" : "circle")
-                                .foregroundStyle(Theme.accent)
-                            Text(price.label)
+                                .foregroundStyle(outOfStock ? .secondary : Theme.accent)
+                            Text(price.label).foregroundStyle(outOfStock ? .secondary : .primary)
+                            if outOfStock {
+                                Text(store.t("Hết hàng", "Out of stock"))
+                                    .font(.caption2.bold())
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.red.opacity(0.15)).foregroundStyle(.red)
+                                    .clipShape(Capsule())
+                            } else if let a = price.available, a <= 5 {
+                                Text(store.t("Còn", "Left") + " \(a)")
+                                    .font(.caption2).foregroundStyle(.orange)
+                            }
                             Spacer()
-                            Text(kFormatVND(price.amount)).bold().foregroundStyle(Theme.accent)
+                            Text(kFormatVND(price.amount)).bold()
+                                .foregroundStyle(outOfStock ? .secondary : Theme.accent)
+                                .strikethrough(outOfStock)
                         }
                         .padding(10).background(Color(.secondarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
+                    .disabled(outOfStock)
                 }
 
-                let priceAmt = selectedPrice?.amount ?? p.prices.first?.amount ?? 0
+                // Tồn kho theo mốc đã chọn (mỗi mốc có kho riêng)
+                let sel = selectedPrice ?? p.prices.first(where: { $0.inStock }) ?? p.prices.first
+                let tierInStock = sel?.inStock ?? false
+                let priceAmt = sel?.amount ?? 0
                 let enough = balance >= priceAmt
                 Button {
                     Task { await buy(p) }
                 } label: {
                     HStack {
                         if buying { ProgressView().tint(.white) }
-                        Text(buying ? "Đang xử lý..."
-                             : (p.availableKeys <= 0 ? "Tạm hết hàng"
-                                : (enough ? "Mua bằng số dư (\(kFormatVND(priceAmt)))" : "Nạp thêm để mua")))
+                        Text(buying ? store.t("Đang xử lý...", "Processing...")
+                             : (!tierInStock ? store.t("Mốc này đã hết hàng", "This plan is out of stock")
+                                : (enough ? store.t("Mua bằng số dư", "Pay with wallet") + " (\(kFormatVND(priceAmt)))"
+                                          : store.t("Nạp thêm để mua", "Top up to buy"))))
                     }
                     .font(.headline).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 50)
-                    .background(p.availableKeys > 0 ? Theme.purple : Color.gray)
+                    .background(tierInStock ? Theme.purple : Color.gray)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .disabled(buying || p.availableKeys <= 0)
+                .disabled(buying || !tierInStock)
 
-                if p.availableKeys > 0 && !p.prices.isEmpty {
+                if tierInStock && !p.prices.isEmpty {
                     Button { addToCart(p) } label: {
                         Label(isInCart(p.id) ? store.t("Đã thêm vào giỏ hàng", "Added to cart") : store.t("Thêm vào giỏ hàng", "Add to cart"),
                               systemImage: isInCart(p.id) ? "cart.badge.checkmark" : "cart.badge.plus")
@@ -1086,7 +1108,10 @@ struct StoreProductDetailView: View {
         do {
             let p = try await pTask
             product = p
-            if selectedPrice == nil { selectedPrice = p.prices.first }
+            // Mặc định chọn mốc CÒN HÀNG đầu tiên (mỗi mốc có kho riêng)
+            if selectedPrice == nil {
+                selectedPrice = p.prices.first(where: { $0.inStock }) ?? p.prices.first
+            }
         } catch { self.error = error.localizedDescription }
         contacts = try? await cTask
         mine = try? await store.api.storeProductMine(productId)

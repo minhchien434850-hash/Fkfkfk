@@ -340,6 +340,9 @@ struct StorePrice: Identifiable, Decodable, Hashable {
     let id: Int
     let label: String
     let amount: Int
+    let available: Int?   // tồn kho riêng của mốc thời hạn này (nil = cũ/không rõ)
+
+    var inStock: Bool { (available ?? 1) > 0 }
 }
 
 struct StoreProduct: Identifiable, Decodable, Hashable {

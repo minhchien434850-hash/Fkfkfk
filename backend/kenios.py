@@ -4230,7 +4230,14 @@ def _load_media(s) -> list:
 def _product_prices(c, pid: int) -> list:
     rows = c.execute("SELECT id,label,amount,sort FROM store_prices WHERE product_id=? "
                      "ORDER BY sort ASC, amount ASC", (pid,)).fetchall()
-    return [{"id": r["id"], "label": r["label"], "amount": r["amount"]} for r in rows]
+    out = []
+    for r in rows:
+        # Tồn kho RIÊNG của từng mốc thời hạn (không dùng chung).
+        avail = c.execute(
+            "SELECT COUNT(*) AS n FROM store_keys WHERE product_id=? AND price_id=? AND status='available'",
+            (pid, r["id"])).fetchone()["n"]
+        out.append({"id": r["id"], "label": r["label"], "amount": r["amount"], "available": avail})
+    return out
 
 def _row_kind(row) -> str:
     try:
@@ -4493,17 +4500,13 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
             raise HTTPException(status_code=400,
                 detail=f"Số dư ví không đủ (cần {amount:,}đ, còn {balance:,}đ). Vui lòng nạp thêm vào ví."
                        .replace(",", "."))
-        # Giành 1 key khả dụng (atomic). Ưu tiên key gắn đúng mốc thời hạn đã chọn,
-        # nếu không có thì dùng key "dùng chung" (price_id IS NULL).
+        # Giành 1 key khả dụng (atomic) — CHỈ lấy key đúng mốc thời hạn đã chọn.
+        # Mỗi mốc (giờ/ngày/tuần/tháng) có kho riêng; hết mốc nào thì mốc đó hết hàng.
         key = None
         for _ in range(50):
             cand = c.execute(
                 "SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
                 "AND price_id=? ORDER BY id ASC LIMIT 1", (b.product_id, price["id"])).fetchone()
-            if not cand:
-                cand = c.execute(
-                    "SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
-                    "AND price_id IS NULL ORDER BY id ASC LIMIT 1", (b.product_id,)).fetchone()
             if not cand:
                 break
             got = c.execute("UPDATE store_keys SET status='sold' WHERE id=? AND status='available'",
@@ -4512,7 +4515,8 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
                 key = cand
                 break
         if not key:
-            raise HTTPException(status_code=400, detail="Mốc thời hạn này tạm hết hàng. Vui lòng chọn mốc khác hoặc quay lại sau.")
+            raise HTTPException(status_code=400,
+                detail=f"Mốc \"{price['label']}\" đã hết hàng. Vui lòng chọn mốc khác.")
         # Trừ ví (atomic, chống âm)
         ded = c.execute("UPDATE users SET wallet=wallet-? WHERE id=? AND wallet>=?",
                         (amount, user["id"], amount))

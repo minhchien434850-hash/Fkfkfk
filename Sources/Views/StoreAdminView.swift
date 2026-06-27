@@ -783,7 +783,7 @@ struct StoreKeysManager: View {
 
     private var isAcc: Bool { kind == "acc" }
     private func priceLabel(_ id: Int?) -> String {
-        guard let id, let p = prices.first(where: { $0.id == id }) else { return "Dùng chung" }
+        guard let id, let p = prices.first(where: { $0.id == id }) else { return "(chưa gán mốc)" }
         return p.label
     }
 
@@ -793,12 +793,11 @@ struct StoreKeysManager: View {
             if !isAcc && !prices.isEmpty {
                 Section("Nhập key cho mốc thời hạn nào?") {
                     Picker("Mốc thời hạn", selection: $selectedPriceId) {
-                        Text("Dùng chung (mọi mốc)").tag(Int?.none)
                         ForEach(prices) { p in
                             Text("\(p.label) · \(kFormatVND(p.amount))").tag(Int?.some(p.id))
                         }
                     }
-                    Text("Mỗi mốc (giờ/ngày/tuần/tháng) có kho key riêng. Khách mua mốc nào sẽ nhận key của mốc đó; nếu mốc đó hết thì lấy key 'Dùng chung'.")
+                    Text("Mỗi mốc (giờ/ngày/tuần/tháng) có kho key RIÊNG. Khách mua mốc nào nhận key của mốc đó; hết mốc nào → mốc đó hiện 'Hết hàng', không mua được.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             } else if !isAcc && prices.isEmpty {
@@ -877,6 +876,8 @@ struct StoreKeysManager: View {
         info = try? await store.api.adminStoreListKeys(productId: productId)
         if let p = try? await store.api.storeProduct(productId) {
             prices = p.prices; kind = p.kind ?? "app"
+            // App/Key: mặc định chọn mốc đầu nếu chưa chọn (bắt buộc gán key vào 1 mốc)
+            if kind != "acc", selectedPriceId == nil { selectedPriceId = prices.first?.id }
         }
     }
     private func importFromFile(_ url: URL) async {
@@ -895,8 +896,8 @@ struct StoreKeysManager: View {
     private func addKeys() async {
         message = nil
         do {
-            // ACC: không gắn mốc thời hạn. App/Key: gắn theo mốc đã chọn (nil = dùng chung).
-            let pid = isAcc ? nil : selectedPriceId
+            // ACC: gắn vào mốc giá duy nhất. App/Key: gắn theo mốc thời hạn đã chọn.
+            let pid = isAcc ? prices.first?.id : selectedPriceId
             let r = try await store.api.adminStoreAddKeys(productId: productId, text: newKeys, priceId: pid)
             isError = false; message = r.message; newKeys = ""
             await reload()
