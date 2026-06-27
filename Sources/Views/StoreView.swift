@@ -242,8 +242,8 @@ struct StoreView: View {
 
     // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
     private var orderedSections: [String] {
-        let all = ["trust", "steps", "flash", "leaderboard", "categories", "products",
-                   "transactions", "topups", "downloads", "contacts", "wishlist", "recent"]
+        let all = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "products",
+                   "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
         guard let raw = (config?.sectionOrder ?? effectiveConfig?.sectionOrder), !raw.isEmpty else { return all }
         let parts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
         var merged = parts.filter { all.contains($0) }
@@ -297,6 +297,10 @@ struct StoreView: View {
             if let s = showcase, !s.recentOrders.isEmpty { transactionsSection(s.recentOrders) }
         case "topups":
             if let s = showcase, !s.recentTopups.isEmpty { topupsSection(s.recentTopups) }
+        case "hero":
+            heroSection
+        case "footer":
+            footerSection
         default:
             EmptyView()
         }
@@ -711,20 +715,39 @@ struct StoreView: View {
         }
     }
 
+    // Khoảng giá "min ~ max" (như mẫu) — 1 giá thì hiện 1
+    private func priceRange(_ p: StoreProduct) -> String {
+        guard !p.prices.isEmpty else { return "" }
+        let amounts = p.prices.map { $0.amount }
+        let lo = amounts.min() ?? 0, hi = amounts.max() ?? 0
+        return lo == hi ? kFormatVND(lo) : "\(kFormatVND(lo)) ~ \(kFormatVND(hi))"
+    }
+
     private func allProductCard(_ p: StoreProduct) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topTrailing) {
+        let inStock = p.availableKeys > 0
+        return VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
                 StoreThumb(media: p.media, height: productThumbHeight)
+                // Badge ACTIVE / Hết hàng (góc trái) như mẫu
+                HStack(spacing: 3) {
+                    Circle().fill(inStock ? Color.green : Color.red).frame(width: 5, height: 5)
+                    Text(inStock ? "ACTIVE" : store.t("Hết hàng", "Sold out"))
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .padding(5)
+                // Tim yêu thích (góc phải)
                 Button { toggleWishlist(p.id) } label: {
                     Image(systemName: wishlistIds.contains(p.id) ? "heart.fill" : "heart")
                         .font(.caption2.bold())
                         .foregroundStyle(wishlistIds.contains(p.id) ? .red : .white)
-                        .padding(5)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                        .padding(5)
+                        .padding(5).background(.ultraThinMaterial).clipShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                .padding(5)
             }
             VStack(alignment: .leading, spacing: 5) {
                 Text(p.name)
@@ -732,19 +755,20 @@ struct StoreView: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if !p.prices.isEmpty {
-                    Text(kFormatVND(p.prices[0].amount))
+                    Text(priceRange(p))
                         .font(.caption2.bold())
                         .foregroundStyle(Theme.accent)
+                        .lineLimit(1).minimumScaleFactor(0.7)
                 }
                 HStack(spacing: 4) {
                     Image(systemName: "cart.fill")
                         .font(.system(size: 10))
-                    Text(store.t("Mua", "Buy"))
+                    Text(store.t("Mua ngay", "Buy now"))
                         .font(.caption2.bold())
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
-                .background(Theme.accent)
+                .background(inStock ? Theme.accent : Color.gray)
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
@@ -754,6 +778,58 @@ struct StoreView: View {
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.06), radius: 3, x: 0, y: 2)
+    }
+
+    // Hero đầu trang: slogan lớn + nút "Mua ngay" (như mẫu)
+    private var heroSection: some View {
+        let big = {
+            let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
+            return s.isEmpty ? store.t("GAME CHẤT LƯỢNG CAO · GIÁ TỐT NHẤT", "TOP QUALITY · BEST PRICE") : s
+        }()
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(big)
+                .font(.title2.bold())
+                .foregroundStyle(LinearGradient(colors: [Theme.accent, .cyan, .purple], startPoint: .leading, endPoint: .trailing))
+                .lineLimit(3)
+            Text(store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty"))
+                .font(.subheadline).foregroundStyle(.secondary)
+            Button { showSearch = true } label: {
+                HStack(spacing: 6) {
+                    Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
+                    Image(systemName: "arrow.right")
+                }
+                .padding(.horizontal, 22).padding(.vertical, 12)
+                .background(Color.white).foregroundStyle(.black)
+                .clipShape(Capsule())
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            LinearGradient(colors: [Theme.accent.opacity(0.18), Color(.secondarySystemBackground)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    // Footer cuối trang: logo + slogan
+    private var footerSection: some View {
+        VStack(spacing: 8) {
+            AnimatedStoreLogo(
+                text: displayName,
+                effect: effectiveConfig?.logoEffect ?? "rainbow",
+                fontStyle: effectiveConfig?.logoFont ?? "rounded",
+                anim: effectiveConfig?.logoAnim ?? "shimmer",
+                size: 22)
+            Text({
+                    let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
+                    return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
+                 }())
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text("© \(Calendar.current.component(.year, from: Date())) \(displayName)")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
     }
 
     private var wishlistSection: some View {

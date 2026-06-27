@@ -285,8 +285,8 @@ struct StoreConfigEditor: View {
     @State private var sloganFont = "rounded"
     @State private var cardSize = "medium"
     @State private var cardScale: Double = 1.0
-    @State private var sections: [String] = ["trust", "steps", "flash", "leaderboard", "categories", "products",
-                                             "transactions", "topups", "downloads", "contacts", "wishlist", "recent"]
+    @State private var sections: [String] = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "products",
+                                             "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
     // Flash sale
     @State private var flashEnabled = false
     @State private var flashProductId = 0
@@ -314,11 +314,13 @@ struct StoreConfigEditor: View {
         case "leaderboard":  return "Bảng xếp hạng nạp"
         case "transactions": return "Giao dịch gần đây"
         case "topups":       return "Nạp tiền gần đây"
+        case "hero":         return "Hero (slogan + Mua ngay)"
+        case "footer":       return "Footer (logo + slogan)"
         default:             return key
         }
     }
-    private let allSectionKeys = ["trust", "steps", "flash", "leaderboard", "categories", "products",
-                                  "transactions", "topups", "downloads", "contacts", "wishlist", "recent"]
+    private let allSectionKeys = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "products",
+                                  "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
 
     var body: some View {
         Form {
