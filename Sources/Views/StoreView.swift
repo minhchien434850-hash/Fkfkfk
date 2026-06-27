@@ -439,8 +439,14 @@ struct StoreView: View {
                         // Nút tải xuống cố định ngay dưới ví (luôn hiển thị nếu có file/link)
                         if !downloads.isEmpty || !downloadableProducts.isEmpty { downloadsSection.id("downloads") }
                         // Các mục hiển thị theo thứ tự admin sắp xếp (bỏ qua "downloads" vì đã hiện ở trên)
+                        // CHỈ gắn .id cho mục cần cuộn đến ("gamecat" — nút Mua ngay). Gắn .id cho TẤT CẢ
+                        // khiến ScrollView mất vị trí & nhảy lung tung khi kéo tải lại trang.
                         ForEach(orderedSections.filter { $0 != "downloads" }, id: \.self) { key in
-                            sectionView(key).id(key)
+                            if key == "gamecat" {
+                                sectionView(key).id("gamecat")
+                            } else {
+                                sectionView(key)
+                            }
                         }
                         if let error {
                             Text(error).font(.caption).foregroundStyle(.red)
@@ -1477,7 +1483,8 @@ struct StoreView: View {
 
     private func reload() async {
         loading = true; error = nil
-        URLCache.shared.removeAllCachedResponses()
+        // KHÔNG xoá toàn bộ cache ảnh ở đây: làm vậy khiến mọi AsyncImage nạp lại,
+        // ảnh thu về placeholder → bố cục co lại → trang bị "nhảy" khi kéo tải lại.
         async let cfgTask = store.api.storeConfig()
         async let dlTask  = store.api.storeDownloads()
         async let ctTask  = store.api.storeContacts()
