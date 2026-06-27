@@ -15,20 +15,20 @@ struct PaymentView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Tài khoản hiện tại") {
+                Section(store.t("Tài khoản hiện tại", "Current account")) {
                     HStack {
-                        Text(store.isPro ? "Gói PRO" : "Gói Free")
+                        Text(store.isPro ? store.t("Gói PRO", "PRO plan") : store.t("Gói Free", "Free plan"))
                         Spacer()
                         if store.isPro {
-                            Label("Đã kích hoạt PRO", systemImage: "crown.fill")
+                            Label(store.t("Đã kích hoạt PRO", "PRO activated"), systemImage: "crown.fill")
                                 .font(.caption).foregroundStyle(Theme.gold)
                         } else {
-                            Text("Chưa nâng cấp").font(.caption).foregroundStyle(.secondary)
+                            Text(store.t("Chưa nâng cấp", "Not upgraded")).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
 
-                Section("Nâng cấp tài khoản") {
+                Section(store.t("Nâng cấp tài khoản", "Upgrade account")) {
                     ForEach(packages) { p in
                         Button {
                             Task { await create(p) }
@@ -39,7 +39,7 @@ struct PaymentView: View {
                                     if p.credits > 0 {
                                         Text("\(p.credits) credits").font(.caption).foregroundStyle(.secondary)
                                     } else {
-                                        Text("Mở khoá toàn bộ tính năng PRO").font(.caption).foregroundStyle(.secondary)
+                                        Text(store.t("Mở khoá toàn bộ tính năng PRO", "Unlock all PRO features")).font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
                                 Spacer()
@@ -50,13 +50,13 @@ struct PaymentView: View {
                         .disabled(loading || store.isPro)
                     }
                     if store.isPro {
-                        Text("Tài khoản của bạn đã là PRO.")
+                        Text(store.t("Tài khoản của bạn đã là PRO.", "Your account is already PRO."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
 
                 if let created {
-                    Section("Quét mã QR để chuyển khoản") {
+                    Section(store.t("Quét mã QR để chuyển khoản", "Scan QR to transfer")) {
                         if let qr = created.qrUrl, let url = URL(string: qr) {
                             AsyncImage(url: url) { phase in
                                 switch phase {
@@ -66,46 +66,48 @@ struct PaymentView: View {
                                         .padding(8).background(Color.white)
                                         .clipShape(RoundedRectangle(cornerRadius: 14))
                                 case .failure:
-                                    Text("Không tải được mã QR. Dùng số tài khoản bên dưới.")
+                                    Text(store.t("Không tải được mã QR. Dùng số tài khoản bên dưới.",
+                                                 "Could not load QR. Use the account number below."))
                                         .font(.footnote).foregroundStyle(.secondary)
                                 default:
                                     ProgressView().frame(maxWidth: .infinity)
                                 }
                             }
                         }
-                        LabeledContent("Ngân hàng", value: created.bankInfo.bank)
-                        LabeledContent("Số tài khoản", value: created.bankInfo.account)
-                        LabeledContent("Chủ tài khoản", value: created.bankInfo.name)
-                        LabeledContent("Nội dung CK", value: created.bankInfo.content)
-                        LabeledContent("Số tiền", value: kFormatVND(created.amount))
+                        LabeledContent(store.t("Ngân hàng", "Bank"), value: created.bankInfo.bank)
+                        LabeledContent(store.t("Số tài khoản", "Account number"), value: created.bankInfo.account)
+                        LabeledContent(store.t("Chủ tài khoản", "Account holder"), value: created.bankInfo.name)
+                        LabeledContent(store.t("Nội dung CK", "Transfer note"), value: created.bankInfo.content)
+                        LabeledContent(store.t("Số tiền", "Amount"), value: kFormatVND(created.amount))
                         Text(created.message).font(.footnote).foregroundStyle(.secondary)
                         Button {
                             Task { await checkPaid() }
                         } label: {
                             HStack {
                                 if checking { ProgressView() }
-                                Text(checking ? "Đang kiểm tra..." : "Tôi đã chuyển khoản — kiểm tra")
+                                Text(checking ? store.t("Đang kiểm tra...", "Checking...") : store.t("Tôi đã chuyển khoản — kiểm tra", "I've transferred — check"))
                             }
                             .frame(maxWidth: .infinity).frame(height: 46)
                             .background(Color.green.opacity(0.18)).foregroundStyle(.green)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         }.disabled(checking)
                         if let info { Text(info).font(.footnote).foregroundStyle(.green) }
-                        Text("Hệ thống tự xác nhận trong ~20 giây sau khi nhận tiền. Nếu chưa lên PRO, đợi chút rồi bấm kiểm tra lại.")
+                        Text(store.t("Hệ thống tự xác nhận trong ~20 giây sau khi nhận tiền. Nếu chưa lên PRO, đợi chút rồi bấm kiểm tra lại.",
+                                     "The system auto-confirms ~20s after receiving payment. If not PRO yet, wait a bit and check again."))
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
 
-                Section("Lịch sử giao dịch") {
+                Section(store.t("Lịch sử giao dịch", "Transaction history")) {
                     if history.isEmpty {
-                        Text("Chưa có giao dịch nào.").foregroundStyle(.secondary)
+                        Text(store.t("Chưa có giao dịch nào.", "No transactions yet.")).foregroundStyle(.secondary)
                     } else {
                         ForEach(history) { h in
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text(h.credits > 0
                                          ? "\(h.amount) đ → \(h.credits) credits"
-                                         : "\(h.amount) đ → Nâng cấp PRO")
+                                         : "\(h.amount) đ → " + store.t("Nâng cấp PRO", "PRO upgrade"))
                                     Text(h.ref ?? "").font(.caption2).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -117,9 +119,9 @@ struct PaymentView: View {
 
                 if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             }
-            .navigationTitle("Nâng cấp PRO")
+            .navigationTitle(store.t("Nâng cấp PRO", "Upgrade to PRO"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await load() }
             .refreshable { await load() }
         }
@@ -127,7 +129,7 @@ struct PaymentView: View {
 
     private func statusBadge(_ status: String) -> some View {
         let (text, color): (String, Color) = status == "completed"
-            ? ("Đã cộng", .green) : (status == "pending" ? ("Chờ xác nhận", .orange) : (status, .secondary))
+            ? (store.t("Đã cộng", "Credited"), .green) : (status == "pending" ? (store.t("Chờ xác nhận", "Pending"), .orange) : (status, .secondary))
         return Text(text).font(.caption2)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.18)).foregroundStyle(color)
@@ -157,10 +159,11 @@ struct PaymentView: View {
         await store.refreshCredits()
         history = (try? await store.api.paymentHistory()) ?? history
         if store.isPro {
-            info = "Thanh toán thành công! Tài khoản đã lên PRO."
+            info = store.t("Thanh toán thành công! Tài khoản đã lên PRO.", "Payment successful! Account upgraded to PRO.")
             created = nil
         } else {
-            info = "Chưa nhận được thanh toán. Vui lòng đợi thêm rồi kiểm tra lại."
+            info = store.t("Chưa nhận được thanh toán. Vui lòng đợi thêm rồi kiểm tra lại.",
+                           "Payment not received yet. Please wait and check again.")
         }
         checking = false
     }

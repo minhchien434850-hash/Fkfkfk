@@ -15,6 +15,8 @@ struct RootView: View {
                             MaintenanceOverlay(message: store.maintenanceMessage)
                         }
                     }
+                    // Màn giới thiệu gói PRO/Free hiện sau khi đăng nhập
+                    .sheet(isPresented: $store.showPlanIntro) { PlanIntroView() }
             }
         }
         .tint(store.accentColor)

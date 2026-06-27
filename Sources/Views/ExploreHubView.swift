@@ -35,6 +35,35 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Thủ công · Tự động Web"
         }
     }
+    // Bản tiếng Anh (khoá dịch) — dùng với store.t(title, titleEN)
+    var titleEN: String {
+        switch self {
+        case .library:        return "Library"
+        case .read:           return "Read (TTS)"
+        case .fun:            return "Entertainment"
+        case .games:          return "Games"
+        case .tools:          return "Tools"
+        case .github:         return "GitHub"
+        case .settings:       return "Settings"
+        case .admin:          return "Admin"
+        case .mediaConverter: return "Convert"
+        case .messenger:      return "Messaging"
+        }
+    }
+    var subtitleEN: String {
+        switch self {
+        case .library:        return "Videos · downloaded files"
+        case .read:           return "Read text · new voices"
+        case .fun:            return "Movies · music · web"
+        case .games:          return "Play games in app"
+        case .tools:          return "Images · news · utilities"
+        case .github:         return "Upload/delete repo files"
+        case .settings:       return "Account · appearance"
+        case .admin:          return "Manage users"
+        case .mediaConverter: return "Image/Video → GIF · PNG"
+        case .messenger:      return "Manual · Auto Web"
+        }
+    }
     var icon: String {
         switch self {
         case .library:        return "clock.arrow.circlepath"
@@ -85,19 +114,23 @@ struct ExploreHubView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     KHeroHeader(icon: "square.grid.2x2.fill",
-                                title: "Khám phá",
-                                subtitle: "Tất cả tính năng của KENIOS")
+                                title: store.t("Khám phá", "Explore"),
+                                subtitle: store.t("Tất cả tính năng của KENIOS", "All KENIOS features"))
 
                     LazyVGrid(columns: cols, spacing: 14) {
                         ForEach(items) { it in
-                            Button { dest = it } label: { card(it) }
+                            Button {
+                                dest = it
+                                // Báo cho admin biết người dùng đang mở tính năng nào
+                                Task { try? await store.api.sendActivity(it.title) }
+                            } label: { card(it) }
                                 .buttonStyle(.plain)
                         }
                     }
                 }
                 .padding()
             }
-            .navigationTitle("Khám phá")
+            .navigationTitle(store.t("Khám phá", "Explore"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarLeading) { ThreeDLogoText(size: 20) } }
             .sheet(item: $dest) { d in destView(d) }
@@ -112,8 +145,8 @@ struct ExploreHubView: View {
                 .background(it.gradient)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .shadow(color: it.colors.first!.opacity(0.4), radius: 8, x: 0, y: 4)
-            Text(it.title).font(.headline).foregroundStyle(.primary)
-            Text(it.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            Text(store.t(it.title, it.titleEN)).font(.headline).foregroundStyle(.primary)
+            Text(store.t(it.subtitle, it.subtitleEN)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
@@ -132,7 +165,10 @@ struct ExploreHubView: View {
         case .settings:       SettingsView()
         case .admin:          AdminView()
         case .mediaConverter: MediaConverterView()
-        case .messenger:      MessengerHubView().environmentObject(store)
+        case .messenger:
+            // Nhắn tin (thủ công/tự động/tool nhóm) chỉ dành cho gói PRO
+            if store.isPro { MessengerHubView().environmentObject(store) }
+            else { ProLockCard(feature: store.t("Nhắn tin", "Messaging")) }
         }
     }
 }
@@ -173,34 +209,37 @@ struct MediaConverterView: View {
             Form {
                 Section {
                     KHeroHeader(icon: "wand.and.stars",
-                                title: "Chuyển đổi Media",
-                                subtitle: "Ảnh / Video → GIF · PNG link")
+                                title: store.t("Chuyển đổi Media", "Media Converter"),
+                                subtitle: store.t("Ảnh / Video → GIF · PNG link", "Image / Video → GIF · PNG link"))
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
 
-                Section("Chọn ảnh/video từ máy → tạo link") {
+                Section(store.t("Chọn ảnh/video từ máy → tạo link", "Pick image/video → create link")) {
                     PhotosPicker(selection: $picker, matching: .any(of: [.images, .videos])) {
                         HStack {
                             if uploading { ProgressView().padding(.trailing, 4) }
-                            Label(uploading ? "Đang tải lên..." : "Chọn ảnh hoặc video",
+                            Label(uploading ? store.t("Đang tải lên...", "Uploading...")
+                                            : store.t("Chọn ảnh hoặc video", "Choose image or video"),
                                   systemImage: "photo.on.rectangle.angled")
                         }
                     }
                     .disabled(uploading)
-                    Text("Chọn 1 ảnh hoặc video → app tự tải lên máy chủ và trả về link dùng được ngay.")
+                    Text(store.t("Chọn 1 ảnh hoặc video → app tự tải lên máy chủ và trả về link dùng được ngay.",
+                                 "Pick 1 image or video → the app uploads it and returns a ready-to-use link."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
-                Section("Hoặc dán link sẵn") {
-                    TextField("Dán link ảnh hoặc video...", text: $inputURL, axis: .vertical)
+                Section(store.t("Hoặc dán link sẵn", "Or paste an existing link")) {
+                    TextField(store.t("Dán link ảnh hoặc video...", "Paste image or video link..."), text: $inputURL, axis: .vertical)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .lineLimit(1...3)
-                    Text("Hoặc dán link ảnh GIF/PNG từ các dịch vụ như Imgur, Giphy, Cloudinary...")
+                    Text(store.t("Hoặc dán link ảnh GIF/PNG từ các dịch vụ như Imgur, Giphy, Cloudinary...",
+                                 "Or paste a GIF/PNG link from services like Imgur, Giphy, Cloudinary..."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
-                Section("Định dạng đầu ra") {
-                    Picker("Định dạng", selection: $outputFormat) {
+                Section(store.t("Định dạng đầu ra", "Output format")) {
+                    Picker(store.t("Định dạng", "Format"), selection: $outputFormat) {
                         Text("GIF").tag("gif")
                         Text("PNG").tag("png")
                         Text("JPEG").tag("jpg")
@@ -215,7 +254,8 @@ struct MediaConverterView: View {
                     } label: {
                         HStack {
                             if converting { ProgressView().padding(.trailing, 4) }
-                            Text(converting ? "Đang xử lý..." : "Tạo link \(outputFormat.uppercased())")
+                            Text(converting ? store.t("Đang xử lý...", "Processing...")
+                                            : store.t("Tạo link", "Create link") + " \(outputFormat.uppercased())")
                         }
                         .frame(maxWidth: .infinity).frame(height: 44)
                         .background(inputURL.isEmpty ? Color.gray : store.accentColor)
@@ -227,7 +267,7 @@ struct MediaConverterView: View {
                 }
 
                 if !resultLink.isEmpty {
-                    Section("Link kết quả") {
+                    Section(store.t("Link kết quả", "Result link")) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(resultLink)
                                 .font(.caption).foregroundStyle(store.accentColor)
@@ -235,13 +275,14 @@ struct MediaConverterView: View {
                             Button {
                                 UIPasteboard.general.string = resultLink
                             } label: {
-                                Label("Copy link", systemImage: "doc.on.doc")
+                                Label(store.t("Copy link", "Copy link"), systemImage: "doc.on.doc")
                                     .font(.caption.bold())
                             }
                         }
                     }
-                    Section("Sử dụng link trong cửa hàng") {
-                        Text("Copy link trên và dán vào mục 'Dán link ảnh/video' khi tạo hoặc sửa sản phẩm trong cửa hàng. Link GIF/PNG sẽ hiển thị trực tiếp trong ứng dụng.")
+                    Section(store.t("Sử dụng link trong cửa hàng", "Use the link in the store")) {
+                        Text(store.t("Copy link trên và dán vào mục 'Dán link ảnh/video' khi tạo hoặc sửa sản phẩm trong cửa hàng. Link GIF/PNG sẽ hiển thị trực tiếp trong ứng dụng.",
+                                     "Copy the link above and paste it into the 'Paste image/video link' field when creating or editing a store product. GIF/PNG links display directly in the app."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -253,9 +294,9 @@ struct MediaConverterView: View {
                 let records = history
                 if !records.isEmpty {
                     Section(header: HStack {
-                        Text("Lịch sử link (\(records.count))")
+                        Text(store.t("Lịch sử link", "Link history") + " (\(records.count))")
                         Spacer()
-                        Button("Xoá hết") { historyRaw = "[]" }
+                        Button(store.t("Xoá hết", "Clear all")) { historyRaw = "[]" }
                             .font(.caption2).foregroundStyle(.red)
                     }) {
                         ForEach(records) { rec in historyRow(rec) }
@@ -269,18 +310,18 @@ struct MediaConverterView: View {
                     }
                 }
 
-                Section("Hướng dẫn") {
+                Section(store.t("Hướng dẫn", "Guide")) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Label("Dán link ảnh/video (từ internet hoặc Google Drive)", systemImage: "1.circle.fill")
-                        Label("Chọn định dạng GIF hoặc PNG", systemImage: "2.circle.fill")
-                        Label("Bấm tạo link → nhận link có thể dùng trong cửa hàng", systemImage: "3.circle.fill")
-                        Label("Bạn cũng có thể dùng Imgur.com, Giphy.com, Cloudinary để host ảnh/GIF miễn phí", systemImage: "lightbulb.fill")
+                        Label(store.t("Dán link ảnh/video (từ internet hoặc Google Drive)", "Paste image/video link (from the internet or Google Drive)"), systemImage: "1.circle.fill")
+                        Label(store.t("Chọn định dạng GIF hoặc PNG", "Choose GIF or PNG format"), systemImage: "2.circle.fill")
+                        Label(store.t("Bấm tạo link → nhận link có thể dùng trong cửa hàng", "Tap create link → get a link usable in the store"), systemImage: "3.circle.fill")
+                        Label(store.t("Bạn cũng có thể dùng Imgur.com, Giphy.com, Cloudinary để host ảnh/GIF miễn phí", "You can also use Imgur.com, Giphy.com, Cloudinary to host images/GIFs for free"), systemImage: "lightbulb.fill")
                             .foregroundStyle(.orange)
                     }
                     .font(.caption)
                 }
             }
-            .navigationTitle("Chuyển đổi Media")
+            .navigationTitle(store.t("Chuyển đổi Media", "Media Converter"))
             .navigationBarTitleDisplayMode(.inline)
             .onChange(of: picker) { item in
                 guard let item else { return }

@@ -4230,7 +4230,14 @@ def _load_media(s) -> list:
 def _product_prices(c, pid: int) -> list:
     rows = c.execute("SELECT id,label,amount,sort FROM store_prices WHERE product_id=? "
                      "ORDER BY sort ASC, amount ASC", (pid,)).fetchall()
-    return [{"id": r["id"], "label": r["label"], "amount": r["amount"]} for r in rows]
+    out = []
+    for r in rows:
+        # Tồn kho RIÊNG của từng mốc thời hạn (không dùng chung).
+        avail = c.execute(
+            "SELECT COUNT(*) AS n FROM store_keys WHERE product_id=? AND price_id=? AND status='available'",
+            (pid, r["id"])).fetchone()["n"]
+        out.append({"id": r["id"], "label": r["label"], "amount": r["amount"], "available": avail})
+    return out
 
 def _row_kind(row) -> str:
     try:
@@ -4267,6 +4274,79 @@ def store_config() -> dict[str, Any]:
         "logo_anim": get_setting("store_logo_anim", "shimmer"),       # shimmer|wave|pulse|none
         "bg_type": get_setting("store_bg_type", "none"),              # none|image|video
         "bg_url": get_setting("store_bg_url", ""),
+        # Dòng giới thiệu (slogan) dưới tên cửa hàng + font + thứ tự bố cục các mục
+        "slogan": get_setting("store_slogan", "Cửa hàng sản phẩm số · key · tải về"),
+        "slogan_font": get_setting("store_slogan_font", "rounded"),
+        "section_order": get_setting("store_section_order",
+                                     "hero,trust,steps,flash,leaderboard,categories,gamecat,products,"
+                                     "transactions,topups,downloads,contacts,wishlist,recent,footer"),
+        "card_size": get_setting("store_card_size", "medium"),   # small | medium | large
+        "card_scale": get_setting("store_card_scale", "1.0"),    # hệ số kéo kích cỡ 0.6–1.6
+        # Flash sale (đếm ngược) — admin bật + chọn sản phẩm + thời điểm kết thúc + % giảm
+        "flash_enabled": get_setting("store_flash_enabled", "0") == "1",
+        "flash_product_id": _int_setting("store_flash_product_id", 0),
+        "flash_end": _int_setting("store_flash_end", 0),
+        "flash_discount": _int_setting("store_flash_discount", 0),
+        "flash_title": get_setting("store_flash_title", "FLASH SALE"),
+    }
+
+
+def _int_setting(key: str, default: int = 0) -> int:
+    try:
+        return int(get_setting(key, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _mask_name(s: str) -> str:
+    """Che tên người dùng: giữ 2 ký tự đầu + 1 ký tự cuối, ở giữa là dấu *."""
+    s = (s or "").strip()
+    if not s:
+        return "***"
+    if len(s) <= 2:
+        return s[0] + "*"
+    if len(s) <= 4:
+        return s[0] + "*" * (len(s) - 2) + s[-1]
+    return s[:2] + "*" * max(3, len(s) - 3) + s[-1]
+
+
+@app.get("/store/showcase")
+def store_showcase() -> dict[str, Any]:
+    """Dữ liệu trang chủ cửa hàng: giao dịch gần đây, nạp gần đây, bảng xếp hạng nạp."""
+    with db() as c:
+        orders = c.execute(
+            "SELECT o.amount AS amount, o.created_at AS at, u.username AS uname, "
+            "       p.name AS pname, pr.label AS plabel "
+            "FROM store_orders o "
+            "JOIN users u ON u.id=o.user_id "
+            "JOIN store_products p ON p.id=o.product_id "
+            "LEFT JOIN store_prices pr ON pr.id=o.price_id "
+            "WHERE o.status='completed' "
+            "ORDER BY o.created_at DESC LIMIT 20").fetchall()
+        topups = c.execute(
+            "SELECT t.amount AS amount, t.created_at AS at, u.username AS uname "
+            "FROM store_topups t JOIN users u ON u.id=t.user_id "
+            "WHERE t.status='completed' "
+            "ORDER BY t.created_at DESC LIMIT 20").fetchall()
+        leaders = c.execute(
+            "SELECT u.username AS uname, SUM(t.credited) AS total "
+            "FROM store_topups t JOIN users u ON u.id=t.user_id "
+            "WHERE t.status='completed' "
+            "GROUP BY t.user_id ORDER BY total DESC LIMIT 5").fetchall()
+    return {
+        "recent_orders": [
+            {"user": _mask_name(r["uname"]), "product": r["pname"],
+             "label": r["plabel"] or "", "amount": r["amount"] or 0, "at": r["at"] or 0}
+            for r in orders
+        ],
+        "recent_topups": [
+            {"user": _mask_name(r["uname"]), "amount": r["amount"] or 0, "at": r["at"] or 0}
+            for r in topups
+        ],
+        "leaderboard": [
+            {"rank": i + 1, "user": _mask_name(r["uname"]), "total": r["total"] or 0}
+            for i, r in enumerate(leaders)
+        ],
     }
 
 
@@ -4493,11 +4573,13 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
             raise HTTPException(status_code=400,
                 detail=f"Số dư ví không đủ (cần {amount:,}đ, còn {balance:,}đ). Vui lòng nạp thêm vào ví."
                        .replace(",", "."))
-        # Giành 1 key khả dụng (atomic)
+        # Giành 1 key khả dụng (atomic) — CHỈ lấy key đúng mốc thời hạn đã chọn.
+        # Mỗi mốc (giờ/ngày/tuần/tháng) có kho riêng; hết mốc nào thì mốc đó hết hàng.
         key = None
         for _ in range(50):
-            cand = c.execute("SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
-                             "ORDER BY id ASC LIMIT 1", (b.product_id,)).fetchone()
+            cand = c.execute(
+                "SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
+                "AND price_id=? ORDER BY id ASC LIMIT 1", (b.product_id, price["id"])).fetchone()
             if not cand:
                 break
             got = c.execute("UPDATE store_keys SET status='sold' WHERE id=? AND status='available'",
@@ -4506,7 +4588,8 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
                 key = cand
                 break
         if not key:
-            raise HTTPException(status_code=400, detail="Sản phẩm tạm hết hàng. Vui lòng quay lại sau.")
+            raise HTTPException(status_code=400,
+                detail=f"Mốc \"{price['label']}\" đã hết hàng. Vui lòng chọn mốc khác.")
         # Trừ ví (atomic, chống âm)
         ded = c.execute("UPDATE users SET wallet=wallet-? WHERE id=? AND wallet>=?",
                         (amount, user["id"], amount))
@@ -4618,6 +4701,16 @@ class StoreConfigIn(BaseModel):
     logo_anim: Optional[str] = None
     bg_type: Optional[str] = None       # none | image | video
     bg_url: Optional[str] = None
+    slogan: Optional[str] = None
+    slogan_font: Optional[str] = None
+    section_order: Optional[str] = None
+    card_size: Optional[str] = None
+    card_scale: Optional[float] = None
+    flash_enabled: Optional[bool] = None
+    flash_product_id: Optional[int] = None
+    flash_end: Optional[int] = None
+    flash_discount: Optional[int] = None
+    flash_title: Optional[str] = None
 
 @app.post("/admin/store/config")
 def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
@@ -4632,6 +4725,19 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.bg_type is not None:
         set_setting("store_bg_type", b.bg_type if b.bg_type in ("none", "image", "video") else "none")
     if b.bg_url is not None: set_setting("store_bg_url", b.bg_url.strip())
+    if b.slogan is not None: set_setting("store_slogan", b.slogan.strip()[:120])
+    if b.slogan_font is not None: set_setting("store_slogan_font", b.slogan_font.strip()[:20])
+    if b.section_order is not None: set_setting("store_section_order", b.section_order.strip()[:200])
+    if b.card_size is not None:
+        set_setting("store_card_size", b.card_size if b.card_size in ("small", "medium", "large") else "medium")
+    if b.card_scale is not None:
+        sc = max(0.6, min(float(b.card_scale), 1.6))
+        set_setting("store_card_scale", f"{sc:.2f}")
+    if b.flash_enabled is not None: set_setting("store_flash_enabled", "1" if b.flash_enabled else "0")
+    if b.flash_product_id is not None: set_setting("store_flash_product_id", str(max(0, int(b.flash_product_id))))
+    if b.flash_end is not None: set_setting("store_flash_end", str(max(0, int(b.flash_end))))
+    if b.flash_discount is not None: set_setting("store_flash_discount", str(max(0, min(int(b.flash_discount), 99))))
+    if b.flash_title is not None: set_setting("store_flash_title", b.flash_title.strip()[:40])
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
 
@@ -4871,17 +4977,18 @@ def admin_store_set_prices(pid: int, b: StorePricesIn, admin=Depends(get_admin))
 # -------------------- Admin: kho KEY --------------------
 class StoreKeysIn(BaseModel):
     text: str = ""   # mỗi dòng 1 key
+    price_id: Optional[int] = None   # gắn key vào 1 mốc thời hạn (giờ/ngày/tuần/tháng). None = dùng chung
 
 @app.get("/admin/store/products/{pid}/keys")
 def admin_store_list_keys(pid: int, admin=Depends(get_admin)) -> dict[str, Any]:
     with db() as c:
-        rows = c.execute("SELECT id,key_text,status,sold_at FROM store_keys WHERE product_id=? "
+        rows = c.execute("SELECT id,key_text,status,sold_at,price_id FROM store_keys WHERE product_id=? "
                          "ORDER BY id DESC", (pid,)).fetchall()
         avail = sum(1 for r in rows if r["status"] == "available")
     return {
         "available": avail, "total": len(rows),
         "keys": [{"id": r["id"], "key_text": r["key_text"], "status": r["status"],
-                  "sold_at": r["sold_at"]} for r in rows],
+                  "sold_at": r["sold_at"], "price_id": r["price_id"]} for r in rows],
     }
 
 @app.post("/admin/store/products/{pid}/keys")
@@ -4893,8 +5000,9 @@ def admin_store_add_keys(pid: int, b: StoreKeysIn, admin=Depends(get_admin)) -> 
         for ln in lines:
             if not ln:
                 continue
-            c.execute("INSERT INTO store_keys(product_id,key_text,status,created_at) VALUES(?,?,'available',?)",
-                      (pid, ln, now))
+            c.execute("INSERT INTO store_keys(product_id,key_text,status,price_id,created_at) "
+                      "VALUES(?,?,'available',?,?)",
+                      (pid, ln, b.price_id, now))
             added += 1
     return {"message": f"Đã thêm {added} key.", "added": added}
 

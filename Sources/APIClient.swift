@@ -327,6 +327,9 @@ struct APIClient {
     func storeCategories() async throws -> [StoreCategory] {
         try decode(try await send("/store/categories", auth: false))
     }
+    func storeShowcase() async throws -> StoreShowcase {
+        try decode(try await send("/store/showcase", auth: false))
+    }
     func storeFolders(categoryId: Int) async throws -> [StoreFolder] {
         try decode(try await send("/store/categories/\(categoryId)/folders", auth: false))
     }
@@ -387,15 +390,30 @@ struct APIClient {
                              bannerType: String, bannerUrl: String,
                              logoEffect: String? = nil, logoFont: String? = nil,
                              logoAnim: String? = nil, bgType: String? = nil,
-                             bgUrl: String? = nil) async throws -> MessageResponse {
+                             bgUrl: String? = nil, slogan: String? = nil,
+                             sloganFont: String? = nil, sectionOrder: String? = nil,
+                             cardSize: String? = nil, cardScale: Double? = nil,
+                             flashEnabled: Bool? = nil, flashProductId: Int? = nil,
+                             flashEnd: Int? = nil, flashDiscount: Int? = nil,
+                             flashTitle: String? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
+        if let flashEnabled { body["flash_enabled"] = flashEnabled }
+        if let flashProductId { body["flash_product_id"] = flashProductId }
+        if let flashEnd { body["flash_end"] = flashEnd }
+        if let flashDiscount { body["flash_discount"] = flashDiscount }
+        if let flashTitle { body["flash_title"] = flashTitle }
         if let logoEffect { body["logo_effect"] = logoEffect }
         if let logoFont { body["logo_font"] = logoFont }
         if let logoAnim { body["logo_anim"] = logoAnim }
         if let bgType { body["bg_type"] = bgType }
         if let bgUrl { body["bg_url"] = bgUrl }
+        if let slogan { body["slogan"] = slogan }
+        if let sloganFont { body["slogan_font"] = sloganFont }
+        if let sectionOrder { body["section_order"] = sectionOrder }
+        if let cardSize { body["card_size"] = cardSize }
+        if let cardScale { body["card_scale"] = cardScale }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
     // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)
@@ -444,9 +462,11 @@ struct APIClient {
     func adminStoreListKeys(productId: Int) async throws -> StoreKeysInfo {
         try decode(try await send("/admin/store/products/\(productId)/keys"))
     }
-    func adminStoreAddKeys(productId: Int, text: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/products/\(productId)/keys",
-                                  method: "POST", json: ["text": text]))
+    func adminStoreAddKeys(productId: Int, text: String, priceId: Int? = nil) async throws -> MessageResponse {
+        var body: [String: Any] = ["text": text]
+        if let priceId { body["price_id"] = priceId }
+        return try decode(try await send("/admin/store/products/\(productId)/keys",
+                                  method: "POST", json: body))
     }
     func adminStoreDeleteKey(_ keyId: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/store/keys/\(keyId)", method: "DELETE"))

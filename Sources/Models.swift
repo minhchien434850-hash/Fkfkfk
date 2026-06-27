@@ -256,6 +256,44 @@ struct StoreAppConfig: Decodable, Hashable {
     var logoAnim: String? = nil     // shimmer|wave|pulse|none
     var bgType: String? = nil       // none|image|video
     var bgUrl: String? = nil
+    var slogan: String? = nil       // dòng giới thiệu dưới tên cửa hàng
+    var sloganFont: String? = nil   // rounded|serif|mono|default|...
+    var sectionOrder: String? = nil // thứ tự bố cục: categories,products,downloads,contacts,wishlist,recent
+    var cardSize: String? = nil     // small | medium | large — kích cỡ thẻ sản phẩm/danh mục
+    var cardScale: String? = nil    // hệ số kéo kích cỡ "0.6"–"1.6" (server trả chuỗi)
+    // Flash sale (đếm ngược)
+    var flashEnabled: Bool? = nil
+    var flashProductId: Int? = nil
+    var flashEnd: Int? = nil         // epoch giây
+    var flashDiscount: Int? = nil    // %
+    var flashTitle: String? = nil
+}
+
+// ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----
+struct ShowcaseOrder: Decodable, Hashable, Identifiable {
+    var id: String { "\(user)-\(product)-\(at)-\(amount)" }
+    let user: String
+    let product: String
+    let label: String
+    let amount: Int
+    let at: Int
+}
+struct ShowcaseTopup: Decodable, Hashable, Identifiable {
+    var id: String { "\(user)-\(at)-\(amount)" }
+    let user: String
+    let amount: Int
+    let at: Int
+}
+struct ShowcaseLeader: Decodable, Hashable, Identifiable {
+    var id: Int { rank }
+    let rank: Int
+    let user: String
+    let total: Int
+}
+struct StoreShowcase: Decodable {
+    let recentOrders: [ShowcaseOrder]
+    let recentTopups: [ShowcaseTopup]
+    let leaderboard: [ShowcaseLeader]
 }
 
 struct MediaUploadResponse: Decodable { let id: Int; let path: String }
@@ -340,6 +378,9 @@ struct StorePrice: Identifiable, Decodable, Hashable {
     let id: Int
     let label: String
     let amount: Int
+    let available: Int?   // tồn kho riêng của mốc thời hạn này (nil = cũ/không rõ)
+
+    var inStock: Bool { (available ?? 1) > 0 }
 }
 
 struct StoreProduct: Identifiable, Decodable, Hashable {
@@ -395,6 +436,7 @@ struct StoreKeyItem: Identifiable, Decodable, Hashable {
     let keyText: String
     let status: String
     let soldAt: Int?
+    let priceId: Int?   // mốc thời hạn key thuộc về (nil = dùng chung)
 }
 
 struct StoreKeysInfo: Decodable {

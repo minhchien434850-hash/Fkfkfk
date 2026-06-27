@@ -33,7 +33,7 @@ struct LoginView: View {
                     .padding(.top, 52)
 
                     RainbowText(text: "KENIOS", size: 40)
-                    Text("Mạng xã hội · Video · Giải trí · Công cụ")
+                    Text(store.t("Mạng xã hội · Video · Giải trí · Công cụ", "Social · Video · Entertainment · Tools"))
                         .font(.subheadline).foregroundStyle(.secondary)
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -43,7 +43,7 @@ struct LoginView: View {
                             .textContentType(.username)   // iOS gợi ý lưu/điền từ iCloud Keychain
                             .padding(12).background(Color(.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
-                        Text("Mật khẩu").font(.caption).foregroundStyle(.secondary)
+                        Text(store.t("Mật khẩu", "Password")).font(.caption).foregroundStyle(.secondary)
                         SecureField("••••••••", text: $password)
                             .textContentType(.password)   // bật lưu mật khẩu vào Apple ID / trình quản lý
                             .submitLabel(.go)
@@ -52,7 +52,7 @@ struct LoginView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         Toggle(isOn: $remember) {
-                            Label("Nhớ tài khoản & mật khẩu", systemImage: "lock.rotation")
+                            Label(store.t("Nhớ tài khoản & mật khẩu", "Remember username & password"), systemImage: "lock.rotation")
                                 .font(.subheadline)
                         }.tint(Theme.accent).padding(.top, 4)
                     }.padding(.horizontal)
@@ -62,19 +62,19 @@ struct LoginView: View {
                     Button { Task { await doLogin() } } label: {
                         HStack {
                             if loading { ProgressView().tint(.white).padding(.trailing, 6) }
-                            Text("Đăng nhập").bold().frame(maxWidth: .infinity)
+                            Text(store.t("Đăng nhập", "Login")).bold().frame(maxWidth: .infinity)
                         }.padding().background(Theme.accent).foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                     }.padding(.horizontal).disabled(loading)
 
-                    NavigationLink("Quên mật khẩu?") { ForgotPasswordView() }
+                    NavigationLink(store.t("Quên mật khẩu?", "Forgot password?")) { ForgotPasswordView() }
                         .font(.subheadline).foregroundStyle(Theme.accent)
 
-                    HStack { Rectangle().frame(height: 1).opacity(0.2); Text("hoặc").font(.caption).foregroundStyle(.secondary); Rectangle().frame(height: 1).opacity(0.2) }
+                    HStack { Rectangle().frame(height: 1).opacity(0.2); Text(store.t("hoặc", "or")).font(.caption).foregroundStyle(.secondary); Rectangle().frame(height: 1).opacity(0.2) }
                         .padding(.horizontal)
 
                     NavigationLink { RegisterView() } label: {
-                        Text("Tạo tài khoản mới").frame(maxWidth: .infinity).padding()
+                        Text(store.t("Tạo tài khoản mới", "Create new account")).frame(maxWidth: .infinity).padding()
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(.secondary.opacity(0.4)))
                     }.padding(.horizontal)
 
@@ -84,7 +84,7 @@ struct LoginView: View {
                             NavigationLink { ServerSetupView() } label: {
                                 HStack {
                                     Image(systemName: "globe").foregroundStyle(.orange)
-                                    Text("Chưa có máy chủ — bấm để kết nối").font(.caption)
+                                    Text(store.t("Chưa có máy chủ — bấm để kết nối", "No server — tap to connect")).font(.caption)
                                 }
                                 .padding().frame(maxWidth: .infinity)
                                 .background(Color(.secondarySystemBackground))
@@ -94,11 +94,11 @@ struct LoginView: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "globe").foregroundStyle(Theme.accent)
                                 VStack(alignment: .leading) {
-                                    Text("Máy chủ \(store.serverType)").font(.caption).foregroundStyle(.secondary)
+                                    Text(store.t("Máy chủ", "Server") + " \(store.serverType)").font(.caption).foregroundStyle(.secondary)
                                     Text(store.baseURL).font(.caption).foregroundStyle(Theme.accent).lineLimit(1)
                                 }
                                 Spacer()
-                                Button("Đổi") { showConnections = true }.font(.caption)
+                                Button(store.t("Đổi", "Change")) { showConnections = true }.font(.caption)
                             }
                             .padding().background(Color(.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
@@ -170,33 +170,35 @@ struct RegisterView: View {
 
     var body: some View {
         Form {
-            Section("Tạo tài khoản") {
-                TextField("Username * (≥3 ký tự)", text: $username)
+            Section(store.t("Tạo tài khoản", "Create account")) {
+                TextField(store.t("Username * (≥3 ký tự)", "Username * (≥3 chars)"), text: $username)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .textContentType(.username)
-                SecureField("Mật khẩu * (≥6 ký tự)", text: $password)
+                SecureField(store.t("Mật khẩu * (≥6 ký tự)", "Password * (≥6 chars)"), text: $password)
                     .textContentType(.newPassword)   // iOS gợi ý lưu mật khẩu mới vào Apple ID
-                TextField("Gmail (tuỳ chọn)", text: $email)
+                TextField(store.t("Gmail (tuỳ chọn)", "Gmail (optional)"), text: $email)
                     .textInputAutocapitalization(.never).keyboardType(.emailAddress)
                     .autocorrectionDisabled()
-                TextField("Số điện thoại (tuỳ chọn)", text: $phone).keyboardType(.phonePad)
-                Text("Chỉ cần SĐT hoặc Gmail là được — không cần mã xác nhận.")
+                TextField(store.t("Số điện thoại (tuỳ chọn)", "Phone number (optional)"), text: $phone).keyboardType(.phonePad)
+                Text(store.t("Chỉ cần SĐT hoặc Gmail là được — không cần mã xác nhận.",
+                             "Just a phone or Gmail is enough — no verification code needed."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             if registered {
-                Text("Tạo tài khoản thành công! Đang chuyển về màn đăng nhập…")
+                Text(store.t("Tạo tài khoản thành công! Đang chuyển về màn đăng nhập…",
+                             "Account created! Returning to login…"))
                     .foregroundStyle(.green).font(.footnote)
             }
             Section {
                 Button { Task { await doRegister() } } label: {
-                    HStack { if loading { ProgressView().padding(.trailing, 6) }; Text("Tạo tài khoản") }
+                    HStack { if loading { ProgressView().padding(.trailing, 6) }; Text(store.t("Tạo tài khoản", "Create account")) }
                 }
                 .disabled(loading || registered)
             }
         }
-        .navigationTitle("Đăng ký")
+        .navigationTitle(store.t("Đăng ký", "Register"))
     }
 
     private func sendCode() async {
@@ -242,20 +244,20 @@ struct ForgotPasswordView: View {
 
     var body: some View {
         Form {
-            Section("Bước 1 · Lấy mã đặt lại") {
-                TextField("Tên đăng nhập", text: $username)
+            Section(store.t("Bước 1 · Lấy mã đặt lại", "Step 1 · Get reset code")) {
+                TextField(store.t("Tên đăng nhập", "Username"), text: $username)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button("Gửi yêu cầu") { Task { await getCode() } }
+                Button(store.t("Gửi yêu cầu", "Send request")) { Task { await getCode() } }
             }
-            Section("Bước 2 · Đặt mật khẩu mới") {
-                TextField("Mã đặt lại", text: $token).autocorrectionDisabled()
-                SecureField("Mật khẩu mới (≥6 ký tự)", text: $newPassword)
-                Button("Đổi mật khẩu") { Task { await doReset() } }
+            Section(store.t("Bước 2 · Đặt mật khẩu mới", "Step 2 · Set new password")) {
+                TextField(store.t("Mã đặt lại", "Reset code"), text: $token).autocorrectionDisabled()
+                SecureField(store.t("Mật khẩu mới (≥6 ký tự)", "New password (≥6 chars)"), text: $newPassword)
+                Button(store.t("Đổi mật khẩu", "Change password")) { Task { await doReset() } }
             }
             if let info { Text(info).foregroundStyle(.green).font(.footnote) }
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
         }
-        .navigationTitle("Quên mật khẩu")
+        .navigationTitle(store.t("Quên mật khẩu", "Forgot password"))
     }
 
     private func getCode() async {

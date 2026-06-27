@@ -471,19 +471,19 @@ struct MessengerHubView: View {
                 Section {
                     KHeroHeader(
                         icon: activeTab == 0 ? "doc.on.clipboard.fill" : "bolt.horizontal.fill",
-                        title: activeTab == 0 ? "Nhắn tin thủ công" : "Nhắn tin tự động",
+                        title: activeTab == 0 ? store.t("Nhắn tin thủ công", "Manual messaging") : store.t("Nhắn tin tự động", "Auto messaging"),
                         subtitle: activeTab == 0
-                            ? "Copy clipboard → paste & gửi trong app"
-                            : "Quét QR đăng nhập → gửi thẳng qua web")
+                            ? store.t("Copy clipboard → paste & gửi trong app", "Copy to clipboard → paste & send in-app")
+                            : store.t("Quét QR đăng nhập → gửi thẳng qua web", "Scan QR to log in → send directly via web"))
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
 
                 // Mode switcher
                 Section {
-                    Picker("Chế độ", selection: $activeTab) {
-                        Text("📋 Thủ công").tag(0)
-                        Text("⚡ Tự động").tag(1)
-                        Text("👥 Tool nhóm").tag(2)
+                    Picker(store.t("Chế độ", "Mode"), selection: $activeTab) {
+                        Text("📋 " + store.t("Thủ công", "Manual")).tag(0)
+                        Text("⚡ " + store.t("Tự động", "Auto")).tag(1)
+                        Text("👥 " + store.t("Tool nhóm", "Group tool")).tag(2)
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: activeTab) { _ in
@@ -501,7 +501,7 @@ struct MessengerHubView: View {
                         .autocorrectionDisabled(false)
                 } header: {
                     HStack {
-                        Label("Soạn thảo tin nhắn", systemImage: "square.and.pencil")
+                        Label(store.t("Soạn thảo tin nhắn", "Compose messages"), systemImage: "square.and.pencil")
                         Spacer()
                         Text("\(messages.count) tin")
                             .font(.caption.bold())
@@ -624,14 +624,14 @@ struct MessengerHubView: View {
                     Section {
                         if manRunning {
                             Button(role: .destructive) { stopManual() } label: {
-                                Label("■  Dừng gửi", systemImage: "stop.circle.fill")
+                                Label(store.t("■  Dừng gửi", "■  Stop sending"), systemImage: "stop.circle.fill")
                                     .frame(maxWidth: .infinity).frame(height: 44)
                                     .background(Color.red).foregroundStyle(.white)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
                             }.buttonStyle(.plain)
                         } else {
                             Button { startManual() } label: {
-                                Label("▶  Bắt đầu gửi thủ công", systemImage: "play.circle.fill")
+                                Label(store.t("▶  Bắt đầu gửi thủ công", "▶  Start manual send"), systemImage: "play.circle.fill")
                                     .frame(maxWidth: .infinity).frame(height: 44)
                                     .background(canStartManual ? store.accentColor : .gray)
                                     .foregroundStyle(.white)
@@ -752,7 +752,7 @@ struct MessengerHubView: View {
                             }
                         }
                         if !autoFriends.isEmpty {
-                            Text("Chọn người để nhắn:").font(.caption).foregroundStyle(.secondary)
+                            Text(store.t("Chọn người để nhắn:", "Choose recipients:")).font(.caption).foregroundStyle(.secondary)
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
                                     ForEach(autoFriends, id: \.self) { name in
@@ -868,7 +868,7 @@ struct MessengerHubView: View {
                     Section {
                         if autoRunning {
                             Button(role: .destructive) { stopAuto() } label: {
-                                Label("■  Dừng gửi", systemImage: "stop.circle.fill")
+                                Label(store.t("■  Dừng gửi", "■  Stop sending"), systemImage: "stop.circle.fill")
                                     .frame(maxWidth: .infinity).frame(height: 44)
                                     .background(Color.red).foregroundStyle(.white)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))

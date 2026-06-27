@@ -53,15 +53,16 @@ struct SocialMediaToolsView: View {
             VStack(spacing: 0) {
                 // Banner sang trọng
                 KHeroHeader(icon: "globe.badge.ellipsis",
-                            title: "Mạng xã hội",
-                            subtitle: "Sáng tạo nội dung · Tải video · Live đa nền tảng")
+                            title: store.t("Mạng xã hội", "Social"),
+                            subtitle: store.t("Sáng tạo nội dung · Tải video · Live đa nền tảng",
+                                              "Create content · Download video · Multi-platform live"))
                     .padding(.horizontal)
                     .padding(.top, 8)
 
                 // Segmented picker
                 Picker("", selection: $selectedSegment) {
-                    Text("Sửa Video").tag(0)
-                    Text("Tải Video").tag(1)
+                    Text(store.t("Sửa Video", "Edit Video")).tag(0)
+                    Text(store.t("Tải Video", "Download")).tag(1)
                     Text("Live Tools").tag(2)
                 }
                 .pickerStyle(.segmented)
@@ -69,15 +70,15 @@ struct SocialMediaToolsView: View {
 
                 if selectedSegment == 0 {
                     if store.isPro { VideoEditorView() }
-                    else { ProLockCard(feature: "Sửa video") }
+                    else { ProLockCard(feature: store.t("Sửa video", "Edit video")) }
                 } else if selectedSegment == 1 {
                     downloaderPane
                 } else {
                     if store.isPro { liveToolsPane }
-                    else { ProLockCard(feature: "Live Tools / Stream key") }
+                    else { ProLockCard(feature: store.t("Live Tools / Stream key", "Live Tools / Stream key")) }
                 }
             }
-            .navigationTitle("Mạng xã hội")
+            .navigationTitle(store.t("Mạng xã hội", "Social"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -99,8 +100,8 @@ struct SocialMediaToolsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Link TikTok · Facebook · Pinterest · YouTube").font(.subheadline).bold()
-                    TextField("Dán link video ở đây...", text: $videoURL)
+                    Text(store.t("Link TikTok · Facebook · Pinterest · YouTube", "TikTok · Facebook · Pinterest · YouTube link")).font(.subheadline).bold()
+                    TextField(store.t("Dán link video ở đây...", "Paste video link here..."), text: $videoURL)
                         .padding(12)
                         .kGlass(RoundedRectangle(cornerRadius: 12))
                         .autocorrectionDisabled()
@@ -109,13 +110,13 @@ struct SocialMediaToolsView: View {
 
                 // Chọn độ phân giải
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Độ phân giải").font(.caption).foregroundStyle(.secondary)
-                    Picker("Độ phân giải", selection: $videoQuality) {
+                    Text(store.t("Độ phân giải", "Resolution")).font(.caption).foregroundStyle(.secondary)
+                    Picker(store.t("Độ phân giải", "Resolution"), selection: $videoQuality) {
                         Text("720p").tag("720")
                         Text("1080p").tag("1080")
                         Text("2K").tag("2k")
                         Text("4K").tag("4k")
-                        Text("Cao nhất").tag("best")
+                        Text(store.t("Cao nhất", "Highest")).tag("best")
                     }
                     .pickerStyle(.segmented)
                 }
@@ -127,10 +128,10 @@ struct SocialMediaToolsView: View {
                     HStack {
                         if downloading {
                             ProgressView().tint(.white)
-                            Text("Đang cào & tải xuống...")
+                            Text(store.t("Đang cào & tải xuống...", "Fetching & downloading..."))
                         } else {
                             Image(systemName: "arrow.down.circle")
-                            Text("Tải video về hệ thống")
+                            Text(store.t("Tải video về hệ thống", "Download video to system"))
                         }
                     }
                     .font(.headline).bold().foregroundStyle(.white)

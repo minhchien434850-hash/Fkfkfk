@@ -47,6 +47,7 @@ final class AppStore: ObservableObject {
     @Published var themeMode: String
     @Published var language: String
     @Published var systemPrompt: String
+    @Published var showPlanIntro: Bool = false   // hiện màn giới thiệu gói PRO/Free sau đăng nhập
 
     // Màu accent người dùng chọn (tên: "blue", "purple", ...)
     @Published var accentColorName: String
@@ -253,6 +254,7 @@ final class AppStore: ObservableObject {
         d.set(plan, forKey: "plan")
         d.set(credits, forKey: "credits")
         d.set(publicId, forKey: "publicId")
+        showPlanIntro = true   // hiện màn giới thiệu gói PRO/Free sau khi đăng nhập
     }
 
     /// Tải lại hồ sơ + trạng thái bảo trì.
@@ -307,6 +309,7 @@ final class AppStore: ObservableObject {
         favorites = []; promptTemplates = []
         friends = []; friendRequests = []; directMessages = [:]
         d.set(false, forKey: "isAdmin")
+        showPlanIntro = false
         suppressAutoLogin = true   // sau khi đăng xuất chỉ điền sẵn, không tự đăng nhập ngay
     }
 

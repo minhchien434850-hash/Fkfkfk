@@ -148,6 +148,7 @@ struct StoreView: View {
     @State private var contacts: StoreContacts?
     @State private var search = ""
     @State private var allProducts: [StoreProduct] = []
+    @State private var productsByCategory: [Int: [StoreProduct]] = [:]
     @State private var loadingProducts = false
     @AppStorage("storeWishlist") private var wishlistRaw: String = ""
     @AppStorage("storeRecentViews") private var recentViewsRaw: String = ""
@@ -161,10 +162,13 @@ struct StoreView: View {
     @State private var productFilter: String = "all"    // all | inStock
     @State private var showCart = false
     @AppStorage("storeCartRaw") private var cartRaw: String = "[]"
+    @State private var showcase: StoreShowcase?
+    @State private var flashNow = Date()   // cập nhật để đồng hồ flash sale đếm ngược
+    private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var displayName: String {
         if let n = config?.logoName, !n.isEmpty { return n }
-        return cfgName.isEmpty ? "Cửa hàng" : cfgName
+        return cfgName.isEmpty ? "KENIOS STORE" : cfgName
     }
     // Cấu hình hiệu lực: ưu tiên server, fallback cache (để banner/logo không biến mất khi offline)
     private var effectiveConfig: StoreAppConfig? {
@@ -212,74 +216,117 @@ struct StoreView: View {
         wishlistRaw = ids.map(String.init).joined(separator: ",")
     }
 
-    private let grid = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-
     private var filteredCategories: [StoreCategory] {
         let q = search.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return categories }
         return categories.filter { $0.name.localizedCaseInsensitiveContains(q) }
     }
 
+    // Kích cỡ thẻ — theo hệ số kéo của admin (Kích cỡ thẻ hiển thị)
+    private var cardScale: CGFloat {
+        if let s = config?.cardScale ?? effectiveConfig?.cardScale, let v = Double(s) {
+            return CGFloat(max(0.6, min(v, 1.6)))
+        }
+        switch config?.cardSize ?? effectiveConfig?.cardSize {
+        case "small": return 0.8
+        case "large": return 1.25
+        default:      return 1.0
+        }
+    }
+    private var productCardWidth: CGFloat { 124 * cardScale }
+    private var productThumbHeight: CGFloat { 84 * cardScale }
+    private var categoryThumbHeight: CGFloat { 120 * cardScale }
+    private var categoryGrid: [GridItem] {
+        let n = cardScale < 0.85 ? 3 : 2
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: n)
+    }
+
+    // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
+    private var orderedSections: [String] {
+        let all = ["hero", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
+                   "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
+        guard let raw = (config?.sectionOrder ?? effectiveConfig?.sectionOrder), !raw.isEmpty else { return all }
+        let parts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        var merged = parts.filter { all.contains($0) }
+        // Chèn các mục mới (chưa có trong cấu hình cũ) vào đúng vị trí ưu tiên thay vì dồn cuối
+        for (i, k) in all.enumerated() where !merged.contains(k) {
+            merged.insert(k, at: min(i, merged.count))
+        }
+        return merged
+    }
+
+    @ViewBuilder
+    private func sectionView(_ key: String) -> some View {
+        switch key {
+        case "categories":
+            if !categories.isEmpty { searchField }
+            if loading && categories.isEmpty {
+                HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
+            } else if categories.isEmpty {
+                emptyState
+            } else {
+                LazyVGrid(columns: categoryGrid, spacing: 12) {
+                    ForEach(filteredCategories) { cat in
+                        NavigationLink {
+                            StoreFolderListView(category: cat)
+                        } label: { categoryCard(cat) }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        case "products":
+            if !allProducts.isEmpty { allProductsSection }
+        case "downloads":
+            if !downloads.isEmpty { downloadsSection }
+        case "contacts":
+            if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
+                StoreContactsBlock(contacts: c)
+            }
+        case "wishlist":
+            if !wishlistProducts.isEmpty { wishlistSection }
+        case "recent":
+            if !recentProducts.isEmpty { recentlyViewedSection }
+        case "trust":
+            trustBadgesSection
+        case "steps":
+            stepsSection
+        case "flash":
+            if let p = flashProduct { flashSection(p) }
+        case "leaderboard":
+            if let s = showcase, !s.leaderboard.isEmpty { leaderboardSection(s.leaderboard) }
+        case "transactions":
+            if let s = showcase, !s.recentOrders.isEmpty { transactionsSection(s.recentOrders) }
+        case "topups":
+            if let s = showcase, !s.recentTopups.isEmpty { topupsSection(s.recentTopups) }
+        case "hero":
+            heroSection
+        case "gamecat":
+            if !productsByCategory.isEmpty { gameCatSection }
+        case "footer":
+            footerSection
+        default:
+            EmptyView()
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 16) {
                     storeHeader
-                        .padding(.horizontal).padding(.top, 8)
 
                     walletBar
-                        .padding(.horizontal).padding(.top, 14)
 
-                    if !downloads.isEmpty {
-                        downloadsSection.padding(.top, 22)
-                    }
-
-                    if !allProducts.isEmpty {
-                        allProductsSection.padding(.top, 22)
-                    }
-
-                    if !wishlistProducts.isEmpty {
-                        wishlistSection.padding(.top, 22)
-                    }
-
-                    if !recentProducts.isEmpty {
-                        recentlyViewedSection.padding(.top, 22)
-                    }
-
-                    VStack(spacing: 10) {
-                        if !categories.isEmpty {
-                            searchField.padding(.horizontal).padding(.top, 22)
-                        }
-                        if loading && categories.isEmpty {
-                            HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
-                        } else if categories.isEmpty {
-                            emptyState
-                        } else {
-                            LazyVGrid(columns: grid, spacing: 12) {
-                                ForEach(filteredCategories) { cat in
-                                    NavigationLink {
-                                        StoreFolderListView(category: cat)
-                                    } label: {
-                                        categoryCard(cat)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal).padding(.top, 6)
-                        }
-                    }
-
-                    if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
-                        StoreContactsBlock(contacts: c)
-                            .padding(.horizontal).padding(.top, 22)
+                    // Các mục hiển thị theo thứ tự admin sắp xếp (Sắp xếp bố cục trang)
+                    ForEach(orderedSections, id: \.self) { key in
+                        sectionView(key)
                     }
 
                     if let error {
-                        Text(error).font(.caption).foregroundStyle(.red).padding()
+                        Text(error).font(.caption).foregroundStyle(.red)
                     }
-
-                    Spacer().frame(height: 30)
                 }
+                .padding()
             }
             .background {
                 if let c = effectiveConfig, let bt = c.bgType, bt != "none",
@@ -348,70 +395,280 @@ struct StoreView: View {
                 }
             }
             .refreshable { await reload() }
+            .onReceive(flashTimer) { t in
+                if let c = config, (c.flashEnabled ?? false), (c.flashEnd ?? 0) > Int(Date().timeIntervalSince1970) {
+                    flashNow = t
+                }
+            }
         }
     }
 
     private var appearanceMenu: some View { AppearanceMenu() }
 
-    // ── Section header helper ──
-    private func sectionHeader(_ title: String, _ icon: String, color: Color = Theme.accent) -> some View {
-        Label(title, systemImage: icon)
-            .font(.subheadline.bold())
-            .foregroundStyle(color)
+    // ======================== Mặt tiền cửa hàng (theo mẫu) ========================
+    // Sản phẩm đang flash sale (nếu admin bật + còn thời gian)
+    private var flashProduct: StoreProduct? {
+        guard let c = config, (c.flashEnabled ?? false),
+              let pid = c.flashProductId, pid > 0,
+              (c.flashEnd ?? 0) > Int(Date().timeIntervalSince1970) else { return nil }
+        return allProducts.first { $0.id == pid }
     }
 
-    // ── Ví cửa hàng ──
-    private var walletBar: some View {
-        Button { showWallet = true } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle().fill(.white.opacity(0.18)).frame(width: 44, height: 44)
-                    Image(systemName: "wallet.pass.fill")
-                        .font(.title3).foregroundStyle(.white)
+    // 4 thẻ tin cậy (2×2)
+    private var trustBadgesSection: some View {
+        let items: [(String, String, String, Color)] = [
+            ("bolt.fill", store.t("Kích hoạt tức thì", "Instant activation"), store.t("Nhận key ngay sau khi thanh toán", "Get key right after payment"), .yellow),
+            ("checkmark.shield.fill", store.t("Bảo hành trọn đời", "Lifetime warranty"), store.t("Hỗ trợ đổi key miễn phí", "Free key replacement"), .purple),
+            ("headphones", store.t("Hỗ trợ 24/7", "24/7 support"), store.t("Luôn sẵn sàng giúp bạn", "Always ready to help"), .blue),
+            ("lock.fill", store.t("An toàn & Bảo mật", "Safe & Secure"), store.t("Mã hoá thông tin tuyệt đối", "Fully encrypted data"), .green),
+        ]
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            ForEach(items, id: \.1) { ic, title, sub, color in
+                HStack(spacing: 10) {
+                    Image(systemName: ic).font(.title3.bold()).foregroundStyle(color)
+                        .frame(width: 40, height: 40)
+                        .background(color.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.caption.bold()).lineLimit(1)
+                        Text(sub).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Spacer(minLength: 0)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Ví cửa hàng").font(.subheadline.bold()).foregroundStyle(.white)
-                    if let pct = config?.topupBonusPercent, pct > 0 {
-                        Text("Khuyến mãi nạp tiền +\(pct)%")
-                            .font(.caption2).foregroundStyle(.white.opacity(0.82))
-                    } else {
-                        Text("Nạp tiền · xem số dư")
-                            .font(.caption2).foregroundStyle(.white.opacity(0.82))
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    // 3 bước: Chọn game → Thanh toán → Nhận key
+    private var stepsSection: some View {
+        let steps: [(String, String, String)] = [
+            ("magnifyingglass", store.t("Chọn game", "Choose game"), store.t("Tìm & chọn gói phù hợp", "Find & pick a package")),
+            ("creditcard", store.t("Thanh toán", "Payment"), store.t("Nạp qua bank hoặc thẻ", "Pay via bank or card")),
+            ("arrow.down.circle", store.t("Nhận key", "Get key"), store.t("Key gửi tức thì", "Key sent instantly")),
+        ]
+        return HStack(spacing: 10) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { i, s in
+                VStack(spacing: 6) {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: s.0).font(.title3)
+                            .frame(width: 46, height: 46)
+                            .background(Theme.accent.opacity(0.15)).foregroundStyle(Theme.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        Text("\(i+1)").font(.system(size: 11, weight: .bold))
+                            .frame(width: 18, height: 18)
+                            .background(Theme.accent).foregroundStyle(.white).clipShape(Circle())
+                            .offset(x: 6, y: -6)
+                    }
+                    Text(s.1).font(.caption.bold()).lineLimit(1)
+                    Text(s.2).font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(2)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    // Flash sale + đếm ngược
+    private func flashSection(_ p: StoreProduct) -> some View {
+        let end = config?.flashEnd ?? 0
+        let remain = max(0, end - Int(flashNow.timeIntervalSince1970))
+        let d = remain / 86400, h = (remain % 86400) / 3600, m = (remain % 3600) / 60, s = remain % 60
+        let disc = config?.flashDiscount ?? 0
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Label(config?.flashTitle ?? "FLASH SALE", systemImage: "bolt.fill")
+                    .font(.headline).foregroundStyle(.orange)
+                Spacer()
+                HStack(spacing: 4) {
+                    ForEach([("\(d)", store.t("Ngày","D")), ("\(h)", store.t("Giờ","H")), ("\(m)", store.t("Phút","M")), ("\(s)", store.t("Giây","S"))], id: \.1) { val, unit in
+                        VStack(spacing: 1) {
+                            Text(val).font(.caption.bold().monospacedDigit())
+                                .frame(minWidth: 26).padding(.vertical, 3)
+                                .background(Color(.tertiarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 6))
+                            Text(unit).font(.system(size: 8)).foregroundStyle(.secondary)
+                        }
                     }
                 }
-                Spacer()
+            }
+            NavigationLink { StoreProductDetailView(productId: p.id) } label: {
+                HStack(spacing: 12) {
+                    StoreThumb(media: p.media, height: 80).frame(width: 120).clipShape(RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(p.name).font(.subheadline.bold()).lineLimit(2).foregroundStyle(.primary)
+                        if let pr = p.prices.first {
+                            HStack(spacing: 6) {
+                                if disc > 0 {
+                                    Text(kFormatVND(pr.amount * (100 - disc) / 100)).font(.subheadline.bold()).foregroundStyle(.orange)
+                                    Text(kFormatVND(pr.amount)).font(.caption).strikethrough().foregroundStyle(.secondary)
+                                    Text("-\(disc)%").font(.caption2.bold())
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Color.red).foregroundStyle(.white).clipShape(Capsule())
+                                } else {
+                                    Text(kFormatVND(pr.amount)).font(.subheadline.bold()).foregroundStyle(.orange)
+                                }
+                            }
+                        }
+                        stockMini(p.availableKeys)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(10)
+                .background(LinearGradient(colors: [Color.orange.opacity(0.12), Color(.secondarySystemBackground)], startPoint: .leading, endPoint: .trailing))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.5), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder private func stockMini(_ n: Int) -> some View {
+        let label = n == 0 ? store.t("Hết hàng","Sold out") : store.t("Còn","Left") + " \(n)"
+        Text(label).font(.caption2.bold())
+            .foregroundStyle(n == 0 ? .red : .green)
+    }
+
+    // Bảng xếp hạng nạp tích luỹ (top 5)
+    private func leaderboardSection(_ leaders: [ShowcaseLeader]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(store.t("Bảng xếp hạng nạp tích luỹ", "Top-up leaderboard"), systemImage: "crown.fill")
+                .font(.headline).foregroundStyle(Theme.gold)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(leaders) { l in
+                        VStack(spacing: 6) {
+                            Text("\(l.rank)").font(.headline.bold()).foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .background(rankColor(l.rank)).clipShape(Circle())
+                            Text(l.user).font(.caption2).lineLimit(1)
+                            Text(kFormatVND(l.total)).font(.caption.bold().monospacedDigit()).foregroundStyle(.green)
+                        }
+                        .frame(width: 96).padding(.vertical, 12)
+                        .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            }
+        }
+    }
+    private func rankColor(_ r: Int) -> Color {
+        switch r { case 1: return .orange; case 2: return .gray; case 3: return .brown; default: return Theme.accent }
+    }
+
+    // Giao dịch gần đây (realtime)
+    private func transactionsSection(_ orders: [ShowcaseOrder]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(store.t("Giao dịch gần đây", "Recent purchases"), systemImage: "bag.fill").font(.headline)
+                Spacer(); realtimeBadge
+            }
+            VStack(spacing: 0) {
+                ForEach(orders.prefix(8)) { o in
+                    HStack(spacing: 10) {
+                        Text(String(o.user.prefix(1)).uppercased()).font(.caption.bold())
+                            .frame(width: 30, height: 30).background(Theme.accent.opacity(0.15))
+                            .foregroundStyle(Theme.accent).clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 1) {
+                            (Text(o.user).bold() + Text(" " + store.t("mua","bought") + " ") + Text(o.product).bold())
+                                .font(.caption).lineLimit(1)
+                            Text((o.label.isEmpty ? "" : o.label + " · ") + timeAgo(o.at))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Text(kFormatVND(o.amount)).font(.caption.bold()).foregroundStyle(.primary)
+                    }
+                    .padding(.vertical, 8)
+                    if o.id != orders.prefix(8).last?.id { Divider() }
+                }
+            }
+            .padding(.horizontal, 12)
+            .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    // Nạp tiền gần đây (realtime)
+    private func topupsSection(_ topups: [ShowcaseTopup]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(store.t("Nạp tiền gần đây", "Recent top-ups"), systemImage: "wallet.pass.fill").font(.headline)
+                Spacer(); realtimeBadge
+            }
+            VStack(spacing: 0) {
+                ForEach(topups.prefix(8)) { t in
+                    HStack(spacing: 10) {
+                        Text(String(t.user.prefix(1)).uppercased()).font(.caption.bold())
+                            .frame(width: 30, height: 30).background(Color.green.opacity(0.15))
+                            .foregroundStyle(.green).clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 1) {
+                            (Text(t.user).bold() + Text(" " + store.t("đã nạp","topped up")))
+                                .font(.caption).lineLimit(1)
+                            Text(timeAgo(t.at)).font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Text("+" + kFormatVND(t.amount)).font(.caption.bold()).foregroundStyle(.green)
+                    }
+                    .padding(.vertical, 8)
+                    if t.id != topups.prefix(8).last?.id { Divider() }
+                }
+            }
+            .padding(.horizontal, 12)
+            .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var realtimeBadge: some View {
+        HStack(spacing: 4) {
+            Circle().fill(Color.green).frame(width: 6, height: 6)
+            Text("REALTIME").font(.system(size: 9, weight: .bold)).foregroundStyle(.green)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .overlay(Capsule().stroke(Color.green.opacity(0.4), lineWidth: 1))
+    }
+
+    private func timeAgo(_ at: Int) -> String {
+        let s = max(0, Int(Date().timeIntervalSince1970) - at)
+        if s < 60 { return store.t("vừa xong", "just now") }
+        if s < 3600 { return "\(s/60) " + store.t("phút trước", "min ago") }
+        if s < 86400 { return "\(s/3600) " + store.t("giờ trước", "h ago") }
+        return "\(s/86400) " + store.t("ngày trước", "d ago")
+    }
+
+    // Thanh ví: bấm để nạp tiền / xem số dư
+    private var walletBar: some View {
+        Button { showWallet = true } label: {
+            HStack {
+                Image(systemName: "wallet.pass.fill").foregroundStyle(Theme.gold)
+                Text(store.t("Ví cửa hàng", "Store wallet")).font(.subheadline.bold())
                 if let pct = config?.topupBonusPercent, pct > 0 {
-                    Text("+\(pct)%")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .background(.white.opacity(0.22))
-                        .foregroundStyle(.white)
+                    Text("KM +\(pct)%").font(.caption2.bold())
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.pink.opacity(0.2)).foregroundStyle(.pink)
                         .clipShape(Capsule())
                 }
-                Image(systemName: "chevron.right")
-                    .font(.caption.bold()).foregroundStyle(.white.opacity(0.65))
+                Spacer()
+                Text(store.t("Nạp tiền", "Top up")).font(.caption).foregroundStyle(Theme.accent)
+                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16).padding(.vertical, 14)
-            .background(
-                LinearGradient(
-                    colors: [Theme.accent, Theme.purple],
-                    startPoint: .leading, endPoint: .trailing))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(color: Theme.accent.opacity(0.35), radius: 8, x: 0, y: 4)
+            .padding(12)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)
     }
 
-    // ── Tải về miễn phí ──
+    // Mục "Tải về" hiện ngay khi vào cửa hàng (bản tải miễn phí)
     private var downloadsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Tải về miễn phí", "arrow.down.circle.fill", color: .green)
-                .padding(.horizontal)
+        VStack(alignment: .leading, spacing: 8) {
+            Label(store.t("Tải về", "Downloads"), systemImage: "arrow.down.circle.fill").font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(downloads) { d in downloadCard(d) }
+                    ForEach(downloads) { d in
+                        downloadCard(d)
+                    }
                 }
-                .padding(.horizontal)
             }
         }
     }
@@ -419,65 +676,34 @@ struct StoreView: View {
     private func downloadCard(_ d: StoreDownloadItem) -> some View {
         let url = !d.downloadUrl.isEmpty ? URL(string: d.downloadUrl) : store.api.storeDownloadURL(productId: d.id)
         return VStack(alignment: .leading, spacing: 0) {
-            StoreThumb(media: d.media, height: 100)
-            VStack(alignment: .leading, spacing: 6) {
+            StoreThumb(media: d.media, height: 90)
+            VStack(alignment: .leading, spacing: 4) {
                 Text(d.name).font(.caption.bold()).lineLimit(2)
                 if let url {
                     Link(destination: url) {
-                        Label("Tải miễn phí", systemImage: "arrow.down.circle.fill")
+                        Label(store.t("Tải", "Get"), systemImage: "arrow.down.circle")
                             .font(.caption2.bold())
-                            .frame(maxWidth: .infinity).padding(.vertical, 7)
-                            .background(Color.green.opacity(0.14)).foregroundStyle(.green)
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(Theme.accent.opacity(0.15)).foregroundStyle(Theme.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
             }
-            .padding(10)
+            .padding(8)
         }
         .frame(width: 150)
         .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.07), radius: 4, x: 0, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    // ── Tất cả sản phẩm ──
+    // Toàn bộ sản phẩm — hiện ngay khi vào cửa hàng
     private var allProductsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                sectionHeader("Tất cả sản phẩm", "bag.fill")
+                Label(store.t("Tất cả sản phẩm", "All products"), systemImage: "bag.fill")
+                    .font(.headline)
                 Spacer()
-                Menu {
-                    Section("Sắp xếp") {
-                        Button { productSort = "default" } label: {
-                            Label("Mặc định", systemImage: productSort == "default" ? "checkmark" : "list.number")
-                        }
-                        Button { productSort = "priceAsc" } label: {
-                            Label("Giá tăng dần", systemImage: productSort == "priceAsc" ? "checkmark" : "arrow.up.circle")
-                        }
-                        Button { productSort = "priceDesc" } label: {
-                            Label("Giá giảm dần", systemImage: productSort == "priceDesc" ? "checkmark" : "arrow.down.circle")
-                        }
-                        Button { productSort = "name" } label: {
-                            Label("Tên A-Z", systemImage: productSort == "name" ? "checkmark" : "textformat.abc")
-                        }
-                    }
-                    Section("Lọc") {
-                        Button {
-                            productFilter = productFilter == "inStock" ? "all" : "inStock"
-                        } label: {
-                            Label("Chỉ còn hàng", systemImage: productFilter == "inStock" ? "checkmark.circle.fill" : "shippingbox")
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "slider.horizontal.3")
-                        Text("\(displayProducts.count) sp")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(productSort != "default" || productFilter != "all" ? Theme.accent : .secondary)
-                }
             }
-            .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(displayProducts) { product in
@@ -487,206 +713,330 @@ struct StoreView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 2)
             }
         }
     }
 
+    // Khoảng giá "min ~ max" (như mẫu) — 1 giá thì hiện 1
+    private func priceRange(_ p: StoreProduct) -> String {
+        guard !p.prices.isEmpty else { return "" }
+        let amounts = p.prices.map { $0.amount }
+        let lo = amounts.min() ?? 0, hi = amounts.max() ?? 0
+        return lo == hi ? kFormatVND(lo) : "\(kFormatVND(lo)) ~ \(kFormatVND(hi))"
+    }
+
     private func allProductCard(_ p: StoreProduct) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topTrailing) {
-                StoreThumb(media: p.media, height: 130)
+        let inStock = p.availableKeys > 0
+        return VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                StoreThumb(media: p.media, height: productThumbHeight)
+                // Badge ACTIVE / Hết hàng (góc trái) như mẫu
+                HStack(spacing: 3) {
+                    Circle().fill(inStock ? Color.green : Color.red).frame(width: 5, height: 5)
+                    Text(inStock ? "ACTIVE" : store.t("Hết hàng", "Sold out"))
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .padding(5)
+                // Tim yêu thích (góc phải)
                 Button { toggleWishlist(p.id) } label: {
                     Image(systemName: wishlistIds.contains(p.id) ? "heart.fill" : "heart")
-                        .font(.caption.bold())
+                        .font(.caption2.bold())
                         .foregroundStyle(wishlistIds.contains(p.id) ? .red : .white)
-                        .padding(7)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                        .padding(8)
+                        .padding(5).background(.ultraThinMaterial).clipShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .topTrailing)
+                .padding(5)
             }
             VStack(alignment: .leading, spacing: 5) {
-                Text(p.name).font(.caption.bold()).lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(alignment: .bottom) {
-                    if !p.prices.isEmpty {
-                        Text(kFormatVND(p.prices[0].amount))
-                            .font(.caption.bold()).foregroundStyle(Theme.accent)
-                    } else {
-                        Text("Liên hệ").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(p.availableKeys > 0 ? "Còn hàng" : "Hết")
-                        .font(.system(size: 9, weight: .semibold))
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(p.availableKeys > 0
-                            ? Color.green.opacity(0.14) : Color.red.opacity(0.12))
-                        .foregroundStyle(p.availableKeys > 0 ? .green : .red)
-                        .clipShape(Capsule())
-                }
-                Label("Tải xuống", systemImage: "arrow.down.circle.fill")
+                Text(p.name)
                     .font(.caption2.bold())
-                    .frame(maxWidth: .infinity).padding(.vertical, 7)
-                    .background(Theme.accent.opacity(0.12)).foregroundStyle(Theme.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !p.prices.isEmpty {
+                    Text(priceRange(p))
+                        .font(.caption2.bold())
+                        .foregroundStyle(Theme.accent)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "cart.fill")
+                        .font(.system(size: 10))
+                    Text(store.t("Mua ngay", "Buy now"))
+                        .font(.caption2.bold())
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .background(inStock ? Theme.accent : Color.gray)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .padding(10)
+            .padding(7)
         }
-        .frame(width: 160)
+        .frame(width: productCardWidth)
         .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.06), radius: 3, x: 0, y: 2)
+    }
+
+    // "Danh mục Game": gom sản phẩm theo từng danh mục thành lưới 2 cột (như mẫu)
+    private var gameCatSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(store.t("Danh mục Game", "Game categories"), systemImage: "gamecontroller.fill").font(.headline)
+            ForEach(filteredCategories) { cat in
+                if let prods = productsByCategory[cat.id], !prods.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            if let m = cat.media.first, m.type != "video", let url = URL(string: m.url) {
+                                AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                placeholder: { Color(.tertiarySystemBackground) }
+                                    .frame(width: 38, height: 38).clipShape(RoundedRectangle(cornerRadius: 8))
+                            } else {
+                                Image(systemName: "folder.fill").foregroundStyle(Theme.gold)
+                                    .frame(width: 38, height: 38)
+                                    .background(Color(.tertiarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(cat.name).font(.subheadline.bold()).lineLimit(1)
+                                Text("\(prods.count) " + store.t("sản phẩm", "products"))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            NavigationLink { StoreFolderListView(category: cat) } label: {
+                                HStack(spacing: 2) {
+                                    Text(store.t("Xem thêm", "See all")).font(.caption.bold())
+                                    Image(systemName: "chevron.right").font(.caption2)
+                                }.foregroundStyle(Theme.accent)
+                            }
+                        }
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                            ForEach(prods.prefix(6)) { p in
+                                NavigationLink { StoreProductDetailView(productId: p.id) } label: {
+                                    productGridCard(p)
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(.secondarySystemBackground).opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
+        }
+    }
+
+    // Thẻ sản phẩm co giãn cho lưới 2 cột (badge ACTIVE + khoảng giá + Mua ngay)
+    private func productGridCard(_ p: StoreProduct) -> some View {
+        let inStock = p.availableKeys > 0
+        return VStack(alignment: .leading, spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                StoreThumb(media: p.media, height: 96)
+                HStack(spacing: 3) {
+                    Circle().fill(inStock ? Color.green : Color.red).frame(width: 5, height: 5)
+                    Text(inStock ? "ACTIVE" : store.t("Hết hàng", "Sold out"))
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(.ultraThinMaterial).clipShape(Capsule()).padding(5)
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(p.name).font(.caption.bold()).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !p.prices.isEmpty {
+                    Text(priceRange(p)).font(.caption2.bold()).foregroundStyle(Theme.accent)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "cart.fill").font(.system(size: 10))
+                    Text(store.t("Mua ngay", "Buy now")).font(.caption2.bold())
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 7)
+                .background(inStock ? Theme.accent : Color.gray).foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .padding(8)
+        }
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // Hero đầu trang: slogan lớn + nút "Mua ngay" (như mẫu)
+    private var heroSection: some View {
+        let big = {
+            let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
+            return s.isEmpty ? store.t("GAME CHẤT LƯỢNG CAO · GIÁ TỐT NHẤT", "TOP QUALITY · BEST PRICE") : s
+        }()
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(big)
+                .font(.title2.bold())
+                .foregroundStyle(LinearGradient(colors: [Theme.accent, .cyan, .purple], startPoint: .leading, endPoint: .trailing))
+                .lineLimit(3)
+            Text(store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty"))
+                .font(.subheadline).foregroundStyle(.secondary)
+            Button { showSearch = true } label: {
+                HStack(spacing: 6) {
+                    Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
+                    Image(systemName: "arrow.right")
+                }
+                .padding(.horizontal, 22).padding(.vertical, 12)
+                .background(Color.white).foregroundStyle(.black)
+                .clipShape(Capsule())
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            LinearGradient(colors: [Theme.accent.opacity(0.18), Color(.secondarySystemBackground)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
+    }
+
+    // Footer cuối trang: logo + slogan
+    private var footerSection: some View {
+        VStack(spacing: 8) {
+            AnimatedStoreLogo(
+                text: displayName,
+                effect: effectiveConfig?.logoEffect ?? "rainbow",
+                fontStyle: effectiveConfig?.logoFont ?? "rounded",
+                anim: effectiveConfig?.logoAnim ?? "shimmer",
+                size: 22)
+            Text({
+                    let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
+                    return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
+                 }())
+                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Text("© \(Calendar.current.component(.year, from: Date())) \(displayName)")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
     }
 
     private var wishlistSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                sectionHeader("Yêu thích", "heart.fill", color: .red)
+                Label(store.t("Yêu thích", "Wishlist"), systemImage: "heart.fill")
+                    .font(.headline).foregroundStyle(.red)
                 Spacer()
-                Text("\(wishlistProducts.count) sản phẩm")
-                    .font(.caption2).foregroundStyle(.secondary)
+                Text("\(wishlistProducts.count) " + store.t("sản phẩm", "products"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            .padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(wishlistProducts) { product in
-                        NavigationLink { StoreProductDetailView(productId: product.id) }
-                        label: { allProductCard(product) }
+                        NavigationLink { StoreProductDetailView(productId: product.id) } label: {
+                            allProductCard(product)
+                        }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 2)
             }
         }
     }
 
     private var recentlyViewedSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Đã xem gần đây", "clock.arrow.circlepath")
-                .padding(.horizontal)
+            Label(store.t("Đã xem gần đây", "Recently viewed"), systemImage: "clock.arrow.circlepath")
+                .font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(recentProducts) { product in
-                        NavigationLink { StoreProductDetailView(productId: product.id) }
-                        label: { allProductCard(product) }
+                        NavigationLink { StoreProductDetailView(productId: product.id) } label: {
+                            allProductCard(product)
+                        }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 2)
             }
         }
     }
 
     private var searchField: some View {
-        HStack(spacing: 10) {
+        HStack {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Tìm danh mục…", text: $search)
+            TextField(store.t("Tìm danh mục…", "Search categories…"), text: $search)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
             if !search.isEmpty {
-                Button { search = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
             }
         }
-        .padding(12)
+        .padding(10)
         .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "bag").font(.system(size: 50)).foregroundStyle(.secondary)
-            Text("Chưa có sản phẩm nào").font(.headline).foregroundStyle(.secondary)
+        VStack(spacing: 8) {
+            Image(systemName: "bag").font(.largeTitle).foregroundStyle(.secondary)
+            Text(store.t("Chưa có danh mục sản phẩm nào.", "No product categories yet.")).foregroundStyle(.secondary)
             if store.isAdmin {
-                Text("Bấm ⚙️ góc trên để thêm danh mục và sản phẩm.")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(store.t("Bấm biểu tượng ⚙️ ở góc trên để thêm danh mục, sản phẩm.",
+                             "Tap the ⚙️ icon at the top to add categories and products."))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
         }
-        .frame(maxWidth: .infinity).padding(.top, 50)
+        .frame(maxWidth: .infinity).padding(.top, 40)
     }
 
     private var storeHeader: some View {
-        ZStack(alignment: .bottomLeading) {
+        VStack(alignment: .leading, spacing: 10) {
             if let c = effectiveConfig, !c.bannerUrl.isEmpty {
-                StoreMediaCarousel(
-                    media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)],
-                    height: 200)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .overlay(
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.62)],
-                        startPoint: .center, endPoint: .bottom)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                )
-            } else {
-                LinearGradient(
-                    colors: [Theme.accent.opacity(0.80), Theme.purple.opacity(0.65)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                .frame(height: 160)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .overlay(
-                    Image(systemName: "bag.fill")
-                        .font(.system(size: 64)).foregroundStyle(.white.opacity(0.07))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                        .padding(.trailing, 20)
-                )
+                StoreMediaCarousel(media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)], height: 170)
             }
-            HStack(alignment: .bottom, spacing: 12) {
+            HStack(spacing: 12) {
                 if let c = effectiveConfig, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
                     Group {
                         if c.logoUrl.lowercased().contains(".gif") {
                             GIFWebView(url: url, contentMode: "cover")
                         } else {
                             AsyncImage(url: url) { img in img.resizable().scaledToFill() }
-                            placeholder: { Color.white.opacity(0.2) }
+                            placeholder: { Color(.secondarySystemBackground) }
                         }
                     }
-                    .frame(width: 58, height: 58)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14)
-                        .stroke(.white.opacity(0.35), lineWidth: 1.5))
-                    .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+                    .frame(width: 48, height: 48).clipShape(RoundedRectangle(cornerRadius: 10))
                 } else {
-                    Image(systemName: "bag.fill")
-                        .font(.title2).foregroundStyle(.white)
-                        .frame(width: 58, height: 58)
-                        .background(.white.opacity(0.18))
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
+                        .frame(width: 48, height: 48)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     AnimatedStoreLogo(
                         text: displayName,
                         effect: effectiveConfig?.logoEffect ?? "rainbow",
                         fontStyle: effectiveConfig?.logoFont ?? "rounded",
                         anim: effectiveConfig?.logoAnim ?? "shimmer",
-                        size: 22)
-                    Text("Sản phẩm số · key · tải về")
-                        .font(.caption2).foregroundStyle(.white.opacity(0.82))
+                        size: 24)
+                    Text({
+                            let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
+                            return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
+                         }())
+                        .font(keniosFont(config?.sloganFont ?? "rounded", size: 13))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
-            .padding(16)
         }
     }
 
     private func categoryCard(_ cat: StoreCategory) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            StoreThumb(media: cat.media, height: 150)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.68)],
-                startPoint: .center, endPoint: .bottom)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+        VStack(alignment: .leading, spacing: 0) {
+            StoreThumb(media: cat.media, height: categoryThumbHeight)
             Text(cat.name)
-                .font(.subheadline.bold())
-                .foregroundStyle(.white)
+                .font(cardScale < 0.85 ? .caption.bold() : .subheadline.bold())
                 .lineLimit(2)
-                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.10), radius: 6, x: 0, y: 3)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
     private func reload() async {
@@ -696,6 +1046,8 @@ struct StoreView: View {
         async let dlTask  = store.api.storeDownloads()
         async let ctTask  = store.api.storeContacts()
         async let catTask = store.api.storeCategories()
+        async let showTask = store.api.storeShowcase()
+        showcase = try? await showTask
         if let c = try? await cfgTask {
             config = c
             // lưu cache để lần sau (kể cả khi offline) vẫn giữ tên/logo/banner
@@ -722,7 +1074,8 @@ struct StoreView: View {
         loadingProducts = true
         var seen = Set<Int>()
         var products: [StoreProduct] = []
-        await withTaskGroup(of: [StoreProduct].self) { group in
+        var grouped: [Int: [StoreProduct]] = [:]
+        await withTaskGroup(of: (Int, [StoreProduct]).self) { group in
             for cat in categories {
                 group.addTask {
                     let folders = (try? await self.store.api.storeFolders(categoryId: cat.id)) ?? []
@@ -731,10 +1084,11 @@ struct StoreView: View {
                         let prods = (try? await self.store.api.storeProducts(folderId: folder.id)) ?? []
                         catProducts.append(contentsOf: prods)
                     }
-                    return catProducts
+                    return (cat.id, catProducts)
                 }
             }
-            for await batch in group {
+            for await (catId, batch) in group {
+                grouped[catId] = batch
                 for p in batch where !seen.contains(p.id) {
                     seen.insert(p.id)
                     products.append(p)
@@ -742,6 +1096,7 @@ struct StoreView: View {
             }
         }
         allProducts = products
+        productsByCategory = grouped
         loadingProducts = false
     }
 }
@@ -762,7 +1117,7 @@ struct StoreFolderListView: View {
                 if loading && folders.isEmpty {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 } else if folders.isEmpty {
-                    Text("Chưa có thư mục con nào.").foregroundStyle(.secondary)
+                    Text(store.t("Chưa có thư mục con nào.", "No subfolders yet.")).foregroundStyle(.secondary)
                 } else {
                     ForEach(folders) { f in
                         NavigationLink {
@@ -824,7 +1179,7 @@ struct StoreProductListView: View {
             if loading && products.isEmpty {
                 HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
             } else if products.isEmpty {
-                Text("Chưa có sản phẩm nào.").foregroundStyle(.secondary)
+                Text(store.t("Chưa có sản phẩm nào.", "No products yet.")).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).padding(.top, 40)
             } else {
                 LazyVGrid(columns: grid, spacing: 12) {
@@ -850,12 +1205,12 @@ struct StoreProductListView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(p.name).font(.subheadline.bold()).lineLimit(2)
                 if let cheapest = p.prices.map(\.amount).min() {
-                    Text("Từ \(kFormatVND(cheapest))").font(.caption.bold()).foregroundStyle(Theme.accent)
+                    Text(store.t("Từ", "From") + " \(kFormatVND(cheapest))").font(.caption.bold()).foregroundStyle(Theme.accent)
                 } else {
-                    Text("Chưa có giá").font(.caption2).foregroundStyle(.secondary)
+                    Text(store.t("Chưa có giá", "No price")).font(.caption2).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 6) {
-                    Text(p.availableKeys > 0 ? "Còn \(p.availableKeys)" : "Hết hàng")
+                    Text(p.availableKeys > 0 ? store.t("Còn", "Left") + " \(p.availableKeys)" : store.t("Hết hàng", "Out of stock"))
                         .font(.caption2)
                         .foregroundStyle(p.availableKeys > 0 ? .green : .red)
                     if p.isAcc {
@@ -959,12 +1314,12 @@ struct StoreProductDetailView: View {
                 } else if loading {
                     HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
                 } else {
-                    Text("Không tải được sản phẩm.").foregroundStyle(.secondary)
+                    Text(store.t("Không tải được sản phẩm.", "Could not load product.")).foregroundStyle(.secondary)
                 }
             }
             .padding()
         }
-        .navigationTitle(product?.name ?? "Sản phẩm")
+        .navigationTitle(product?.name ?? store.t("Sản phẩm", "Product"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await reload(); trackRecentView(productId) }
         .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) {
@@ -975,7 +1330,7 @@ struct StoreProductDetailView: View {
     private var ratingSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
-            Text("Đánh giá sản phẩm").font(.headline)
+            Text(store.t("Đánh giá sản phẩm", "Rate this product")).font(.headline)
             HStack(spacing: 12) {
                 ForEach(1...5, id: \.self) { star in
                     Button { saveRating(star) } label: {
@@ -986,7 +1341,8 @@ struct StoreProductDetailView: View {
                     .buttonStyle(.plain)
                 }
                 if myRating > 0 {
-                    Text(["", "Rất tệ", "Tệ", "Bình thường", "Tốt", "Rất tốt"][myRating])
+                    Text(store.t(["", "Rất tệ", "Tệ", "Bình thường", "Tốt", "Rất tốt"][myRating],
+                                 ["", "Very bad", "Bad", "Okay", "Good", "Excellent"][myRating]))
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
@@ -997,7 +1353,7 @@ struct StoreProductDetailView: View {
     private func contactSellerSection(_ c: StoreContacts) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
-            Label("Liên hệ người bán", systemImage: "bubble.left.and.bubble.right.fill")
+            Label(store.t("Liên hệ người bán", "Contact seller"), systemImage: "bubble.left.and.bubble.right.fill")
                 .font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -1041,11 +1397,11 @@ struct StoreProductDetailView: View {
     // Đã mua: hiện key + nút tải game
     @ViewBuilder private func ownedSection(_ m: StoreProductMine) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Bạn đã sở hữu sản phẩm này", systemImage: "checkmark.seal.fill")
+            Label(store.t("Bạn đã sở hữu sản phẩm này", "You already own this product"), systemImage: "checkmark.seal.fill")
                 .font(.headline).foregroundStyle(.green)
             if let key = m.key, !key.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("\(product?.itemLabel ?? "KEY") của bạn").font(.caption).foregroundStyle(.secondary)
+                    Text("\(product?.itemLabel ?? "KEY") " + store.t("của bạn", "(yours)")).font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Text(key).font(.body.monospaced()).textSelection(.enabled)
                         Spacer()
@@ -1066,7 +1422,7 @@ struct StoreProductDetailView: View {
     @ViewBuilder private func downloadButton(url: String?, fileId: Int?) -> some View {
         if let url, !url.isEmpty, let u = URL(string: url) {
             Link(destination: u) {
-                Label("Tải game", systemImage: "arrow.down.circle.fill")
+                Label(store.t("Tải game", "Download game"), systemImage: "arrow.down.circle.fill")
                     .frame(maxWidth: .infinity).frame(height: 48)
                     .background(Theme.accent).foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -1074,7 +1430,7 @@ struct StoreProductDetailView: View {
         } else if let fileId {
             StoreFileDownloadButton(fileId: fileId)
         } else if !(product?.isAcc ?? false) {
-            Text("Sản phẩm chưa có bản tải. Liên hệ admin.")
+            Text(store.t("Sản phẩm chưa có bản tải. Liên hệ admin.", "This product has no download yet. Contact admin."))
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -1083,53 +1439,71 @@ struct StoreProductDetailView: View {
     @ViewBuilder private func buySection(_ p: StoreProduct) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if p.prices.isEmpty {
-                Text("Sản phẩm chưa có giá bán.").foregroundStyle(.secondary)
+                Text(store.t("Sản phẩm chưa có giá bán.", "This product has no price yet.")).foregroundStyle(.secondary)
             } else {
                 HStack {
-                    Text("Số dư ví: \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
+                    Text(store.t("Số dư ví", "Wallet balance") + ": \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Nạp ví") { showWallet = true }.font(.caption.bold())
+                    Button(store.t("Nạp ví", "Top up")) { showWallet = true }.font(.caption.bold())
                 }
 
-                Text("Chọn gói thời hạn").font(.headline)
+                Text(store.t("Chọn gói thời hạn", "Choose a plan")).font(.headline)
                 ForEach(p.prices) { price in
+                    let outOfStock = !price.inStock
                     Button {
-                        selectedPrice = price
+                        if !outOfStock { selectedPrice = price }
                     } label: {
                         HStack {
                             Image(systemName: selectedPrice?.id == price.id ? "largecircle.fill.circle" : "circle")
-                                .foregroundStyle(Theme.accent)
-                            Text(price.label)
+                                .foregroundStyle(outOfStock ? .secondary : Theme.accent)
+                            Text(price.label).foregroundStyle(outOfStock ? .secondary : .primary)
+                            if outOfStock {
+                                Text(store.t("Hết hàng", "Out of stock"))
+                                    .font(.caption2.bold())
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Color.red.opacity(0.15)).foregroundStyle(.red)
+                                    .clipShape(Capsule())
+                            } else if let a = price.available, a <= 5 {
+                                Text(store.t("Còn", "Left") + " \(a)")
+                                    .font(.caption2).foregroundStyle(.orange)
+                            }
                             Spacer()
-                            Text(kFormatVND(price.amount)).bold().foregroundStyle(Theme.accent)
+                            Text(kFormatVND(price.amount)).bold()
+                                .foregroundStyle(outOfStock ? .secondary : Theme.accent)
+                                .strikethrough(outOfStock)
                         }
                         .padding(10).background(Color(.secondarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
+                    .disabled(outOfStock)
                 }
 
-                let priceAmt = selectedPrice?.amount ?? p.prices.first?.amount ?? 0
+                // Tồn kho theo mốc đã chọn (mỗi mốc có kho riêng)
+                let sel = selectedPrice ?? p.prices.first(where: { $0.inStock }) ?? p.prices.first
+                let tierInStock = sel?.inStock ?? false
+                let priceAmt = sel?.amount ?? 0
                 let enough = balance >= priceAmt
                 Button {
                     Task { await buy(p) }
                 } label: {
                     HStack {
                         if buying { ProgressView().tint(.white) }
-                        Text(buying ? "Đang xử lý..."
-                             : (p.availableKeys <= 0 ? "Tạm hết hàng"
-                                : (enough ? "Mua bằng số dư (\(kFormatVND(priceAmt)))" : "Nạp thêm để mua")))
+                        Text(buying ? store.t("Đang xử lý...", "Processing...")
+                             : (!tierInStock ? store.t("Mốc này đã hết hàng", "This plan is out of stock")
+                                : (enough ? store.t("Mua bằng số dư", "Pay with wallet") + " (\(kFormatVND(priceAmt)))"
+                                          : store.t("Nạp thêm để mua", "Top up to buy"))))
                     }
                     .font(.headline).foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 50)
-                    .background(p.availableKeys > 0 ? Theme.purple : Color.gray)
+                    .background(tierInStock ? Theme.purple : Color.gray)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .disabled(buying || p.availableKeys <= 0)
+                .disabled(buying || !tierInStock)
 
-                if p.availableKeys > 0 && !p.prices.isEmpty {
+                if tierInStock && !p.prices.isEmpty {
                     Button { addToCart(p) } label: {
-                        Label(isInCart(p.id) ? "Đã thêm vào giỏ hàng" : "Thêm vào giỏ hàng",
+                        Label(isInCart(p.id) ? store.t("Đã thêm vào giỏ hàng", "Added to cart") : store.t("Thêm vào giỏ hàng", "Add to cart"),
                               systemImage: isInCart(p.id) ? "cart.badge.checkmark" : "cart.badge.plus")
                             .font(.subheadline.bold())
                             .foregroundStyle(Theme.accent)
@@ -1141,7 +1515,7 @@ struct StoreProductDetailView: View {
                     .disabled(isInCart(p.id))
                 }
 
-                Text("Mua bằng số dư ví — giao key/acc ngay lập tức.")
+                Text(store.t("Mua bằng số dư ví — giao key/acc ngay lập tức.", "Pay with wallet balance — key/account delivered instantly."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -1154,7 +1528,10 @@ struct StoreProductDetailView: View {
         do {
             let p = try await pTask
             product = p
-            if selectedPrice == nil { selectedPrice = p.prices.first }
+            // Mặc định chọn mốc CÒN HÀNG đầu tiên (mỗi mốc có kho riêng)
+            if selectedPrice == nil {
+                selectedPrice = p.prices.first(where: { $0.inStock }) ?? p.prices.first
+            }
         } catch { self.error = error.localizedDescription }
         contacts = try? await cTask
         mine = try? await store.api.storeProductMine(productId)
@@ -1169,7 +1546,7 @@ struct StoreProductDetailView: View {
     private func buy(_ p: StoreProduct) async {
         let priceAmt = selectedPrice?.amount ?? p.prices.first?.amount ?? 0
         if balance < priceAmt {
-            info = nil; error = "Số dư ví không đủ. Hãy nạp thêm vào ví."
+            info = nil; error = store.t("Số dư ví không đủ. Hãy nạp thêm vào ví.", "Insufficient wallet balance. Please top up.")
             showWallet = true
             return
         }
@@ -1204,7 +1581,7 @@ struct StoreFileDownloadButton: View {
         VStack {
             if let localURL {
                 ShareLink(item: localURL) {
-                    Label("Lưu / mở file đã tải", systemImage: "square.and.arrow.up")
+                    Label(store.t("Lưu / mở file đã tải", "Save / open downloaded file"), systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity).frame(height: 48)
                         .background(Theme.accent).foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -1213,7 +1590,7 @@ struct StoreFileDownloadButton: View {
                 Button { Task { await download() } } label: {
                     HStack {
                         if downloading { ProgressView().tint(.white) }
-                        Text(downloading ? "Đang tải..." : "Tải game")
+                        Text(downloading ? store.t("Đang tải...", "Downloading...") : store.t("Tải game", "Download game"))
                     }
                     .frame(maxWidth: .infinity).frame(height: 48)
                     .background(Theme.accent).foregroundStyle(.white)
@@ -1248,14 +1625,14 @@ struct StoreMyOrdersView: View {
                 if loading && orders.isEmpty {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 } else if orders.isEmpty {
-                    Text("Bạn chưa mua sản phẩm nào.").foregroundStyle(.secondary)
+                    Text(store.t("Bạn chưa mua sản phẩm nào.", "You haven't bought any products.")).foregroundStyle(.secondary)
                 } else {
                     ForEach(orders) { o in orderRow(o) }
                 }
             }
-            .navigationTitle("Đơn của tôi")
+            .navigationTitle(store.t("Đơn của tôi", "My orders"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await reload() }
             .refreshable { await reload() }
         }
@@ -1284,7 +1661,7 @@ struct StoreMyOrdersView: View {
             if o.status == "completed" {
                 if let url = o.downloadUrl, !url.isEmpty, let u = URL(string: url) {
                     Link(destination: u) {
-                        Label("Tải game", systemImage: "arrow.down.circle.fill").font(.caption.bold())
+                        Label(store.t("Tải game", "Download game"), systemImage: "arrow.down.circle.fill").font(.caption.bold())
                     }
                 } else if let fid = o.downloadFileId {
                     StoreFileDownloadButton(fileId: fid)
@@ -1301,32 +1678,116 @@ struct StoreMyOrdersView: View {
     }
 }
 
-// Menu đổi giao diện sáng/tối/tự động + ngôn ngữ (dùng chung — áp cho toàn app)
+// Nút mở bảng tuỳ chỉnh giao diện + ngôn ngữ (dùng chung — áp cho toàn app)
 struct AppearanceMenu: View {
     @EnvironmentObject var store: AppStore
+    @State private var show = false
     var body: some View {
-        Menu {
-            Menu("Giao diện") {
-                Button { store.setThemeMode("light") } label: {
-                    Label("Sáng", systemImage: store.themeMode == "light" ? "checkmark" : "sun.max")
-                }
-                Button { store.setThemeMode("dark") } label: {
-                    Label("Tối", systemImage: store.themeMode == "dark" ? "checkmark" : "moon")
-                }
-                Button { store.setThemeMode("system") } label: {
-                    Label("Tự động (cân bằng)", systemImage: store.themeMode == "system" ? "checkmark" : "circle.lefthalf.filled")
-                }
-            }
-            Menu("Ngôn ngữ") {
-                ForEach(kAppLanguages, id: \.0) { code, name in
-                    Button { store.setLanguage(code) } label: {
-                        Label(name, systemImage: store.language == code ? "checkmark" : "globe")
+        Button { show = true } label: {
+            Image(systemName: "paintbrush.pointed.fill")
+        }
+        .sheet(isPresented: $show) { AppearanceSheet().environmentObject(store) }
+    }
+}
+
+// Bảng tuỳ chỉnh đẹp: chọn Giao diện (thẻ) + Ngôn ngữ (lưới có cờ)
+struct AppearanceSheet: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    private let langCols = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    // ----- Giao diện -----
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(store.t("Giao diện", "Theme"), systemImage: "circle.lefthalf.filled")
+                            .font(.headline)
+                        HStack(spacing: 12) {
+                            themeCard("light",  store.t("Sáng", "Light"),  "sun.max.fill",     [.orange, .yellow])
+                            themeCard("dark",   store.t("Tối", "Dark"),    "moon.stars.fill",  [.indigo, .purple])
+                            themeCard("system", store.t("Tự động", "Auto"), "circle.lefthalf.filled", [.blue, .cyan])
+                        }
+                    }
+
+                    // ----- Ngôn ngữ -----
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(store.t("Ngôn ngữ", "Language"), systemImage: "globe")
+                            .font(.headline)
+                        LazyVGrid(columns: langCols, spacing: 10) {
+                            ForEach(kAppLanguages, id: \.0) { code, name in
+                                langCard(code, name)
+                            }
+                        }
                     }
                 }
+                .padding()
             }
-        } label: {
-            Image(systemName: "paintbrush")
+            .navigationTitle(store.t("Tuỳ chỉnh giao diện", "Appearance"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(store.t("Xong", "Done")) { dismiss() }.bold()
+                }
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
+    }
+
+    private func themeCard(_ mode: String, _ title: String, _ icon: String, _ colors: [Color]) -> some View {
+        let on = store.themeMode == mode
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { store.setThemeMode(mode) }
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                Text(title).font(.subheadline.bold()).foregroundStyle(.primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(on ? store.accentColor : Color.clear, lineWidth: 2)
+            )
+            .overlay(alignment: .topTrailing) {
+                if on {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(store.accentColor).padding(6)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func langCard(_ code: String, _ name: String) -> some View {
+        let on = store.language == code
+        return Button {
+            store.setLanguage(code)
+        } label: {
+            HStack(spacing: 6) {
+                Text(name).font(.subheadline).foregroundStyle(.primary).lineLimit(1)
+                Spacer(minLength: 2)
+                if on { Image(systemName: "checkmark.circle.fill").foregroundStyle(store.accentColor) }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(on ? store.accentColor.opacity(0.14) : Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(on ? store.accentColor.opacity(0.6) : Color.clear, lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -1354,7 +1815,7 @@ struct StoreGlobalSearchView: View {
                 }
 
                 if !matchingCategories.isEmpty {
-                    Section("Danh mục (\(matchingCategories.count))") {
+                    Section(store.t("Danh mục", "Categories") + " (\(matchingCategories.count))") {
                         ForEach(matchingCategories) { cat in
                             NavigationLink(cat.name) {
                                 StoreFolderListView(category: cat)
@@ -1365,7 +1826,7 @@ struct StoreGlobalSearchView: View {
 
                 let matchFolders = folders.filter { $0.name.localizedCaseInsensitiveContains(query) }
                 if !matchFolders.isEmpty {
-                    Section("Thư mục (\(matchFolders.count))") {
+                    Section(store.t("Thư mục", "Folders") + " (\(matchFolders.count))") {
                         ForEach(matchFolders) { f in
                             NavigationLink(f.name) {
                                 StoreProductListView(folder: f)
@@ -1379,7 +1840,7 @@ struct StoreGlobalSearchView: View {
                     p.description.localizedCaseInsensitiveContains(query)
                 }
                 if !matchProducts.isEmpty {
-                    Section("Sản phẩm (\(matchProducts.count))") {
+                    Section(store.t("Sản phẩm", "Products") + " (\(matchProducts.count))") {
                         ForEach(matchProducts) { p in
                             NavigationLink {
                                 StoreProductDetailView(productId: p.id)
@@ -1387,11 +1848,11 @@ struct StoreGlobalSearchView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(p.name).font(.subheadline.bold())
                                     if let cheapest = p.prices.map(\.amount).min() {
-                                        Text("Từ \(kFormatVND(cheapest))")
+                                        Text(store.t("Từ", "From") + " \(kFormatVND(cheapest))")
                                             .font(.caption).foregroundStyle(Theme.accent)
                                     }
                                     HStack {
-                                        Text(p.availableKeys > 0 ? "Còn \(p.availableKeys)" : "Hết hàng")
+                                        Text(p.availableKeys > 0 ? store.t("Còn", "Left") + " \(p.availableKeys)" : store.t("Hết hàng", "Out of stock"))
                                             .font(.caption2)
                                             .foregroundStyle(p.availableKeys > 0 ? .green : .red)
                                     }
@@ -1404,7 +1865,7 @@ struct StoreGlobalSearchView: View {
                 if !loading && !query.isEmpty && matchingCategories.isEmpty &&
                     folders.filter({ $0.name.localizedCaseInsensitiveContains(query) }).isEmpty &&
                     products.filter({ $0.name.localizedCaseInsensitiveContains(query) }).isEmpty {
-                    Text("Không tìm thấy kết quả nào cho \"\(query)\".")
+                    Text(store.t("Không tìm thấy kết quả nào cho", "No results found for") + " \"\(query)\".")
                         .foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
                 }
@@ -1412,7 +1873,8 @@ struct StoreGlobalSearchView: View {
                 if query.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.secondary)
-                        Text("Nhập tên sản phẩm, danh mục hoặc thư mục để tìm kiếm.")
+                        Text(store.t("Nhập tên sản phẩm, danh mục hoặc thư mục để tìm kiếm.",
+                                     "Type a product, category, or folder name to search."))
                             .font(.caption).foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
@@ -1421,10 +1883,10 @@ struct StoreGlobalSearchView: View {
                     .listRowBackground(Color.clear)
                 }
             }
-            .navigationTitle("Tìm kiếm")
+            .navigationTitle(store.t("Tìm kiếm", "Search"))
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Tìm sản phẩm, danh mục...")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: store.t("Tìm sản phẩm, danh mục...", "Search products, categories..."))
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await loadAll() }
             .onChange(of: query) { _ in }
         }
@@ -1483,14 +1945,15 @@ struct StoreCartView: View {
                 if cartItems.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "cart").font(.system(size: 60)).foregroundStyle(.secondary)
-                        Text("Giỏ hàng trống").font(.title3.bold())
-                        Text("Bấm 'Thêm vào giỏ' ở trang chi tiết sản phẩm để mua nhiều cùng lúc.")
+                        Text(store.t("Giỏ hàng trống", "Cart is empty")).font(.title3.bold())
+                        Text(store.t("Bấm 'Thêm vào giỏ' ở trang chi tiết sản phẩm để mua nhiều cùng lúc.",
+                                     "Tap 'Add to cart' on a product page to buy several at once."))
                             .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
-                        Section("Sản phẩm (\(cartItems.count))") {
+                        Section(store.t("Sản phẩm", "Products") + " (\(cartItems.count))") {
                             ForEach(cartItems) { item in
                                 HStack(spacing: 10) {
                                     VStack(alignment: .leading, spacing: 4) {
@@ -1508,9 +1971,9 @@ struct StoreCartView: View {
                             }
                         }
 
-                        Section("Mã khuyến mãi") {
+                        Section(store.t("Mã khuyến mãi", "Promo code")) {
                             HStack(spacing: 8) {
-                                TextField("Nhập mã giảm giá...", text: $promoCode)
+                                TextField(store.t("Nhập mã giảm giá...", "Enter discount code..."), text: $promoCode)
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .submitLabel(.done)
@@ -1522,13 +1985,13 @@ struct StoreCartView: View {
                                         Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
                                     }.buttonStyle(.borderless)
                                 } else {
-                                    Button("Áp dụng") { Task { await applyPromo() } }
+                                    Button(store.t("Áp dụng", "Apply")) { Task { await applyPromo() } }
                                         .font(.caption.bold())
                                         .disabled(promoCode.trimmingCharacters(in: .whitespaces).isEmpty)
                                 }
                             }
                             if let r = promoResult {
-                                Label("Giảm \(r.label) — tiết kiệm \(kFormatVND(discount))", systemImage: "checkmark.seal.fill")
+                                Label(store.t("Giảm", "Off") + " \(r.label) — " + store.t("tiết kiệm", "save") + " \(kFormatVND(discount))", systemImage: "checkmark.seal.fill")
                                     .font(.caption).foregroundStyle(.green)
                             }
                             if !promoError.isEmpty {
@@ -1539,33 +2002,33 @@ struct StoreCartView: View {
                         Section {
                             if discount > 0 {
                                 HStack {
-                                    Text("Giá gốc").font(.subheadline).foregroundStyle(.secondary)
+                                    Text(store.t("Giá gốc", "Subtotal")).font(.subheadline).foregroundStyle(.secondary)
                                     Spacer()
                                     Text(kFormatVND(rawTotal)).font(.subheadline).strikethrough().foregroundStyle(.secondary)
                                 }
                                 HStack {
-                                    Text("Giảm giá").font(.subheadline).foregroundStyle(.green)
+                                    Text(store.t("Giảm giá", "Discount")).font(.subheadline).foregroundStyle(.green)
                                     Spacer()
                                     Text("-\(kFormatVND(discount))").font(.subheadline.bold()).foregroundStyle(.green)
                                 }
                             }
                             HStack {
-                                Text("Tổng cộng").font(.headline)
+                                Text(store.t("Tổng cộng", "Total")).font(.headline)
                                 Spacer()
                                 Text(kFormatVND(total)).font(.headline.bold()).foregroundStyle(Theme.accent)
                             }
                             HStack {
-                                Text("Số dư ví: \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
+                                Text(store.t("Số dư ví", "Wallet balance") + ": \(kFormatVND(balance))").font(.caption).foregroundStyle(.secondary)
                                 Spacer()
-                                Button("Nạp ví") { showWallet = true }.font(.caption.bold())
+                                Button(store.t("Nạp ví", "Top up")) { showWallet = true }.font(.caption.bold())
                             }
                             Button {
                                 Task { await checkout() }
                             } label: {
                                 HStack {
                                     if buying { ProgressView().tint(.white).padding(.trailing, 4) }
-                                    Text(buying ? "Đang thanh toán..."
-                                         : (balance >= total ? "Thanh toán \(kFormatVND(total))" : "Số dư không đủ — Nạp ví"))
+                                    Text(buying ? store.t("Đang thanh toán...", "Paying...")
+                                         : (balance >= total ? store.t("Thanh toán", "Pay") + " \(kFormatVND(total))" : store.t("Số dư không đủ — Nạp ví", "Insufficient balance — Top up")))
                                 }
                                 .font(.headline).foregroundStyle(.white)
                                 .frame(maxWidth: .infinity).frame(height: 50)
@@ -1585,15 +2048,15 @@ struct StoreCartView: View {
                     }
                 }
             }
-            .navigationTitle("Giỏ hàng")
+            .navigationTitle(store.t("Giỏ hàng", "Cart"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if !cartItems.isEmpty {
-                        Button("Xoá hết", role: .destructive) { cartRaw = "[]" }
+                        Button(store.t("Xoá hết", "Clear all"), role: .destructive) { cartRaw = "[]" }
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } }
             }
             .task { await reloadBalance() }
             .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) { StoreWalletView() }

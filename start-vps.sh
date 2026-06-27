@@ -63,14 +63,14 @@ pip install \
     "uvicorn[standard]>=0.29" \
     "httpx>=0.27" \
     "cryptography>=42" \
-    "stripe>=8.0" \
     "python-multipart>=0.0.9" \
     "pypdf" \
     "python-docx" \
     "openpyxl" \
     "TikTokLive>=6.0" \
     "aiosmtpd>=1.4" \
-    "yt-dlp"
+    "yt-dlp" \
+    "PyJWT>=2.8"
 
 # 5. Tạo file .env
 echo "▸ [5/7] Tạo file cấu hình..."

@@ -3,24 +3,26 @@ import UniformTypeIdentifiers
 import QuickLook
 
 struct LibraryView: View {
+    @EnvironmentObject var store: AppStore
     @State private var seg = 1
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 KHeroHeader(icon: "clock.arrow.circlepath",
-                            title: "Thư viện",
-                            subtitle: "Video đã tải · File · Lịch sử nội dung")
+                            title: store.t("Thư viện", "Library"),
+                            subtitle: store.t("Video đã tải · File · Lịch sử nội dung",
+                                              "Downloaded videos · Files · Content history"))
                     .padding(.horizontal)
                     .padding(.top, 8)
 
                 Picker("", selection: $seg) {
                     Text("File").tag(1)
-                    Text("Lịch sử").tag(0)
+                    Text(store.t("Lịch sử", "History")).tag(0)
                 }
                 .pickerStyle(.segmented).padding()
                 if seg == 0 { HistoryPane() } else { FilesPane() }
             }
-            .navigationTitle("Thư viện")
+            .navigationTitle(store.t("Thư viện", "Library"))
         }
     }
 }
@@ -38,12 +40,12 @@ struct HistoryPane: View {
         List {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Tìm kiếm...", text: $search)
+                TextField(store.t("Tìm kiếm...", "Search..."), text: $search)
             }
             Button {
                 store.openConversation(nil)
             } label: {
-                Label("Hội thoại mới", systemImage: "plus").foregroundStyle(Theme.accent)
+                Label(store.t("Hội thoại mới", "New conversation"), systemImage: "plus").foregroundStyle(Theme.accent)
             }
             ForEach(filtered) { c in
                 Button { store.openConversation(c) } label: {
@@ -64,7 +66,7 @@ struct HistoryPane: View {
         .refreshable { await store.refreshConversations() }
         .overlay {
             if store.conversations.isEmpty {
-                Text("Bạn chưa lưu cuộc trò chuyện nào").foregroundStyle(.secondary)
+                Text(store.t("Bạn chưa lưu cuộc trò chuyện nào", "You haven't saved any conversations")).foregroundStyle(.secondary)
             }
         }
     }
@@ -152,8 +154,8 @@ struct FilesPane: View {
 
                 Button { showImporter = true } label: {
                     VStack {
-                        Label("Tải file lên từ máy", systemImage: "plus")
-                        Text("Ảnh · PDF · Code · Tài liệu").font(.caption).foregroundStyle(.secondary)
+                        Label(store.t("Tải file lên từ máy", "Upload file from device"), systemImage: "plus")
+                        Text(store.t("Ảnh · PDF · Code · Tài liệu", "Images · PDF · Code · Documents")).font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity)
                 }
             }
@@ -244,6 +246,7 @@ struct FilesPane: View {
 }
 
 struct RunResultView: View {
+    @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) var dismiss
     let result: FileRunResult
 
@@ -277,14 +280,14 @@ struct RunResultView: View {
                             .textSelection(.enabled)
                     }
                     if result.stdout.isEmpty && result.stderr.isEmpty {
-                        Text("Không có đầu ra.").foregroundStyle(.secondary)
+                        Text(store.t("Không có đầu ra.", "No output.")).foregroundStyle(.secondary)
                     }
                 }
                 .padding()
             }
-            .navigationTitle("Kết quả chạy")
+            .navigationTitle(store.t("Kết quả chạy", "Run result"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
         }
     }
 }

@@ -19,7 +19,7 @@ struct StoreWalletView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Số dư ví") {
+                Section(store.t("Số dư ví", "Wallet balance")) {
                     HStack {
                         Image(systemName: "wallet.pass.fill").foregroundStyle(Theme.gold)
                         Text(kFormatVND(wallet?.balance ?? 0))
@@ -27,15 +27,15 @@ struct StoreWalletView: View {
                         Spacer()
                     }
                     if let pct = wallet?.bonusPercent, pct > 0 {
-                        Label("Đang khuyến mãi +\(pct)% khi nạp ví!", systemImage: "gift.fill")
+                        Label(store.t("Đang khuyến mãi", "Promo") + " +\(pct)% " + store.t("khi nạp ví!", "on top-up!"), systemImage: "gift.fill")
                             .font(.caption).foregroundStyle(.pink)
                     }
                 }
 
                 if topup == nil {
-                    Section("Nạp tiền vào ví") {
+                    Section(store.t("Nạp tiền vào ví", "Top up wallet")) {
                         HStack {
-                            TextField("Số tiền muốn nạp", text: $amountText).keyboardType(.numberPad)
+                            TextField(store.t("Số tiền muốn nạp", "Amount to top up"), text: $amountText).keyboardType(.numberPad)
                             Text("đ").foregroundStyle(.secondary)
                         }
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -57,7 +57,7 @@ struct StoreWalletView: View {
                         } label: {
                             HStack {
                                 if creating { ProgressView().tint(.white) }
-                                Text(creating ? "Đang tạo..." : "Tạo lệnh nạp")
+                                Text(creating ? store.t("Đang tạo...", "Creating...") : store.t("Tạo lệnh nạp", "Create top-up"))
                             }
                             .frame(maxWidth: .infinity).frame(height: 44)
                             .background((amount ?? 0) >= 1000 ? Theme.purple : Color.gray)
@@ -72,14 +72,14 @@ struct StoreWalletView: View {
                 if let info { Section { Text(info).font(.footnote).foregroundStyle(.green) } }
                 if let error { Section { Text(error).font(.footnote).foregroundStyle(.red) } }
 
-                Section("Lịch sử ví") {
+                Section(store.t("Lịch sử ví", "Wallet history")) {
                     if (wallet?.tx ?? []).isEmpty {
-                        Text("Chưa có giao dịch nào.").foregroundStyle(.secondary)
+                        Text(store.t("Chưa có giao dịch nào.", "No transactions yet.")).foregroundStyle(.secondary)
                     } else {
                         ForEach(wallet!.tx) { tx in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(tx.kind == "topup" ? "Nạp ví" : "Mua hàng").font(.subheadline)
+                                    Text(tx.kind == "topup" ? store.t("Nạp ví", "Top up") : store.t("Mua hàng", "Purchase")).font(.subheadline)
                                     if !tx.note.isEmpty {
                                         Text(tx.note).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                     }
@@ -93,28 +93,28 @@ struct StoreWalletView: View {
                     }
                 }
             }
-            .navigationTitle("Ví cửa hàng")
+            .navigationTitle(store.t("Ví cửa hàng", "Store wallet"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await reload() }
             .refreshable { await reload() }
         }
     }
 
     @ViewBuilder private func topupBox(_ t: StoreTopupResponse) -> some View {
-        Section("Quét mã QR để nạp \(kFormatVND(t.amount))") {
+        Section(store.t("Quét mã QR để nạp", "Scan QR to top up") + " \(kFormatVND(t.amount))") {
             if let qr = t.qrUrl, let url = URL(string: qr) {
                 AsyncImage(url: url) { img in
                     img.resizable().scaledToFit().frame(maxWidth: 240).frame(maxWidth: .infinity)
                 } placeholder: { ProgressView().frame(maxWidth: .infinity) }
             }
-            LabeledContent("Ngân hàng", value: t.bankInfo.bank)
-            LabeledContent("Số tài khoản", value: t.bankInfo.account)
-            LabeledContent("Chủ tài khoản", value: t.bankInfo.name)
-            LabeledContent("Nội dung CK", value: t.bankInfo.content)
-            LabeledContent("Số tiền", value: kFormatVND(t.amount))
+            LabeledContent(store.t("Ngân hàng", "Bank"), value: t.bankInfo.bank)
+            LabeledContent(store.t("Số tài khoản", "Account number"), value: t.bankInfo.account)
+            LabeledContent(store.t("Chủ tài khoản", "Account holder"), value: t.bankInfo.name)
+            LabeledContent(store.t("Nội dung CK", "Transfer note"), value: t.bankInfo.content)
+            LabeledContent(store.t("Số tiền", "Amount"), value: kFormatVND(t.amount))
             if t.bonus > 0 {
-                LabeledContent("Nhận vào ví", value: kFormatVND(t.credited) + " (+\(t.bonusPercent)%)")
+                LabeledContent(store.t("Nhận vào ví", "Credited"), value: kFormatVND(t.credited) + " (+\(t.bonusPercent)%)")
             }
             Text(t.message).font(.caption).foregroundStyle(.secondary)
             Button {
@@ -122,13 +122,13 @@ struct StoreWalletView: View {
             } label: {
                 HStack {
                     if checking { ProgressView() }
-                    Text(checking ? "Đang kiểm tra..." : "Tôi đã chuyển khoản — kiểm tra")
+                    Text(checking ? store.t("Đang kiểm tra...", "Checking...") : store.t("Tôi đã chuyển khoản — kiểm tra", "I've transferred — check"))
                 }
                 .frame(maxWidth: .infinity).frame(height: 44)
                 .background(Color.green.opacity(0.18)).foregroundStyle(.green)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }.disabled(checking)
-            Button("Huỷ lệnh nạp", role: .destructive) { topup = nil; info = nil }
+            Button(store.t("Huỷ lệnh nạp", "Cancel top-up"), role: .destructive) { topup = nil; info = nil }
         }
     }
 
@@ -148,10 +148,11 @@ struct StoreWalletView: View {
         if let w {
             wallet = w
             if w.balance > before {
-                info = "Nạp ví thành công! Số dư: \(kFormatVND(w.balance))"
+                info = store.t("Nạp ví thành công! Số dư:", "Top-up successful! Balance:") + " \(kFormatVND(w.balance))"
                 topup = nil; amountText = ""
             } else {
-                info = "Chưa nhận được tiền. Vui lòng đợi thêm rồi kiểm tra lại."
+                info = store.t("Chưa nhận được tiền. Vui lòng đợi thêm rồi kiểm tra lại.",
+                               "Payment not received yet. Please wait and check again.")
             }
         }
         checking = false
