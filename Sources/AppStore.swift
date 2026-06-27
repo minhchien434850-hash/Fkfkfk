@@ -84,6 +84,13 @@ final class AppStore: ObservableObject {
         username = d.string(forKey: "username")
         email = d.string(forKey: "email")
         phone = d.string(forKey: "phone")
+        // Cài app mới: Keychain trên iOS KHÔNG tự xoá khi gỡ app → token cũ còn sót
+        // làm app "tự vào thẳng". UserDefaults bị xoá khi gỡ app, nên dùng cờ này
+        // để phát hiện lần cài mới và xoá token cũ → luôn bắt đầu ở màn đăng nhập.
+        if !d.bool(forKey: "kenios_installed_flag") {
+            Keychain.delete("token")
+            d.set(true, forKey: "kenios_installed_flag")
+        }
         token = Keychain.load("token")
         isAdmin = d.bool(forKey: "isAdmin")
         plan = d.string(forKey: "plan") ?? "free"
@@ -132,6 +139,25 @@ final class AppStore: ObservableObject {
     }
     /// Dịch nhanh: trả tiếng Anh nếu đang chọn EN, ngược lại tiếng Việt.
     func t(_ vi: String, _ en: String) -> String { language == "en" ? en : vi }
+
+    // ===== Nhớ tài khoản & mật khẩu (lưu trong Keychain, có mã hoá) =====
+    var rememberLogin: Bool {
+        get { d.bool(forKey: "rememberLogin") }
+        set { d.set(newValue, forKey: "rememberLogin") }
+    }
+    var savedUsername: String { Keychain.load("saved_username") ?? "" }
+    var savedPassword: String { Keychain.load("saved_password") ?? "" }
+
+    func saveCredentials(_ u: String, _ p: String) {
+        Keychain.save("saved_username", u)
+        Keychain.save("saved_password", p)
+        rememberLogin = true
+    }
+    func forgetCredentials() {
+        Keychain.delete("saved_username")
+        Keychain.delete("saved_password")
+        rememberLogin = false
+    }
     func setSystemPrompt(_ v: String) { systemPrompt = v; d.set(v, forKey: "systemPrompt") }
     func setBiometrics(_ v: Bool) { biometricsEnabled = v; d.set(v, forKey: "biometricsEnabled") }
 
@@ -261,6 +287,10 @@ final class AppStore: ObservableObject {
         if let phone { self.phone = phone; d.set(phone, forKey: "phone") }
     }
 
+    /// Bỏ qua tự-đăng-nhập đúng 1 lần ngay sau khi người dùng bấm Đăng xuất
+    /// (tránh kẹt: vừa đăng xuất lại tự vào). Lần mở app sau vẫn tự đăng nhập.
+    var suppressAutoLogin = false
+
     func logout() {
         token = nil; username = nil; isAdmin = false; plan = "free"; credits = 0
         Keychain.delete("token")
@@ -269,6 +299,7 @@ final class AppStore: ObservableObject {
         favorites = []; promptTemplates = []
         friends = []; friendRequests = []; directMessages = [:]
         d.set(false, forKey: "isAdmin")
+        suppressAutoLogin = true   // sau khi đăng xuất chỉ điền sẵn, không tự đăng nhập ngay
     }
 
     func loadProviders() async {

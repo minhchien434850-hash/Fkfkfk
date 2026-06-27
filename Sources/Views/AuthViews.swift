@@ -8,6 +8,8 @@ struct LoginView: View {
     @State private var error: String?
     @State private var goRegister = false
     @State private var showConnections = false
+    @State private var remember = false
+    @State private var didAutoTry = false
 
     var body: some View {
         NavigationStack {
@@ -38,12 +40,21 @@ struct LoginView: View {
                         Text("Username").font(.caption).foregroundStyle(.secondary)
                         TextField("kenios_user", text: $username)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .textContentType(.username)   // iOS gợi ý lưu/điền từ iCloud Keychain
                             .padding(12).background(Color(.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         Text("Mật khẩu").font(.caption).foregroundStyle(.secondary)
                         SecureField("••••••••", text: $password)
+                            .textContentType(.password)   // bật lưu mật khẩu vào Apple ID / trình quản lý
+                            .submitLabel(.go)
+                            .onSubmit { Task { await doLogin() } }
                             .padding(12).background(Color(.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        Toggle(isOn: $remember) {
+                            Label("Nhớ tài khoản & mật khẩu", systemImage: "lock.rotation")
+                                .font(.subheadline)
+                        }.tint(Theme.accent).padding(.top, 4)
                     }.padding(.horizontal)
 
                     if let error { Text(error).foregroundStyle(.red).font(.footnote) }
@@ -96,6 +107,31 @@ struct LoginView: View {
                 }
             }
             .sheet(isPresented: $showConnections) { ConnectionsView() }
+            .task { await prepareLogin() }
+        }
+    }
+
+    /// Khi mở màn đăng nhập: điền sẵn tài khoản vừa đăng ký (nếu có) hoặc
+    /// tài khoản đã "nhớ" — và tự đăng nhập nếu bật nhớ mật khẩu.
+    private func prepareLogin() async {
+        guard !didAutoTry else { return }
+        didAutoTry = true
+        remember = store.rememberLogin
+        let d = UserDefaults.standard
+        if let justRegistered = d.string(forKey: "pendingLoginUser"), !justRegistered.isEmpty {
+            username = justRegistered
+            d.removeObject(forKey: "pendingLoginUser")
+            return
+        }
+        if remember && !store.savedUsername.isEmpty {
+            username = store.savedUsername
+            password = store.savedPassword
+            // Tự đăng nhập khi mở app; nhưng KHÔNG tự vào lại ngay sau khi vừa đăng xuất
+            let skip = store.suppressAutoLogin
+            store.suppressAutoLogin = false
+            if !password.isEmpty && !skip { await doLogin() }
+        } else {
+            store.suppressAutoLogin = false
         }
     }
 
@@ -103,6 +139,9 @@ struct LoginView: View {
         loading = true; error = nil
         do {
             let resp = try await store.api.login(username, password)
+            // Nhớ / quên tài khoản theo lựa chọn
+            if remember { store.saveCredentials(username, password) }
+            else { store.forgetCredentials() }
             store.setAuth(resp)
             await store.loadProviders(); await store.loadKeys()
         } catch { self.error = error.localizedDescription }
@@ -119,6 +158,7 @@ struct RegisterView: View {
     @State private var phone = ""
     @State private var loading = false
     @State private var error: String?
+    @State private var registered = false
 
     // OTP — mã xác nhận email
     @State private var codeSent = false
@@ -133,7 +173,9 @@ struct RegisterView: View {
             Section("Tạo tài khoản") {
                 TextField("Username * (≥3 ký tự)", text: $username)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .textContentType(.username)
                 SecureField("Mật khẩu * (≥6 ký tự)", text: $password)
+                    .textContentType(.newPassword)   // iOS gợi ý lưu mật khẩu mới vào Apple ID
                 TextField("Gmail (tuỳ chọn)", text: $email)
                     .textInputAutocapitalization(.never).keyboardType(.emailAddress)
                     .autocorrectionDisabled()
@@ -143,11 +185,15 @@ struct RegisterView: View {
             }
 
             if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+            if registered {
+                Text("Tạo tài khoản thành công! Đang chuyển về màn đăng nhập…")
+                    .foregroundStyle(.green).font(.footnote)
+            }
             Section {
                 Button { Task { await doRegister() } } label: {
                     HStack { if loading { ProgressView().padding(.trailing, 6) }; Text("Tạo tài khoản") }
                 }
-                .disabled(loading)
+                .disabled(loading || registered)
             }
         }
         .navigationTitle("Đăng ký")
@@ -174,9 +220,13 @@ struct RegisterView: View {
         do {
             // chỉ gửi mã nếu người dùng thực sự đã nhập (không bắt buộc)
             let otp = (codeSent && code.count >= 4) ? code : nil
-            let resp = try await store.api.register(username, password, email: email, phone: phone,
-                                                    code: otp)
-            store.setAuth(resp); await store.loadProviders(); dismiss()
+            // Tạo tài khoản nhưng KHÔNG tự đăng nhập — quay lại màn đăng nhập.
+            _ = try await store.api.register(username, password, email: email, phone: phone, code: otp)
+            // Ghi tên vừa tạo để màn đăng nhập điền sẵn
+            UserDefaults.standard.set(username, forKey: "pendingLoginUser")
+            registered = true
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            dismiss()   // quay về màn đăng nhập để người dùng đăng nhập
         } catch { self.error = error.localizedDescription }
         loading = false
     }
