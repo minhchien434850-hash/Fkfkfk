@@ -318,7 +318,7 @@ struct ShowcaseLeader: Decodable, Hashable, Identifiable {
     let user: String
     let total: Int
 }
-struct StoreShowcase: Decodable {
+struct StoreShowcase: Decodable, Equatable {
     let recentOrders: [ShowcaseOrder]
     let recentTopups: [ShowcaseTopup]
     let leaderboard: [ShowcaseLeader]
@@ -389,7 +389,7 @@ struct SocialLink: Identifiable, Decodable, Hashable {
     let enabled: Bool
 }
 
-struct StoreContacts: Decodable {
+struct StoreContacts: Decodable, Equatable {
     let contact: [SocialLink]
     let groups: [SocialLink]
 }

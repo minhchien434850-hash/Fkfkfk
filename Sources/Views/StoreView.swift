@@ -464,7 +464,12 @@ struct StoreView: View {
             .background {
                 if let c = effectiveConfig, let bt = c.bgType, bt != "none",
                    let bu = c.bgUrl, !bu.isEmpty {
-                    StoreBackground(type: bt, url: bu)
+                    ZStack {
+                        // .id(bu): chỉ tạo lại khi ĐỔI URL → không nạp lại/nhấp nháy mỗi lần trang vẽ lại
+                        StoreBackground(type: bt, url: bu).id(bu)
+                        // Lớp tối phủ lên nền cho nội dung dễ đọc & nền không "đè" như giao diện thứ 2
+                        Color.black.opacity(0.55).ignoresSafeArea().allowsHitTesting(false)
+                    }
                 }
             }
             .navigationTitle(displayName)
@@ -1490,17 +1495,19 @@ struct StoreView: View {
         async let ctTask  = store.api.storeContacts()
         async let catTask = store.api.storeCategories()
         async let showTask = store.api.storeShowcase()
-        showcase = try? await showTask
+        // CHỈ gán khi dữ liệu THỰC SỰ đổi → tránh vẽ lại / nhấp nháy mỗi lần poll 30s.
+        if let s = try? await showTask, s != showcase { showcase = s }
         if let c = try? await cfgTask {
-            config = c
+            if c != config { config = c }
             // lưu cache để lần sau (kể cả khi offline) vẫn giữ tên/logo/banner
             cfgName = c.logoName; cfgLogo = c.logoUrl
             cfgBannerType = c.bannerType; cfgBannerUrl = c.bannerUrl
         }
-        downloads = (try? await dlTask) ?? []
-        contacts  = try? await ctTask
+        let dl = (try? await dlTask) ?? []
+        if dl != downloads { downloads = dl }
+        if let ct = try? await ctTask, ct != contacts { contacts = ct }
         if let cats = try? await catTask {
-            categories = cats
+            if cats != categories { categories = cats }
             if !cats.isEmpty { storeHasData = true }
         } else if !storeHasData && categories.isEmpty {
             error = "Không kết nối được máy chủ. Kiểm tra IP/URL & mạng."
@@ -1518,7 +1525,6 @@ struct StoreView: View {
 
         // Nhanh: lấy hết sản phẩm trong 1 request (gom theo danh mục). Lỗi/backend cũ → quay về cách cũ.
         if let groupedFast = try? await store.api.storeAllProducts(), !groupedFast.isEmpty {
-            productsByCategory = groupedFast
             var seenFast = Set<Int>()
             var flat: [StoreProduct] = []
             let extraIds = groupedFast.keys.filter { id in !categories.contains { $0.id == id } }
@@ -1527,7 +1533,8 @@ struct StoreView: View {
                     seenFast.insert(p.id); flat.append(p)
                 }
             }
-            allProducts = flat
+            if productsByCategory != groupedFast { productsByCategory = groupedFast }
+            if allProducts != flat { allProducts = flat }
             loadingProducts = false
             return
         }
@@ -1555,8 +1562,8 @@ struct StoreView: View {
                 }
             }
         }
-        allProducts = products
-        productsByCategory = grouped
+        if allProducts != products { allProducts = products }
+        if productsByCategory != grouped { productsByCategory = grouped }
         loadingProducts = false
     }
 }
