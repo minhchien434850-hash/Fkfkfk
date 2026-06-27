@@ -256,6 +256,9 @@ struct StoreAppConfig: Decodable, Hashable {
     var logoAnim: String? = nil     // shimmer|wave|pulse|none
     var bgType: String? = nil       // none|image|video
     var bgUrl: String? = nil
+    var slogan: String? = nil       // dòng giới thiệu dưới tên cửa hàng
+    var sloganFont: String? = nil   // rounded|serif|mono|default|...
+    var sectionOrder: String? = nil // thứ tự bố cục: categories,products,downloads,contacts,wishlist,recent
 }
 
 struct MediaUploadResponse: Decodable { let id: Int; let path: String }

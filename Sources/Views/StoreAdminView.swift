@@ -266,12 +266,27 @@ struct StoreConfigEditor: View {
     @State private var logoAnim = "shimmer"
     @State private var bgType = "none"
     @State private var bgUrl = ""
+    @State private var slogan = ""
+    @State private var sloganFont = "rounded"
+    @State private var sections: [String] = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
     @State private var message: String?
     @State private var isError = false
     @AppStorage("storeCfgName") private var cfgName: String = ""
     @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
     @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
     @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
+
+    private func sectionLabel(_ key: String) -> String {
+        switch key {
+        case "categories": return "Danh mục"
+        case "products":   return "Sản phẩm"
+        case "downloads":  return "Tải về"
+        case "contacts":   return "Liên hệ & Cộng đồng"
+        case "wishlist":   return "Yêu thích"
+        case "recent":     return "Đã xem gần đây"
+        default:           return key
+        }
+    }
 
     var body: some View {
         Form {
@@ -280,6 +295,39 @@ struct StoreConfigEditor: View {
                 TextField("Link ảnh logo (PNG / GIF / JPEG / WEBP)", text: $logoUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
+
+            // Dòng giới thiệu (slogan) dưới tên cửa hàng + chọn font đa dạng
+            Section("Dòng giới thiệu (slogan)") {
+                TextField("Vd: Cửa hàng sản phẩm số · key · tải về", text: $slogan, axis: .vertical)
+                    .lineLimit(1...3)
+                Picker("Font chữ", selection: $sloganFont) {
+                    ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Text(slogan.isEmpty ? "Cửa hàng sản phẩm số · key · tải về" : slogan)
+                    .font(keniosFont(sloganFont, size: 14))
+                    .foregroundStyle(.secondary)
+            }
+
+            // Sắp xếp thứ tự các mục hiển thị ngoài trang cửa hàng (kéo để đổi vị trí)
+            Section {
+                ForEach(sections, id: \.self) { key in
+                    HStack {
+                        Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
+                        Text(sectionLabel(key))
+                    }
+                }
+                .onMove { from, to in sections.move(fromOffsets: from, toOffset: to) }
+            } header: {
+                HStack {
+                    Text("Sắp xếp bố cục trang")
+                    Spacer()
+                    EditButton().font(.caption)
+                }
+            } footer: {
+                Text("Kéo biểu tượng ☰ để đổi vị trí các mục (Danh mục, Sản phẩm, Tải về, Liên hệ & Cộng đồng...). Thứ tự này áp dụng cho trang cửa hàng khách thấy.")
+                    .font(.caption2)
+            }
+
             Section("Hiệu ứng tên/logo cửa hàng") {
                 HStack { Spacer()
                     AnimatedStoreLogo(text: logoName.isEmpty ? "KENIOS STORE" : logoName,
@@ -327,6 +375,15 @@ struct StoreConfigEditor: View {
             logoEffect = c.logoEffect ?? "rainbow"; logoFont = c.logoFont ?? "rounded"
             logoAnim = c.logoAnim ?? "shimmer"
             bgType = c.bgType ?? "none"; bgUrl = c.bgUrl ?? ""
+            slogan = c.slogan ?? ""; sloganFont = c.sloganFont ?? "rounded"
+            if let order = c.sectionOrder, !order.isEmpty {
+                let parts = order.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                let all = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
+                // Giữ các mục hợp lệ theo thứ tự lưu, bổ sung mục còn thiếu vào cuối
+                var merged = parts.filter { all.contains($0) }
+                for k in all where !merged.contains(k) { merged.append(k) }
+                sections = merged
+            }
         }
     }
     private func save() async {
@@ -336,7 +393,9 @@ struct StoreConfigEditor: View {
                 logoName: logoName, logoUrl: logoUrl,
                 bannerType: bannerType, bannerUrl: bannerUrl,
                 logoEffect: logoEffect, logoFont: logoFont, logoAnim: logoAnim,
-                bgType: bgType, bgUrl: bgUrl)
+                bgType: bgType, bgUrl: bgUrl,
+                slogan: slogan, sloganFont: sloganFont,
+                sectionOrder: sections.joined(separator: ","))
             // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             isError = false; message = r.message

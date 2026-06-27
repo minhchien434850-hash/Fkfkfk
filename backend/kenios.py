@@ -4274,6 +4274,11 @@ def store_config() -> dict[str, Any]:
         "logo_anim": get_setting("store_logo_anim", "shimmer"),       # shimmer|wave|pulse|none
         "bg_type": get_setting("store_bg_type", "none"),              # none|image|video
         "bg_url": get_setting("store_bg_url", ""),
+        # Dòng giới thiệu (slogan) dưới tên cửa hàng + font + thứ tự bố cục các mục
+        "slogan": get_setting("store_slogan", "Cửa hàng sản phẩm số · key · tải về"),
+        "slogan_font": get_setting("store_slogan_font", "rounded"),
+        "section_order": get_setting("store_section_order",
+                                     "categories,products,downloads,contacts,wishlist,recent"),
     }
 
 
@@ -4628,6 +4633,9 @@ class StoreConfigIn(BaseModel):
     logo_anim: Optional[str] = None
     bg_type: Optional[str] = None       # none | image | video
     bg_url: Optional[str] = None
+    slogan: Optional[str] = None
+    slogan_font: Optional[str] = None
+    section_order: Optional[str] = None
 
 @app.post("/admin/store/config")
 def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
@@ -4642,6 +4650,9 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.bg_type is not None:
         set_setting("store_bg_type", b.bg_type if b.bg_type in ("none", "image", "video") else "none")
     if b.bg_url is not None: set_setting("store_bg_url", b.bg_url.strip())
+    if b.slogan is not None: set_setting("store_slogan", b.slogan.strip()[:120])
+    if b.slogan_font is not None: set_setting("store_slogan_font", b.slogan_font.strip()[:20])
+    if b.section_order is not None: set_setting("store_section_order", b.section_order.strip()[:200])
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
 

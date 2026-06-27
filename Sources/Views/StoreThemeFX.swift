@@ -143,3 +143,31 @@ let kLogoFonts: [(String, String)] = [
 let kLogoAnims: [(String, String)] = [
     ("shimmer", "Lung linh"), ("wave", "Lượn sóng"), ("pulse", "Nhịp đập"), ("none", "Tĩnh")
 ]
+
+// Bộ font đa dạng cho dòng giới thiệu (slogan) cửa hàng
+let kSloganFonts: [(String, String)] = [
+    ("rounded", "Bo tròn"), ("default", "Mặc định"), ("serif", "Có chân"),
+    ("mono", "Đơn cách"), ("serif-italic", "Có chân nghiêng"), ("rounded-bold", "Bo tròn đậm"),
+    ("italic", "Nghiêng"), ("thin", "Mảnh"), ("heavy", "Đậm khối"),
+    ("mono-bold", "Đơn cách đậm")
+]
+
+/// Tạo Font đa dạng từ tên kiểu (dùng cho slogan cửa hàng).
+func keniosFont(_ style: String, size: CGFloat) -> Font {
+    let design: Font.Design
+    switch style {
+    case "serif", "serif-italic":   design = .serif
+    case "mono", "mono-bold":        design = .monospaced
+    case "rounded", "rounded-bold":  design = .rounded
+    default:                          design = .default
+    }
+    let weight: Font.Weight
+    switch style {
+    case "thin":                                weight = .light
+    case "heavy", "rounded-bold", "mono-bold":  weight = .heavy
+    default:                                     weight = .semibold
+    }
+    var f = Font.system(size: size, weight: weight, design: design)
+    if style == "italic" || style == "serif-italic" { f = f.italic() }
+    return f
+}

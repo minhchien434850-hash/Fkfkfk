@@ -95,6 +95,8 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
 
+                // ===== Tuỳ biến thương hiệu — CHỈ admin thấy (khách không thấy) =====
+                if store.isAdmin {
                 // ===== Logo & hiệu ứng app (ngoài cửa hàng) =====
                 Section(store.t("Logo & Hiệu ứng app", "App logo & effects")) {
                     HStack { Spacer()
@@ -165,6 +167,7 @@ struct SettingsView: View {
                                  "Enable shimmering animation for the KENIOS and store logos."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
+                } // hết phần tuỳ biến thương hiệu (chỉ admin)
 
                 // ===== Thông báo =====
                 Section(store.t("Thông báo", "Notifications")) {

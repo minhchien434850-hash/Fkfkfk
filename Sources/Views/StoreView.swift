@@ -220,6 +220,52 @@ struct StoreView: View {
         return categories.filter { $0.name.localizedCaseInsensitiveContains(q) }
     }
 
+    // Thứ tự bố cục các mục — theo cấu hình admin (Sắp xếp bố cục trang)
+    private var orderedSections: [String] {
+        let all = ["categories", "products", "downloads", "contacts", "wishlist", "recent"]
+        guard let raw = (config?.sectionOrder ?? effectiveConfig?.sectionOrder), !raw.isEmpty else { return all }
+        let parts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        var merged = parts.filter { all.contains($0) }
+        for k in all where !merged.contains(k) { merged.append(k) }
+        return merged
+    }
+
+    @ViewBuilder
+    private func sectionView(_ key: String) -> some View {
+        switch key {
+        case "categories":
+            if !categories.isEmpty { searchField }
+            if loading && categories.isEmpty {
+                HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
+            } else if categories.isEmpty {
+                emptyState
+            } else {
+                LazyVGrid(columns: grid, spacing: 12) {
+                    ForEach(filteredCategories) { cat in
+                        NavigationLink {
+                            StoreFolderListView(category: cat)
+                        } label: { categoryCard(cat) }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        case "products":
+            if !allProducts.isEmpty { allProductsSection }
+        case "downloads":
+            if !downloads.isEmpty { downloadsSection }
+        case "contacts":
+            if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
+                StoreContactsBlock(contacts: c)
+            }
+        case "wishlist":
+            if !wishlistProducts.isEmpty { wishlistSection }
+        case "recent":
+            if !recentProducts.isEmpty { recentlyViewedSection }
+        default:
+            EmptyView()
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -228,49 +274,9 @@ struct StoreView: View {
 
                     walletBar
 
-                    // 1. DANH MỤC — luôn nằm trên đầu
-                    if !categories.isEmpty {
-                        searchField
-                    }
-                    if loading && categories.isEmpty {
-                        HStack { Spacer(); ProgressView(); Spacer() }.padding(.top, 40)
-                    } else if categories.isEmpty {
-                        emptyState
-                    } else {
-                        LazyVGrid(columns: grid, spacing: 12) {
-                            ForEach(filteredCategories) { cat in
-                                NavigationLink {
-                                    StoreFolderListView(category: cat)
-                                } label: {
-                                    categoryCard(cat)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-
-                    // 2. SẢN PHẨM
-                    if !allProducts.isEmpty {
-                        allProductsSection
-                    }
-
-                    // 3. TẢI VỀ
-                    if !downloads.isEmpty {
-                        downloadsSection
-                    }
-
-                    // 4. YÊU THÍCH
-                    if !wishlistProducts.isEmpty {
-                        wishlistSection
-                    }
-
-                    // 5. ĐÃ XEM GẦN ĐÂY
-                    if !recentProducts.isEmpty {
-                        recentlyViewedSection
-                    }
-
-                    if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {
-                        StoreContactsBlock(contacts: c)
+                    // Các mục hiển thị theo thứ tự admin sắp xếp (Sắp xếp bố cục trang)
+                    ForEach(orderedSections, id: \.self) { key in
+                        sectionView(key)
                     }
 
                     if let error {
@@ -604,7 +610,12 @@ struct StoreView: View {
                         fontStyle: effectiveConfig?.logoFont ?? "rounded",
                         anim: effectiveConfig?.logoAnim ?? "shimmer",
                         size: 24)
-                    Text(store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads")).font(.caption).foregroundStyle(.secondary)
+                    Text({
+                            let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
+                            return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
+                         }())
+                        .font(keniosFont(config?.sloganFont ?? "rounded", size: 13))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
             }
