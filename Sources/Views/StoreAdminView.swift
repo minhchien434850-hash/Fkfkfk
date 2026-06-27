@@ -902,6 +902,10 @@ struct StoreQuickAddView: View {
     // Quản lý sản phẩm hiện có
     @State private var expandedProductId: Int?
     @State private var editProductNames: [Int: String] = [:]
+    @State private var editProductDownloadUrls: [Int: String] = [:]
+    @State private var editProductDownloadFileIds: [Int: Int] = [:]
+    @State private var uploadingDownloadFor: Int?
+    @State private var showDownloadPickerFor: Int?
     @State private var keysData: [Int: StoreKeysInfo] = [:]
     @State private var addKeysText: [Int: String] = [:]
     @State private var addingKeysFor: Int?
@@ -1141,6 +1145,53 @@ struct StoreQuickAddView: View {
                                     }
                                     .padding(.bottom, 10)
 
+                                    // Link tải / File
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(store.t("Link tải / File", "Download link / File"))
+                                            .font(.caption).foregroundStyle(.secondary)
+                                        HStack {
+                                            TextField(store.t("Dán link tải mới...", "Paste new download link..."),
+                                                      text: Binding(
+                                                        get: { editProductDownloadUrls[p.id] ?? "" },
+                                                        set: { editProductDownloadUrls[p.id] = $0 }))
+                                                .textFieldStyle(.roundedBorder)
+                                                .autocorrectionDisabled()
+                                                .textInputAutocapitalization(.never)
+                                                .font(.caption)
+                                            Button {
+                                                Task { await saveProductDownload(p) }
+                                            } label: {
+                                                Text(store.t("Lưu", "Save")).font(.caption.bold())
+                                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                                    .background(Theme.accent).foregroundStyle(.white)
+                                                    .clipShape(Capsule())
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .disabled(savingProductId == p.id || uploadingDownloadFor == p.id)
+                                        }
+                                        Button {
+                                            showDownloadPickerFor = p.id
+                                        } label: {
+                                            HStack(spacing: 4) {
+                                                if uploadingDownloadFor == p.id {
+                                                    ProgressView().scaleEffect(0.7)
+                                                } else {
+                                                    Image(systemName: "arrow.up.doc")
+                                                }
+                                                if let fid = editProductDownloadFileIds[p.id] {
+                                                    Text(store.t("Đổi file", "Change file") + " (#\(fid))")
+                                                } else {
+                                                    Text(store.t("Tải file mới lên", "Upload new file"))
+                                                }
+                                            }
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.accent)
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(uploadingDownloadFor != nil)
+                                    }
+                                    .padding(.bottom, 10)
+
                                     // Giá hiện có
                                     if !p.prices.isEmpty {
                                         VStack(alignment: .leading, spacing: 4) {
@@ -1362,6 +1413,18 @@ struct StoreQuickAddView: View {
                 }
                 .ignoresSafeArea()
             }
+            .sheet(isPresented: Binding(
+                get: { showDownloadPickerFor != nil },
+                set: { if !$0 { showDownloadPickerFor = nil } }
+            )) {
+                if let pid = showDownloadPickerFor {
+                    DocumentPicker(allowsMultipleSelection: false) { urls in
+                        showDownloadPickerFor = nil
+                        if let url = urls.first { Task { await uploadDownloadFile(url, productId: pid) } }
+                    }
+                    .ignoresSafeArea()
+                }
+            }
         }
     }
 
@@ -1483,6 +1546,35 @@ struct StoreQuickAddView: View {
         }
         await loadKeysForProduct(productId)
         deletingKeyId = nil
+    }
+    private func uploadDownloadFile(_ url: URL, productId: Int) async {
+        uploadingDownloadFor = productId
+        do {
+            let r = try await store.api.uploadFileRaw(name: url.lastPathComponent, category: "store", fileURL: url)
+            editProductDownloadFileIds[productId] = r.id
+            if let p = existingProducts.first(where: { $0.id == productId }) {
+                await saveProductDownload(p, fileId: r.id)
+            }
+        } catch { isError = true; message = error.localizedDescription }
+        uploadingDownloadFor = nil
+    }
+    private func saveProductDownload(_ p: StoreProduct, fileId: Int? = nil) async {
+        guard let fid = selectedFolderId else { return }
+        let url = (editProductDownloadUrls[p.id] ?? "").trimmingCharacters(in: .whitespaces)
+        savingProductId = p.id
+        do {
+            _ = try await store.api.adminStoreSaveProduct(
+                id: p.id, folderId: fid,
+                name: editProductNames[p.id] ?? p.name,
+                description: p.description,
+                media: editMediaToPayload(mediaToEdit(p.media)),
+                downloadUrl: url,
+                downloadFileId: fileId ?? editProductDownloadFileIds[p.id],
+                kind: p.kind ?? "app")
+            await loadProducts()
+            isError = false; message = store.t("Đã cập nhật link tải.", "Download updated.")
+        } catch { isError = true; message = error.localizedDescription }
+        savingProductId = nil
     }
     private func addKeysToProduct(_ productId: Int) async {
         let txt = (addKeysText[productId] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
