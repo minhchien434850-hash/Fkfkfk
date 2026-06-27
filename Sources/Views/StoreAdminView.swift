@@ -887,10 +887,26 @@ struct StoreQuickAddView: View {
     // Dữ liệu
     @State private var categories: [StoreCategory] = []
     @State private var folders: [StoreFolder] = []
+    @State private var existingProducts: [StoreProduct] = []
 
-    // Lựa chọn (tích)
+    // Lựa chọn
     @State private var selectedCategoryId: Int?
     @State private var selectedFolderId: Int?
+
+    // Đổi tên inline danh mục / thư mục con
+    @State private var editCatId: Int?
+    @State private var editCatNameText = ""
+    @State private var editFldId: Int?
+    @State private var editFldNameText = ""
+
+    // Quản lý sản phẩm hiện có
+    @State private var expandedProductId: Int?
+    @State private var editProductNames: [Int: String] = [:]
+    @State private var keysData: [Int: StoreKeysInfo] = [:]
+    @State private var addKeysText: [Int: String] = [:]
+    @State private var addingKeysFor: Int?
+    @State private var deletingKeyId: Int?
+    @State private var savingProductId: Int?
 
     // Tạo danh mục mới
     @State private var showNewCat = false
@@ -904,8 +920,8 @@ struct StoreQuickAddView: View {
     @State private var newFolderMedia: [EditMedia] = []
     @State private var savingFolder = false
 
-    // Sản phẩm
-    @State private var kind = "app"            // app (key) | acc
+    // Sản phẩm mới
+    @State private var kind = "app"
     @State private var name = ""
     @State private var desc = ""
     @State private var media: [EditMedia] = []
@@ -939,12 +955,44 @@ struct StoreQuickAddView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     ForEach(categories) { c in
-                        Button {
-                            selectedCategoryId = c.id
-                            selectedFolderId = nil
-                            Task { await loadFolders() }
-                        } label: {
-                            pickRow(thumb: c.media.first, title: c.name, selected: selectedCategoryId == c.id)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 0) {
+                                Button {
+                                    selectedCategoryId = c.id
+                                    selectedFolderId = nil
+                                    editCatId = nil
+                                    Task { await loadFolders() }
+                                } label: {
+                                    pickRow(thumb: c.media.first, title: c.name, selected: selectedCategoryId == c.id)
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    if editCatId == c.id { editCatId = nil }
+                                    else { editCatId = c.id; editCatNameText = c.name }
+                                } label: {
+                                    Image(systemName: editCatId == c.id ? "xmark.circle" : "pencil.circle")
+                                        .foregroundStyle(editCatId == c.id ? .secondary : Theme.accent)
+                                        .font(.title3)
+                                        .padding(.leading, 8)
+                                }
+                                .buttonStyle(.borderless)
+                            }
+                            if editCatId == c.id {
+                                HStack {
+                                    TextField(store.t("Tên danh mục", "Category name"), text: $editCatNameText)
+                                        .textFieldStyle(.roundedBorder)
+                                    Button {
+                                        Task { await renameCategory(c) }
+                                    } label: {
+                                        Text(store.t("Lưu", "Save")).font(.caption.bold())
+                                            .padding(.horizontal, 10).padding(.vertical, 6)
+                                            .background(Theme.accent).foregroundStyle(.white)
+                                            .clipShape(Capsule())
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(editCatNameText.trimmingCharacters(in: .whitespaces).isEmpty)
+                                }
+                            }
                         }
                     }
                     Button { withAnimation { showNewCat.toggle() } } label: {
@@ -976,10 +1024,43 @@ struct StoreQuickAddView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         ForEach(folders) { f in
-                            Button {
-                                selectedFolderId = f.id
-                            } label: {
-                                pickRow(thumb: f.media.first, title: f.name, selected: selectedFolderId == f.id)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 0) {
+                                    Button {
+                                        selectedFolderId = f.id
+                                        editFldId = nil
+                                        Task { await loadProducts() }
+                                    } label: {
+                                        pickRow(thumb: f.media.first, title: f.name, selected: selectedFolderId == f.id)
+                                    }
+                                    .buttonStyle(.plain)
+                                    Button {
+                                        if editFldId == f.id { editFldId = nil }
+                                        else { editFldId = f.id; editFldNameText = f.name }
+                                    } label: {
+                                        Image(systemName: editFldId == f.id ? "xmark.circle" : "pencil.circle")
+                                            .foregroundStyle(editFldId == f.id ? .secondary : Theme.accent)
+                                            .font(.title3)
+                                            .padding(.leading, 8)
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                                if editFldId == f.id {
+                                    HStack {
+                                        TextField(store.t("Tên thư mục con", "Subfolder name"), text: $editFldNameText)
+                                            .textFieldStyle(.roundedBorder)
+                                        Button {
+                                            Task { await renameFolder(f) }
+                                        } label: {
+                                            Text(store.t("Lưu", "Save")).font(.caption.bold())
+                                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                                .background(Theme.accent).foregroundStyle(.white)
+                                                .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .disabled(editFldNameText.trimmingCharacters(in: .whitespaces).isEmpty)
+                                    }
+                                }
                             }
                         }
                         Button { withAnimation { showNewFolder.toggle() } } label: {
@@ -1000,6 +1081,174 @@ struct StoreQuickAddView: View {
                     Label(store.t("Bước 2 · Chọn / tạo thư mục con", "Step 2 · Pick / create subfolder"), systemImage: "2.circle.fill")
                 }
                 if showNewFolder && hasCategory { MediaEditor(media: $newFolderMedia) }
+
+                // ---------- SẢN PHẨM HIỆN CÓ (quản lý / sửa / key) ----------
+                if hasFolder && !existingProducts.isEmpty {
+                    Section {
+                        ForEach(existingProducts) { p in
+                            VStack(alignment: .leading, spacing: 0) {
+                                // Header row – bấm để mở/đóng
+                                Button {
+                                    withAnimation {
+                                        if expandedProductId == p.id {
+                                            expandedProductId = nil
+                                        } else {
+                                            expandedProductId = p.id
+                                            if editProductNames[p.id] == nil { editProductNames[p.id] = p.name }
+                                            if keysData[p.id] == nil { Task { await loadKeysForProduct(p.id) } }
+                                        }
+                                    }
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(p.name).font(.subheadline.bold()).foregroundStyle(.primary).lineLimit(1)
+                                            Text(p.prices.map { kFormatVND($0.amount) }.joined(separator: " · "))
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: expandedProductId == p.id ? "chevron.up" : "chevron.down")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+
+                                if expandedProductId == p.id {
+                                    Divider().padding(.vertical, 8)
+
+                                    // Đổi tên sản phẩm
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(store.t("Tên sản phẩm", "Product name")).font(.caption).foregroundStyle(.secondary)
+                                        HStack {
+                                            TextField(store.t("Tên sản phẩm", "Product name"),
+                                                      text: Binding(
+                                                        get: { editProductNames[p.id] ?? p.name },
+                                                        set: { editProductNames[p.id] = $0 }))
+                                                .textFieldStyle(.roundedBorder)
+                                            if savingProductId == p.id {
+                                                ProgressView()
+                                            } else {
+                                                Button {
+                                                    Task { await saveProductName(p) }
+                                                } label: {
+                                                    Text(store.t("Lưu", "Save")).font(.caption.bold())
+                                                        .padding(.horizontal, 10).padding(.vertical, 6)
+                                                        .background(Theme.accent).foregroundStyle(.white)
+                                                        .clipShape(Capsule())
+                                                }
+                                                .buttonStyle(.borderless)
+                                            }
+                                        }
+                                    }
+                                    .padding(.bottom, 10)
+
+                                    // Giá hiện có
+                                    if !p.prices.isEmpty {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(store.t("Mốc giá", "Price tiers")).font(.caption).foregroundStyle(.secondary)
+                                            ForEach(p.prices) { pr in
+                                                HStack {
+                                                    Text(pr.label).font(.caption)
+                                                    Spacer()
+                                                    Text(kFormatVND(pr.amount)).font(.caption.bold()).foregroundStyle(Theme.accent)
+                                                    Text("(\(pr.available ?? 0) key)").font(.caption2).foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        }
+                                        .padding(.bottom, 10)
+                                    }
+
+                                    // KEY: danh sách hiện có + xóa từng key
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack {
+                                            Text(store.t("Kho key", "Key stock")).font(.caption).foregroundStyle(.secondary)
+                                            Spacer()
+                                            if let info = keysData[p.id] {
+                                                Text("\(info.available)/\(info.total)").font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        if let info = keysData[p.id] {
+                                            let avail = info.keys.filter { $0.status == "available" }
+                                            if avail.isEmpty {
+                                                Text(store.t("Không có key nào.", "No keys available."))
+                                                    .font(.caption2).foregroundStyle(.secondary)
+                                            } else {
+                                                ForEach(avail.prefix(30)) { k in
+                                                    HStack {
+                                                        Text(k.keyText)
+                                                            .font(.system(.caption2, design: .monospaced))
+                                                            .foregroundStyle(.primary)
+                                                            .lineLimit(1)
+                                                        Spacer()
+                                                        if deletingKeyId == k.id {
+                                                            ProgressView().scaleEffect(0.7)
+                                                        } else {
+                                                            Button {
+                                                                Task { await deleteKey(k.id, productId: p.id) }
+                                                            } label: {
+                                                                Image(systemName: "trash")
+                                                                    .font(.caption).foregroundStyle(.red)
+                                                            }
+                                                            .buttonStyle(.borderless)
+                                                        }
+                                                    }
+                                                }
+                                                if avail.count > 30 {
+                                                    Text("+ \(avail.count - 30) " + store.t("key khác", "more keys"))
+                                                        .font(.caption2).foregroundStyle(.secondary)
+                                                }
+                                            }
+                                        } else {
+                                            ProgressView()
+                                        }
+
+                                        // Thêm key mới
+                                        DisclosureGroup(
+                                            isExpanded: Binding(
+                                                get: { addingKeysFor == p.id },
+                                                set: { addingKeysFor = $0 ? p.id : nil }),
+                                            content: {
+                                                VStack(alignment: .leading, spacing: 6) {
+                                                    TextEditor(text: Binding(
+                                                        get: { addKeysText[p.id] ?? "" },
+                                                        set: { addKeysText[p.id] = $0 }))
+                                                        .frame(minHeight: 80)
+                                                        .font(.system(.caption, design: .monospaced))
+                                                    Text(store.t("Mỗi dòng 1 key. Bấm Lưu để thêm vào kho.",
+                                                                 "One key per line. Tap Save to add to stock."))
+                                                        .font(.caption2).foregroundStyle(.secondary)
+                                                    Button {
+                                                        Task { await addKeysToProduct(p.id) }
+                                                    } label: {
+                                                        Label(store.t("Lưu key", "Save keys"), systemImage: "key.fill")
+                                                            .font(.caption.bold())
+                                                            .frame(maxWidth: .infinity).frame(height: 36)
+                                                            .background(Theme.accent).foregroundStyle(.white)
+                                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .disabled((addKeysText[p.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                                }
+                                            },
+                                            label: {
+                                                Label(store.t("Thêm key mới", "Add new keys"), systemImage: "plus.circle")
+                                                    .font(.caption)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    } header: {
+                        HStack {
+                            Label(store.t("Sản phẩm trong thư mục", "Products in folder") + " (\(existingProducts.count))", systemImage: "cube.box.fill")
+                            Spacer()
+                            Button { Task { await loadProducts() } } label: {
+                                Image(systemName: "arrow.clockwise").font(.caption2).foregroundStyle(Theme.accent)
+                            }
+                        }
+                    }
+                }
 
                 // ---------- BƯỚC 3: SẢN PHẨM ----------
                 if hasFolder {
@@ -1114,7 +1363,7 @@ struct StoreQuickAddView: View {
         }
     }
 
-    // Hàng chọn có dấu tích
+    // Hàng chọn — cuộn đến và bấm để chọn (không có icon tích)
     @ViewBuilder private func pickRow(thumb: StoreMedia?, title: String, selected: Bool) -> some View {
         HStack(spacing: 10) {
             if let m = thumb, m.type != "video", let url = URL(string: m.url) {
@@ -1122,15 +1371,21 @@ struct StoreQuickAddView: View {
                 placeholder: { Color(.tertiarySystemBackground) }
                     .frame(width: 34, height: 34).clipShape(RoundedRectangle(cornerRadius: 7))
             } else {
-                Image(systemName: "folder.fill").foregroundStyle(Theme.gold)
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(selected ? store.accentColor : Theme.gold)
                     .frame(width: 34, height: 34)
-                    .background(Color(.tertiarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 7))
+                    .background(selected ? store.accentColor.opacity(0.15) : Color(.tertiarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
             }
-            Text(title).foregroundStyle(.primary)
+            Text(title)
+                .foregroundStyle(selected ? store.accentColor : .primary)
+                .fontWeight(selected ? .semibold : .regular)
             Spacer()
-            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(selected ? store.accentColor : .secondary)
         }
+        .contentShape(Rectangle())
+        .padding(.vertical, 2)
+        .background(selected ? store.accentColor.opacity(0.07) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // ---- Tải dữ liệu ----
@@ -1169,6 +1424,75 @@ struct StoreQuickAddView: View {
             isError = false; message = store.t("Đã tạo thư mục con.", "Subfolder created.")
         } catch { isError = true; message = error.localizedDescription }
         savingFolder = false
+    }
+
+    // ---- Đổi tên danh mục / thư mục con ----
+    private func renameCategory(_ c: StoreCategory) async {
+        let newName = editCatNameText.trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty else { return }
+        do {
+            _ = try await store.api.adminStoreSaveCategory(id: c.id, name: newName, media: editMediaToPayload(mediaToEdit(c.media)))
+            await loadCategories()
+            editCatId = nil
+            isError = false; message = store.t("Đã đổi tên danh mục.", "Category renamed.")
+        } catch { isError = true; message = error.localizedDescription }
+    }
+    private func renameFolder(_ f: StoreFolder) async {
+        guard let cid = selectedCategoryId else { return }
+        let newName = editFldNameText.trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty else { return }
+        do {
+            _ = try await store.api.adminStoreSaveFolder(id: f.id, categoryId: cid, name: newName, media: editMediaToPayload(mediaToEdit(f.media)))
+            await loadFolders()
+            editFldId = nil
+            isError = false; message = store.t("Đã đổi tên thư mục.", "Folder renamed.")
+        } catch { isError = true; message = error.localizedDescription }
+    }
+
+    // ---- Quản lý sản phẩm hiện có ----
+    private func loadProducts() async {
+        guard let fid = selectedFolderId else { existingProducts = []; return }
+        existingProducts = (try? await store.api.storeProducts(folderId: fid)) ?? []
+    }
+    private func loadKeysForProduct(_ pid: Int) async {
+        keysData[pid] = try? await store.api.adminStoreListKeys(productId: pid)
+    }
+    private func saveProductName(_ p: StoreProduct) async {
+        guard let fid = selectedFolderId else { return }
+        let newName = (editProductNames[p.id] ?? p.name).trimmingCharacters(in: .whitespaces)
+        guard !newName.isEmpty else { return }
+        savingProductId = p.id
+        do {
+            _ = try await store.api.adminStoreSaveProduct(
+                id: p.id, folderId: fid, name: newName, description: p.description,
+                media: editMediaToPayload(mediaToEdit(p.media)),
+                downloadUrl: "", downloadFileId: nil, kind: p.kind ?? "app")
+            await loadProducts()
+            isError = false; message = store.t("Đã cập nhật sản phẩm.", "Product updated.")
+        } catch { isError = true; message = error.localizedDescription }
+        savingProductId = nil
+    }
+    private func deleteKey(_ keyId: Int, productId: Int) async {
+        deletingKeyId = keyId
+        do {
+            _ = try await store.api.adminStoreDeleteKey(keyId)
+        } catch {
+            isError = true; message = error.localizedDescription
+        }
+        await loadKeysForProduct(productId)
+        deletingKeyId = nil
+    }
+    private func addKeysToProduct(_ productId: Int) async {
+        let txt = (addKeysText[productId] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !txt.isEmpty else { return }
+        let priceId = existingProducts.first(where: { $0.id == productId })?.prices.first?.id
+        do {
+            _ = try await store.api.adminStoreAddKeys(productId: productId, text: txt, priceId: priceId)
+            addKeysText[productId] = ""
+            addingKeysFor = nil
+            await loadKeysForProduct(productId)
+            isError = false; message = store.t("Đã thêm key.", "Keys added.")
+        } catch { isError = true; message = error.localizedDescription }
     }
 
     private func uploadFile(_ url: URL) async {
