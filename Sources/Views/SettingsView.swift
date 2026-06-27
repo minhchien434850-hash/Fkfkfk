@@ -12,6 +12,10 @@ struct SettingsView: View {
     @State private var showPayment = false
     @State private var cleanupDays = 30
     @State private var cleaning = false
+    // Logo & hiệu ứng app ngoài (khác cửa hàng)
+    @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
+    @AppStorage("appLogoFont") private var appLogoFont = "rounded"
+    @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
 
     var body: some View {
         NavigationStack {
@@ -88,6 +92,25 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                }
+
+                // ===== Logo & hiệu ứng app (ngoài cửa hàng) =====
+                Section(store.t("Logo & Hiệu ứng app", "App logo & effects")) {
+                    HStack { Spacer()
+                        AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
+                                          fontStyle: appLogoFont, anim: appLogoAnim, size: 30)
+                        Spacer() }
+                    Picker(store.t("Hiệu ứng màu", "Color effect"), selection: $appLogoEffect) {
+                        ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    Picker(store.t("Kiểu chữ (font)", "Font"), selection: $appLogoFont) {
+                        ForEach(kLogoFonts, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    Picker(store.t("Chuyển động", "Animation"), selection: $appLogoAnim) {
+                        ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    Text("Áp cho logo/thương hiệu của app (khác với cài đặt cửa hàng).")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
 
                 // ===== Màu chủ đạo =====
@@ -312,6 +335,7 @@ struct WelcomeGreetingView: View {
                     Picker("Chọn giọng", selection: Binding(
                         get: { store.welcomeVoiceId },
                         set: { store.setWelcomeVoiceId($0) })) {
+                        Text("Chị Google (Online) — như TTS Live").tag("google")
                         Text("Mặc định (vi-VN tự động)").tag("")
                         ForEach(voices, id: \.identifier) { v in
                             Text(WelcomeVoice.displayName(v)).tag(v.identifier)

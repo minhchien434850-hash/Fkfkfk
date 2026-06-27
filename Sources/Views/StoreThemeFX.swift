@@ -113,6 +113,25 @@ struct LoopingVideoBackground: UIViewRepresentable {
     func updateUIView(_ uiView: LoopingPlayerUIView, context: Context) {}
 }
 
+// ============================ Hiệu ứng chạm kiểu iOS 26 ============================
+// Nút thu nhỏ mềm + rung nhẹ khi chạm (Liquid Glass feel)
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .opacity(configuration.isPressed ? 0.82 : 1.0)
+            .animation(.spring(response: 0.28, dampingFraction: 0.6), value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { pressed in
+                if pressed { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            }
+    }
+}
+
+extension View {
+    /// Áp hiệu ứng chạm iOS 26 cho 1 view bất kỳ (dùng cho thẻ chạm được)
+    func iosTapEffect() -> some View { buttonStyle(PressableButtonStyle()) }
+}
+
 // Danh sách tuỳ chọn hiệu ứng / font (dùng cho cả cửa hàng & cài đặt app)
 let kLogoEffects: [(String, String)] = [
     ("rainbow", "7 màu chạy"), ("gold", "Vàng kim"), ("neon", "Neon"),

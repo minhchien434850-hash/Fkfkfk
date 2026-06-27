@@ -19,6 +19,7 @@ struct RootView: View {
         }
         .tint(store.accentColor)
         .preferredColorScheme(store.preferredScheme)
+        .buttonStyle(PressableButtonStyle())   // hiệu ứng chạm iOS 26 toàn app
     }
 }
 

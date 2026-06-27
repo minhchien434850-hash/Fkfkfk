@@ -6,6 +6,7 @@ final class WelcomeVoice: NSObject, AVSpeechSynthesizerDelegate {
 
     private let synth = AVSpeechSynthesizer()
     private var spokenOnce = false
+    private var googlePlayer: AVPlayer?   // giọng "chị Google" (online, như TTS Live)
 
     override init() {
         super.init()
@@ -30,10 +31,37 @@ final class WelcomeVoice: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     /// Dừng phát
-    func stop() { synth.stopSpeaking(at: .immediate) }
+    func stop() {
+        synth.stopSpeaking(at: .immediate)
+        googlePlayer?.pause(); googlePlayer = nil
+    }
+
+    /// Phát bằng giọng "chị Google" (online) — giống TTS Live
+    private func playGoogle(_ text: String) {
+        let chunk = String(text.prefix(190))
+        guard let enc = chunk.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=\(enc)")
+        else { return }
+        let asset = AVURLAsset(url: url, options: [
+            "AVURLAssetHTTPHeaderFieldsKey": [
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
+            ]
+        ])
+        let item = AVPlayerItem(asset: asset)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let p = AVPlayer(playerItem: item)
+        googlePlayer = p
+        p.play()
+    }
 
     private func speak(text: String, voiceId: String, rate: Float) {
-        let utterance = AVSpeechUtterance(string: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Xin chào" : text)
+        let content = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Xin chào" : text
+        // Giọng "chị Google" online — giống động cơ Google trong TTS Live
+        if voiceId == "google" {
+            playGoogle(content); return
+        }
+        let utterance = AVSpeechUtterance(string: content)
         if voiceId.isEmpty {
             utterance.voice = AVSpeechSynthesisVoice(language: "vi-VN")
         } else {

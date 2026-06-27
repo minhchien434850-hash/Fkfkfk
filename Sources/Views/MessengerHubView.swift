@@ -290,6 +290,8 @@ struct MessengerHubView: View {
     @AppStorage("mhAutoRecipient")  private var autoRecipient   = ""
     @AppStorage("mhAutoDelay")      private var autoDelay       = 15
     @AppStorage("mhAutoSpeed")      private var speedPresetRaw  = "normal"
+    // Tốc độ tinh chỉnh 0.1 – 5.0 giây giữa các tin (ưu tiên dùng giá trị này)
+    @AppStorage("mhAutoDelaySec")   private var autoDelaySec: Double = 1.0
 
     @State private var autoRunning  = false
     @State private var autoIdx      = 0
@@ -524,6 +526,13 @@ struct MessengerHubView: View {
                                 Button {
                                     speedPresetRaw = preset.rawValue
                                     autoDelay = preset.seconds
+                                    // map preset → giây (trong khoảng 0.1–5.0)
+                                    switch preset {
+                                    case .slow:   autoDelaySec = 5.0
+                                    case .normal: autoDelaySec = 2.0
+                                    case .fast:   autoDelaySec = 1.0
+                                    case .turbo:  autoDelaySec = 0.3
+                                    }
                                 } label: {
                                     Text(preset.label)
                                         .font(.caption.bold())
@@ -539,19 +548,19 @@ struct MessengerHubView: View {
                             }
                         }
                         .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                        // Fine-tune stepper
-                        Stepper(value: $autoDelay, in: 3...300, onEditingChanged: { _ in
-                            // Clear preset if manually changed
-                            if !SpeedPreset.allCases.map({ $0.seconds }).contains(autoDelay) {
-                                speedPresetRaw = ""
-                            }
-                        }) {
+                        // Tinh chỉnh tốc độ 0.1 – 5.0 giây / tin
+                        VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text("Tùy chỉnh")
+                                Text("Tốc độ (giây/tin)")
                                 Spacer()
-                                Text("\(autoDelay) giây")
+                                Text(String(format: "%.1f giây", autoDelaySec))
                                     .foregroundStyle(store.accentColor).font(.subheadline.bold())
                             }
+                            Slider(value: $autoDelaySec, in: 0.1...5.0, step: 0.1) { _ in
+                                speedPresetRaw = ""
+                            }
+                            Text("Càng nhỏ gửi càng nhanh (0.1 = rất nhanh, 5.0 = chậm).")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
 
@@ -763,10 +772,16 @@ struct MessengerHubView: View {
             }
             autoIdx += 1
             guard autoIdx < messages.count else { break }
-            for i in stride(from: autoDelay, through: 0, by: -1) {
+            // Chờ theo tốc độ tinh chỉnh 0.1–5.0 giây (chia nhỏ để vẫn dừng được giữa chừng)
+            let total = max(0.1, min(autoDelaySec, 5.0))
+            autoCountdown = Int(ceil(total))
+            var remain = total
+            while remain > 0 {
                 guard autoRunning, !Task.isCancelled else { return }
-                autoCountdown = i
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                let step = min(0.1, remain)
+                try? await Task.sleep(nanoseconds: UInt64(step * 1_000_000_000))
+                remain -= step
+                autoCountdown = Int(ceil(remain))
             }
         }
         autoRunning = false; autoCountdown = 0
