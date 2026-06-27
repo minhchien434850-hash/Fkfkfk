@@ -4288,7 +4288,30 @@ def store_config() -> dict[str, Any]:
         "flash_end": _int_setting("store_flash_end", 0),
         "flash_discount": _int_setting("store_flash_discount", 0),
         "flash_title": get_setting("store_flash_title", "FLASH SALE"),
+        # Hero (banner chính đầu trang)
+        "hero_title": get_setting("store_hero_title", ""),
+        "hero_subtitle": get_setting("store_hero_subtitle", ""),
+        "hero_effect": get_setting("store_hero_effect", "gradient"),
+        "hero_font": get_setting("store_hero_font", "rounded"),
+        "hero_anim": get_setting("store_hero_anim", "shimmer"),
+        # Hiệu ứng / chuyển động cho slogan
+        "slogan_effect": get_setting("store_slogan_effect", "none"),
+        "slogan_anim": get_setting("store_slogan_anim", "none"),
+        # Khuyến mãi (banner ảnh trong phần ví nạp tiền)
+        "promo_image_url": get_setting("store_promo_image_url", ""),
+        "promo_product_id": _int_setting("store_promo_product_id", 0),
+        # 3 bước hướng dẫn tuỳ chỉnh
+        "steps": _load_steps(),
     }
+
+
+def _load_steps() -> list:
+    """Đọc 3 bước hướng dẫn đã lưu (JSON). Trả [] nếu chưa cấu hình → app dùng mặc định."""
+    try:
+        v = json.loads(get_setting("store_steps", "[]") or "[]")
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
 
 
 def _int_setting(key: str, default: int = 0) -> int:
@@ -4711,6 +4734,20 @@ class StoreConfigIn(BaseModel):
     flash_end: Optional[int] = None
     flash_discount: Optional[int] = None
     flash_title: Optional[str] = None
+    # Hero (banner chính đầu trang)
+    hero_title: Optional[str] = None
+    hero_subtitle: Optional[str] = None
+    hero_effect: Optional[str] = None
+    hero_font: Optional[str] = None
+    hero_anim: Optional[str] = None
+    # Hiệu ứng / chuyển động cho slogan
+    slogan_effect: Optional[str] = None
+    slogan_anim: Optional[str] = None
+    # Khuyến mãi (banner ảnh trong phần ví nạp tiền)
+    promo_image_url: Optional[str] = None
+    promo_product_id: Optional[int] = None
+    # 3 bước hướng dẫn tuỳ chỉnh: [{icon,title,desc,badge}, ...]
+    steps: Optional[list[dict[str, str]]] = None
 
 @app.post("/admin/store/config")
 def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
@@ -4738,6 +4775,31 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.flash_end is not None: set_setting("store_flash_end", str(max(0, int(b.flash_end))))
     if b.flash_discount is not None: set_setting("store_flash_discount", str(max(0, min(int(b.flash_discount), 99))))
     if b.flash_title is not None: set_setting("store_flash_title", b.flash_title.strip()[:40])
+    # Hero
+    if b.hero_title is not None: set_setting("store_hero_title", b.hero_title.strip()[:120])
+    if b.hero_subtitle is not None: set_setting("store_hero_subtitle", b.hero_subtitle.strip()[:160])
+    if b.hero_effect is not None: set_setting("store_hero_effect", b.hero_effect.strip()[:20])
+    if b.hero_font is not None: set_setting("store_hero_font", b.hero_font.strip()[:20])
+    if b.hero_anim is not None: set_setting("store_hero_anim", b.hero_anim.strip()[:20])
+    # Slogan effect / anim
+    if b.slogan_effect is not None: set_setting("store_slogan_effect", b.slogan_effect.strip()[:20])
+    if b.slogan_anim is not None: set_setting("store_slogan_anim", b.slogan_anim.strip()[:20])
+    # Khuyến mãi (banner)
+    if b.promo_image_url is not None: set_setting("store_promo_image_url", b.promo_image_url.strip())
+    if b.promo_product_id is not None: set_setting("store_promo_product_id", str(max(0, int(b.promo_product_id))))
+    # 3 bước hướng dẫn — lưu dạng JSON (chỉ giữ icon/title/desc/badge, tối đa 6 bước)
+    if b.steps is not None:
+        clean = []
+        for st in b.steps[:6]:
+            if not isinstance(st, dict):
+                continue
+            clean.append({
+                "icon": str(st.get("icon", "")).strip()[:40],
+                "title": str(st.get("title", "")).strip()[:40],
+                "desc": str(st.get("desc", "")).strip()[:80],
+                "badge": str(st.get("badge", "")).strip()[:6],
+            })
+        set_setting("store_steps", json.dumps(clean, ensure_ascii=False))
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
 
