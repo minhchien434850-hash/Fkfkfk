@@ -586,13 +586,6 @@ def init_db() -> None:
                 note TEXT DEFAULT '',
                 created_at INTEGER
             );
-            -- Ảnh công khai cho logo/banner cửa hàng (admin tải lên, khách xem được)
-            CREATE TABLE IF NOT EXISTS store_images(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                data BLOB NOT NULL,
-                mime TEXT NOT NULL DEFAULT 'image/jpeg',
-                created_at INTEGER
-            );
         """)
     _migrate()
 
