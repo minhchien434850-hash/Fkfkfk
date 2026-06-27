@@ -129,6 +129,7 @@ private final class WVDelegate: NSObject, WKNavigationDelegate, WKUIDelegate {
 }
 
 // ======================== BrowserModel — owns the persistent WKWebView ========================
+@MainActor
 final class BrowserModel: ObservableObject {
     @Published var urlText      = ""
     @Published var canGoBack    = false
@@ -144,20 +145,19 @@ final class BrowserModel: ObservableObject {
 
     init() {
         let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = WKWebsiteDataStore.default()   // shared cookies → stay logged in
+        cfg.websiteDataStore = WKWebsiteDataStore.default()
         cfg.allowsInlineMediaPlayback = true
         cfg.mediaTypesRequiringUserActionForPlayback = []
         cfg.allowsPictureInPictureMediaPlayback = true
 
         let uc = cfg.userContentController
-
-        // 1. Visibility bypass — prevents YouTube pausing when app goes to background
+        // Visibility bypass + ad-skip JS (runs on every page load)
         uc.addUserScript(WKUserScript(
             source: kYouTubeAdSkipJS,
             injectionTime: .atDocumentStart,
             forMainFrameOnly: false
         ))
-        // 2. CSS ad-hider — injected after DOM ready
+        // CSS ad-hider (injected after DOM is ready)
         uc.addUserScript(WKUserScript(
             source: kCSSInjectJS,
             injectionTime: .atDocumentEnd,
@@ -166,7 +166,7 @@ final class BrowserModel: ObservableObject {
 
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.allowsBackForwardNavigationGestures = true
-        // Desktop Safari UA — YouTube web player, no app redirect
+        // Desktop Safari UA → YouTube serves full web player, no native-app redirect
         wv.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         self.webView = wv
         self.urlText = BrowserModel.homeURL
@@ -176,22 +176,20 @@ final class BrowserModel: ObservableObject {
         wv.uiDelegate = del
         self.wvDelegate = del
 
-        // Background audio: .playback keeps audio alive when screen locks
+        // Background audio: keeps playing when screen locks / user switches apps
         try? AVAudioSession.sharedInstance().setCategory(
             .playback, mode: .moviePlayback,
             options: [.mixWithOthers, .allowBluetooth, .allowAirPlay]
         )
         try? AVAudioSession.sharedInstance().setActive(true)
 
-        // Compile ad-block content rules async and attach once ready
-        Task.detached(priority: .utility) { [weak wv] in
-            guard let wv else { return }
+        // Compile ad-block content rules on main actor (avoids @MainActor isolation issues)
+        Task { [weak self] in
+            guard let self else { return }
             if let list = try? await WKContentRuleListStore.default()
                 .compileContentRuleList(forIdentifier: "kenios-yt-adblock",
                                         encodedContentRuleList: kAdBlockRules) {
-                await MainActor.run {
-                    wv.configuration.userContentController.add(list)
-                }
+                self.webView.configuration.userContentController.add(list)
             }
         }
 
