@@ -318,6 +318,11 @@ struct StoreShowcase: Decodable {
     let leaderboard: [ShowcaseLeader]
 }
 
+// Tất cả sản phẩm gom theo danh mục (1 request, tránh N+1)
+struct StoreAllProducts: Decodable {
+    let byCategory: [String: [StoreProduct]]
+}
+
 struct MediaUploadResponse: Decodable { let id: Int; let path: String }
 
 // ---- Ví cửa hàng ----

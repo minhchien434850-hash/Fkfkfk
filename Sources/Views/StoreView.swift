@@ -1481,6 +1481,23 @@ struct StoreView: View {
     private func loadAllProducts() async {
         guard !loadingProducts else { return }
         loadingProducts = true
+
+        // Nhanh: lấy hết sản phẩm trong 1 request (gom theo danh mục). Lỗi/backend cũ → quay về cách cũ.
+        if let groupedFast = try? await store.api.storeAllProducts(), !groupedFast.isEmpty {
+            productsByCategory = groupedFast
+            var seenFast = Set<Int>()
+            var flat: [StoreProduct] = []
+            let extraIds = groupedFast.keys.filter { id in !categories.contains { $0.id == id } }
+            for cid in categories.map({ $0.id }) + extraIds {
+                for p in (groupedFast[cid] ?? []) where !seenFast.contains(p.id) {
+                    seenFast.insert(p.id); flat.append(p)
+                }
+            }
+            allProducts = flat
+            loadingProducts = false
+            return
+        }
+
         var seen = Set<Int>()
         var products: [StoreProduct] = []
         var grouped: [Int: [StoreProduct]] = [:]

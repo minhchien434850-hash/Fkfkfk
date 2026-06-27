@@ -4260,6 +4260,20 @@ def _product_public(c, row) -> dict:
 
 
 # -------------------- Khách xem (công khai) --------------------
+@app.get("/store/all-products")
+def store_all_products() -> dict[str, Any]:
+    """Trả TẤT CẢ sản phẩm gom theo danh mục trong 1 request (tránh N+1 khi tải cửa hàng)."""
+    with db() as c:
+        rows = c.execute(
+            "SELECT p.*, f.category_id AS category_id "
+            "FROM store_products p JOIN store_folders f ON f.id=p.folder_id "
+            "ORDER BY p.sort ASC, p.id ASC").fetchall()
+        grouped: dict[str, list] = {}
+        for r in rows:
+            grouped.setdefault(str(r["category_id"]), []).append(_product_public(c, r))
+    return {"by_category": grouped}
+
+
 @app.get("/store/config")
 def store_config() -> dict[str, Any]:
     return {

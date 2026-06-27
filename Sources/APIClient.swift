@@ -358,6 +358,13 @@ struct APIClient {
     func storeShowcase() async throws -> StoreShowcase {
         try decode(try await send("/store/showcase", auth: false))
     }
+    // Tất cả sản phẩm gom theo danh mục trong 1 request (id danh mục → danh sách sản phẩm)
+    func storeAllProducts() async throws -> [Int: [StoreProduct]] {
+        let r: StoreAllProducts = try decode(try await send("/store/all-products", auth: false))
+        var out: [Int: [StoreProduct]] = [:]
+        for (k, v) in r.byCategory { if let id = Int(k) { out[id] = v } }
+        return out
+    }
     func storeFolders(categoryId: Int) async throws -> [StoreFolder] {
         try decode(try await send("/store/categories/\(categoryId)/folders", auth: false))
     }

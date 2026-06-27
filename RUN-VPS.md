@@ -92,3 +92,18 @@ Sửa xong luôn `systemctl restart kenios`.
 | AI khác báo 429 | Hết hạn mức free → đổi Groq/OpenRouter hoặc dùng KENIOS AI |
 | Tải video lỗi | Thiếu `ffmpeg`/`yt-dlp` → chạy lại `start-vps.sh` |
 | OTP không tới | Đặt SMTP_RELAY, hoặc `OTP_DEBUG=1` để test |
+
+---
+
+## 8. Tự động sao lưu dữ liệu (khuyên dùng)
+Database (`kenios.db`) + file upload nằm trong `/root/kenios`. Để tránh mất hàng/đơn/ví khi sự cố, bật sao lưu hằng ngày bằng `backend/backup-db.sh`:
+```bash
+chmod +x /root/kenios/backup-db.sh
+# chạy thử 1 lần:
+WORK_DIR=/root/kenios /root/kenios/backup-db.sh
+# đặt lịch tự chạy 3h sáng mỗi ngày:
+( crontab -l 2>/dev/null; echo "0 3 * * * WORK_DIR=/root/kenios /root/kenios/backup-db.sh >> /root/kenios/backup.log 2>&1" ) | crontab -
+```
+- Bản sao lưu ở `/root/kenios/backups/` (DB nén `.gz` + uploads `.tar.gz`), tự xoá bản cũ hơn 14 ngày (đổi bằng `KEEP_DAYS`).
+- Khôi phục DB: `gunzip -c backups/kenios-XXXX.db.gz > kenios.db` rồi `systemctl restart kenios`.
+- Nên tải định kỳ bản sao lưu về máy khác (SFTP) cho an toàn.
