@@ -503,6 +503,13 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 PRIMARY KEY(post_id, user_id)
             );
+            CREATE TABLE IF NOT EXISTS post_comments(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER
+            );
             CREATE TABLE IF NOT EXISTS live_rooms(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 host_id INTEGER NOT NULL,
@@ -793,6 +800,11 @@ def _migrate() -> None:
         ("store_orders", "key_text", "TEXT"),
         # Ví cửa hàng (số dư VND, tách biệt với app chính)
         ("users", "wallet", "INTEGER DEFAULT 0"),
+        # Hồ sơ mạng xã hội: ảnh đại diện + tiểu sử
+        ("users", "avatar_url", "TEXT"),
+        ("users", "bio", "TEXT"),
+        # Video feed: lượt xem
+        ("posts", "views", "INTEGER DEFAULT 0"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -5724,29 +5736,53 @@ def create_post(b: PostIn, user=Depends(get_user)) -> dict[str, Any]:
     return {"id": pid, "message": "Đã đăng video."}
 
 
-@app.get("/feed")
-def feed(user=Depends(get_user)) -> list[dict[str, Any]]:
-    with db() as c:
-        rows = c.execute(
-            "SELECT p.id, p.caption, p.likes, p.created_at, p.file_id, p.user_id, "
-            "u.username, u.public_id, f.name, f.mime "
-            "FROM posts p JOIN users u ON p.user_id=u.id "
-            "JOIN files f ON p.file_id=f.id "
-            "ORDER BY p.id DESC LIMIT 100"
-        ).fetchall()
-        liked = {r["post_id"] for r in c.execute(
-            "SELECT post_id FROM post_likes WHERE user_id=?", (user["id"],)).fetchall()}
-        following = {r["following_id"] for r in c.execute(
-            "SELECT following_id FROM follows WHERE follower_id=?", (user["id"],)).fetchall()}
+def _posts_for(c, viewer_id: int, where: str = "", params: tuple = ()) -> list[dict[str, Any]]:
+    """Lấy danh sách bài (video feed) kèm trạng thái like/follow của người xem,
+    số bình luận & lượt xem. `where` là điều kiện thêm vào (vd 'p.user_id=?')."""
+    sql = ("SELECT p.id, p.caption, p.likes, p.created_at, p.file_id, p.user_id, "
+           "p.views, u.username, u.public_id, u.avatar_url, f.name, f.mime "
+           "FROM posts p JOIN users u ON p.user_id=u.id "
+           "JOIN files f ON p.file_id=f.id ")
+    if where:
+        sql += f"WHERE {where} "
+    sql += "ORDER BY p.id DESC LIMIT 100"
+    rows = c.execute(sql, params).fetchall()
+    liked = {r["post_id"] for r in c.execute(
+        "SELECT post_id FROM post_likes WHERE user_id=?", (viewer_id,)).fetchall()}
+    following = {r["following_id"] for r in c.execute(
+        "SELECT following_id FROM follows WHERE follower_id=?", (viewer_id,)).fetchall()}
+    cmt = {r["post_id"]: r["n"] for r in c.execute(
+        "SELECT post_id, COUNT(*) n FROM post_comments GROUP BY post_id").fetchall()}
     return [{
         "id": r["id"], "caption": r["caption"], "likes": r["likes"],
         "created_at": r["created_at"], "file_id": r["file_id"],
         "user_id": r["user_id"],
         "username": r["username"], "public_id": r["public_id"],
+        "avatar_url": r["avatar_url"] or "",
         "name": r["name"], "mime": r["mime"],
+        "views": r["views"] or 0, "comments": cmt.get(r["id"], 0),
+        "is_public": True,
         "liked": r["id"] in liked,
         "following": r["user_id"] in following,
     } for r in rows]
+
+
+@app.get("/feed")
+def feed(user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        return _posts_for(c, user["id"])
+
+
+@app.get("/me/posts")
+def my_posts(user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        return _posts_for(c, user["id"], "p.user_id=?", (user["id"],))
+
+
+@app.get("/users/{uid}/posts")
+def user_posts(uid: int, user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        return _posts_for(c, user["id"], "p.user_id=?", (uid,))
 
 
 def _vmime(name: str, mime: Optional[str]) -> str:
@@ -5837,7 +5873,59 @@ def delete_post(pid: int, user=Depends(get_user)) -> dict[str, Any]:
             raise HTTPException(status_code=403, detail="Không thể xoá bài của người khác.")
         c.execute("DELETE FROM posts WHERE id=?", (pid,))
         c.execute("DELETE FROM post_likes WHERE post_id=?", (pid,))
+        c.execute("DELETE FROM post_comments WHERE post_id=?", (pid,))
     return {"message": "Đã xoá bài."}
+
+
+@app.post("/posts/{pid}/view")
+def post_view(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        c.execute("UPDATE posts SET views=COALESCE(views,0)+1 WHERE id=?", (pid,))
+        row = c.execute("SELECT views FROM posts WHERE id=?", (pid,)).fetchone()
+    return {"views": (row["views"] if row else 0) or 0}
+
+
+class CommentIn(BaseModel):
+    content: str = ""
+
+
+@app.get("/posts/{pid}/comments")
+def list_comments(pid: int, user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT cm.id, cm.user_id, cm.content, cm.created_at, u.username "
+            "FROM post_comments cm JOIN users u ON cm.user_id=u.id "
+            "WHERE cm.post_id=? ORDER BY cm.id ASC LIMIT 500", (pid,)).fetchall()
+    return [{"id": r["id"], "user_id": r["user_id"], "username": r["username"],
+             "content": r["content"], "created_at": r["created_at"]} for r in rows]
+
+
+@app.post("/posts/{pid}/comments")
+def add_comment(pid: int, b: CommentIn, user=Depends(get_user)) -> dict[str, Any]:
+    content = (b.content or "").strip()[:500]
+    if not content:
+        raise HTTPException(status_code=400, detail="Bình luận không được để trống.")
+    with db() as c:
+        if not c.execute("SELECT 1 FROM posts WHERE id=?", (pid,)).fetchone():
+            raise HTTPException(status_code=404, detail="Không tìm thấy bài.")
+        cur = c.execute(
+            "INSERT INTO post_comments(post_id,user_id,content,created_at) VALUES(?,?,?,?)",
+            (pid, user["id"], content, int(time.time())))
+        cid = cur.lastrowid
+    return {"id": cid, "user_id": user["id"], "username": user["username"],
+            "content": content, "created_at": int(time.time())}
+
+
+@app.delete("/comments/{cid}")
+def delete_comment(cid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        row = c.execute("SELECT user_id FROM post_comments WHERE id=?", (cid,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Không tìm thấy bình luận.")
+        if row["user_id"] != user["id"] and not user["is_admin"]:
+            raise HTTPException(status_code=403, detail="Không thể xoá bình luận của người khác.")
+        c.execute("DELETE FROM post_comments WHERE id=?", (cid,))
+    return {"message": "Đã xoá bình luận."}
 
 
 # ======================== Live (phòng live + bình luận như TikTok) ========================
@@ -5976,21 +6064,58 @@ def unfollow_user(uid: int, user=Depends(get_user)) -> dict[str, Any]:
     return {"following": False}
 
 
+def _profile_dict(c, uid: int, viewer_id: int) -> dict[str, Any]:
+    u = c.execute("SELECT id,username,public_id,avatar_url,bio FROM users WHERE id=?", (uid,)).fetchone()
+    if not u:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
+    followers = c.execute("SELECT COUNT(*) n FROM follows WHERE following_id=?", (uid,)).fetchone()["n"]
+    following = c.execute("SELECT COUNT(*) n FROM follows WHERE follower_id=?", (uid,)).fetchone()["n"]
+    posts = c.execute("SELECT COUNT(*) n FROM posts WHERE user_id=?", (uid,)).fetchone()["n"]
+    total_likes = c.execute("SELECT COALESCE(SUM(likes),0) n FROM posts WHERE user_id=?", (uid,)).fetchone()["n"]
+    is_following = c.execute(
+        "SELECT 1 FROM follows WHERE follower_id=? AND following_id=?",
+        (viewer_id, uid)).fetchone() is not None
+    return {"id": u["id"], "username": u["username"], "public_id": u["public_id"],
+            "avatar_url": u["avatar_url"] or "", "bio": u["bio"] or "",
+            "followers": followers, "following": following, "posts": posts,
+            "total_likes": total_likes, "is_following": is_following}
+
+
 @app.get("/users/{uid}/profile")
 def user_profile(uid: int, user=Depends(get_user)) -> dict[str, Any]:
     with db() as c:
-        u = c.execute("SELECT id,username,public_id FROM users WHERE id=?", (uid,)).fetchone()
-        if not u:
-            raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
-        followers = c.execute("SELECT COUNT(*) n FROM follows WHERE following_id=?", (uid,)).fetchone()["n"]
-        following = c.execute("SELECT COUNT(*) n FROM follows WHERE follower_id=?", (uid,)).fetchone()["n"]
-        posts = c.execute("SELECT COUNT(*) n FROM posts WHERE user_id=?", (uid,)).fetchone()["n"]
-        is_following = c.execute(
-            "SELECT 1 FROM follows WHERE follower_id=? AND following_id=?",
-            (user["id"], uid)).fetchone() is not None
-    return {"id": u["id"], "username": u["username"], "public_id": u["public_id"],
-            "followers": followers, "following": following, "posts": posts,
-            "is_following": is_following}
+        return _profile_dict(c, uid, user["id"])
+
+
+@app.get("/me/profile")
+def my_profile(user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        return _profile_dict(c, user["id"], user["id"])
+
+
+class ProfileUpdateIn(BaseModel):
+    public_id: Optional[str] = None
+    avatar_url: Optional[str] = None
+    bio: Optional[str] = None
+
+
+@app.put("/me/profile")
+def update_my_profile(b: ProfileUpdateIn, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        if b.public_id is not None:
+            pid = b.public_id.strip()[:30]
+            if pid:
+                # ID phải là duy nhất giữa các user
+                dup = c.execute("SELECT 1 FROM users WHERE public_id=? AND id!=?",
+                                (pid, user["id"])).fetchone()
+                if dup:
+                    raise HTTPException(status_code=409, detail="ID này đã có người dùng. Hãy chọn ID khác.")
+                c.execute("UPDATE users SET public_id=? WHERE id=?", (pid, user["id"]))
+        if b.avatar_url is not None:
+            c.execute("UPDATE users SET avatar_url=? WHERE id=?", (b.avatar_url.strip(), user["id"]))
+        if b.bio is not None:
+            c.execute("UPDATE users SET bio=? WHERE id=?", (b.bio.strip()[:300], user["id"]))
+    return {"message": "Đã cập nhật hồ sơ."}
 
 
 @app.post("/admin/payments/{pid}/confirm")

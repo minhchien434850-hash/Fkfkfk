@@ -217,7 +217,18 @@ struct StoreView: View {
 
     // Tự sinh từ sản phẩm thật, xoay vòng theo tick (5 phút/lần)
     private var effectiveShowcase: StoreShowcase {
-        if let s = showcase { return s }
+        // Luôn có sẵn dữ liệu ảo. Mục nào server có giao dịch THẬT thì ưu tiên hiển thị thật,
+        // mục nào server rỗng (cửa hàng mới / mất kết nối) thì dùng ảo để không bao giờ trống.
+        let fake = generatedShowcase
+        guard let s = showcase else { return fake }
+        return StoreShowcase(
+            recentOrders: s.recentOrders.isEmpty ? fake.recentOrders : s.recentOrders,
+            recentTopups: s.recentTopups.isEmpty ? fake.recentTopups : s.recentTopups,
+            leaderboard:  s.leaderboard.isEmpty  ? fake.leaderboard  : s.leaderboard)
+    }
+
+    // Dữ liệu showcase ảo — xoay vòng mỗi 5 phút theo showcaseTick
+    private var generatedShowcase: StoreShowcase {
         let now = Int(Date().timeIntervalSince1970)
         let tick = showcaseTick
 
