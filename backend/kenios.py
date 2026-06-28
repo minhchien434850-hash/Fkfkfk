@@ -517,6 +517,12 @@ def init_db() -> None:
                 content TEXT NOT NULL,
                 created_at INTEGER
             );
+            CREATE TABLE IF NOT EXISTS post_saves(
+                post_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at INTEGER,
+                PRIMARY KEY(post_id, user_id)
+            );
             CREATE TABLE IF NOT EXISTS live_rooms(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 host_id INTEGER NOT NULL,
@@ -6035,6 +6041,8 @@ def _posts_for(c, viewer_id: int, where: str = "", params: tuple = (),
         "SELECT following_id FROM follows WHERE follower_id=?", (viewer_id,)).fetchall()}
     cmt = {r["post_id"]: r["n"] for r in c.execute(
         "SELECT post_id, COUNT(*) n FROM post_comments GROUP BY post_id").fetchall()}
+    saved = {r["post_id"] for r in c.execute(
+        "SELECT post_id FROM post_saves WHERE user_id=?", (viewer_id,)).fetchall()}
     return [{
         "id": r["id"], "caption": r["caption"], "likes": r["likes"],
         "created_at": r["created_at"], "file_id": r["file_id"],
@@ -6046,6 +6054,7 @@ def _posts_for(c, viewer_id: int, where: str = "", params: tuple = (),
         "views": r["views"] or 0, "comments": cmt.get(r["id"], 0),
         "is_public": True,
         "liked": r["id"] in liked,
+        "saved": r["id"] in saved,
         "following": r["user_id"] in following,
     } for r in rows]
 
@@ -6153,6 +6162,31 @@ def like_post(pid: int, user=Depends(get_user)) -> dict[str, Any]:
             liked = True
         likes = c.execute("SELECT likes FROM posts WHERE id=?", (pid,)).fetchone()
     return {"liked": liked, "likes": likes["likes"] if likes else 0}
+
+
+@app.post("/posts/{pid}/save")
+def save_post(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    """Lưu / bỏ lưu bài (như nút Lưu của Facebook)."""
+    with db() as c:
+        ex = c.execute("SELECT 1 FROM post_saves WHERE post_id=? AND user_id=?",
+                       (pid, user["id"])).fetchone()
+        if ex:
+            c.execute("DELETE FROM post_saves WHERE post_id=? AND user_id=?", (pid, user["id"]))
+            saved = False
+        else:
+            c.execute("INSERT OR IGNORE INTO post_saves(post_id,user_id,created_at) VALUES(?,?,?)",
+                      (pid, user["id"], int(time.time())))
+            saved = True
+    return {"saved": saved}
+
+
+@app.get("/me/saved")
+def my_saved_posts(user=Depends(get_user)) -> list[dict[str, Any]]:
+    """Danh sách bài đã lưu của tôi."""
+    with db() as c:
+        return _posts_for(c, user["id"],
+                          "p.id IN (SELECT post_id FROM post_saves WHERE user_id=?)",
+                          (user["id"],))
 
 
 @app.delete("/posts/{pid}")

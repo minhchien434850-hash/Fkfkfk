@@ -67,7 +67,8 @@ struct ReelsFeedView: View {
                                      currentUserId: store.userId,
                                      onLike: { Task { await like(p) } },
                                      onComment: { commentsFor = PostIDWrapper(id: p.id) },
-                                     onFollow: { Task { await toggleFollow(p) } })
+                                     onFollow: { Task { await toggleFollow(p) } },
+                                     onSave: { Task { await save(p) } })
                                 .frame(width: geo.size.width, height: h)
                                 .offset(y: CGFloat(idx - currentIndex) * h + dragOffset)
                         }
@@ -151,6 +152,13 @@ struct ReelsFeedView: View {
         } catch { self.error = error.localizedDescription }
     }
 
+    private func save(_ p: PostItem) async {
+        do {
+            let r = try await store.api.savePost(p.id)
+            if let i = posts.firstIndex(where: { $0.id == p.id }) { posts[i].saved = r.saved }
+        } catch { self.error = error.localizedDescription }
+    }
+
     private func toggleFollow(_ p: PostItem) async {
         guard let uid = p.userId else { return }
         let nowFollowing = !(p.following ?? false)
@@ -175,6 +183,7 @@ struct ReelCard: View {
     var onLike: () -> Void
     var onComment: () -> Void
     var onFollow: () -> Void = {}
+    var onSave: () -> Void = {}
 
     @State private var player: AVPlayer?
     @State private var thumb: UIImage?
@@ -276,6 +285,14 @@ struct ReelCard: View {
                             VStack(spacing: 4) {
                                 Image(systemName: "bubble.right.fill").font(.title2).foregroundStyle(.white)
                                 Text("\(post.comments ?? 0)").font(.caption).foregroundStyle(.white)
+                            }
+                        }
+                        // Lưu (bookmark)
+                        Button(action: onSave) {
+                            VStack(spacing: 4) {
+                                Image(systemName: (post.saved ?? false) ? "bookmark.fill" : "bookmark")
+                                    .font(.title2).foregroundStyle((post.saved ?? false) ? .yellow : .white)
+                                Text("Lưu").font(.caption).foregroundStyle(.white)
                             }
                         }
                         // Chia sẻ

@@ -40,6 +40,7 @@ struct SocialFeedView: View {
                     SocialPostCard(post: p,
                                    onLike: { Task { await like(p) } },
                                    onComment: { commentsFor = PostIDWrapper(id: p.id) },
+                                   onSave: { Task { await save(p) } },
                                    onProfile: { if let uid = p.userId { onOpenProfile?(uid) } })
                 }
                 if let error { Text(error).font(.caption).foregroundStyle(.red) }
@@ -149,6 +150,13 @@ struct SocialFeedView: View {
             }
         } catch { self.error = error.localizedDescription }
     }
+
+    private func save(_ p: PostItem) async {
+        do {
+            let r = try await store.api.savePost(p.id)
+            if let i = posts.firstIndex(where: { $0.id == p.id }) { posts[i].saved = r.saved }
+        } catch { self.error = error.localizedDescription }
+    }
 }
 
 // ======================== Thẻ bài viết ========================
@@ -157,7 +165,9 @@ struct SocialPostCard: View {
     let post: PostItem
     var onLike: () -> Void
     var onComment: () -> Void
+    var onSave: () -> Void = {}
     var onProfile: () -> Void = {}
+    @State private var showFullImage = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -176,13 +186,19 @@ struct SocialPostCard: View {
                 Text(cap).font(.body).fixedSize(horizontal: false, vertical: true)
             }
             if post.kind == "image", let url = store.api.mediaURL(fileId: post.fileId) {
-                AsyncImage(url: url) { img in
-                    img.resizable().scaledToFit()
-                } placeholder: {
-                    Color(.tertiarySystemBackground).frame(height: 200)
+                Button { showFullImage = true } label: {
+                    AsyncImage(url: url) { img in
+                        img.resizable().scaledToFit()
+                    } placeholder: {
+                        Color(.tertiarySystemBackground).frame(height: 200)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.plain)
+                .fullScreenCover(isPresented: $showFullImage) {
+                    FullImageViewer(url: url)
+                }
             }
 
             HStack(spacing: 22) {
@@ -193,6 +209,10 @@ struct SocialPostCard: View {
                 Button(action: onComment) {
                     Label("\(post.comments ?? 0)", systemImage: "bubble.right")
                         .foregroundStyle(.secondary)
+                }
+                Button(action: onSave) {
+                    Image(systemName: (post.saved ?? false) ? "bookmark.fill" : "bookmark")
+                        .foregroundStyle((post.saved ?? false) ? .yellow : .secondary)
                 }
                 Spacer()
             }
@@ -212,6 +232,61 @@ struct SocialPostCard: View {
         } else {
             Circle().fill(store.accentColor.opacity(0.5)).frame(width: 40, height: 40)
                 .overlay(Text(initial).font(.headline).foregroundStyle(.white))
+        }
+    }
+}
+
+// ======================== Xem ảnh phóng to (zoom + kéo) ========================
+struct FullImageViewer: View {
+    let url: URL
+    @Environment(\.dismiss) var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            AsyncImage(url: url) { img in
+                img.resizable().scaledToFit()
+            } placeholder: { ProgressView().tint(.white) }
+            .scaleEffect(scale)
+            .offset(offset)
+            .gesture(
+                MagnificationGesture()
+                    .onChanged { v in scale = max(1, lastScale * v) }
+                    .onEnded { _ in
+                        lastScale = scale
+                        if scale <= 1 { withAnimation { offset = .zero; lastOffset = .zero } }
+                    }
+            )
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { v in
+                        if scale > 1 {
+                            offset = CGSize(width: lastOffset.width + v.translation.width,
+                                            height: lastOffset.height + v.translation.height)
+                        }
+                    }
+                    .onEnded { _ in lastOffset = offset }
+            )
+            .onTapGesture(count: 2) {
+                withAnimation {
+                    if scale > 1 { scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero }
+                    else { scale = 2.5; lastScale = 2.5 }
+                }
+            }
+            VStack {
+                HStack {
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.largeTitle).foregroundStyle(.white.opacity(0.9))
+                    }.padding()
+                }
+                Spacer()
+            }
         }
     }
 }

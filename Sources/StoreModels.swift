@@ -461,6 +461,7 @@ struct PostItem: Identifiable, Decodable, Hashable {
     let mime: String?
     var kind: String? = nil   // text | image | video
     var liked: Bool
+    var saved: Bool? = nil
     var following: Bool?
     var views: Int?
     var comments: Int?
@@ -493,6 +494,7 @@ struct UserProfile: Decodable {
 
 struct PostCreateResponse: Decodable { let id: Int; let message: String }
 struct LikeResponse: Decodable { let liked: Bool; let likes: Int }
+struct SaveResponse: Decodable { let saved: Bool }
 struct LikesResponse: Decodable { let likes: Int }
 
 // Live (phòng live + bình luận)

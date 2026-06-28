@@ -233,6 +233,14 @@ struct APIClient {
     func getSocialFeed() async throws -> [PostItem] {
         try decode(try await send("/social/feed"))
     }
+    // Lưu / bỏ lưu bài (bookmark)
+    @discardableResult
+    func savePost(_ pid: Int) async throws -> SaveResponse {
+        try decode(try await send("/posts/\(pid)/save", method: "POST"))
+    }
+    func getSavedPosts() async throws -> [PostItem] {
+        try decode(try await send("/me/saved"))
+    }
     func getMyPosts() async throws -> [PostItem] {
         try decode(try await send("/me/posts"))
     }
