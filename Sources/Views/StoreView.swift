@@ -786,24 +786,30 @@ struct StoreView: View {
             }
             VStack(spacing: 0) {
                 ForEach(shown) { o in
-                    HStack(spacing: 10) {
-                        Text(String(o.user.prefix(1)).uppercased()).font(.caption.bold())
-                            .frame(width: 30, height: 30).background(Theme.accent.opacity(0.15))
-                            .foregroundStyle(Theme.accent).clipShape(Circle())
-                        VStack(alignment: .leading, spacing: 1) {
-                            (Text(o.user).bold() + Text(" " + store.t("mua","bought") + " ") + Text(o.product).bold())
-                                .font(.caption).lineLimit(1)
-                            Text((o.label.isEmpty ? "" : o.label + " · ") + timeAgo(o.at))
-                                .font(.caption2).foregroundStyle(.secondary)
+                    VStack(spacing: 0) {
+                        HStack(spacing: 10) {
+                            Text(String(o.user.prefix(1)).uppercased()).font(.caption.bold())
+                                .frame(width: 30, height: 30).background(Theme.accent.opacity(0.15))
+                                .foregroundStyle(Theme.accent).clipShape(Circle())
+                            VStack(alignment: .leading, spacing: 1) {
+                                (Text(o.user).bold() + Text(" " + store.t("mua","bought") + " ") + Text(o.product).bold())
+                                    .font(.caption).lineLimit(1)
+                                Text((o.label.isEmpty ? "" : o.label + " · ") + timeAgo(o.at))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 4)
+                            Text(kFormatVND(o.amount)).font(.caption.bold()).foregroundStyle(.primary)
                         }
-                        Spacer(minLength: 4)
-                        Text(kFormatVND(o.amount)).font(.caption.bold()).foregroundStyle(.primary)
+                        .padding(.vertical, 8)
+                        Divider()
                     }
-                    .padding(.vertical, 8)
-                    if o.id != shown.last?.id { Divider() }
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)))
                 }
             }
             .padding(.horizontal, 12)
+            .clipped()
             .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
             .animation(.easeInOut(duration: 0.55), value: tickerIndex)
         }
@@ -819,23 +825,29 @@ struct StoreView: View {
             }
             VStack(spacing: 0) {
                 ForEach(shown) { t in
-                    HStack(spacing: 10) {
-                        Text(String(t.user.prefix(1)).uppercased()).font(.caption.bold())
-                            .frame(width: 30, height: 30).background(Color.green.opacity(0.15))
-                            .foregroundStyle(.green).clipShape(Circle())
-                        VStack(alignment: .leading, spacing: 1) {
-                            (Text(t.user).bold() + Text(" " + store.t("đã nạp","topped up")))
-                                .font(.caption).lineLimit(1)
-                            Text(timeAgo(t.at)).font(.caption2).foregroundStyle(.secondary)
+                    VStack(spacing: 0) {
+                        HStack(spacing: 10) {
+                            Text(String(t.user.prefix(1)).uppercased()).font(.caption.bold())
+                                .frame(width: 30, height: 30).background(Color.green.opacity(0.15))
+                                .foregroundStyle(.green).clipShape(Circle())
+                            VStack(alignment: .leading, spacing: 1) {
+                                (Text(t.user).bold() + Text(" " + store.t("đã nạp","topped up")))
+                                    .font(.caption).lineLimit(1)
+                                Text(timeAgo(t.at)).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 4)
+                            Text("+" + kFormatVND(t.amount)).font(.caption.bold()).foregroundStyle(.green)
                         }
-                        Spacer(minLength: 4)
-                        Text("+" + kFormatVND(t.amount)).font(.caption.bold()).foregroundStyle(.green)
+                        .padding(.vertical, 8)
+                        Divider()
                     }
-                    .padding(.vertical, 8)
-                    if t.id != shown.last?.id { Divider() }
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)))
                 }
             }
             .padding(.horizontal, 12)
+            .clipped()
             .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
             .animation(.easeInOut(duration: 0.55), value: tickerIndex)
         }
