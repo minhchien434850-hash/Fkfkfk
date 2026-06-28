@@ -623,6 +623,12 @@ def init_db() -> None:
                 note TEXT DEFAULT '',
                 created_at INTEGER
             );
+            -- Vân tay các giao dịch NGÂN HÀNG đã cộng tiền (chống cộng trùng khi
+            -- API ngân hàng trả về cùng giao dịch nhiều lần / webhook gửi lại).
+            CREATE TABLE IF NOT EXISTS bank_tx_seen(
+                fp TEXT PRIMARY KEY,
+                created_at INTEGER
+            );
             -- Mã khuyến mãi / giảm giá
             CREATE TABLE IF NOT EXISTS store_promo_codes(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4112,6 +4118,63 @@ def _match_amount(rows, amount: int):
     return rows[0]
 
 
+# ---- Chống cộng tiền trùng: vân tay mỗi giao dịch ngân hàng đã xử lý ----
+_TX_ID_KEYS = ("transactionID", "transactionId", "transaction_id", "id", "tid",
+               "tranId", "refNo", "referenceNumber", "reference", "ftCode", "ft",
+               "trace", "seqNo", "transactionNumber", "bankRefNo")
+_TX_FP_KEYS = ("transactionDate", "date", "time", "datetime", "when", "transactionTime",
+               "amount", "creditAmount", "transferAmount", "money",
+               "description", "content", "transactionContent", "addDescription", "comment",
+               "balance", "balanceAfter", "accountBalance", "runningBalance", "cusumBalance")
+
+
+def _tx_fingerprint(tx: dict) -> str:
+    """Vân tay duy nhất cho 1 giao dịch ngân hàng.
+
+    Ưu tiên mã giao dịch thật của ngân hàng; nếu không có thì băm nhiều trường
+    (ngày giờ + số tiền + nội dung + số dư) — 2 lần chuyển khoản thật luôn khác
+    nhau nên không bao giờ chặn nhầm giao dịch hợp lệ.
+    """
+    for k in _TX_ID_KEYS:
+        v = tx.get(k)
+        if v not in (None, "", 0, "0"):
+            return "id:" + str(v)
+    parts = [f"{k}={tx.get(k)}" for k in _TX_FP_KEYS if tx.get(k) not in (None, "")]
+    return "h:" + hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:32]
+
+
+def _bank_tx_done(fp: str) -> bool:
+    try:
+        with db() as c:
+            return c.execute("SELECT 1 FROM bank_tx_seen WHERE fp=?", (fp,)).fetchone() is not None
+    except Exception:
+        return False
+
+
+def _mark_bank_tx(fp: str) -> None:
+    try:
+        with db() as c:
+            c.execute("INSERT OR IGNORE INTO bank_tx_seen(fp,created_at) VALUES(?,?)",
+                      (fp, int(time.time())))
+    except Exception as e:
+        log.error("Lưu vân tay giao dịch lỗi: %s", e)
+
+
+def _confirm_tx(tx: dict, desc: str, amount: int) -> bool:
+    """Xác nhận 1 giao dịch ngân hàng — CHỈ cộng tiền nếu vân tay chưa từng xử lý.
+
+    Đánh dấu vân tay SAU khi cộng thành công (giao dịch chưa khớp đơn nào sẽ không
+    bị đánh dấu, để lần sau khách tạo đơn rồi vẫn khớp được — không kẹt tiền).
+    """
+    fp = _tx_fingerprint(tx)
+    if _bank_tx_done(fp):
+        return False
+    if _confirm_from_description(desc, amount):
+        _mark_bank_tx(fp)
+        return True
+    return False
+
+
 def _confirm_by_customer_id(cid: str, amount: int) -> bool:
     """Xác nhận chuyển khoản dựa trên ID khách hàng trong nội dung CK + số tiền."""
     try:
@@ -4192,7 +4255,7 @@ async def payment_webhook(request: Request) -> dict[str, Any]:
             amount = int(float(str(amount).replace(",", "")))
         except (TypeError, ValueError):
             amount = 0
-        if _confirm_from_description(desc, amount):
+        if _confirm_tx(item, desc, amount):
             confirmed += 1
 
     return {"success": True, "confirmed": confirmed}
@@ -4288,7 +4351,7 @@ async def _acb_fetch_and_confirm() -> int:
             amount = int(float(str(amt_raw).replace(",", "").replace(".", "") or 0))
         except (TypeError, ValueError):
             amount = 0
-        if _confirm_from_description(desc, amount):
+        if _confirm_tx(tx, desc, amount):
             confirmed += 1
     if confirmed:
         log.info("ACB tự động xác nhận %d giao dịch.", confirmed)
