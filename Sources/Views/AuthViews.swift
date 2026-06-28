@@ -15,22 +15,19 @@ struct LoginView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 30, style: .continuous)
-                            .fill(Theme.heroGradient)
-                            .frame(width: 116, height: 116)
-                            .shadow(color: Theme.purple.opacity(0.55), radius: 26, y: 12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 30, style: .continuous)
-                                    .stroke(LinearGradient(colors: [.white.opacity(0.5), .clear],
-                                                           startPoint: .topLeading, endPoint: .bottomTrailing),
-                                            lineWidth: 1.5)
-                            )
-                        Text("🦊")
-                            .font(.system(size: 66))
-                            .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
-                    }
-                    .padding(.top, 52)
+                    Image("AppLogo")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 116, height: 116)
+                        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                                .stroke(LinearGradient(colors: [.white.opacity(0.5), .clear],
+                                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                                        lineWidth: 1.5)
+                        )
+                        .shadow(color: Theme.purple.opacity(0.55), radius: 26, y: 12)
+                        .padding(.top, 52)
 
                     RainbowText(text: "KENIOS", size: 40)
                     Text(store.t("Mạng xã hội · Video · Giải trí · Công cụ", "Social · Video · Entertainment · Tools"))
