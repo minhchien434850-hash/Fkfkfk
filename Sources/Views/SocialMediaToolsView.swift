@@ -15,7 +15,11 @@ struct LiveTarget: Identifiable, Codable {
 struct SocialMediaToolsView: View {
     @EnvironmentObject var store: AppStore
 
-    @State private var selectedSegment = 0 // 0: AI Generator, 1: Downloader, 2: Live Tools
+    @State private var selectedSegment: Int // 0: AI Generator, 1: Downloader, 2: Live Tools
+
+    init(initialSegment: Int = 0) {
+        _selectedSegment = State(initialValue: initialSegment)
+    }
 
     // Phát Live đa nền tảng (nhập stream key / link)
     @AppStorage("kenios_live_targets") private var liveTargetsRaw = "[]"
