@@ -178,26 +178,30 @@ struct SettingsView: View {
                 }
                 } // hết phần tuỳ biến thương hiệu (chỉ admin)
 
-                // ===== Thông báo =====
-                Section(store.t("Thông báo", "Notifications")) {
-                    Button {
-                        store.requestNotificationPermission()
-                        message = store.t("Đã mở yêu cầu cấp quyền thông báo iOS.", "Opened iOS notification permission request.")
-                    } label: {
-                        Label(store.t("Bật thông báo (sản phẩm mới, cập nhật)", "Enable notifications (new products, updates)"),
-                              systemImage: "bell.badge")
-                    }
-                    Button {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(url)
+                // ===== Thông báo (CHỈ admin thấy) =====
+                // Khách hàng KHÔNG thấy mục này; app đã tự xin quyền thông báo lúc
+                // khởi động (AppDelegate) nên với khách mặc định là BẬT.
+                if store.isAdmin {
+                    Section(store.t("Thông báo", "Notifications")) {
+                        Button {
+                            store.requestNotificationPermission()
+                            message = store.t("Đã mở yêu cầu cấp quyền thông báo iOS.", "Opened iOS notification permission request.")
+                        } label: {
+                            Label(store.t("Bật thông báo (sản phẩm mới, cập nhật)", "Enable notifications (new products, updates)"),
+                                  systemImage: "bell.badge")
                         }
-                    } label: {
-                        Label(store.t("Mở Cài đặt iOS để quản lý thông báo", "Open iOS Settings to manage notifications"),
-                              systemImage: "gear")
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Label(store.t("Mở Cài đặt iOS để quản lý thông báo", "Open iOS Settings to manage notifications"),
+                                  systemImage: "gear")
+                        }
+                        Text(store.t("Thông báo xuất hiện khi admin thêm sản phẩm mới hoặc có cập nhật bảo trì.",
+                                     "Notifications appear when an admin adds new products or posts a maintenance update."))
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
-                    Text(store.t("Thông báo xuất hiện khi admin thêm sản phẩm mới hoặc có cập nhật bảo trì.",
-                                 "Notifications appear when an admin adds new products or posts a maintenance update."))
-                        .font(.caption2).foregroundStyle(.secondary)
                 }
 
                 Section(store.t("Dung lượng & Dọn dẹp", "Storage & Cleanup")) {
