@@ -3522,6 +3522,8 @@ class RestreamTarget(BaseModel):
 
 class RestreamStartIn(BaseModel):
     targets: list[RestreamTarget]
+    resolution: str = "source"   # source | 1080 | 720 | 480
+    fps: str = "source"          # source | 60 | 30
 
 
 def _restream_host(request: Request) -> str:
@@ -3558,9 +3560,25 @@ def restream_start(b: RestreamStartIn, request: Request, user=Depends(get_user))
     _restream_stop_proc()
     ingest_key = secrets.token_hex(8)
     ingest_local = f"rtmp://0.0.0.0:1935/live/{ingest_key}"
+
+    # Chọn chế độ: sao chép (nhẹ CPU, giữ nguyên FPS/độ phân giải của điện thoại)
+    # hoặc mã hoá lại để ÉP độ phân giải + FPS theo lựa chọn.
+    res = (b.resolution or "source").strip()
+    fps = (b.fps or "source").strip()
+    if res == "source" and fps == "source":
+        enc = ["-c", "copy"]
+    else:
+        enc = []
+        if res in ("1080", "720", "480"):
+            enc += ["-vf", f"scale={res}:-2"]   # ép bề rộng (màn dọc), cao tự động (chẵn)
+        bitrate = {"1080": "4500k", "720": "2500k", "480": "1200k"}.get(res, "2500k")
+        if fps in ("60", "30"):
+            enc += ["-r", fps]
+        enc += ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+                "-b:v", bitrate, "-maxrate", bitrate, "-bufsize", bitrate, "-g", "60",
+                "-c:a", "aac", "-b:a", "128k"]
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning",
-           "-listen", "1", "-i", ingest_local,
-           "-c", "copy", "-f", "tee", "-map", "0", "|".join(outs)]
+           "-listen", "1", "-i", ingest_local] + enc + ["-f", "tee", "-map", "0", "|".join(outs)]
     try:
         _restream_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
@@ -3569,6 +3587,7 @@ def restream_start(b: RestreamStartIn, request: Request, user=Depends(get_user))
     _restream_meta = {"running": True,
                       "ingest_url": f"rtmp://{host}:1935/live/{ingest_key}",
                       "key": ingest_key, "targets": len(outs),
+                      "resolution": res, "fps": fps,
                       "started_at": int(time.time()), "uid": user["id"]}
     return _restream_meta
 

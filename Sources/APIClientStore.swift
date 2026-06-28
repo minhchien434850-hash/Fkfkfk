@@ -370,8 +370,9 @@ extension APIClient {
     }
 
     // ---- Restream đa nền tảng (VPS chia luồng bằng ffmpeg) ----
-    func restreamStart(targets: [[String: String]]) async throws -> RestreamInfo {
-        try decode(try await send("/live/restream/start", method: "POST", json: ["targets": targets]))
+    func restreamStart(targets: [[String: String]], resolution: String = "source", fps: String = "source") async throws -> RestreamInfo {
+        let body: [String: Any] = ["targets": targets, "resolution": resolution, "fps": fps]
+        return try decode(try await send("/live/restream/start", method: "POST", json: body))
     }
     func restreamStop() async throws -> RestreamInfo {
         try decode(try await send("/live/restream/stop", method: "POST", json: [:]))

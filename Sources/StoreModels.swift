@@ -347,6 +347,8 @@ struct RestreamInfo: Decodable {
     let ingestUrl: String?
     let key: String?
     let targets: Int?
+    let resolution: String?
+    let fps: String?
 }
 
 // TikTok Live (đọc bình luận tự động)

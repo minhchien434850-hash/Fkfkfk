@@ -70,6 +70,8 @@ struct SocialMediaToolsView: View {
     // Restream: phát màn hình 1 lần → VPS chia ra nhiều nền tảng
     @State private var restream: RestreamInfo?
     @State private var restreamBusy = false
+    @State private var restreamRes = "source"   // source | 1080 | 720 | 480
+    @State private var restreamFps = "source"   // source | 60 | 30
     @State private var showBrowser = false
     @State private var browserURL = ""
     @State private var streamError: String?
@@ -396,6 +398,8 @@ struct SocialMediaToolsView: View {
                         Text("Đang chia luồng tới \(r.targets ?? 0) nền tảng")
                             .font(.caption.bold()).foregroundStyle(.red)
                     }
+                    Text("Chất lượng: \((r.resolution ?? "source") == "source" ? "Gốc" : (r.resolution ?? "") + "p") · FPS: \((r.fps ?? "source") == "source" ? "Gốc" : (r.fps ?? ""))")
+                        .font(.caption2).foregroundStyle(.secondary)
                     Text("URL đẩy luồng (dán vào app quay màn hình):").font(.caption2).foregroundStyle(.secondary)
                     HStack {
                         Text(ingest).font(.system(.caption2, design: .monospaced)).lineLimit(2)
@@ -412,6 +416,27 @@ struct SocialMediaToolsView: View {
                 }
                 .padding(10).background(Color.green.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 10))
             } else {
+                // Chỉnh độ phân giải + FPS (VPS mã hoá lại nếu khác "Gốc")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Độ phân giải").font(.caption).foregroundStyle(.secondary)
+                    Picker("Độ phân giải", selection: $restreamRes) {
+                        Text("Gốc").tag("source")
+                        Text("1080p").tag("1080")
+                        Text("720p").tag("720")
+                        Text("480p").tag("480")
+                    }.pickerStyle(.segmented)
+                    Text("FPS").font(.caption).foregroundStyle(.secondary)
+                    Picker("FPS", selection: $restreamFps) {
+                        Text("Gốc").tag("source")
+                        Text("60").tag("60")
+                        Text("30").tag("30")
+                    }.pickerStyle(.segmented)
+                    if restreamRes != "source" || restreamFps != "source" {
+                        Text("VPS sẽ mã hoá lại để ép mức bạn chọn (tốn CPU hơn). Để 'Gốc' nếu muốn nhẹ & giữ nguyên chất lượng điện thoại.")
+                            .font(.caption2).foregroundStyle(.orange)
+                    }
+                }
+
                 Button { Task { await startRestream() } } label: {
                     HStack {
                         if restreamBusy { ProgressView().tint(.white) }
@@ -447,7 +472,7 @@ struct SocialMediaToolsView: View {
             streamError = "Chưa có nền tảng nào sẵn sàng. Hãy bấm 'Tạo Live' ở trên trước."
             return
         }
-        do { restream = try await store.api.restreamStart(targets: targets) }
+        do { restream = try await store.api.restreamStart(targets: targets, resolution: restreamRes, fps: restreamFps) }
         catch { streamError = error.localizedDescription }
     }
 
