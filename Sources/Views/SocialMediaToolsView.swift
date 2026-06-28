@@ -276,9 +276,10 @@ struct SocialMediaToolsView: View {
                     Picker("Chọn nền tảng phát", selection: $livePlatform) {
                         Text("TikTok Live").tag("tiktok")
                         Text("Facebook Live").tag("facebook")
+                        Text("YouTube Live").tag("youtube")
                     }
                     .pickerStyle(.segmented)
-                    
+
                     if livePlatform == "tiktok" {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Dán Cookie TikTok (Đã trích xuất hoặc tự nhập)").font(.caption).bold()
@@ -288,12 +289,21 @@ struct SocialMediaToolsView: View {
                                 .background(Color(.secondarySystemBackground))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
-                    } else {
+                    } else if livePlatform == "facebook" {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Nhập Facebook Access Token").font(.caption).bold()
                             TextField("EAA...", text: $liveAccessToken)
                                 .padding(12)
                                 .kGlass(RoundedRectangle(cornerRadius: 12))
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Nhập YouTube (Google) Access Token").font(.caption).bold()
+                            TextField("ya29...", text: $liveAccessToken)
+                                .padding(12)
+                                .kGlass(RoundedRectangle(cornerRadius: 12))
+                            Text("Token Google OAuth có quyền youtube. App sẽ tự tạo buổi live & trả RTMP + Key.")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
                     
@@ -566,6 +576,8 @@ struct SocialMediaToolsView: View {
             let res: StreamKeyResponse
             if livePlatform == "tiktok" {
                 res = try await store.api.getTikTokStreamKey(cookies: liveCookies)
+            } else if livePlatform == "youtube" {
+                res = try await store.api.getYouTubeStreamKey(accessToken: liveAccessToken)
             } else {
                 res = try await store.api.getFacebookStreamKey(accessToken: liveAccessToken)
             }

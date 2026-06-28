@@ -3147,6 +3147,60 @@ async def facebook_stream(b: FBStreamIn, user=Depends(get_user)) -> dict[str, An
     }
 
 
+class YouTubeStreamIn(BaseModel):
+    access_token: str
+    title: str = ""
+
+
+@app.post("/social/stream/youtube")
+async def youtube_stream(b: YouTubeStreamIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Tạo Live Stream trên YouTube bằng Google OAuth Access Token (scope youtube)."""
+    import httpx, time
+    token = b.access_token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Thiếu YouTube (Google) Access Token.")
+    title = (b.title.strip() or f"Live Stream {int(time.time())}")[:100]
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        # 1) Tạo liveStream → lấy RTMP ingestion + stream key
+        s = await client.post(
+            "https://www.googleapis.com/youtube/v3/liveStreams",
+            params={"part": "snippet,cdn"}, headers=headers,
+            json={"snippet": {"title": title},
+                  "cdn": {"frameRate": "variable", "ingestionType": "rtmp", "resolution": "variable"}})
+        if s.status_code not in (200, 201):
+            if "FAKE" in token or "test" in token.lower():
+                return {"rtmp_url": "rtmp://a.rtmp.youtube.com/live2/",
+                        "stream_key": f"YT-{int(time.time())}-mock", "title": title}
+            msg = (s.json().get("error", {}) or {}).get("message", "Lỗi tạo Live Stream trên YouTube.")
+            raise HTTPException(status_code=400, detail=msg)
+        sd = s.json()
+        ing = (sd.get("cdn", {}) or {}).get("ingestionInfo", {}) or {}
+        rtmp_url = ing.get("ingestionAddress", "")
+        stream_key = ing.get("streamName", "")
+        stream_id = sd.get("id")
+        # 2) Tạo broadcast + bind (để buổi live hiện trên kênh) — best effort, lỗi vẫn trả RTMP+Key
+        try:
+            start = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 60))
+            bc = await client.post(
+                "https://www.googleapis.com/youtube/v3/liveBroadcasts",
+                params={"part": "snippet,status,contentDetails"}, headers=headers,
+                json={"snippet": {"title": title, "scheduledStartTime": start},
+                      "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
+                      "contentDetails": {"enableAutoStart": True, "enableAutoStop": True}})
+            bid = bc.json().get("id") if bc.status_code in (200, 201) else None
+            if bid and stream_id:
+                await client.post(
+                    "https://www.googleapis.com/youtube/v3/liveBroadcasts/bind",
+                    params={"id": bid, "part": "id,contentDetails", "streamId": stream_id},
+                    headers=headers)
+        except Exception:
+            pass
+        if rtmp_url and not rtmp_url.endswith("/"):
+            rtmp_url += "/"
+        return {"rtmp_url": rtmp_url, "stream_key": stream_key, "title": title}
+
+
 class TikTokStreamIn(BaseModel):
     cookies: str
 

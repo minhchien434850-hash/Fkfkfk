@@ -364,6 +364,11 @@ extension APIClient {
         return try decode(try await send("/social/stream/tiktok", method: "POST", json: body))
     }
 
+    func getYouTubeStreamKey(accessToken: String, title: String = "") async throws -> StreamKeyResponse {
+        let body: [String: Any] = ["access_token": accessToken, "title": title]
+        return try decode(try await send("/social/stream/youtube", method: "POST", json: body))
+    }
+
     // ---- TikTok Live: đọc bình luận tự động (như TikFinity) ----
     func tiktokLiveConnect(username: String) async throws -> TikTokLiveStatus {
         try decode(try await send("/social/tiktok/live/connect", method: "POST",
