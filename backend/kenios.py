@@ -3097,19 +3097,103 @@ async def social_download(b: SocialDownloadIn, user=Depends(get_user)) -> dict[s
     return {"file_id": fid, "filename": fname, "size": size}
 
 
+def _parse_cookie_string(cookies_str: str) -> dict[str, str]:
+    """Đọc cookie ở dạng JSON (mảng {name,value} hoặc object) hoặc chuỗi 'a=b; c=d'."""
+    cookies_str = (cookies_str or "").strip()
+    cookie_dict: dict[str, str] = {}
+    if not cookies_str:
+        return cookie_dict
+    if cookies_str.startswith("[") or cookies_str.startswith("{"):
+        try:
+            import json as _json
+            j = _json.loads(cookies_str)
+            if isinstance(j, list):
+                for c in j:
+                    if isinstance(c, dict) and "name" in c and "value" in c:
+                        cookie_dict[c["name"]] = c["value"]
+            elif isinstance(j, dict):
+                cookie_dict = {str(k): str(v) for k, v in j.items()}
+        except Exception:
+            pass
+    if not cookie_dict:
+        for item in cookies_str.split(";"):
+            item = item.strip()
+            if "=" in item:
+                k, v = item.split("=", 1)
+                cookie_dict[k.strip()] = v.strip()
+    return cookie_dict
+
+
+async def _fb_token_from_cookies(cookie_dict: dict[str, str]) -> Optional[str]:
+    """Best-effort: dùng phiên đăng nhập Facebook (c_user + xs) để lấy access token.
+
+    Thử lần lượt vài trang nội bộ của Facebook và trích token EAA... trong HTML.
+    Trả None nếu không lấy được (cookie hết hạn / chưa đủ quyền)."""
+    import httpx
+    if "c_user" not in cookie_dict or "xs" not in cookie_dict:
+        return None
+    cookie_header = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                       "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"),
+        "Cookie": cookie_header,
+        "Accept": "text/html,application/xhtml+xml,application/json,*/*",
+        "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
+    }
+    probe_urls = [
+        "https://business.facebook.com/content_management",
+        "https://business.facebook.com/creatorstudio/",
+        "https://www.facebook.com/adsmanager/manage/campaigns",
+        "https://m.facebook.com/composer/ocelot/async_loader/?publisher=feed",
+    ]
+    pattern = re.compile(r'(EAAB[\w-]+|EAAG[\w-]+|EAA[A-Za-z0-9]{20,})')
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            for u in probe_urls:
+                try:
+                    r = await client.get(u, headers=headers)
+                except Exception:
+                    continue
+                m = pattern.search(r.text or "")
+                if m:
+                    return m.group(1)
+    except Exception:
+        return None
+    return None
+
+
 class FBStreamIn(BaseModel):
-    access_token: str
+    cookies: str = ""
+    access_token: str = ""
 
 
 @app.post("/social/stream/facebook")
 async def facebook_stream(b: FBStreamIn, user=Depends(get_user)) -> dict[str, Any]:
-    """Tạo Live Stream trên Facebook bằng Access Token."""
+    """Tạo Live Stream trên Facebook bằng Cookies (tự lấy token) hoặc Access Token."""
     import httpx
     import time
-    token = b.access_token.strip()
+    token = (b.access_token or "").strip()
+    cookies_str = (b.cookies or "").strip()
+
+    # Ưu tiên cookie: tự lấy access token từ phiên đăng nhập
+    if not token and cookies_str:
+        if "FAKE" in cookies_str:
+            return {
+                "rtmp_url": "rtmps://live-api-s.facebook.com:443/rtmp/",
+                "stream_key": f"FB-{int(time.time())}-mock-stream-key",
+                "title": f"Live Stream {int(time.time())}",
+            }
+        cookie_dict = _parse_cookie_string(cookies_str)
+        token = (await _fb_token_from_cookies(cookie_dict)) or ""
+        if not token:
+            raise HTTPException(
+                status_code=400,
+                detail=("Không lấy được token từ cookie Facebook. Hãy đăng nhập lại Facebook "
+                        "trong trình duyệt tích hợp (lấy cookie mới), hoặc dán Access Token thủ công."))
+
     if not token:
-        raise HTTPException(status_code=400, detail="Thiếu Facebook Access Token.")
-    
+        raise HTTPException(status_code=400, detail="Thiếu cookie hoặc Access Token Facebook.")
+
     url = "https://graph.facebook.com/v19.0/me/live_videos"
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
@@ -3147,19 +3231,104 @@ async def facebook_stream(b: FBStreamIn, user=Depends(get_user)) -> dict[str, An
     }
 
 
+def _sapisid_hash(sapisid: str, origin: str) -> str:
+    """Tạo header Authorization SAPISIDHASH cho API nội bộ của Google/YouTube."""
+    import hashlib, time
+    ts = int(time.time())
+    digest = hashlib.sha1(f"{ts} {sapisid} {origin}".encode()).hexdigest()
+    return f"SAPISIDHASH {ts}_{digest}"
+
+
+async def _yt_stream_from_cookies(cookie_dict: dict[str, str], title: str) -> Optional[dict[str, str]]:
+    """Best-effort: tạo liveStream YouTube bằng cookie (SAPISIDHASH → API nội bộ Studio).
+
+    Lưu ý: API chính thức của YouTube cần OAuth; đường cookie này mang tính thử nghiệm,
+    có thể không thành công với mọi tài khoản. Trả None nếu không tạo được."""
+    import httpx
+    sapisid = (cookie_dict.get("SAPISID") or cookie_dict.get("__Secure-3PAPISID")
+               or cookie_dict.get("__Secure-1PAPISID"))
+    if not sapisid:
+        return None
+    origin = "https://studio.youtube.com"
+    cookie_header = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+    headers = {
+        "Authorization": _sapisid_hash(sapisid, origin),
+        "Origin": origin,
+        "Referer": origin + "/",
+        "Cookie": cookie_header,
+        "Content-Type": "application/json",
+        "X-Origin": origin,
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+    }
+    context = {"client": {"clientName": "WEB", "clientVersion": "2.0",
+                          "hl": "vi", "gl": "VN"}}
+    payload = {"context": context,
+               "title": title,
+               "frameRate": "FRAME_RATE_60FPS",
+               "ingestionType": "RTMP",
+               "resolution": "RESOLUTION_1080P"}
+    endpoints = [
+        "https://studio.youtube.com/youtubei/v1/live_streaming/create_stream?alt=json",
+        "https://studio.youtube.com/youtubei/v1/live_chat/create_stream?alt=json",
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            for ep in endpoints:
+                try:
+                    r = await client.post(ep, headers=headers, json=payload)
+                except Exception:
+                    continue
+                if r.status_code not in (200, 201):
+                    continue
+                try:
+                    j = r.json()
+                except Exception:
+                    continue
+                blob = json.dumps(j)
+                # Trích RTMP + stream key theo nhiều dạng field
+                addr = re.search(r'"(?:ingestionAddress|rtmpsIngestionAddress|address)"\s*:\s*"([^"]+)"', blob)
+                key = re.search(r'"(?:streamName|streamKey|key)"\s*:\s*"([^"]+)"', blob)
+                if addr and key:
+                    rtmp = addr.group(1)
+                    if not rtmp.endswith("/"):
+                        rtmp += "/"
+                    return {"rtmp_url": rtmp, "stream_key": key.group(1)}
+    except Exception:
+        return None
+    return None
+
+
 class YouTubeStreamIn(BaseModel):
-    access_token: str
+    cookies: str = ""
+    access_token: str = ""
     title: str = ""
 
 
 @app.post("/social/stream/youtube")
 async def youtube_stream(b: YouTubeStreamIn, user=Depends(get_user)) -> dict[str, Any]:
-    """Tạo Live Stream trên YouTube bằng Google OAuth Access Token (scope youtube)."""
+    """Tạo Live Stream trên YouTube bằng Cookies (SAPISIDHASH) hoặc Google OAuth Access Token."""
     import httpx, time
-    token = b.access_token.strip()
-    if not token:
-        raise HTTPException(status_code=400, detail="Thiếu YouTube (Google) Access Token.")
+    token = (b.access_token or "").strip()
+    cookies_str = (b.cookies or "").strip()
     title = (b.title.strip() or f"Live Stream {int(time.time())}")[:100]
+
+    # Ưu tiên cookie: thử tạo liveStream qua API nội bộ Studio
+    if not token and cookies_str:
+        if "FAKE" in cookies_str:
+            return {"rtmp_url": "rtmp://a.rtmp.youtube.com/live2/",
+                    "stream_key": f"YT-{int(time.time())}-mock", "title": title}
+        cookie_dict = _parse_cookie_string(cookies_str)
+        got = await _yt_stream_from_cookies(cookie_dict, title)
+        if got:
+            return {"rtmp_url": got["rtmp_url"], "stream_key": got["stream_key"], "title": title}
+        raise HTTPException(
+            status_code=400,
+            detail=("Không tạo được Live YouTube từ cookie (API YouTube yêu cầu quyền OAuth). "
+                    "Hãy đăng nhập lại YouTube để lấy cookie mới, hoặc dán Google Access Token (ya29...)."))
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Thiếu cookie hoặc Google Access Token cho YouTube.")
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=30) as client:
         # 1) Tạo liveStream → lấy RTMP ingestion + stream key

@@ -12,6 +12,27 @@ struct LiveTarget: Identifiable, Codable {
     var key: String
 }
 
+// Kết quả lấy stream key cho 1 nền tảng (TikTok / Facebook / YouTube)
+struct PlatformStreamResult {
+    var rtmp: String = ""
+    var key: String = ""
+    var error: String? = nil
+    var ok: Bool { error == nil && !rtmp.isEmpty && !key.isEmpty }
+}
+
+// Thông tin hiển thị mỗi nền tảng
+struct LivePlatformInfo {
+    let id: String        // "tiktok" | "facebook" | "youtube"
+    let name: String
+    let icon: String
+    let loginURL: String
+    static let all: [LivePlatformInfo] = [
+        .init(id: "tiktok",   name: "TikTok Live",   icon: "play.tv",   loginURL: "https://www.tiktok.com/login"),
+        .init(id: "facebook", name: "Facebook Live", icon: "person.2",  loginURL: "https://m.facebook.com/"),
+        .init(id: "youtube",  name: "YouTube Live",  icon: "video",     loginURL: "https://m.youtube.com/"),
+    ]
+}
+
 struct SocialMediaToolsView: View {
     @EnvironmentObject var store: AppStore
 
@@ -40,14 +61,14 @@ struct SocialMediaToolsView: View {
     @State private var savingToPhotos = false
     @State private var saveMessage: String?
     
-    // Live Tools States
-    @State private var livePlatform = "tiktok"
-    @State private var liveCookies = ""
-    @State private var liveAccessToken = ""
+    // Live Tools States — cookie RIÊNG cho từng nền tảng (lưu lâu dài)
+    @AppStorage("live_cookie_tiktok")   private var ckTikTok = ""
+    @AppStorage("live_cookie_facebook") private var ckFacebook = ""
+    @AppStorage("live_cookie_youtube")  private var ckYouTube = ""
+    @State private var selectedPlatforms: Set<String> = ["tiktok", "facebook", "youtube"]
+    @State private var streamResults: [String: PlatformStreamResult] = [:]
     @State private var showBrowser = false
     @State private var browserURL = ""
-    @State private var streamRTMP = ""
-    @State private var streamKey = ""
     @State private var streamError: String?
     @State private var fetchingStream = false
     @State private var browserSiteName = ""
@@ -92,7 +113,7 @@ struct SocialMediaToolsView: View {
             .quickLookPreview($previewURL)
             .sheet(isPresented: $showBrowser) {
                 CookieBrowserView(urlString: browserURL) { cookies in
-                    self.liveCookies = cookies
+                    setCookie(cookies, for: browserSiteName)   // lưu cookie RIÊNG theo nền tảng
                     saveCookieToLibrary(cookies: cookies, siteName: browserSiteName)
                 }
             }
@@ -234,147 +255,41 @@ struct SocialMediaToolsView: View {
     private var liveToolsPane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                // Section 1: Cookie Extractor Browser
+                // ====== Live đa nền tảng cùng lúc — cookie RIÊNG từng nền tảng ======
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("1. Bộ trích xuất Cookie tài khoản").font(.headline)
-                    Text("Đăng nhập tài khoản mạng xã hội của bạn thông qua trình duyệt an toàn tích hợp dưới đây để tự động lấy Cookie.")
+                    Text("Live đa nền tảng cùng lúc").font(.headline)
+                    Text("Đăng nhập từng nền tảng để lấy cookie RIÊNG, tích chọn nền tảng muốn phát rồi bấm tạo Live MỘT LẦN cho tất cả.")
                         .font(.caption).foregroundStyle(.secondary)
-                    
-                    HStack(spacing: 8) {
-                        Button {
-                            browserURL = "https://www.tiktok.com/login"
-                            browserSiteName = "tiktok"
-                            showBrowser = true
-                        } label: {
-                            Label("TikTok", systemImage: "play.tv")
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        Button {
-                            browserURL = "https://m.facebook.com/"
-                            browserSiteName = "facebook"
-                            showBrowser = true
-                        } label: {
-                            Label("Facebook", systemImage: "person.2")
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        Button {
-                            browserURL = "https://m.youtube.com/"
-                            browserSiteName = "youtube"
-                            showBrowser = true
-                        } label: {
-                            Label("YouTube", systemImage: "video")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .kCard(16)
-                
-                // Section 2: Get Stream Key
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("2. Tạo Live Stream & Lấy Stream Key").font(.headline)
-                    
-                    Picker("Chọn nền tảng phát", selection: $livePlatform) {
-                        Text("TikTok Live").tag("tiktok")
-                        Text("Facebook Live").tag("facebook")
-                        Text("YouTube Live").tag("youtube")
-                    }
-                    .pickerStyle(.segmented)
 
-                    if livePlatform == "tiktok" {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Dán Cookie TikTok (Đã trích xuất hoặc tự nhập)").font(.caption).bold()
-                            TextEditor(text: $liveCookies)
-                                .frame(height: 80)
-                                .padding(6)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                    } else if livePlatform == "facebook" {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Nhập Facebook Access Token").font(.caption).bold()
-                            TextField("EAA...", text: $liveAccessToken)
-                                .padding(12)
-                                .kGlass(RoundedRectangle(cornerRadius: 12))
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Nhập YouTube (Google) Access Token").font(.caption).bold()
-                            TextField("ya29...", text: $liveAccessToken)
-                                .padding(12)
-                                .kGlass(RoundedRectangle(cornerRadius: 12))
-                            Text("Token Google OAuth có quyền youtube. App sẽ tự tạo buổi live & trả RTMP + Key.")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
+                    ForEach(LivePlatformInfo.all, id: \.id) { p in
+                        platformRow(p)
                     }
-                    
+
                     Button {
-                        Task { await fetchStreamKey() }
+                        Task { await fetchAllStreamKeys() }
                     } label: {
                         HStack {
-                            if fetchingStream {
-                                ProgressView().tint(.white)
-                                Text("Đang tạo Live...")
-                            } else {
-                                Image(systemName: "video.fill")
-                                Text("Tạo Live & Lấy RTMP + Key")
+                            if fetchingStream { ProgressView().tint(.white); Text("Đang tạo Live...") }
+                            else {
+                                Image(systemName: "dot.radiowaves.left.and.right")
+                                Text("Tạo Live cho \(selectedPlatforms.count) nền tảng đã chọn")
                             }
                         }
                         .font(.headline).bold().foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 50)
-                        .background(fetchingStream ? Color.gray : Theme.accent)
+                        .background(fetchingStream || selectedPlatforms.isEmpty ? Color.gray : Color.red)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
-                    .disabled(fetchingStream)
+                    .disabled(fetchingStream || selectedPlatforms.isEmpty)
+
+                    Text("💡 App lấy RTMP + Stream Key riêng cho từng nền tảng. Dán vào OBS/Larix (hỗ trợ nhiều đích) để phát CÙNG LÚC tới cả 3 nơi. Kết quả tự lưu xuống mục 'Điểm phát' bên dưới.")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .kCard(16)
-                
-                // Display Results
-                if !streamRTMP.isEmpty && !streamKey.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Kết quả cấu hình phát trực tiếp").font(.headline)
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Máy chủ RTMP (Server URL):").font(.caption).bold()
-                            HStack {
-                                Text(streamRTMP).font(.system(.caption, design: .monospaced)).lineLimit(1)
-                                Spacer()
-                                Button {
-                                    UIPasteboard.general.string = streamRTMP
-                                } label: {
-                                    Image(systemName: "doc.on.doc")
-                                }
-                            }
-                            .padding(8).background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 6))
-                            
-                            Text("Khóa luồng (Stream Key):").font(.caption).bold()
-                            HStack {
-                                Text(streamKey).font(.system(.caption, design: .monospaced)).lineLimit(1)
-                                Spacer()
-                                Button {
-                                    UIPasteboard.general.string = streamKey
-                                } label: {
-                                    Image(systemName: "doc.on.doc")
-                                }
-                            }
-                            .padding(8).background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .padding()
-                        .background(Color.blue.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        
-                        Text("💡 Copy hai dòng trên cấu hình vào OBS Studio hoặc các ứng dụng Livestream trên máy tính để phát Live.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding()
-                }
 
-                // Section 3: Phát Live đa nền tảng bằng stream key / link
+                // Phát Live đa nền tảng bằng stream key / link (lưu thủ công)
                 multiLivePane
 
                 if let err = streamError {
@@ -383,6 +298,80 @@ struct SocialMediaToolsView: View {
             }
             .padding()
         }
+    }
+
+    // Cookie RIÊNG cho từng nền tảng
+    private func cookie(for p: String) -> String {
+        switch p {
+        case "tiktok":   return ckTikTok
+        case "facebook": return ckFacebook
+        default:         return ckYouTube
+        }
+    }
+    private func setCookie(_ v: String, for p: String) {
+        switch p {
+        case "tiktok":   ckTikTok = v
+        case "facebook": ckFacebook = v
+        case "youtube":  ckYouTube = v
+        default:         break
+        }
+    }
+
+    // Một dòng nền tảng: tích chọn + trạng thái cookie + nút đăng nhập + kết quả
+    @ViewBuilder
+    private func platformRow(_ p: LivePlatformInfo) -> some View {
+        let hasCookie = !cookie(for: p.id).isEmpty
+        let selected = selectedPlatforms.contains(p.id)
+        let res = streamResults[p.id]
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Button {
+                    if selected { selectedPlatforms.remove(p.id) } else { selectedPlatforms.insert(p.id) }
+                } label: {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3).foregroundStyle(selected ? .green : .secondary)
+                }
+                Image(systemName: p.icon).foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(p.name).font(.subheadline.bold())
+                    HStack(spacing: 4) {
+                        Image(systemName: hasCookie ? "checkmark.seal.fill" : "exclamationmark.triangle")
+                            .font(.caption2).foregroundStyle(hasCookie ? .green : .orange)
+                        Text(hasCookie ? "Đã có cookie" : "Chưa đăng nhập")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Button {
+                    browserURL = p.loginURL
+                    browserSiteName = p.id
+                    showBrowser = true
+                } label: {
+                    Text(hasCookie ? "Đăng nhập lại" : "Đăng nhập").font(.caption.bold())
+                }.buttonStyle(.bordered)
+            }
+            if let res {
+                if res.ok {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            Text("Sẵn sàng phát").font(.caption.bold()).foregroundStyle(.green)
+                        }
+                        keyRow("RTMP", res.rtmp)
+                        keyRow("Key", res.key)
+                        Button { UIPasteboard.general.string = "Server: \(res.rtmp)\nKey: \(res.key)" } label: {
+                            Label("Copy RTMP + Key", systemImage: "doc.on.doc").font(.caption2)
+                        }.buttonStyle(.bordered)
+                    }
+                    .padding(8).background(Color.green.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 8))
+                } else if let e = res.error {
+                    Text("✗ \(e)").font(.caption2).foregroundStyle(.red)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     // MARK: - Phát Live đa nền tảng (stream key / link)
@@ -571,26 +560,43 @@ struct SocialMediaToolsView: View {
         savingToPhotos = false
     }
 
-    private func fetchStreamKey() async {
+    /// Lấy RTMP + Stream Key cho TẤT CẢ nền tảng đã tích chọn (mỗi nền tảng dùng cookie riêng).
+    private func fetchAllStreamKeys() async {
         fetchingStream = true
-        streamRTMP = ""
-        streamKey = ""
         streamError = nil
-        do {
-            let res: StreamKeyResponse
-            if livePlatform == "tiktok" {
-                res = try await store.api.getTikTokStreamKey(cookies: liveCookies)
-            } else if livePlatform == "youtube" {
-                res = try await store.api.getYouTubeStreamKey(accessToken: liveAccessToken)
-            } else {
-                res = try await store.api.getFacebookStreamKey(accessToken: liveAccessToken)
+        for p in ["tiktok", "facebook", "youtube"] where selectedPlatforms.contains(p) {
+            let ck = cookie(for: p)
+            if ck.isEmpty {
+                streamResults[p] = PlatformStreamResult(error: "Chưa có cookie — hãy bấm Đăng nhập nền tảng này.")
+                continue
             }
-            streamRTMP = res.rtmpUrl
-            streamKey = res.streamKey
-        } catch {
-            streamError = error.localizedDescription
+            do {
+                let res: StreamKeyResponse
+                switch p {
+                case "tiktok":   res = try await store.api.getTikTokStreamKey(cookies: ck)
+                case "facebook": res = try await store.api.getFacebookStreamKey(cookies: ck)
+                default:         res = try await store.api.getYouTubeStreamKey(cookies: ck)
+                }
+                streamResults[p] = PlatformStreamResult(rtmp: res.rtmpUrl, key: res.streamKey)
+                addTargetDirect(name: platformName(p), rtmp: res.rtmpUrl, key: res.streamKey)
+            } catch {
+                streamResults[p] = PlatformStreamResult(error: error.localizedDescription)
+            }
         }
         fetchingStream = false
+    }
+
+    private func platformName(_ p: String) -> String {
+        LivePlatformInfo.all.first { $0.id == p }?.name ?? p
+    }
+
+    /// Lưu thẳng 1 điểm phát vào danh sách (thay điểm cũ cùng tên) để restream/copy.
+    private func addTargetDirect(name: String, rtmp: String, key: String) {
+        guard !rtmp.isEmpty, !key.isEmpty else { return }
+        var list = liveTargets
+        list.removeAll { $0.name == name }
+        list.append(LiveTarget(name: name, rtmp: rtmp, key: key))
+        saveTargets(list)
     }
     
     private func saveCookieToLibrary(cookies: String, siteName: String) {

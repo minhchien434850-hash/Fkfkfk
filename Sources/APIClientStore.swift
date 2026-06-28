@@ -354,8 +354,8 @@ extension APIClient {
         return try decode(try await send("/social/download", method: "POST", json: body))
     }
 
-    func getFacebookStreamKey(accessToken: String) async throws -> StreamKeyResponse {
-        let body: [String: Any] = ["access_token": accessToken]
+    func getFacebookStreamKey(cookies: String = "", accessToken: String = "") async throws -> StreamKeyResponse {
+        let body: [String: Any] = ["cookies": cookies, "access_token": accessToken]
         return try decode(try await send("/social/stream/facebook", method: "POST", json: body))
     }
 
@@ -364,8 +364,8 @@ extension APIClient {
         return try decode(try await send("/social/stream/tiktok", method: "POST", json: body))
     }
 
-    func getYouTubeStreamKey(accessToken: String, title: String = "") async throws -> StreamKeyResponse {
-        let body: [String: Any] = ["access_token": accessToken, "title": title]
+    func getYouTubeStreamKey(cookies: String = "", accessToken: String = "", title: String = "") async throws -> StreamKeyResponse {
+        let body: [String: Any] = ["cookies": cookies, "access_token": accessToken, "title": title]
         return try decode(try await send("/social/stream/youtube", method: "POST", json: body))
     }
 
