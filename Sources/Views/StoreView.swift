@@ -1561,7 +1561,8 @@ struct StoreView: View {
                 }
             }
             .padding(.top, 10)
-            .padding(.horizontal, effectiveConfig?.bannerUrl.isEmpty == false ? 14 : 0)
+            // Không thụt ngang cố định nữa: hero thẳng lề trang như banner, Ví cửa hàng,
+            // thẻ sản phẩm... (trước đây +14 khi có banner làm tiêu đề bị lệch).
         }
     }
 
