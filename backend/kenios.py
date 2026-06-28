@@ -76,6 +76,9 @@ SANDBOX_TIMEOUT = int(os.getenv("SANDBOX_TIMEOUT", "15"))  # giây chạy code
 
 # ----- Email tích hợp (KenMail) chạy chung trong KENIOS -----
 MAIL_DOMAIN     = os.getenv("MAIL_DOMAIN", "kenios.store")
+# Email người gửi cho mail hệ thống (OTP...). Để trống = no-reply@MAIL_DOMAIN.
+# Đặt = email đã xác minh trong Brevo (vd Gmail của bạn) để khỏi cấu hình DNS.
+MAIL_FROM       = os.getenv("MAIL_FROM", "")
 MAIL_ENABLE     = os.getenv("MAIL_ENABLE", "1") == "1"      # bật bộ nhận thư SMTP nội bộ
 MAIL_SMTP_PORT  = int(os.getenv("MAIL_SMTP_PORT", "25"))    # cổng nhận thư đến (cần MX + mở port 25)
 SMTP_RELAY_HOST = os.getenv("SMTP_RELAY_HOST", "")          # gửi ra ngoài qua relay (vd smtp.gmail.com)
@@ -3643,7 +3646,7 @@ def send_system_mail(to: str, subject: str, body: str) -> str:
     to = (to or "").strip()
     if "@" not in to:
         return "none"
-    sender = f"no-reply@{MAIL_DOMAIN}"
+    sender = MAIL_FROM.strip() or f"no-reply@{MAIL_DOMAIN}"
     # Nội bộ: nếu là hộp thư đã tồn tại trong hệ thống (kể cả tên miền custom) → giao thẳng vào KenMail
     with db() as c:
         ok = c.execute("SELECT 1 FROM mailboxes WHERE address=?", (to.lower(),)).fetchone()
@@ -3687,14 +3690,14 @@ def _otp_store_and_send(email: str, purpose: str) -> dict[str, Any]:
     if "@" not in email:
         raise HTTPException(status_code=400, detail="Email không hợp lệ.")
     code = f"{secrets.randbelow(1000000):06d}"
-    exp = int(time.time()) + 600  # 10 phút
+    exp = int(time.time()) + 300  # 5 phút
     with db() as c:
         c.execute("INSERT INTO otp_codes(email,code,purpose,exp,attempts) VALUES(?,?,?,?,0) "
                   "ON CONFLICT(email) DO UPDATE SET code=excluded.code, purpose=excluded.purpose, "
                   "exp=excluded.exp, attempts=0", (email, code, purpose, exp))
     subject = "Mã xác nhận KENIOS"
     body = (f"Mã xác nhận của bạn là: {code}\n"
-            f"Mã có hiệu lực trong 10 phút.\n"
+            f"Mã có hiệu lực trong 5 phút.\n"
             f"Nếu bạn không yêu cầu, hãy bỏ qua email này.")
     channel = send_system_mail(email, subject, body)
     resp: dict[str, Any] = {"sent": channel != "none", "channel": channel}
