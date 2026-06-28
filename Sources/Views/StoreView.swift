@@ -1509,8 +1509,10 @@ struct StoreView: View {
             cfgSectionOrder = c.sectionOrder ?? ""
             cfgSectionHidden = c.sectionHidden ?? ""
         }
-        let dl = (try? await dlTask) ?? []
-        if dl != downloads { downloads = dl }
+        // CHỈ cập nhật khi tải downloads THÀNH CÔNG. Nếu lỗi tạm thời (mạng chập chờn lúc
+        // kéo tải lại) thì GIỮ nguyên danh sách cũ — tránh mục "Tải về" biến mất rồi hiện
+        // lại khiến cả trang nhảy sang bố cục khác.
+        if let dl = try? await dlTask, dl != downloads { downloads = dl }
         if let ct = try? await ctTask, ct != contacts { contacts = ct }
         if let cats = try? await catTask {
             if cats != categories { categories = cats }
