@@ -1134,7 +1134,8 @@ struct StoreView: View {
             }
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 4) {
-                    Text(String(format: "#%02d", index + 1))
+                    // ID THẬT của sản phẩm (khớp với ID trong quản lý sản phẩm / Flash sale / Khuyến mãi)
+                    Text(String(format: "#%02d", p.id))
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .foregroundStyle(Theme.accent.opacity(0.7))
                     Text(p.name)

@@ -874,7 +874,16 @@ struct StoreAdminProductList: View {
                         StoreProductEditor(folderId: folder.id, product: p) { Task { await reload() } }
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(p.name)
+                            HStack(spacing: 8) {
+                                // ID THẬT của sản phẩm — dùng để điền vào Flash sale / Khuyến mãi
+                                Text("#\(String(format: "%02d", p.id))")
+                                    .font(.caption.bold().monospacedDigit())
+                                    .padding(.horizontal, 7).padding(.vertical, 2)
+                                    .background(store.accentColor.opacity(0.18))
+                                    .foregroundStyle(store.accentColor)
+                                    .clipShape(Capsule())
+                                Text(p.name)
+                            }
                             HStack(spacing: 6) {
                                 Text("\(p.prices.count) " + store.t("mốc giá", "price tiers"))
                                     .font(.caption2).foregroundStyle(.secondary)
@@ -941,6 +950,16 @@ struct StoreProductEditor: View {
         NavigationStack {
             Form {
                 Section(store.t("Thông tin sản phẩm", "Product info")) {
+                    if let pid = productId {
+                        HStack {
+                            Label(store.t("ID sản phẩm", "Product ID"), systemImage: "number")
+                            Spacer()
+                            Text("#\(String(format: "%02d", pid))")
+                                .font(.body.bold().monospacedDigit())
+                                .foregroundStyle(store.accentColor)
+                            Text("(\(pid))").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     Picker(store.t("Loại", "Type"), selection: $kind) {
                         Text(store.t("Ứng dụng / Key", "App / Key")).tag("app")
                         Text(store.t("Acc game", "Game account")).tag("acc")
