@@ -801,17 +801,13 @@ struct VideoProfileView: View {
             guard let data = try await item.loadTransferable(type: Data.self) else {
                 uploadingAvatar = false; return
             }
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("avatar_upload.jpg")
-            try data.write(to: tmp)
-            let up = try await store.api.uploadFileRaw(name: "avatar.jpg", category: "image", fileURL: tmp)
-            try? FileManager.default.removeItem(at: tmp)
-            var base = store.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !base.lowercased().hasPrefix("http") { base = "http://" + base }
-            while base.hasSuffix("/") { base.removeLast() }
-            let avatarUrl = "\(base)/files/\(up.id)/download"
+            // Dùng /media/upload → trả link ảnh CÔNG KHAI (/media/{id}) phục vụ inline,
+            // tải được bằng AsyncImage (không cần token) và người khác cũng xem được.
+            let avatarUrl = try await store.api.mediaUpload(
+                dataBase64: data.base64EncodedString(), mime: "image/jpeg", name: "avatar.jpg")
             _ = try await store.api.updateProfile(publicId: nil, avatarUrl: avatarUrl, bio: nil)
             await load()
-        } catch {}
+        } catch { self.error = error.localizedDescription }
         uploadingAvatar = false
     }
 }
