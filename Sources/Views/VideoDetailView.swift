@@ -166,12 +166,13 @@ struct VideoDetailView: View {
     }
 
     private func shareVideo() {
-        guard let url = keniosVideoURL(postId: post.id, token: nil, baseURL: store.baseURL) else { return }
-        let items: [Any] = [post.caption ?? "", url]
-        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }.first?
-            .windows.first?.rootViewController?.present(vc, animated: true)
+        let who = post.username.isEmpty ? "KENIOS" : post.username
+        let cap = (post.caption?.isEmpty == false) ? " – \(post.caption!)" : ""
+        var items: [Any] = ["Xem video của \(who) trên KENIOS\(cap)"]
+        if let url = keniosVideoURL(postId: post.id, token: nil, baseURL: store.baseURL) {
+            items.append(url)
+        }
+        keniosPresentShare(items)
     }
 }
 

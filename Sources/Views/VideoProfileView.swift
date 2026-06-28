@@ -142,11 +142,11 @@ struct VideoProfileView: View {
                             ForEach(Array(posts.enumerated()), id: \.element.id) { idx, p in
                                 Button { reelsIndex = idx; showReels = true } label: {
                                     VideoGridCell(post: p, token: store.token, baseURL: store.baseURL)
-                                        .aspectRatio(9/16, contentMode: .fill).clipped()
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
+                        .padding(.bottom, 12)
                     }
                 }
             }

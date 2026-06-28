@@ -207,6 +207,8 @@ struct KENIOSApp: App {
                 .environmentObject(store)
                 .tint(store.accentColor)
                 .onAppear {
+                    // Nút "ẩn bàn phím" nổi — dùng chung cho mọi màn có bàn phím
+                    KeyboardDismissBar.shared.start()
                     // Wire appStore vào delegate để có thể gửi device token khi đăng nhập
                     appDelegate.appStore = store
                     // Nếu đã đăng nhập và có device token, gửi lên server

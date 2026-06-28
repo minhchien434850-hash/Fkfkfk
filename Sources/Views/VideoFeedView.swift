@@ -204,8 +204,9 @@ struct VideoGridCell: View {
                 LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
             )
         }
-        .aspectRatio(9/16, contentMode: .fill)
+        .aspectRatio(3/4, contentMode: .fill)
         .clipped()
+        .contentShape(Rectangle())
         .onAppear {
             guard thumb == nil, let url = streamURL else { return }
             generateThumbnail(postId: post.id, url: url) { img in self.thumb = img }
