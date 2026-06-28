@@ -5,6 +5,11 @@ options:
     iOS: "16.0"
   createIntermediateGroups: true
 
+packages:
+  HaishinKit:
+    url: https://github.com/HaishinKit/HaishinKit.swift
+    exactVersion: 1.9.9
+
 targets:
   KENIOS:
     type: application
@@ -12,6 +17,8 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: Sources
+    dependencies:
+      - package: HaishinKit
     info:
       path: Sources/Info.plist
       properties:
