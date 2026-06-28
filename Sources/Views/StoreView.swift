@@ -214,8 +214,10 @@ struct StoreView: View {
     @State private var scrollTarget: String?   // dùng cho ScrollViewReader scroll đến section
     @State private var flashNow = Date()   // cập nhật để đồng hồ flash sale đếm ngược
     @State private var showcaseTick: Int = 0   // tăng mỗi 5 phút → xoay vòng showcase
+    @State private var tickerIndex: Int = 0    // tăng mỗi 5 giây → cuộn danh sách giao dịch/nạp tiền
     private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let showcaseTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
+    private let tickerTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     // Tên hiển thị trong showcase — 200 tên Việt Nam không lặp
     private let showcaseNames: [String] = [
@@ -287,22 +289,21 @@ struct StoreView: View {
             ("Liên Quân acc", 150_000), ("PUBG Mobile acc", 200_000), ("Free Fire acc", 120_000),
         ]
 
-        let timeAgo = [35, 120, 310, 620, 900, 1500, 2200, 3600, 4800, 7200]
-        let count = min(8, combos.count)
-        let offset = tick % combos.count
-
         func name(_ seed: Int) -> String {
-            "\(showcaseNames[seed % showcaseNames.count])***"
+            "\(showcaseNames[((seed % showcaseNames.count) + showcaseNames.count) % showcaseNames.count])***"
         }
 
-        let orders: [ShowcaseOrder] = (0..<count).map { i in
-            let ci = (offset + i) % combos.count
+        // Pool ĐẦY ĐỦ 200 dòng (mỗi tên 1 dòng) để ticker tự cuộn lên 5 giây/lần,
+        // hết 200 tên thì tự lặp lại từ đầu. Mỗi 5 phút (tick) sản phẩm/số tiền đổi cho mới.
+        let poolSize = showcaseNames.count
+        let orders: [ShowcaseOrder] = (0..<poolSize).map { i in
+            let ci = (i + tick) % combos.count
             return ShowcaseOrder(
-                user: name(tick + i * 7),
+                user: name(i),
                 product: combos[ci].0,
                 label: "Thành công",
                 amount: combos[ci].1,
-                at: now - timeAgo[i % timeAgo.count]
+                at: now - (i * 37 + 20)
             )
         }
 
@@ -314,12 +315,12 @@ struct StoreView: View {
             60_000, 120_000, 180_000, 220_000, 280_000, 320_000, 380_000,
             750_000, 850_000, 950_000,
         ]
-        let topups: [ShowcaseTopup] = (0..<8).map { i in
-            let ai = (tick * 3 + i * 7 + 5) % topupAmounts.count
+        let topups: [ShowcaseTopup] = (0..<poolSize).map { i in
+            let ai = (i * 3 + tick) % topupAmounts.count
             return ShowcaseTopup(
-                user: name(tick + i * 11 + 5),
+                user: name(i + 97),   // lệch pha để tên khác phần giao dịch
                 amount: topupAmounts[ai],
-                at: now - timeAgo[i % timeAgo.count] * 2
+                at: now - (i * 43 + 25)
             )
         }
 
@@ -599,6 +600,7 @@ struct StoreView: View {
                 }
             }
             .onReceive(showcaseTimer) { _ in showcaseTick += 1 }
+            .onReceive(tickerTimer) { _ in tickerIndex += 1 }
         }
     }
 
@@ -768,14 +770,22 @@ struct StoreView: View {
     }
 
     // Giao dịch gần đây (realtime)
+    // Cửa sổ cuộn: lấy `visible` dòng bắt đầu từ tickerIndex, vòng lại khi hết danh sách.
+    private func tickerWindow<T>(_ items: [T], _ visible: Int) -> [T] {
+        guard items.count > visible else { return items }
+        let start = ((tickerIndex % items.count) + items.count) % items.count
+        return (0..<visible).map { items[(start + $0) % items.count] }
+    }
+
     private func transactionsSection(_ orders: [ShowcaseOrder]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let shown = tickerWindow(orders, 6)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(store.t("Giao dịch gần đây", "Recent purchases"), systemImage: "bag.fill").font(.headline)
                 Spacer(); realtimeBadge
             }
             VStack(spacing: 0) {
-                ForEach(orders.prefix(8)) { o in
+                ForEach(shown) { o in
                     HStack(spacing: 10) {
                         Text(String(o.user.prefix(1)).uppercased()).font(.caption.bold())
                             .frame(width: 30, height: 30).background(Theme.accent.opacity(0.15))
@@ -790,23 +800,25 @@ struct StoreView: View {
                         Text(kFormatVND(o.amount)).font(.caption.bold()).foregroundStyle(.primary)
                     }
                     .padding(.vertical, 8)
-                    if o.id != orders.prefix(8).last?.id { Divider() }
+                    if o.id != shown.last?.id { Divider() }
                 }
             }
             .padding(.horizontal, 12)
             .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+            .animation(.easeInOut(duration: 0.55), value: tickerIndex)
         }
     }
 
-    // Nạp tiền gần đây (realtime)
+    // Nạp tiền gần đây (realtime) — tự cuộn lên 5 giây/lần
     private func topupsSection(_ topups: [ShowcaseTopup]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let shown = tickerWindow(topups, 6)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(store.t("Nạp tiền gần đây", "Recent top-ups"), systemImage: "wallet.pass.fill").font(.headline)
                 Spacer(); realtimeBadge
             }
             VStack(spacing: 0) {
-                ForEach(topups.prefix(8)) { t in
+                ForEach(shown) { t in
                     HStack(spacing: 10) {
                         Text(String(t.user.prefix(1)).uppercased()).font(.caption.bold())
                             .frame(width: 30, height: 30).background(Color.green.opacity(0.15))
@@ -820,11 +832,12 @@ struct StoreView: View {
                         Text("+" + kFormatVND(t.amount)).font(.caption.bold()).foregroundStyle(.green)
                     }
                     .padding(.vertical, 8)
-                    if t.id != topups.prefix(8).last?.id { Divider() }
+                    if t.id != shown.last?.id { Divider() }
                 }
             }
             .padding(.horizontal, 12)
             .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+            .animation(.easeInOut(duration: 0.55), value: tickerIndex)
         }
     }
 
