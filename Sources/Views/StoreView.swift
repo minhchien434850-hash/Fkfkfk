@@ -289,13 +289,25 @@ struct StoreView: View {
             ("Liên Quân acc", 150_000), ("PUBG Mobile acc", 200_000), ("Free Fire acc", 120_000),
         ]
 
+        // Sinh tên Việt từ Họ × Đệm × Chữ cái → 20×20×18 = 7.200 tên KHÁC NHAU (không trùng),
+        // đủ cho pool 1.000+ dòng mà không phải liệt kê tay.
+        let HO  = ["Nguyễn","Trần","Lê","Phạm","Hoàng","Huỳnh","Phan","Vũ","Võ","Đặng",
+                   "Bùi","Đỗ","Hồ","Ngô","Dương","Lý","Đào","Đinh","Tô","Trương"]
+        let DEM = ["Văn","Thị","Hữu","Đức","Minh","Quang","Thanh","Ngọc","Gia","Hoài",
+                   "Tuấn","Bảo","Khánh","Nhật","Anh","Hải","Trung","Công","Xuân","Phú"]
+        let CHU = ["A","B","C","D","Đ","G","H","K","L","M","N","P","Q","S","T","V","X","Y"]
+        let nameSpace = HO.count * DEM.count * CHU.count
         func name(_ seed: Int) -> String {
-            "\(showcaseNames[((seed % showcaseNames.count) + showcaseNames.count) % showcaseNames.count])***"
+            let s = ((seed % nameSpace) + nameSpace) % nameSpace
+            let h = HO[s % HO.count]
+            let d = DEM[(s / HO.count) % DEM.count]
+            let c = CHU[(s / (HO.count * DEM.count)) % CHU.count]
+            return "\(h) \(d) \(c)***"
         }
 
-        // Pool ĐẦY ĐỦ 200 dòng (mỗi tên 1 dòng) để ticker tự cuộn lên 5 giây/lần,
-        // hết 200 tên thì tự lặp lại từ đầu. Mỗi 5 phút (tick) sản phẩm/số tiền đổi cho mới.
-        let poolSize = showcaseNames.count
+        // Pool 1.000 dòng (mỗi dòng 1 tên khác nhau) để ticker tự cuộn lên 5 giây/lần,
+        // hết 1.000 tên thì tự lặp lại từ đầu. Mỗi 5 phút (tick) sản phẩm/số tiền đổi cho mới.
+        let poolSize = 1000
         let orders: [ShowcaseOrder] = (0..<poolSize).map { i in
             let ci = (i + tick) % combos.count
             return ShowcaseOrder(
