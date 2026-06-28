@@ -55,6 +55,7 @@ struct VideoFeedView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 Picker("", selection: $selectedTab) {
+                    Text(store.t("Bảng tin", "Posts")).tag(2)
                     Text(store.t("Của tôi", "My Videos")).tag(0)
                     Text("Reels").tag(1)
                 }
@@ -62,7 +63,11 @@ struct VideoFeedView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-                MyVideosView()
+                if selectedTab == 2 {
+                    SocialFeedView(onOpenProfile: { uid in profileSheet = ProfileIDWrapper(id: uid) })
+                } else {
+                    MyVideosView()
+                }
             }
             .navigationTitle(store.t("Video", "Video"))
             .navigationBarTitleDisplayMode(.inline)

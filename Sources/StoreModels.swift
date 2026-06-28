@@ -459,6 +459,7 @@ struct PostItem: Identifiable, Decodable, Hashable {
     let publicId: String?
     let name: String?
     let mime: String?
+    var kind: String? = nil   // text | image | video
     var liked: Bool
     var following: Bool?
     var views: Int?

@@ -229,6 +229,10 @@ struct APIClient {
     func getFeed() async throws -> [PostItem] {
         try decode(try await send("/feed"))
     }
+    // Bảng tin mạng xã hội (ảnh + tin chữ, không gồm video)
+    func getSocialFeed() async throws -> [PostItem] {
+        try decode(try await send("/social/feed"))
+    }
     func getMyPosts() async throws -> [PostItem] {
         try decode(try await send("/me/posts"))
     }
@@ -496,4 +500,12 @@ struct APIClient {
             json: ["data_base64": dataBase64, "mime": mime, "name": name]))
         return root + r.path
     }
+    // Tải ảnh/video lên (công khai /media/{id}) → trả về FILE ID để đăng bài
+    func mediaUploadId(dataBase64: String, mime: String, name: String) async throws -> Int {
+        let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",
+            json: ["data_base64": dataBase64, "mime": mime, "name": name]))
+        return r.id
+    }
+    /// URL công khai của 1 file media theo id (ảnh/video bài đăng) — tải bằng AsyncImage được.
+    func mediaURL(fileId: Int) -> URL? { URL(string: "\(root)/media/\(fileId)") }
 }
