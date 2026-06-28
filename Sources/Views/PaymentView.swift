@@ -144,8 +144,13 @@ struct PaymentView: View {
     }
 
     private func statusBadge(_ status: String) -> some View {
-        let (text, color): (String, Color) = status == "completed"
-            ? (store.t("Đã cộng", "Credited"), .green) : (status == "pending" ? (store.t("Chờ xác nhận", "Pending"), .orange) : (status, .secondary))
+        let (text, color): (String, Color)
+        switch status {
+        case "completed": (text, color) = (store.t("Đã cộng", "Credited"), .green)
+        case "pending":   (text, color) = (store.t("Chờ xác nhận", "Pending"), .orange)
+        case "cancelled", "canceled": (text, color) = (store.t("Đã huỷ", "Cancelled"), .secondary)
+        default:          (text, color) = (status, .secondary)
+        }
         return Text(text).font(.caption2)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.18)).foregroundStyle(color)

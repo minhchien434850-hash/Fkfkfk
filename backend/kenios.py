@@ -4217,6 +4217,22 @@ def payment_history(user=Depends(get_user)) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+class PaymentCancelIn(BaseModel):
+    id: int
+
+@app.post("/payment/cancel")
+def payment_cancel(b: PaymentCancelIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Khách tự huỷ đơn nâng cấp đang CHỜ xác nhận (chưa nhận tiền)."""
+    with db() as c:
+        row = c.execute("SELECT user_id,status FROM payments WHERE id=?", (b.id,)).fetchone()
+        if not row or row["user_id"] != user["id"]:
+            raise HTTPException(status_code=404, detail="Không tìm thấy đơn của bạn.")
+        if row["status"] != "pending":
+            raise HTTPException(status_code=400, detail="Chỉ huỷ được đơn đang chờ xác nhận.")
+        c.execute("UPDATE payments SET status='cancelled' WHERE id=?", (b.id,))
+    return {"message": "Đã huỷ đơn."}
+
+
 @app.get("/me/credits")
 def my_credits(user=Depends(get_user)) -> dict[str, Any]:
     return {"credits": user["credits"], "plan": user["plan"]}
