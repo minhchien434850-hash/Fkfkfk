@@ -35,6 +35,7 @@ struct KHeroHeader: View {
     let icon: String
     let title: String
     let subtitle: String
+    var useLogo: Bool = false   // true = hiện logo app KENIOS thay cho icon SF
 
     var body: some View {
         HStack(spacing: 14) {
@@ -42,9 +43,18 @@ struct KHeroHeader: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(.white.opacity(0.18))
                     .frame(width: 52, height: 52)
-                Image(systemName: icon)
-                    .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(.white)
+                if useLogo {
+                    Image("AppLogo")
+                        .resizable().scaledToFill()
+                        .frame(width: 52, height: 52)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(.white.opacity(0.5), lineWidth: 1))
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(.white)
+                }
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)

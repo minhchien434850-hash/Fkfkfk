@@ -19,6 +19,15 @@ struct AdminView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    KHeroHeader(icon: "crown.fill",
+                                title: store.t("Quản trị", "Admin"),
+                                subtitle: store.t("Thống kê · người dùng · đơn hàng · hệ thống",
+                                                  "Stats · users · orders · system"),
+                                useLogo: true)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
                 // ==================== 📊 Thống kê ====================
                 Section {
                     if let stats {

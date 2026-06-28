@@ -26,7 +26,8 @@ struct SettingsView: View {
                     KHeroHeader(icon: "gearshape.fill",
                                 title: store.t("Cài đặt", "Settings"),
                                 subtitle: store.t("Tài khoản · giao diện · dọn dẹp · cache",
-                                                  "Account · appearance · cleanup · cache"))
+                                                  "Account · appearance · cleanup · cache"),
+                                useLogo: true)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                 }
