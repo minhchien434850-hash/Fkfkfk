@@ -617,6 +617,7 @@ def init_db() -> None:
     _seed_setting("store_banner_url", "")
     _seed_setting("store_topup_bonus_percent", "0")   # % thưởng khi nạp tiền vào ví
     _seed_prompt_templates()
+    _seed_demo_store()
     log.info("DB sẵn sàng: %s", DB_PATH)
 
 
@@ -726,6 +727,40 @@ def _seed_setting(key: str, value: str) -> None:
     with db() as c:
         if not c.execute("SELECT 1 FROM settings WHERE key=?", (key,)).fetchone():
             c.execute("INSERT INTO settings(key,value) VALUES(?,?)", (key, value))
+
+
+def _seed_demo_store() -> None:
+    """Tạo sẵn 1 sản phẩm MẪU gói 7 ngày để admin xem thử luồng giao key.
+
+    Chỉ chạy 1 lần (gắn cờ 'store_demo_seeded'); admin có thể sửa/xoá thoải mái
+    mà không bị tạo lại sau khi khởi động lại.
+    """
+    if get_setting("store_demo_seeded", "") == "1":
+        return
+    now = int(time.time())
+    with db() as c:
+        # Danh mục → thư mục 'iOS' (để nền tảng tự nhận là iOS) → sản phẩm mẫu
+        cur = c.execute("INSERT INTO store_categories(name,media,sort,created_at) VALUES(?,?,?,?)",
+                        ("Ứng dụng iOS", "[]", 0, now))
+        cat_id = cur.lastrowid
+        cur = c.execute("INSERT INTO store_folders(category_id,name,media,sort,created_at) "
+                        "VALUES(?,?,?,?,?)", (cat_id, "iOS", "[]", 0, now))
+        folder_id = cur.lastrowid
+        cur = c.execute("INSERT INTO store_products(folder_id,name,description,media,download_url,"
+                        "download_file_id,kind,sort,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                        (folder_id, "App Mẫu VIP (7 ngày)",
+                         "Sản phẩm MẪU để xem thử luồng mua & giao key. Admin có thể sửa hoặc xoá.",
+                         "[]", "", None, "app", 0, now))
+        pid = cur.lastrowid
+        # Gói thời hạn 7 ngày
+        c.execute("INSERT INTO store_prices(product_id,label,amount,sort) VALUES(?,?,?,?)",
+                  (pid, "7 ngày", 50000, 0))
+        # Vài key mẫu để bán thử
+        for i in range(1, 6):
+            c.execute("INSERT INTO store_keys(product_id,key_text,status,created_at) "
+                      "VALUES(?,?,'available',?)", (pid, f"DEMO-7DAY-{i:04d}", now))
+    set_setting("store_demo_seeded", "1")
+    log.info("Đã tạo sản phẩm MẪU 'App Mẫu VIP (7 ngày)' (product_id=%d)", pid)
 
 
 def _migrate() -> None:
