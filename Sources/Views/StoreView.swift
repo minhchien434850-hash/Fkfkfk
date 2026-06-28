@@ -1208,8 +1208,47 @@ struct StoreView: View {
                     media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)], height: 235)
                     .overlay {
                         LinearGradient(
-                            colors: [.black.opacity(0.10), .black.opacity(0.78)],
+                            colors: [.black.opacity(0.35), .clear, .black.opacity(0.78)],
                             startPoint: .top, endPoint: .bottom)
+                    }
+                    // Logo + slogan ở góc trên-trái (chữ trắng cho nổi trên ảnh)
+                    .overlay(alignment: .topLeading) {
+                        HStack(spacing: 10) {
+                            if !c.logoUrl.isEmpty, let lurl = URL(string: c.logoUrl) {
+                                Group {
+                                    if isAnimatedImage(c.logoUrl) {
+                                        GIFWebView(url: lurl, contentMode: "cover")
+                                    } else {
+                                        CachedAsyncImage(url: lurl) { img in img.resizable().scaledToFill() }
+                                        placeholder: { Color(.tertiarySystemBackground) }
+                                    }
+                                }
+                                .frame(width: 48, height: 48)
+                                .clipShape(RoundedRectangle(cornerRadius: 11))
+                                .overlay(RoundedRectangle(cornerRadius: 11).stroke(.white.opacity(0.25), lineWidth: 1))
+                            } else {
+                                Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
+                                    .frame(width: 48, height: 48)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(RoundedRectangle(cornerRadius: 11))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                AnimatedStoreLogo(
+                                    text: displayName,
+                                    effect: c.logoEffect ?? "rainbow",
+                                    fontStyle: c.logoFont ?? "rounded",
+                                    anim: c.logoAnim ?? "shimmer",
+                                    size: 20)
+                                Text({
+                                    let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
+                                    return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
+                                }())
+                                .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
+                                .foregroundStyle(.white.opacity(0.9))
+                            }
+                        }
+                        .padding(.horizontal, 14).padding(.top, 14)
+                        .padding(.trailing, 56)   // chừa chỗ cho icon chat góc phải
                     }
                     .overlay(alignment: .topTrailing) {
                         headerContactIcons.padding(12)
