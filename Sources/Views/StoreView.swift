@@ -225,7 +225,8 @@ struct StoreView: View {
     @State private var tickerIndex: Int = 0    // tăng mỗi 5 giây → cuộn danh sách giao dịch/nạp tiền
     private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let showcaseTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
-    private let tickerTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    // (Đã bỏ tickerTimer 5 giây — danh sách giao dịch/nạp tiền giữ tĩnh để cửa hàng
+    //  không bị "chóp nháy" do tự cuộn + hiệu ứng mờ dần mỗi 5 giây.)
 
     // Tên hiển thị trong showcase — 200 tên Việt Nam không lặp
     private let showcaseNames: [String] = [
@@ -610,7 +611,6 @@ struct StoreView: View {
                 }
             }
             .onReceive(showcaseTimer) { _ in showcaseTick += 1 }
-            .onReceive(tickerTimer) { _ in tickerIndex += 1 }
         }
     }
 
