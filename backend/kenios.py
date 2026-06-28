@@ -37,7 +37,7 @@ import sqlite3, logging, asyncio, subprocess, tempfile, sys, shutil
 from typing import Any, Optional
 
 import httpx
-from fastapi import FastAPI, Request, HTTPException, Header, Depends, UploadFile, File as FastAPIFile, Form, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, Header, Depends, UploadFile, File as FastAPIFile, Form, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse, Response
 from pydantic import BaseModel
@@ -45,7 +45,31 @@ from pydantic import BaseModel
 # ========================= Cấu hình =========================
 DB_PATH         = os.getenv("CODEBOX_DB", "kenios.db")
 PORT            = int(os.getenv("PORT", "8000"))
-SECRET          = os.getenv("CODEBOX_SECRET") or secrets.token_hex(32)
+
+def _load_or_create_secret() -> str:
+    """Khóa ký session token. Ưu tiên biến môi trường; nếu không có thì lưu ra
+    file & tái sử dụng — tránh việc mỗi lần restart VPS lại sinh khóa mới khiến
+    toàn bộ user bị đăng xuất (token cũ thành không hợp lệ)."""
+    if os.getenv("CODEBOX_SECRET"):
+        return os.getenv("CODEBOX_SECRET")
+    path = os.getenv("CODEBOX_SECRET_FILE",
+                     os.path.join(os.path.dirname(os.path.abspath(__file__)), "kenios_secret.key"))
+    try:
+        if os.path.exists(path):
+            v = open(path).read().strip()
+            if v:
+                return v
+        v = secrets.token_hex(32)
+        with open(path, "w") as f:
+            f.write(v)
+        try: os.chmod(path, 0o600)
+        except OSError: pass
+        return v
+    except OSError:
+        # Không ghi được file (chỉ đọc) — vẫn chạy được nhưng cảnh báo
+        return secrets.token_hex(32)
+
+SECRET          = _load_or_create_secret()
 TOKEN_TTL       = int(os.getenv("TOKEN_TTL", str(60 * 60 * 24 * 30)))  # 30 ngày
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120"))
 SANDBOX_TIMEOUT = int(os.getenv("SANDBOX_TIMEOUT", "15"))  # giây chạy code
@@ -69,9 +93,6 @@ KENIOS_AI_KEY    = os.getenv("KENIOS_AI_KEY", "ollama")   # Ollama bỏ qua, ch�
 # Thư mục lưu tệp tải lên của user trên đĩa
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# File backup các KEY / ACC đã bán (mỗi dòng 1 JSON). Admin xem trong cài đặt cửa hàng.
-STORE_KEYS_BACKUP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "store_sold_keys_backup.jsonl")
 
 # Kích thước tệp giới hạn (1KB - 4GB)
 MIN_FILE_SIZE = 1024
@@ -482,6 +503,13 @@ def init_db() -> None:
                 user_id INTEGER NOT NULL,
                 PRIMARY KEY(post_id, user_id)
             );
+            CREATE TABLE IF NOT EXISTS post_comments(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER
+            );
             CREATE TABLE IF NOT EXISTS live_rooms(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 host_id INTEGER NOT NULL,
@@ -566,6 +594,15 @@ def init_db() -> None:
                 created_at INTEGER
             );
 
+            -- Đánh giá sản phẩm (mỗi khách 1 đánh giá / sản phẩm) → đếm "lượt đánh giá"
+            CREATE TABLE IF NOT EXISTS store_reviews(
+                product_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                stars INTEGER DEFAULT 5,
+                created_at INTEGER,
+                PRIMARY KEY(product_id, user_id)
+            );
+
             -- Nạp tiền vào VÍ cửa hàng (tách biệt thanh toán app chính)
             CREATE TABLE IF NOT EXISTS store_topups(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -584,6 +621,27 @@ def init_db() -> None:
                 kind TEXT NOT NULL,              -- topup | purchase
                 amount INTEGER NOT NULL,         -- +nạp / -mua
                 note TEXT DEFAULT '',
+                created_at INTEGER
+            );
+            -- Mã khuyến mãi / giảm giá
+            CREATE TABLE IF NOT EXISTS store_promo_codes(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                discount_type TEXT DEFAULT 'percent',  -- percent | fixed
+                discount_value INTEGER NOT NULL,
+                min_amount INTEGER DEFAULT 0,
+                max_uses INTEGER DEFAULT 0,            -- 0 = không giới hạn
+                used_count INTEGER DEFAULT 0,
+                expires_at INTEGER DEFAULT 0,          -- 0 = không hết hạn
+                is_active INTEGER DEFAULT 1,
+                created_at INTEGER
+            );
+            -- Device tokens cho push notification
+            CREATE TABLE IF NOT EXISTS device_tokens(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                platform TEXT DEFAULT 'ios',
                 created_at INTEGER
             );
         """)
@@ -749,13 +807,15 @@ def _migrate() -> None:
         # App bán hàng: loại sản phẩm (app/key vs acc game) + lưu key trực tiếp vào đơn
         ("store_products", "kind", "TEXT DEFAULT 'app'"),   # app | acc
         ("store_orders", "key_text", "TEXT"),
-        # Giao hàng: lưu thời hạn gói + nền tảng + ngày hết hạn + tin nhắn giao key
-        ("store_orders", "price_label",  "TEXT"),
-        ("store_orders", "platform",     "TEXT"),
-        ("store_orders", "expires_at",   "INTEGER"),
-        ("store_orders", "delivery_msg", "TEXT"),
         # Ví cửa hàng (số dư VND, tách biệt với app chính)
         ("users", "wallet", "INTEGER DEFAULT 0"),
+        # Hồ sơ mạng xã hội: ảnh đại diện + tiểu sử
+        ("users", "avatar_url", "TEXT"),
+        ("users", "bio", "TEXT"),
+        # Video feed: lượt xem
+        ("posts", "views", "INTEGER DEFAULT 0"),
+        # Sản phẩm cửa hàng: lượt xem (mỗi lần khách bấm vào +1)
+        ("store_products", "views", "INTEGER DEFAULT 0"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -3902,111 +3962,6 @@ def _finalize_payment_row(c, pay) -> bool:
     return True
 
 
-# ===================== Giao key: thời hạn · nền tảng · tin nhắn =====================
-# Quy đổi đơn vị thời hạn sang số giây (tháng = 30 ngày, năm = 365 ngày)
-_DURATION_UNITS = [
-    (("phút", "phut", "minute", "min"),          60),
-    (("giờ", "gio", "hour", "hr"),               3600),
-    (("ngày", "ngay", "day", "days"),            86400),
-    (("tuần", "tuan", "week", "weeks", "wk"),    7 * 86400),
-    (("tháng", "thang", "month", "months", "mo"),30 * 86400),
-    (("năm", "nam", "year", "years", "yr"),      365 * 86400),
-]
-_LIFETIME_HINTS = ("vĩnh viễn", "vinh vien", "trọn đời", "tron doi",
-                   "lifetime", "forever", "vĩnh", "vinh")
-
-
-def _duration_seconds(label: str):
-    """Đổi nhãn gói ('1 tháng', '30 ngày', '1 năm', 'vĩnh viễn'...) thành số giây.
-
-    Trả về None nếu là gói vĩnh viễn hoặc không xác định được thời hạn.
-    """
-    s = (label or "").strip().lower()
-    if not s:
-        return None
-    if any(h in s for h in _LIFETIME_HINTS):
-        return None
-    m = re.search(r"(\d+(?:[.,]\d+)?)", s)
-    qty = float(m.group(1).replace(",", ".")) if m else 1.0
-    # Ưu tiên đơn vị dài nhất (tránh 'ngày' lọt vào 'tháng')
-    for names, secs in sorted(_DURATION_UNITS, key=lambda u: -max(len(n) for n in u[0])):
-        if any(n in s for n in names):
-            return int(qty * secs)
-    return None
-
-
-def _platform_label(c, product_id: int) -> str:
-    """Suy ra nền tảng (iOS / Android) từ tên thư mục → danh mục chứa sản phẩm.
-
-    Nếu không nhận diện được thì dùng luôn tên thư mục cho khách dễ hiểu.
-    """
-    row = c.execute(
-        "SELECT f.name AS folder, cat.name AS category "
-        "FROM store_products p "
-        "JOIN store_folders f ON f.id=p.folder_id "
-        "JOIN store_categories cat ON cat.id=f.category_id "
-        "WHERE p.id=?", (product_id,)).fetchone()
-    if not row:
-        return ""
-    text = f"{row['folder'] or ''} {row['category'] or ''}".lower()
-    if any(k in text for k in ("ios", "iphone", "ipad", "apple")):
-        return "iOS"
-    if "android" in text:
-        return "Android"
-    return (row["folder"] or "").strip()
-
-
-def _fmt_dmy(ts) -> str:
-    return time.strftime("%d/%m/%Y", time.localtime(int(ts)))
-
-
-def _build_delivery_msg(c, product_id: int, price_label: str, key_text: str,
-                        created_at: int, expires_at, kind: str = "app") -> str:
-    """Soạn tin nhắn giao hàng gửi khách sau khi mua key/acc."""
-    prod = c.execute("SELECT name FROM store_products WHERE id=?", (product_id,)).fetchone()
-    pname = (prod["name"] if prod else "") or "(sản phẩm)"
-    item = "tài khoản" if (kind or "app") == "acc" else "key"
-    platform = _platform_label(c, product_id)
-    plat = f" [{platform}]" if platform else ""
-    dur = f" ({price_label})" if (price_label or "").strip() else ""
-    lines = [
-        f"🔑 Bạn đã mua 1 {item} {pname}{plat}{dur}",
-        f"🗓 Ngày mua: {_fmt_dmy(created_at)}",
-        f"⏳ Hết hạn: {_fmt_dmy(expires_at)}" if expires_at else "⏳ Thời hạn: Vĩnh viễn",
-        f"🔑 {item.capitalize()}: {key_text}",
-    ]
-    return "\n".join(lines)
-
-
-def _apply_delivery(c, order_id: int, product_id: int, price_label: str,
-                    key_text: str, created_at: int, kind: str = "app") -> dict:
-    """Tính nền tảng + ngày hết hạn + tin nhắn rồi lưu vào đơn. Trả về để API dùng lại."""
-    platform = _platform_label(c, product_id)
-    secs = _duration_seconds(price_label)
-    expires_at = (int(created_at) + secs) if secs else None
-    msg = _build_delivery_msg(c, product_id, price_label, key_text, created_at, expires_at, kind)
-    c.execute("UPDATE store_orders SET price_label=?, platform=?, expires_at=?, delivery_msg=? WHERE id=?",
-              (price_label or "", platform, expires_at, msg, order_id))
-    return {"platform": platform, "expires_at": expires_at, "delivery": msg}
-
-
-def _backup_sold_key(c, order, key_text: str) -> None:
-    """Ghi 1 dòng JSON sao lưu key/acc đã bán vào file backup (admin xem được)."""
-    prod = c.execute("SELECT name,kind FROM store_products WHERE id=?", (order["product_id"],)).fetchone()
-    usr = c.execute("SELECT username,public_id FROM users WHERE id=?", (order["user_id"],)).fetchone()
-    entry = {
-        "time": int(time.time()), "order_id": order["id"], "product_id": order["product_id"],
-        "product_name": prod["name"] if prod else "", "kind": (prod["kind"] if prod else "app"),
-        "user_id": order["user_id"], "username": usr["username"] if usr else "",
-        "public_id": usr["public_id"] if usr else "", "amount": order["amount"], "key": key_text,
-    }
-    try:
-        with open(STORE_KEYS_BACKUP, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception as e:
-        log.error("Backup key lỗi: %s", e)
-
-
 def _finalize_store_order_row(c, order) -> bool:
     """Hoàn tất 1 đơn mua sản phẩm: cấp 1 key khả dụng, sao lưu rồi XOÁ key khỏi kho.
 
@@ -4033,15 +3988,8 @@ def _finalize_store_order_row(c, order) -> bool:
         log.warning("Store: đơn #%d đã thanh toán nhưng HẾT key (product=%d)",
                     order["id"], order["product_id"])
         return True
-    _backup_sold_key(c, order, key["key_text"])
     c.execute("UPDATE store_orders SET key_id=?, key_text=? WHERE id=?",
               (key["id"], key["key_text"], order["id"]))
-    # Soạn tin giao hàng (thời hạn + nền tảng + ngày hết hạn + key)
-    pr = c.execute("SELECT label FROM store_prices WHERE id=?", (order["price_id"],)).fetchone()
-    prod = c.execute("SELECT kind FROM store_products WHERE id=?", (order["product_id"],)).fetchone()
-    _apply_delivery(c, order["id"], order["product_id"], pr["label"] if pr else "",
-                    key["key_text"], order["created_at"] or int(time.time()),
-                    _row_kind(prod) if prod else "app")
     # Khách đã nhận key → tự động xoá key khỏi kho (không bao giờ bán lại)
     c.execute("DELETE FROM store_keys WHERE id=?", (key["id"],))
     log.info("Store xác nhận: đơn #%d, user=%d, product=%d (đã xoá key khỏi kho)",
@@ -4269,6 +4217,22 @@ def payment_history(user=Depends(get_user)) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+class PaymentCancelIn(BaseModel):
+    id: int
+
+@app.post("/payment/cancel")
+def payment_cancel(b: PaymentCancelIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Khách tự huỷ đơn nâng cấp đang CHỜ xác nhận (chưa nhận tiền)."""
+    with db() as c:
+        row = c.execute("SELECT user_id,status FROM payments WHERE id=?", (b.id,)).fetchone()
+        if not row or row["user_id"] != user["id"]:
+            raise HTTPException(status_code=404, detail="Không tìm thấy đơn của bạn.")
+        if row["status"] != "pending":
+            raise HTTPException(status_code=400, detail="Chỉ huỷ được đơn đang chờ xác nhận.")
+        c.execute("UPDATE payments SET status='cancelled' WHERE id=?", (b.id,))
+    return {"message": "Đã huỷ đơn."}
+
+
 @app.get("/me/credits")
 def my_credits(user=Depends(get_user)) -> dict[str, Any]:
     return {"credits": user["credits"], "plan": user["plan"]}
@@ -4308,7 +4272,14 @@ def _load_media(s) -> list:
 def _product_prices(c, pid: int) -> list:
     rows = c.execute("SELECT id,label,amount,sort FROM store_prices WHERE product_id=? "
                      "ORDER BY sort ASC, amount ASC", (pid,)).fetchall()
-    return [{"id": r["id"], "label": r["label"], "amount": r["amount"]} for r in rows]
+    out = []
+    for r in rows:
+        # Tồn kho RIÊNG của từng mốc thời hạn (không dùng chung).
+        avail = c.execute(
+            "SELECT COUNT(*) AS n FROM store_keys WHERE product_id=? AND price_id=? AND status='available'",
+            (pid, r["id"])).fetchone()["n"]
+        out.append({"id": r["id"], "label": r["label"], "amount": r["amount"], "available": avail})
+    return out
 
 def _row_kind(row) -> str:
     try:
@@ -4326,20 +4297,199 @@ def _product_public(c, row) -> dict:
         "media": _load_media(row["media"]),
         "prices": _product_prices(c, row["id"]),
         "available_keys": avail,
+        "views": (row["views"] if "views" in row.keys() else 0) or 0,
         "has_download": bool((row["download_url"] or "").strip()) or row["download_file_id"] is not None,
     }
 
 
 # -------------------- Khách xem (công khai) --------------------
+@app.get("/store/all-products")
+def store_all_products() -> dict[str, Any]:
+    """Trả TẤT CẢ sản phẩm gom theo danh mục trong 1 request (tránh N+1 khi tải cửa hàng)."""
+    with db() as c:
+        rows = c.execute(
+            "SELECT p.*, f.category_id AS category_id "
+            "FROM store_products p JOIN store_folders f ON f.id=p.folder_id "
+            "ORDER BY p.sort ASC, p.id ASC").fetchall()
+        grouped: dict[str, list] = {}
+        for r in rows:
+            grouped.setdefault(str(r["category_id"]), []).append(_product_public(c, r))
+    return {"by_category": grouped}
+
+
 @app.get("/store/config")
 def store_config() -> dict[str, Any]:
+    # Đếm số THẬT cho 3 ô thống kê (người dùng / sản phẩm đã bán / lượt đánh giá)
+    with db() as c:
+        real_users = c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
+        real_sold = c.execute("SELECT COUNT(*) n FROM store_orders WHERE status='completed'").fetchone()["n"]
+        try:
+            real_reviews = c.execute("SELECT COUNT(*) n FROM store_reviews").fetchone()["n"]
+        except Exception:
+            real_reviews = 0
     return {
         "logo_name": get_setting("store_logo_name", "KENIOS Store"),
         "logo_url": get_setting("store_logo_url", ""),
         "banner_type": get_setting("store_banner_type", "image"),
         "banner_url": get_setting("store_banner_url", ""),
         "topup_bonus_percent": _topup_bonus_percent(),
+        # Hiệu ứng / font logo cửa hàng + nền full màn hình
+        "logo_effect": get_setting("store_logo_effect", "rainbow"),   # rainbow|none|glow|neon|gold
+        "logo_font": get_setting("store_logo_font", "rounded"),       # rounded|serif|mono|default
+        "logo_anim": get_setting("store_logo_anim", "shimmer"),       # shimmer|wave|pulse|none
+        "bg_type": get_setting("store_bg_type", "none"),              # none|image|video
+        "bg_url": get_setting("store_bg_url", ""),
+        # Dòng giới thiệu (slogan) dưới tên cửa hàng + font + thứ tự bố cục các mục
+        "slogan": get_setting("store_slogan", "Cửa hàng sản phẩm số · key · tải về"),
+        "slogan_font": get_setting("store_slogan_font", "rounded"),
+        "section_order": get_setting("store_section_order",
+                                     "hero,categories,gamecat,flash,trust,steps,leaderboard,"
+                                     "transactions,topups,downloads,contacts,wishlist,recent,products,footer"),
+        # Các mục bị ẩn (admin tắt cho gọn). Mặc định ẩn "products" vì đã có lưới "gamecat".
+        "section_hidden": get_setting("store_section_hidden", "products"),
+        "card_size": get_setting("store_card_size", "medium"),   # small | medium | large
+        "card_scale": get_setting("store_card_scale", "1.0"),    # hệ số kéo kích cỡ 0.6–1.6
+        # Flash sale (đếm ngược) — admin bật + chọn sản phẩm + thời điểm kết thúc + % giảm
+        "flash_enabled": get_setting("store_flash_enabled", "0") == "1",
+        "flash_product_id": _int_setting("store_flash_product_id", 0),
+        "flash_end": _int_setting("store_flash_end", 0),
+        "flash_discount": _int_setting("store_flash_discount", 0),
+        "flash_title": get_setting("store_flash_title", "FLASH SALE"),
+        # Hero (banner chính đầu trang)
+        "hero_title": get_setting("store_hero_title", ""),
+        "hero_subtitle": get_setting("store_hero_subtitle", ""),
+        "hero_effect": get_setting("store_hero_effect", "gradient"),
+        "hero_font": get_setting("store_hero_font", "rounded"),
+        "hero_anim": get_setting("store_hero_anim", "shimmer"),
+        # Hiệu ứng / chuyển động cho slogan
+        "slogan_effect": get_setting("store_slogan_effect", "none"),
+        "slogan_anim": get_setting("store_slogan_anim", "none"),
+        # Khuyến mãi (banner ảnh trong phần ví nạp tiền)
+        "promo_image_url": get_setting("store_promo_image_url", ""),
+        "promo_product_id": _int_setting("store_promo_product_id", 0),
+        # 3 ô thống kê: số ẢO admin đặt + số THẬT đếm từ DB (app hiển thị tổng = ảo + thật)
+        "stat_users_base": _int_setting("store_stat_users_base", 0),
+        "stat_sold_base": _int_setting("store_stat_sold_base", 0),
+        "stat_reviews_base": _int_setting("store_stat_reviews_base", 0),
+        "stat_users_real": real_users,
+        "stat_sold_real": real_sold,
+        "stat_reviews_real": real_reviews,
+        # Thanh thông báo chạy (announcement) đầu trang cửa hàng
+        "announce_enabled": get_setting("store_announce_enabled", "0") == "1",
+        "announce_text": get_setting("store_announce_text", ""),
+        "announce_color": get_setting("store_announce_color", "accent"),  # accent|red|green|gold|purple
+        # Số sản phẩm hiển thị tối đa mỗi danh mục ở lưới "Danh mục Game"
+        "gamecat_limit": _int_setting("store_gamecat_limit", 6),
     }
+
+
+def _int_setting(key: str, default: int = 0) -> int:
+    try:
+        return int(get_setting(key, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _mask_name(s: str) -> str:
+    """Che tên người dùng: giữ 2 ký tự đầu + 1 ký tự cuối, ở giữa là dấu *."""
+    s = (s or "").strip()
+    if not s:
+        return "***"
+    if len(s) <= 2:
+        return s[0] + "*"
+    if len(s) <= 4:
+        return s[0] + "*" * (len(s) - 2) + s[-1]
+    return s[:2] + "*" * max(3, len(s) - 3) + s[-1]
+
+
+@app.get("/store/showcase")
+def store_showcase() -> dict[str, Any]:
+    """Dữ liệu trang chủ cửa hàng: giao dịch gần đây, nạp gần đây, bảng xếp hạng nạp."""
+    with db() as c:
+        orders = c.execute(
+            "SELECT o.amount AS amount, o.created_at AS at, u.username AS uname, "
+            "       p.name AS pname, pr.label AS plabel "
+            "FROM store_orders o "
+            "JOIN users u ON u.id=o.user_id "
+            "JOIN store_products p ON p.id=o.product_id "
+            "LEFT JOIN store_prices pr ON pr.id=o.price_id "
+            "WHERE o.status='completed' "
+            "ORDER BY o.created_at DESC LIMIT 20").fetchall()
+        topups = c.execute(
+            "SELECT t.amount AS amount, t.created_at AS at, u.username AS uname "
+            "FROM store_topups t JOIN users u ON u.id=t.user_id "
+            "WHERE t.status='completed' "
+            "ORDER BY t.created_at DESC LIMIT 20").fetchall()
+        leaders = c.execute(
+            "SELECT u.username AS uname, SUM(t.credited) AS total "
+            "FROM store_topups t JOIN users u ON u.id=t.user_id "
+            "WHERE t.status='completed' "
+            "GROUP BY t.user_id ORDER BY total DESC LIMIT 5").fetchall()
+    return {
+        "recent_orders": [
+            {"user": _mask_name(r["uname"]), "product": r["pname"],
+             "label": r["plabel"] or "", "amount": r["amount"] or 0, "at": r["at"] or 0}
+            for r in orders
+        ],
+        "recent_topups": [
+            {"user": _mask_name(r["uname"]), "amount": r["amount"] or 0, "at": r["at"] or 0}
+            for r in topups
+        ],
+        "leaderboard": [
+            {"rank": i + 1, "user": _mask_name(r["uname"]), "total": r["total"] or 0}
+            for i, r in enumerate(leaders)
+        ],
+    }
+
+
+# -------------------- Lưu ảnh từ máy → trả về link URL công khai --------------------
+class MediaUploadIn(BaseModel):
+    data_base64: str
+    mime: Optional[str] = None
+    name: Optional[str] = None
+
+@app.post("/media/upload")
+def media_upload(b: MediaUploadIn, user=Depends(get_user)) -> dict[str, Any]:
+    data = (b.data_base64 or "").strip()
+    if data.startswith("data:") and "," in data:
+        data = data.split(",", 1)[1]
+    try:
+        raw = base64.b64decode(data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Dữ liệu ảnh không hợp lệ.")
+    if not raw:
+        raise HTTPException(status_code=400, detail="Ảnh rỗng.")
+    mime = b.mime or "image/jpeg"
+    name = (b.name or f"media_{int(time.time())}")[:80]
+    with db() as c:
+        cur = c.execute("INSERT INTO files(user_id,name,category,mime,size,data,created_at) "
+                        "VALUES(?,?,?,?,?,'',?)",
+                        (user["id"], name, "media", mime, len(raw), int(time.time())))
+        fid = cur.lastrowid
+    try:
+        with open(os.path.join(UPLOAD_DIR, str(fid)), "wb") as f:
+            f.write(raw)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lưu ảnh: {e}")
+    return {"id": fid, "path": f"/media/{fid}"}
+
+@app.get("/media/{fid}")
+def media_serve(fid: int, background_tasks: BackgroundTasks):
+    """Phục vụ ảnh đã upload — công khai (để dùng làm link logo/banner/media)."""
+    with db() as c:
+        row = c.execute("SELECT name,mime,data FROM files WHERE id=? AND category='media'", (fid,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Không tìm thấy ảnh.")
+    path = os.path.join(UPLOAD_DIR, str(fid))
+    if os.path.exists(path):
+        return FileResponse(path, media_type=row["mime"] or "image/jpeg")
+    if row["data"]:
+        tmp = os.path.join(UPLOAD_DIR, f"m_{fid}_{secrets.token_hex(3)}")
+        with open(tmp, "wb") as f:
+            f.write(base64.b64decode(row["data"]))
+        background_tasks.add_task(os.unlink, tmp)
+        return FileResponse(tmp, media_type=row["mime"] or "image/jpeg")
+    raise HTTPException(status_code=404, detail="Không có nội dung ảnh.")
 
 
 # ======================== VÍ CỬA HÀNG (tách biệt thanh toán app chính) ========================
@@ -4413,6 +4563,12 @@ def _finalize_topup_row(c, t) -> bool:
                 f"Nạp {t['amount']:,}đ".replace(",", ".") +
                 (f" + thưởng {t['bonus']:,}đ".replace(",", ".") if t["bonus"] else ""))
     log.info("Ví: nạp xong topup #%d user=%d +%d", t["id"], t["user_id"], t["credited"])
+    # Báo admin có người nạp ví (chạy nền)
+    urow = c.execute("SELECT username FROM users WHERE id=?", (t["user_id"],)).fetchone()
+    uname = urow["username"] if urow else f"user#{t['user_id']}"
+    _notify_admins("💰 Nạp ví mới",
+                   f"{uname} vừa nạp {t['amount']:,}đ".replace(",", ".") +
+                   (f" (+{t['bonus']:,}đ thưởng)".replace(",", ".") if t["bonus"] else ""))
     return True
 
 @app.get("/store/categories")
@@ -4453,8 +4609,7 @@ def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
         if not prod:
             raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
         # Key đã được giao lưu trong đơn (key gốc đã bị xoá khỏi kho sau khi bán)
-        order = c.execute("SELECT key_text,delivery_msg,expires_at FROM store_orders "
-                          "WHERE product_id=? AND user_id=? "
+        order = c.execute("SELECT key_text FROM store_orders WHERE product_id=? AND user_id=? "
                           "AND status='completed' ORDER BY id DESC LIMIT 1",
                           (pid, user["id"])).fetchone()
         if not order:
@@ -4462,17 +4617,42 @@ def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
         return {
             "owned": True,
             "key": order["key_text"] or "",
-            "delivery": order["delivery_msg"] or "",
-            "expires_at": order["expires_at"],
             "download_url": prod["download_url"] or "",
             "download_file_id": prod["download_file_id"],
         }
+
+
+# -------------------- Đánh giá sản phẩm (đếm "lượt đánh giá") --------------------
+class ReviewIn(BaseModel):
+    stars: int = 5
+
+@app.post("/store/products/{pid}/review")
+def store_review(pid: int, b: ReviewIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Khách đánh giá sản phẩm — mỗi khách 1 đánh giá/sản phẩm (cập nhật nếu đã có)."""
+    stars = max(1, min(5, int(b.stars)))
+    with db() as c:
+        c.execute(
+            "INSERT INTO store_reviews(product_id,user_id,stars,created_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(product_id,user_id) DO UPDATE SET stars=excluded.stars",
+            (pid, user["id"], stars, int(time.time())))
+        total = c.execute("SELECT COUNT(*) n FROM store_reviews").fetchone()["n"]
+    return {"ok": True, "total_reviews": total}
+
+
+@app.post("/store/products/{pid}/view")
+def store_product_view(pid: int) -> dict[str, Any]:
+    """Tăng lượt xem sản phẩm — mỗi lần khách bấm vào +1 (không giới hạn, công khai)."""
+    with db() as c:
+        c.execute("UPDATE store_products SET views=COALESCE(views,0)+1 WHERE id=?", (pid,))
+        row = c.execute("SELECT views FROM store_products WHERE id=?", (pid,)).fetchone()
+    return {"views": (row["views"] if row else 0) or 0}
 
 
 # -------------------- Khách mua bằng VÍ (giao hàng tức thì) --------------------
 class StoreOrderIn(BaseModel):
     product_id: int
     price_id: Optional[int] = None
+    promo_code: Optional[str] = None
 
 @app.post("/store/orders")
 def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
@@ -4489,16 +4669,41 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
         if price is None:
             price = prices[0]
         amount = price["amount"]
+        # Áp dụng mã khuyến mãi nếu có
+        discount = 0
+        promo_row = None
+        if b.promo_code:
+            now = int(time.time())
+            promo_row = c.execute(
+                "SELECT * FROM store_promo_codes WHERE code=? AND is_active=1",
+                (b.promo_code.strip().upper(),)
+            ).fetchone()
+            if not promo_row:
+                raise HTTPException(status_code=400, detail="Mã khuyến mãi không hợp lệ hoặc đã hết hạn.")
+            if promo_row["expires_at"] and promo_row["expires_at"] < now:
+                raise HTTPException(status_code=400, detail="Mã khuyến mãi đã hết hạn.")
+            if promo_row["max_uses"] and promo_row["used_count"] >= promo_row["max_uses"]:
+                raise HTTPException(status_code=400, detail="Mã khuyến mãi đã hết lượt sử dụng.")
+            if amount < promo_row["min_amount"]:
+                raise HTTPException(status_code=400,
+                    detail=f"Đơn hàng tối thiểu {promo_row['min_amount']:,}đ để dùng mã này.".replace(",", "."))
+            if promo_row["discount_type"] == "percent":
+                discount = int(amount * promo_row["discount_value"] / 100)
+            else:
+                discount = min(promo_row["discount_value"], amount)
+            amount = max(0, amount - discount)
         balance = _wallet_balance(c, user["id"])
         if balance < amount:
             raise HTTPException(status_code=400,
                 detail=f"Số dư ví không đủ (cần {amount:,}đ, còn {balance:,}đ). Vui lòng nạp thêm vào ví."
                        .replace(",", "."))
-        # Giành 1 key khả dụng (atomic)
+        # Giành 1 key khả dụng (atomic) — CHỈ lấy key đúng mốc thời hạn đã chọn.
+        # Mỗi mốc (giờ/ngày/tuần/tháng) có kho riêng; hết mốc nào thì mốc đó hết hàng.
         key = None
         for _ in range(50):
-            cand = c.execute("SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
-                             "ORDER BY id ASC LIMIT 1", (b.product_id,)).fetchone()
+            cand = c.execute(
+                "SELECT id,key_text FROM store_keys WHERE product_id=? AND status='available' "
+                "AND price_id=? ORDER BY id ASC LIMIT 1", (b.product_id, price["id"])).fetchone()
             if not cand:
                 break
             got = c.execute("UPDATE store_keys SET status='sold' WHERE id=? AND status='available'",
@@ -4507,37 +4712,39 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
                 key = cand
                 break
         if not key:
-            raise HTTPException(status_code=400, detail="Sản phẩm tạm hết hàng. Vui lòng quay lại sau.")
+            raise HTTPException(status_code=400,
+                detail=f"Mốc \"{price['label']}\" đã hết hàng. Vui lòng chọn mốc khác.")
         # Trừ ví (atomic, chống âm)
         ded = c.execute("UPDATE users SET wallet=wallet-? WHERE id=? AND wallet>=?",
                         (amount, user["id"], amount))
         if ded.rowcount != 1:
             c.execute("UPDATE store_keys SET status='available' WHERE id=?", (key["id"],))  # trả key
             raise HTTPException(status_code=400, detail="Số dư ví không đủ. Vui lòng nạp thêm.")
+        if promo_row:
+            c.execute("UPDATE store_promo_codes SET used_count=used_count+1 WHERE id=?", (promo_row["id"],))
         cur = c.execute(
             "INSERT INTO store_orders(user_id,product_id,price_id,key_id,key_text,amount,status,ref,created_at) "
             "VALUES(?,?,?,?,?,?,'completed',?,?)",
             (user["id"], b.product_id, price["id"], key["id"], key["key_text"], amount,
              "wallet", int(time.time())))
         oid = cur.lastrowid
-        now = int(time.time())
-        deliv = _apply_delivery(c, oid, b.product_id, price["label"], key["key_text"],
-                                now, _row_kind(prod))
-        _backup_sold_key(c, {"id": oid, "product_id": b.product_id, "user_id": user["id"],
-                             "amount": amount}, key["key_text"])
         c.execute("DELETE FROM store_keys WHERE id=?", (key["id"],))   # đã giao → xoá khỏi kho
         c.execute("INSERT INTO store_wallet_tx(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",
-                  (user["id"], "purchase", -amount, f"Mua {prod['name']}", now))
+                  (user["id"], "purchase", -amount, f"Mua {prod['name']}", int(time.time())))
         new_balance = _wallet_balance(c, user["id"])
+    # Báo admin có đơn mới (chạy nền, không ảnh hưởng tới phản hồi mua hàng)
+    _notify_admins("🛒 Đơn hàng mới",
+                   f"{user['username']} vừa mua {prod['name']} — "
+                   f"{amount:,}đ".replace(",", "."))
     return {
         "ok": True, "owned": True, "order_id": oid,
         "key": key["key_text"], "product_name": prod["name"],
         "download_url": prod["download_url"] or "",
         "download_file_id": prod["download_file_id"],
         "balance": new_balance,
-        "platform": deliv["platform"], "expires_at": deliv["expires_at"],
-        "delivery": deliv["delivery"],
-        "message": "Mua thành công! Key đã được giao.",
+        "discount": discount,
+        "message": ("Mua thành công! Key đã được giao." if not discount else
+                    f"Mua thành công! Đã giảm {discount:,}đ.".replace(",", ".")),
     }
 
 
@@ -4591,24 +4798,20 @@ def store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
     with db() as c:
         rows = c.execute(
             "SELECT o.id,o.product_id,o.amount,o.status,o.ref,o.created_at,o.key_text,"
-            "o.delivery_msg,o.expires_at,"
             "p.name AS product_name,p.download_url,p.download_file_id "
             "FROM store_orders o LEFT JOIN store_products p ON p.id=o.product_id "
             "WHERE o.user_id=? ORDER BY o.id DESC", (user["id"],)).fetchall()
         out = []
         for r in rows:
             # key đã giao lưu thẳng trong đơn (store_keys gốc đã bị xoá sau khi bán)
-            done = r["status"] == "completed"
-            key_text = r["key_text"] if done else None
+            key_text = r["key_text"] if r["status"] == "completed" else None
             out.append({
                 "id": r["id"], "product_id": r["product_id"],
                 "product_name": r["product_name"] or "(đã xoá)",
                 "amount": r["amount"], "status": r["status"], "ref": r["ref"],
                 "created_at": r["created_at"], "key": key_text,
-                "delivery": (r["delivery_msg"] or "") if done else "",
-                "expires_at": r["expires_at"] if done else None,
-                "download_url": (r["download_url"] or "") if done else "",
-                "download_file_id": r["download_file_id"] if done else None,
+                "download_url": (r["download_url"] or "") if r["status"] == "completed" else "",
+                "download_file_id": r["download_file_id"] if r["status"] == "completed" else None,
             })
     return out
 
@@ -4619,6 +4822,44 @@ class StoreConfigIn(BaseModel):
     logo_url: Optional[str] = None
     banner_type: Optional[str] = None   # image | video
     banner_url: Optional[str] = None
+    logo_effect: Optional[str] = None
+    logo_font: Optional[str] = None
+    logo_anim: Optional[str] = None
+    bg_type: Optional[str] = None       # none | image | video
+    bg_url: Optional[str] = None
+    slogan: Optional[str] = None
+    slogan_font: Optional[str] = None
+    section_order: Optional[str] = None
+    section_hidden: Optional[str] = None
+    card_size: Optional[str] = None
+    card_scale: Optional[float] = None
+    flash_enabled: Optional[bool] = None
+    flash_product_id: Optional[int] = None
+    flash_end: Optional[int] = None
+    flash_discount: Optional[int] = None
+    flash_title: Optional[str] = None
+    # Hero (banner chính đầu trang)
+    hero_title: Optional[str] = None
+    hero_subtitle: Optional[str] = None
+    hero_effect: Optional[str] = None
+    hero_font: Optional[str] = None
+    hero_anim: Optional[str] = None
+    # Hiệu ứng / chuyển động cho slogan
+    slogan_effect: Optional[str] = None
+    slogan_anim: Optional[str] = None
+    # Khuyến mãi (banner ảnh trong phần ví nạp tiền)
+    promo_image_url: Optional[str] = None
+    promo_product_id: Optional[int] = None
+    # 3 ô thống kê: số ảo admin đặt (số thật đếm tự động ở backend)
+    stat_users_base: Optional[int] = None
+    stat_sold_base: Optional[int] = None
+    stat_reviews_base: Optional[int] = None
+    # Thanh thông báo chạy
+    announce_enabled: Optional[bool] = None
+    announce_text: Optional[str] = None
+    announce_color: Optional[str] = None
+    # Số sản phẩm/danh mục trong lưới "Danh mục Game"
+    gamecat_limit: Optional[int] = None
 
 @app.post("/admin/store/config")
 def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
@@ -4627,6 +4868,47 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.banner_type is not None:
         set_setting("store_banner_type", "video" if b.banner_type == "video" else "image")
     if b.banner_url is not None: set_setting("store_banner_url", b.banner_url.strip())
+    if b.logo_effect is not None: set_setting("store_logo_effect", b.logo_effect.strip()[:20])
+    if b.logo_font is not None: set_setting("store_logo_font", b.logo_font.strip()[:20])
+    if b.logo_anim is not None: set_setting("store_logo_anim", b.logo_anim.strip()[:20])
+    if b.bg_type is not None:
+        set_setting("store_bg_type", b.bg_type if b.bg_type in ("none", "image", "video") else "none")
+    if b.bg_url is not None: set_setting("store_bg_url", b.bg_url.strip())
+    if b.slogan is not None: set_setting("store_slogan", b.slogan.strip()[:120])
+    if b.slogan_font is not None: set_setting("store_slogan_font", b.slogan_font.strip()[:20])
+    if b.section_order is not None: set_setting("store_section_order", b.section_order.strip()[:200])
+    if b.section_hidden is not None: set_setting("store_section_hidden", b.section_hidden.strip()[:200])
+    if b.card_size is not None:
+        set_setting("store_card_size", b.card_size if b.card_size in ("small", "medium", "large") else "medium")
+    if b.card_scale is not None:
+        sc = max(0.6, min(float(b.card_scale), 1.6))
+        set_setting("store_card_scale", f"{sc:.2f}")
+    if b.flash_enabled is not None: set_setting("store_flash_enabled", "1" if b.flash_enabled else "0")
+    if b.flash_product_id is not None: set_setting("store_flash_product_id", str(max(0, int(b.flash_product_id))))
+    if b.flash_end is not None: set_setting("store_flash_end", str(max(0, int(b.flash_end))))
+    if b.flash_discount is not None: set_setting("store_flash_discount", str(max(0, min(int(b.flash_discount), 99))))
+    if b.flash_title is not None: set_setting("store_flash_title", b.flash_title.strip()[:40])
+    # Hero
+    if b.hero_title is not None: set_setting("store_hero_title", b.hero_title.strip()[:120])
+    if b.hero_subtitle is not None: set_setting("store_hero_subtitle", b.hero_subtitle.strip()[:160])
+    if b.hero_effect is not None: set_setting("store_hero_effect", b.hero_effect.strip()[:20])
+    if b.hero_font is not None: set_setting("store_hero_font", b.hero_font.strip()[:20])
+    if b.hero_anim is not None: set_setting("store_hero_anim", b.hero_anim.strip()[:20])
+    # Slogan effect / anim
+    if b.slogan_effect is not None: set_setting("store_slogan_effect", b.slogan_effect.strip()[:20])
+    if b.slogan_anim is not None: set_setting("store_slogan_anim", b.slogan_anim.strip()[:20])
+    # Khuyến mãi (banner)
+    if b.promo_image_url is not None: set_setting("store_promo_image_url", b.promo_image_url.strip())
+    if b.promo_product_id is not None: set_setting("store_promo_product_id", str(max(0, int(b.promo_product_id))))
+    # 3 ô thống kê — số ảo (số thật cộng tự động ở store_config)
+    if b.stat_users_base is not None: set_setting("store_stat_users_base", str(max(0, int(b.stat_users_base))))
+    if b.stat_sold_base is not None: set_setting("store_stat_sold_base", str(max(0, int(b.stat_sold_base))))
+    if b.stat_reviews_base is not None: set_setting("store_stat_reviews_base", str(max(0, int(b.stat_reviews_base))))
+    # Thanh thông báo
+    if b.announce_enabled is not None: set_setting("store_announce_enabled", "1" if b.announce_enabled else "0")
+    if b.announce_text is not None: set_setting("store_announce_text", b.announce_text.strip()[:200])
+    if b.announce_color is not None: set_setting("store_announce_color", b.announce_color.strip()[:20])
+    if b.gamecat_limit is not None: set_setting("store_gamecat_limit", str(max(1, min(int(b.gamecat_limit), 30))))
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
 
@@ -4643,6 +4925,36 @@ def admin_set_topup_bonus(b: TopupBonusIn, admin=Depends(get_admin)) -> dict[str
     p = max(0, min(int(b.percent), 1000))
     set_setting("store_topup_bonus_percent", str(p))
     return {"message": f"Đã đặt khuyến mãi nạp ví {p}%.", "percent": p}
+
+
+# -------------------- Admin: cộng/trừ ví khách (thủ công) --------------------
+class WalletAdjustIn(BaseModel):
+    user: str            # public_id / username / id
+    delta: int           # +nạp / -trừ (VND)
+    note: str = ""
+
+@app.post("/admin/store/wallet/adjust")
+def admin_store_wallet_adjust(b: WalletAdjustIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    ident = (b.user or "").strip()
+    if not ident:
+        raise HTTPException(status_code=400, detail="Thiếu thông tin người dùng (ID / username).")
+    with db() as c:
+        row = c.execute(
+            "SELECT id,username,wallet FROM users WHERE public_id=? OR username=? OR CAST(id AS TEXT)=?",
+            (ident, ident, ident)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy người dùng '{ident}'.")
+        delta = int(b.delta)
+        cur_bal = row["wallet"] or 0
+        if delta < 0 and cur_bal + delta < 0:
+            delta = -cur_bal   # không cho âm
+        kind = "topup" if delta >= 0 else "purchase"
+        note = b.note.strip() or ("Admin nạp ví" if delta >= 0 else "Admin trừ ví")
+        _wallet_add(c, row["id"], delta, kind, note)
+        bal = _wallet_balance(c, row["id"])
+    sign = "+" if delta >= 0 else ""
+    return {"message": f"Đã cập nhật ví của {row['username']}: {sign}{delta:,}đ. Số dư hiện tại: {bal:,}đ"
+            .replace(",", ".")}
 
 
 # -------------------- Liên hệ admin & Nhóm cộng đồng (mạng xã hội) --------------------
@@ -4836,17 +5148,18 @@ def admin_store_set_prices(pid: int, b: StorePricesIn, admin=Depends(get_admin))
 # -------------------- Admin: kho KEY --------------------
 class StoreKeysIn(BaseModel):
     text: str = ""   # mỗi dòng 1 key
+    price_id: Optional[int] = None   # gắn key vào 1 mốc thời hạn (giờ/ngày/tuần/tháng). None = dùng chung
 
 @app.get("/admin/store/products/{pid}/keys")
 def admin_store_list_keys(pid: int, admin=Depends(get_admin)) -> dict[str, Any]:
     with db() as c:
-        rows = c.execute("SELECT id,key_text,status,sold_at FROM store_keys WHERE product_id=? "
+        rows = c.execute("SELECT id,key_text,status,sold_at,price_id FROM store_keys WHERE product_id=? "
                          "ORDER BY id DESC", (pid,)).fetchall()
         avail = sum(1 for r in rows if r["status"] == "available")
     return {
         "available": avail, "total": len(rows),
         "keys": [{"id": r["id"], "key_text": r["key_text"], "status": r["status"],
-                  "sold_at": r["sold_at"]} for r in rows],
+                  "sold_at": r["sold_at"], "price_id": r["price_id"]} for r in rows],
     }
 
 @app.post("/admin/store/products/{pid}/keys")
@@ -4858,8 +5171,9 @@ def admin_store_add_keys(pid: int, b: StoreKeysIn, admin=Depends(get_admin)) -> 
         for ln in lines:
             if not ln:
                 continue
-            c.execute("INSERT INTO store_keys(product_id,key_text,status,created_at) VALUES(?,?,'available',?)",
-                      (pid, ln, now))
+            c.execute("INSERT INTO store_keys(product_id,key_text,status,price_id,created_at) "
+                      "VALUES(?,?,'available',?,?)",
+                      (pid, ln, b.price_id, now))
             added += 1
     return {"message": f"Đã thêm {added} key.", "added": added}
 
@@ -4916,34 +5230,183 @@ def admin_store_inventory(admin=Depends(get_admin)) -> dict[str, Any]:
 
 
 # -------------------- Admin: sao lưu key/acc đã bán --------------------
-@app.get("/admin/store/keys-backup")
-def admin_store_keys_backup(admin=Depends(get_admin)) -> dict[str, Any]:
-    """Đọc file backup các key/acc đã bán (mỗi dòng 1 JSON), trả về danh sách mới nhất trước."""
-    entries: list[dict[str, Any]] = []
-    if os.path.exists(STORE_KEYS_BACKUP):
+# ======================== Mã khuyến mãi (Promo Codes) ========================
+class PromoCodeIn(BaseModel):
+    code: str
+    discount_type: str = "percent"   # percent | fixed
+    discount_value: int
+    min_amount: int = 0
+    max_uses: int = 0
+    expires_at: int = 0              # unix timestamp, 0 = không hết hạn
+
+@app.get("/admin/store/promo-codes")
+def admin_list_promo_codes(admin=Depends(get_admin)) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute("SELECT * FROM store_promo_codes ORDER BY id DESC").fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/admin/store/promo-codes")
+def admin_create_promo_code(b: PromoCodeIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    code = b.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Mã không được để trống.")
+    if b.discount_value <= 0:
+        raise HTTPException(status_code=400, detail="Giá trị giảm phải lớn hơn 0.")
+    if b.discount_type == "percent" and b.discount_value > 100:
+        raise HTTPException(status_code=400, detail="% giảm không được quá 100.")
+    with db() as c:
         try:
-            with open(STORE_KEYS_BACKUP, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entries.append(json.loads(line))
-                    except Exception:
-                        pass
-        except Exception as e:
-            log.error("Đọc backup key lỗi: %s", e)
-    entries.reverse()
-    return {"total": len(entries), "entries": entries[:500]}
+            cur = c.execute(
+                "INSERT INTO store_promo_codes(code,discount_type,discount_value,min_amount,max_uses,"
+                "expires_at,is_active,created_at) VALUES(?,?,?,?,?,?,1,?)",
+                (code, b.discount_type, b.discount_value, b.min_amount,
+                 b.max_uses, b.expires_at, int(time.time())))
+            return {"id": cur.lastrowid, "message": "Đã tạo mã khuyến mãi."}
+        except Exception:
+            raise HTTPException(status_code=400, detail="Mã này đã tồn tại.")
+
+@app.delete("/admin/store/promo-codes/{cid}")
+def admin_delete_promo_code(cid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        c.execute("DELETE FROM store_promo_codes WHERE id=?", (cid,))
+    return {"message": "Đã xoá mã khuyến mãi."}
+
+@app.post("/store/promo/validate")
+def store_validate_promo(body: dict = Body(...), user=Depends(get_user)) -> dict[str, Any]:
+    code = str(body.get("code", "")).strip().upper()
+    amount = int(body.get("amount", 0))
+    if not code:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập mã.")
+    with db() as c:
+        row = c.execute(
+            "SELECT * FROM store_promo_codes WHERE code=? AND is_active=1", (code,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Mã không tồn tại hoặc đã vô hiệu hoá.")
+    now = int(time.time())
+    if row["expires_at"] and row["expires_at"] < now:
+        raise HTTPException(status_code=400, detail="Mã đã hết hạn.")
+    if row["max_uses"] and row["used_count"] >= row["max_uses"]:
+        raise HTTPException(status_code=400, detail="Mã đã hết lượt sử dụng.")
+    if amount and amount < row["min_amount"]:
+        raise HTTPException(status_code=400,
+            detail=f"Đơn tối thiểu {row['min_amount']:,}đ.".replace(",", "."))
+    if row["discount_type"] == "percent":
+        discount = int(amount * row["discount_value"] / 100) if amount else 0
+        label = f"-{row['discount_value']}%"
+    else:
+        discount = min(row["discount_value"], amount) if amount else row["discount_value"]
+        label = f"-{row['discount_value']:,}đ".replace(",", ".")
+    return {"valid": True, "discount": discount, "label": label,
+            "discount_type": row["discount_type"], "discount_value": row["discount_value"]}
 
 
-@app.get("/admin/store/keys-backup/download")
-def admin_store_keys_backup_download(admin=Depends(get_admin)):
-    from fastapi.responses import FileResponse, PlainTextResponse
-    if not os.path.exists(STORE_KEYS_BACKUP):
-        return PlainTextResponse("", media_type="text/plain")
-    return FileResponse(STORE_KEYS_BACKUP, media_type="application/x-ndjson",
-                        filename="store_sold_keys_backup.jsonl")
+# ======================== Push Notification (Device Tokens) ========================
+class DeviceTokenIn(BaseModel):
+    token: str
+    platform: str = "ios"
+
+@app.post("/device-token")
+def register_device_token(b: DeviceTokenIn, user=Depends(get_user)) -> dict[str, Any]:
+    if not b.token.strip():
+        raise HTTPException(status_code=400, detail="Token không hợp lệ.")
+    with db() as c:
+        c.execute(
+            "INSERT INTO device_tokens(user_id,token,platform,created_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(token) DO UPDATE SET user_id=excluded.user_id, created_at=excluded.created_at",
+            (user["id"], b.token.strip(), b.platform, int(time.time())))
+    return {"message": "Đã đăng ký thiết bị."}
+
+@app.delete("/device-token")
+def unregister_device_token(body: dict = Body(...), user=Depends(get_user)) -> dict[str, Any]:
+    token = str(body.get("token", "")).strip()
+    if token:
+        with db() as c:
+            c.execute("DELETE FROM device_tokens WHERE token=? AND user_id=?", (token, user["id"]))
+    return {"message": "Đã huỷ đăng ký thiết bị."}
+
+class PushNotifIn(BaseModel):
+    title: str
+    body: str
+    target: str = "all"   # all | uid:<id>
+
+def _apns_configured() -> bool:
+    return all([os.getenv("APNS_KEY_ID", ""), os.getenv("APNS_TEAM_ID", ""),
+                os.getenv("APNS_BUNDLE_ID", ""), os.getenv("APNS_KEY_PATH", "")])
+
+def _apns_send(tokens: list[str], title: str, body: str) -> tuple[int, int]:
+    """Gửi push tới danh sách device token. Trả (sent, failed).
+    Im lặng trả (0,0) nếu chưa cấu hình APNs — dùng được cho thông báo tự động."""
+    tokens = [t for t in tokens if t]
+    if not tokens or not _apns_configured():
+        return (0, 0)
+    try:
+        import httpx, jwt as pyjwt
+        with open(os.getenv("APNS_KEY_PATH"), "r") as f:
+            private_key = f.read()
+        jwt_token = pyjwt.encode({"iss": os.getenv("APNS_TEAM_ID"), "iat": int(time.time())},
+                                 private_key, algorithm="ES256",
+                                 headers={"kid": os.getenv("APNS_KEY_ID")})
+        payload = {"aps": {"alert": {"title": title, "body": body}, "sound": "default"}}
+        headers = {"authorization": f"bearer {jwt_token}",
+                   "apns-topic": os.getenv("APNS_BUNDLE_ID"), "apns-push-type": "alert"}
+        sent = failed = 0
+        with httpx.Client(http2=True, timeout=10) as client:
+            for t in tokens:
+                try:
+                    r = client.post(f"https://api.push.apple.com/3/device/{t}",
+                                    json=payload, headers=headers)
+                    if r.status_code == 200: sent += 1
+                    else: failed += 1
+                except Exception:
+                    failed += 1
+        return (sent, failed)
+    except Exception as e:
+        log.warning("APNs gửi lỗi: %s", e)
+        return (0, 0)
+
+def _notify_admins(title: str, body: str) -> None:
+    """Gửi push cho mọi thiết bị của admin, chạy nền (không chặn request mua hàng)."""
+    try:
+        with db() as c:
+            tokens = [r["token"] for r in c.execute(
+                "SELECT dt.token FROM device_tokens dt JOIN users u ON u.id=dt.user_id "
+                "WHERE u.is_admin=1").fetchall()]
+        if not tokens or not _apns_configured():
+            return
+        import threading
+        threading.Thread(target=_apns_send, args=(tokens, title, body),
+                         daemon=True, name="notify-admin").start()
+    except Exception as e:
+        log.warning("notify_admins lỗi: %s", e)
+
+
+@app.post("/admin/push-notification")
+def admin_send_push(b: PushNotifIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    """Gửi push notification qua APNs. Cần cấu hình APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_KEY_PATH."""
+    if not _apns_configured():
+        raise HTTPException(status_code=501,
+            detail="Chưa cấu hình APNs (APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_KEY_PATH).")
+    with db() as c:
+        if b.target == "all":
+            tokens = [r["token"] for r in c.execute("SELECT token FROM device_tokens").fetchall()]
+        elif b.target.startswith("uid:"):
+            uid = int(b.target.split(":")[1])
+            tokens = [r["token"] for r in
+                      c.execute("SELECT token FROM device_tokens WHERE user_id=?", (uid,)).fetchall()]
+        else:
+            tokens = []
+    if not tokens:
+        return {"sent": 0, "message": "Không có thiết bị nào để gửi."}
+    sent, failed = _apns_send(tokens, b.title, b.body)
+    return {"sent": sent, "failed": failed, "message": f"Đã gửi {sent}/{len(tokens)} thiết bị."}
+
+@app.get("/admin/push-notification/devices")
+def admin_list_devices(admin=Depends(get_admin)) -> dict[str, Any]:
+    with db() as c:
+        total = c.execute("SELECT COUNT(*) as n FROM device_tokens").fetchone()["n"]
+        users = c.execute("SELECT COUNT(DISTINCT user_id) as n FROM device_tokens").fetchone()["n"]
+    return {"total_devices": total, "total_users": users}
 
 
 # ======================== Prompt Templates ========================
@@ -5324,50 +5787,113 @@ def create_post(b: PostIn, user=Depends(get_user)) -> dict[str, Any]:
     return {"id": pid, "message": "Đã đăng video."}
 
 
-@app.get("/feed")
-def feed(user=Depends(get_user)) -> list[dict[str, Any]]:
-    with db() as c:
-        rows = c.execute(
-            "SELECT p.id, p.caption, p.likes, p.created_at, p.file_id, p.user_id, "
-            "u.username, u.public_id, f.name, f.mime "
-            "FROM posts p JOIN users u ON p.user_id=u.id "
-            "JOIN files f ON p.file_id=f.id "
-            "ORDER BY p.id DESC LIMIT 100"
-        ).fetchall()
-        liked = {r["post_id"] for r in c.execute(
-            "SELECT post_id FROM post_likes WHERE user_id=?", (user["id"],)).fetchall()}
-        following = {r["following_id"] for r in c.execute(
-            "SELECT following_id FROM follows WHERE follower_id=?", (user["id"],)).fetchall()}
+def _posts_for(c, viewer_id: int, where: str = "", params: tuple = ()) -> list[dict[str, Any]]:
+    """Lấy danh sách bài (video feed) kèm trạng thái like/follow của người xem,
+    số bình luận & lượt xem. `where` là điều kiện thêm vào (vd 'p.user_id=?')."""
+    sql = ("SELECT p.id, p.caption, p.likes, p.created_at, p.file_id, p.user_id, "
+           "p.views, u.username, u.public_id, u.avatar_url, f.name, f.mime "
+           "FROM posts p JOIN users u ON p.user_id=u.id "
+           "JOIN files f ON p.file_id=f.id ")
+    if where:
+        sql += f"WHERE {where} "
+    sql += "ORDER BY p.id DESC LIMIT 100"
+    rows = c.execute(sql, params).fetchall()
+    liked = {r["post_id"] for r in c.execute(
+        "SELECT post_id FROM post_likes WHERE user_id=?", (viewer_id,)).fetchall()}
+    following = {r["following_id"] for r in c.execute(
+        "SELECT following_id FROM follows WHERE follower_id=?", (viewer_id,)).fetchall()}
+    cmt = {r["post_id"]: r["n"] for r in c.execute(
+        "SELECT post_id, COUNT(*) n FROM post_comments GROUP BY post_id").fetchall()}
     return [{
         "id": r["id"], "caption": r["caption"], "likes": r["likes"],
         "created_at": r["created_at"], "file_id": r["file_id"],
         "user_id": r["user_id"],
         "username": r["username"], "public_id": r["public_id"],
+        "avatar_url": r["avatar_url"] or "",
         "name": r["name"], "mime": r["mime"],
+        "views": r["views"] or 0, "comments": cmt.get(r["id"], 0),
+        "is_public": True,
         "liked": r["id"] in liked,
         "following": r["user_id"] in following,
     } for r in rows]
 
 
+@app.get("/feed")
+def feed(user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        return _posts_for(c, user["id"])
+
+
+@app.get("/me/posts")
+def my_posts(user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        return _posts_for(c, user["id"], "p.user_id=?", (user["id"],))
+
+
+@app.get("/users/{uid}/posts")
+def user_posts(uid: int, user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        return _posts_for(c, user["id"], "p.user_id=?", (uid,))
+
+
+def _vmime(name: str, mime: Optional[str]) -> str:
+    """Chuẩn hoá mime cho video để AVPlayer (iOS) nhận diện & render được khung hình.
+    Nhiều file lưu mime sai (application/octet-stream) khiến video chỉ hiện màn đen."""
+    m = (mime or "").lower().strip()
+    if m.startswith("video/"):
+        return mime
+    ext = os.path.splitext(name or "")[1].lower()
+    table = {
+        ".mp4": "video/mp4", ".mov": "video/quicktime", ".m4v": "video/x-m4v",
+        ".webm": "video/webm", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo",
+        ".3gp": "video/3gpp", ".hevc": "video/mp4", ".ts": "video/mp2t",
+    }
+    return table.get(ext, "video/mp4")
+
+
+def _user_from_token_or_header(authorization: Optional[str], token: Optional[str]):
+    """Cho phép xác thực qua header HOẶC query ?token= — cần cho AVPlayer (iOS)
+    stream video bằng URL trực tiếp (header tuỳ chỉnh hay bị bỏ qua → màn đen)."""
+    raw = ""
+    if authorization and authorization.startswith("Bearer "):
+        raw = authorization.split(" ", 1)[1]
+    elif token:
+        raw = token.strip()
+    if not raw:
+        raise HTTPException(status_code=401, detail="Thiếu token đăng nhập.")
+    uid = verify_token(raw)
+    with db() as c:
+        row = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="Tài khoản không tồn tại.")
+    if row["banned"]:
+        raise HTTPException(status_code=403, detail="Tài khoản đã bị khóa.")
+    return row
+
+
 @app.get("/posts/{pid}/video")
-def post_video(pid: int, background_tasks: BackgroundTasks, user=Depends(get_user)):
+def post_video(pid: int, background_tasks: BackgroundTasks,
+               authorization: Optional[str] = Header(default=None),
+               token: Optional[str] = None):
+    # AVPlayer của iOS stream qua URL trực tiếp nên dùng ?token= cho chắc ăn.
+    _user_from_token_or_header(authorization, token)
     with db() as c:
         row = c.execute(
             "SELECT f.name,f.mime,f.data,f.id as fid FROM posts p "
             "JOIN files f ON p.file_id=f.id WHERE p.id=?", (pid,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Không tìm thấy video.")
+    media = _vmime(row["name"], row["mime"])
     file_path = os.path.join(UPLOAD_DIR, str(row["fid"]))
     if os.path.exists(file_path):
-        return FileResponse(path=file_path, filename=row["name"],
-                            media_type=row["mime"] or "video/mp4")
+        # FileResponse hỗ trợ HTTP Range (tua/stream) — cần thiết để iOS phát mượt.
+        return FileResponse(path=file_path, filename=row["name"], media_type=media)
     if row["data"]:
         temp_path = os.path.join(UPLOAD_DIR, f"feed_{pid}_{secrets.token_hex(4)}")
         with open(temp_path, "wb") as f:
             f.write(base64.b64decode(row["data"]))
         background_tasks.add_task(os.unlink, temp_path)
-        return FileResponse(path=temp_path, filename=row["name"],
-                            media_type=row["mime"] or "video/mp4")
+        return FileResponse(path=temp_path, filename=row["name"], media_type=media)
     raise HTTPException(status_code=404, detail="Không có nội dung video.")
 
 
@@ -5398,7 +5924,59 @@ def delete_post(pid: int, user=Depends(get_user)) -> dict[str, Any]:
             raise HTTPException(status_code=403, detail="Không thể xoá bài của người khác.")
         c.execute("DELETE FROM posts WHERE id=?", (pid,))
         c.execute("DELETE FROM post_likes WHERE post_id=?", (pid,))
+        c.execute("DELETE FROM post_comments WHERE post_id=?", (pid,))
     return {"message": "Đã xoá bài."}
+
+
+@app.post("/posts/{pid}/view")
+def post_view(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        c.execute("UPDATE posts SET views=COALESCE(views,0)+1 WHERE id=?", (pid,))
+        row = c.execute("SELECT views FROM posts WHERE id=?", (pid,)).fetchone()
+    return {"views": (row["views"] if row else 0) or 0}
+
+
+class CommentIn(BaseModel):
+    content: str = ""
+
+
+@app.get("/posts/{pid}/comments")
+def list_comments(pid: int, user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT cm.id, cm.user_id, cm.content, cm.created_at, u.username "
+            "FROM post_comments cm JOIN users u ON cm.user_id=u.id "
+            "WHERE cm.post_id=? ORDER BY cm.id ASC LIMIT 500", (pid,)).fetchall()
+    return [{"id": r["id"], "user_id": r["user_id"], "username": r["username"],
+             "content": r["content"], "created_at": r["created_at"]} for r in rows]
+
+
+@app.post("/posts/{pid}/comments")
+def add_comment(pid: int, b: CommentIn, user=Depends(get_user)) -> dict[str, Any]:
+    content = (b.content or "").strip()[:500]
+    if not content:
+        raise HTTPException(status_code=400, detail="Bình luận không được để trống.")
+    with db() as c:
+        if not c.execute("SELECT 1 FROM posts WHERE id=?", (pid,)).fetchone():
+            raise HTTPException(status_code=404, detail="Không tìm thấy bài.")
+        cur = c.execute(
+            "INSERT INTO post_comments(post_id,user_id,content,created_at) VALUES(?,?,?,?)",
+            (pid, user["id"], content, int(time.time())))
+        cid = cur.lastrowid
+    return {"id": cid, "user_id": user["id"], "username": user["username"],
+            "content": content, "created_at": int(time.time())}
+
+
+@app.delete("/comments/{cid}")
+def delete_comment(cid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        row = c.execute("SELECT user_id FROM post_comments WHERE id=?", (cid,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Không tìm thấy bình luận.")
+        if row["user_id"] != user["id"] and not user["is_admin"]:
+            raise HTTPException(status_code=403, detail="Không thể xoá bình luận của người khác.")
+        c.execute("DELETE FROM post_comments WHERE id=?", (cid,))
+    return {"message": "Đã xoá bình luận."}
 
 
 # ======================== Live (phòng live + bình luận như TikTok) ========================
@@ -5537,21 +6115,58 @@ def unfollow_user(uid: int, user=Depends(get_user)) -> dict[str, Any]:
     return {"following": False}
 
 
+def _profile_dict(c, uid: int, viewer_id: int) -> dict[str, Any]:
+    u = c.execute("SELECT id,username,public_id,avatar_url,bio FROM users WHERE id=?", (uid,)).fetchone()
+    if not u:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
+    followers = c.execute("SELECT COUNT(*) n FROM follows WHERE following_id=?", (uid,)).fetchone()["n"]
+    following = c.execute("SELECT COUNT(*) n FROM follows WHERE follower_id=?", (uid,)).fetchone()["n"]
+    posts = c.execute("SELECT COUNT(*) n FROM posts WHERE user_id=?", (uid,)).fetchone()["n"]
+    total_likes = c.execute("SELECT COALESCE(SUM(likes),0) n FROM posts WHERE user_id=?", (uid,)).fetchone()["n"]
+    is_following = c.execute(
+        "SELECT 1 FROM follows WHERE follower_id=? AND following_id=?",
+        (viewer_id, uid)).fetchone() is not None
+    return {"id": u["id"], "username": u["username"], "public_id": u["public_id"],
+            "avatar_url": u["avatar_url"] or "", "bio": u["bio"] or "",
+            "followers": followers, "following": following, "posts": posts,
+            "total_likes": total_likes, "is_following": is_following}
+
+
 @app.get("/users/{uid}/profile")
 def user_profile(uid: int, user=Depends(get_user)) -> dict[str, Any]:
     with db() as c:
-        u = c.execute("SELECT id,username,public_id FROM users WHERE id=?", (uid,)).fetchone()
-        if not u:
-            raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
-        followers = c.execute("SELECT COUNT(*) n FROM follows WHERE following_id=?", (uid,)).fetchone()["n"]
-        following = c.execute("SELECT COUNT(*) n FROM follows WHERE follower_id=?", (uid,)).fetchone()["n"]
-        posts = c.execute("SELECT COUNT(*) n FROM posts WHERE user_id=?", (uid,)).fetchone()["n"]
-        is_following = c.execute(
-            "SELECT 1 FROM follows WHERE follower_id=? AND following_id=?",
-            (user["id"], uid)).fetchone() is not None
-    return {"id": u["id"], "username": u["username"], "public_id": u["public_id"],
-            "followers": followers, "following": following, "posts": posts,
-            "is_following": is_following}
+        return _profile_dict(c, uid, user["id"])
+
+
+@app.get("/me/profile")
+def my_profile(user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        return _profile_dict(c, user["id"], user["id"])
+
+
+class ProfileUpdateIn(BaseModel):
+    public_id: Optional[str] = None
+    avatar_url: Optional[str] = None
+    bio: Optional[str] = None
+
+
+@app.put("/me/profile")
+def update_my_profile(b: ProfileUpdateIn, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        if b.public_id is not None:
+            pid = b.public_id.strip()[:30]
+            if pid:
+                # ID phải là duy nhất giữa các user
+                dup = c.execute("SELECT 1 FROM users WHERE public_id=? AND id!=?",
+                                (pid, user["id"])).fetchone()
+                if dup:
+                    raise HTTPException(status_code=409, detail="ID này đã có người dùng. Hãy chọn ID khác.")
+                c.execute("UPDATE users SET public_id=? WHERE id=?", (pid, user["id"]))
+        if b.avatar_url is not None:
+            c.execute("UPDATE users SET avatar_url=? WHERE id=?", (b.avatar_url.strip(), user["id"]))
+        if b.bio is not None:
+            c.execute("UPDATE users SET bio=? WHERE id=?", (b.bio.strip()[:300], user["id"]))
+    return {"message": "Đã cập nhật hồ sơ."}
 
 
 @app.post("/admin/payments/{pid}/confirm")

@@ -251,7 +251,84 @@ struct StoreAppConfig: Decodable, Hashable {
     let bannerType: String   // image | video
     let bannerUrl: String
     let topupBonusPercent: Int?
+    var logoEffect: String? = nil   // rainbow|none|glow|neon|gold
+    var logoFont: String? = nil     // rounded|serif|mono|default
+    var logoAnim: String? = nil     // shimmer|wave|pulse|none
+    var bgType: String? = nil       // none|image|video
+    var bgUrl: String? = nil
+    var slogan: String? = nil       // dòng giới thiệu dưới tên cửa hàng
+    var sloganFont: String? = nil   // rounded|serif|mono|default|...
+    var sectionOrder: String? = nil // thứ tự bố cục: categories,products,downloads,contacts,wishlist,recent
+    var sectionHidden: String? = nil // các mục bị admin ẩn (cho gọn)
+    var cardSize: String? = nil     // small | medium | large — kích cỡ thẻ sản phẩm/danh mục
+    var cardScale: String? = nil    // hệ số kéo kích cỡ "0.6"–"1.6" (server trả chuỗi)
+    // Flash sale (đếm ngược)
+    var flashEnabled: Bool? = nil
+    var flashProductId: Int? = nil
+    var flashEnd: Int? = nil         // epoch giây
+    var flashDiscount: Int? = nil    // %
+    var flashTitle: String? = nil
+    // Hero section (banner chính đầu trang)
+    var heroTitle: String? = nil     // tiêu đề lớn (nil = dùng slogan hoặc mặc định)
+    var heroSubtitle: String? = nil  // dòng phụ (nil = mặc định)
+    var heroEffect: String? = nil    // rainbow|gradient|gold|neon|glow|accent|none
+    var heroFont: String? = nil      // font cho tiêu đề hero
+    var heroAnim: String? = nil      // shimmer|wave|pulse|none
+    // Slogan / dòng giới thiệu — thêm hiệu ứng màu & chuyển động
+    var sloganEffect: String? = nil  // rainbow|gradient|gold|neon|glow|accent|none
+    var sloganAnim: String? = nil    // shimmer|wave|pulse|none
+    // Khuyến mãi (banner ảnh trong phần ví nạp tiền)
+    var promoImageUrl: String? = nil
+    var promoProductId: Int? = nil
+    // 3 ô thống kê: số ẢO admin đặt + số THẬT đếm từ server (hiển thị = ảo + thật)
+    var statUsersBase: Int? = nil
+    var statSoldBase: Int? = nil
+    var statReviewsBase: Int? = nil
+    var statUsersReal: Int? = nil
+    var statSoldReal: Int? = nil
+    var statReviewsReal: Int? = nil
+    // Thanh thông báo chạy đầu trang
+    var announceEnabled: Bool? = nil
+    var announceText: String? = nil
+    var announceColor: String? = nil  // accent|red|green|gold|purple
+    // Số sản phẩm tối đa mỗi danh mục ở lưới "Danh mục Game"
+    var gamecatLimit: Int? = nil
 }
+
+
+// ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----
+struct ShowcaseOrder: Decodable, Hashable, Identifiable {
+    var id: String { "\(user)-\(product)-\(at)-\(amount)" }
+    let user: String
+    let product: String
+    let label: String
+    let amount: Int
+    let at: Int
+}
+struct ShowcaseTopup: Decodable, Hashable, Identifiable {
+    var id: String { "\(user)-\(at)-\(amount)" }
+    let user: String
+    let amount: Int
+    let at: Int
+}
+struct ShowcaseLeader: Decodable, Hashable, Identifiable {
+    var id: Int { rank }
+    let rank: Int
+    let user: String
+    let total: Int
+}
+struct StoreShowcase: Decodable, Equatable {
+    let recentOrders: [ShowcaseOrder]
+    let recentTopups: [ShowcaseTopup]
+    let leaderboard: [ShowcaseLeader]
+}
+
+// Tất cả sản phẩm gom theo danh mục (1 request, tránh N+1)
+struct StoreAllProducts: Decodable {
+    let byCategory: [String: [StoreProduct]]
+}
+
+struct MediaUploadResponse: Decodable { let id: Int; let path: String }
 
 // ---- Ví cửa hàng ----
 struct StoreWalletTx: Identifiable, Decodable, Hashable {
@@ -290,8 +367,6 @@ struct StoreBuyResponse: Decodable {
     let downloadFileId: Int?
     let balance: Int
     let message: String
-    let delivery: String?      // tin nhắn giao key (sản phẩm + nền tảng + hạn dùng + key)
-    let expiresAt: Int?        // mốc hết hạn (unix), nil nếu vĩnh viễn
 }
 
 struct StoreDownloadItem: Identifiable, Decodable, Hashable {
@@ -313,7 +388,7 @@ struct SocialLink: Identifiable, Decodable, Hashable {
     let enabled: Bool
 }
 
-struct StoreContacts: Decodable {
+struct StoreContacts: Decodable, Equatable {
     let contact: [SocialLink]
     let groups: [SocialLink]
 }
@@ -335,6 +410,9 @@ struct StorePrice: Identifiable, Decodable, Hashable {
     let id: Int
     let label: String
     let amount: Int
+    let available: Int?   // tồn kho riêng của mốc thời hạn này (nil = cũ/không rõ)
+
+    var inStock: Bool { (available ?? 1) > 0 }
 }
 
 struct StoreProduct: Identifiable, Decodable, Hashable {
@@ -347,6 +425,7 @@ struct StoreProduct: Identifiable, Decodable, Hashable {
     let availableKeys: Int
     let hasDownload: Bool
     let kind: String?   // "app" (key/ứng dụng) | "acc" (acc game)
+    var views: Int? = nil   // lượt xem (mỗi lần khách bấm vào +1)
 
     var isAcc: Bool { (kind ?? "app") == "acc" }
     /// Nhãn cho phần "key/acc" tuỳ loại sản phẩm
@@ -359,8 +438,6 @@ struct StoreProductMine: Decodable, Hashable {
     let key: String?
     let downloadUrl: String?
     let downloadFileId: Int?
-    var delivery: String? = nil   // tin nhắn giao key
-    var expiresAt: Int? = nil     // mốc hết hạn (unix), nil nếu vĩnh viễn
 }
 
 struct StoreOrderCreateResponse: Decodable {
@@ -383,8 +460,6 @@ struct StoreOrder: Identifiable, Decodable, Hashable {
     let ref: String?
     let createdAt: Int?
     let key: String?
-    let delivery: String?      // tin nhắn giao key
-    let expiresAt: Int?        // mốc hết hạn (unix), nil nếu vĩnh viễn
     let downloadUrl: String?
     let downloadFileId: Int?
 }
@@ -394,6 +469,7 @@ struct StoreKeyItem: Identifiable, Decodable, Hashable {
     let keyText: String
     let status: String
     let soldAt: Int?
+    let priceId: Int?   // mốc thời hạn key thuộc về (nil = dùng chung)
 }
 
 struct StoreKeysInfo: Decodable {
@@ -427,23 +503,6 @@ struct StoreAdminOrder: Identifiable, Decodable, Hashable {
     let createdAt: Int?
     let productName: String
     let username: String
-}
-
-struct StoreKeyBackupEntry: Identifiable, Decodable, Hashable {
-    var id: String { "\(orderId)-\(time)" }
-    let time: Int
-    let orderId: Int
-    let productName: String
-    let kind: String?
-    let username: String
-    let publicId: String?
-    let amount: Int
-    let key: String
-}
-
-struct StoreKeysBackup: Decodable {
-    let total: Int
-    let entries: [StoreKeyBackupEntry]
 }
 
 struct IdResponse: Decodable { let message: String; let id: Int? }
@@ -624,7 +683,7 @@ struct UserSearchResult: Identifiable, Decodable, Hashable {
 struct PostItem: Identifiable, Decodable, Hashable {
     let id: Int
     let caption: String?
-    let likes: Int
+    var likes: Int
     let createdAt: Int?
     let fileId: Int
     let userId: Int?
@@ -632,8 +691,21 @@ struct PostItem: Identifiable, Decodable, Hashable {
     let publicId: String?
     let name: String?
     let mime: String?
-    let liked: Bool
-    let following: Bool?
+    var liked: Bool
+    var following: Bool?
+    var views: Int?
+    var comments: Int?
+    var shares: Int?
+    let isPublic: Bool?
+    let avatarUrl: String?
+}
+
+struct PostComment: Identifiable, Decodable, Hashable {
+    let id: Int
+    let userId: Int?
+    let username: String
+    let content: String
+    let createdAt: Int?
 }
 
 struct FollowResponse: Decodable { let following: Bool }
@@ -645,6 +717,9 @@ struct UserProfile: Decodable {
     let following: Int
     let posts: Int
     let isFollowing: Bool
+    let totalLikes: Int?
+    let avatarUrl: String?
+    let bio: String?
 }
 
 struct PostCreateResponse: Decodable { let id: Int; let message: String }
@@ -708,5 +783,58 @@ struct DirectMessageItem: Identifiable, Decodable, Hashable {
     let content: String
     let createdAt: Int
     let isRead: Int
+}
+
+// ---- Giỏ hàng ----
+struct CartItem: Identifiable, Codable, Hashable {
+    var id: UUID
+    let productId: Int
+    let productName: String
+    let priceId: Int?
+    let priceAmount: Int
+    let priceLabel: String
+
+    init(productId: Int, productName: String, priceId: Int?, priceAmount: Int, priceLabel: String) {
+        self.id = UUID()
+        self.productId = productId
+        self.productName = productName
+        self.priceId = priceId
+        self.priceAmount = priceAmount
+        self.priceLabel = priceLabel
+    }
+}
+
+// ---- Mã khuyến mãi ----
+struct PromoCode: Identifiable, Decodable, Hashable {
+    let id: Int
+    let code: String
+    let discountType: String
+    let discountValue: Int
+    let minAmount: Int
+    let maxUses: Int
+    let usedCount: Int
+    let expiresAt: Int
+    let isActive: Int
+    let createdAt: Int
+}
+
+struct PromoValidateResult: Decodable {
+    let valid: Bool
+    let discount: Int
+    let label: String
+    let discountType: String
+    let discountValue: Int
+}
+
+// ---- Push Notification ----
+struct PushSendResult: Decodable {
+    let sent: Int
+    let failed: Int
+    let message: String
+}
+
+struct PushDeviceStats: Decodable {
+    let totalDevices: Int
+    let totalUsers: Int
 }
 

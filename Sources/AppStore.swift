@@ -1,5 +1,19 @@
 import Foundation
 import SwiftUI
+import UserNotifications
+
+// Bảng màu accent người dùng có thể chọn
+let kAccentColors: [(name: String, color: Color)] = [
+    ("blue",   Color(red: 0.0,  green: 0.58, blue: 0.96)),
+    ("purple", Color(red: 0.65, green: 0.45, blue: 0.95)),
+    ("pink",   Color(red: 0.96, green: 0.22, blue: 0.60)),
+    ("orange", Color(red: 0.98, green: 0.50, blue: 0.05)),
+    ("green",  Color(red: 0.20, green: 0.78, blue: 0.35)),
+    ("teal",   Color(red: 0.00, green: 0.80, blue: 0.78)),
+    ("red",    Color(red: 0.95, green: 0.18, blue: 0.18)),
+    ("gold",   Color(red: 1.00, green: 0.84, blue: 0.00)),
+    ("indigo", Color(red: 0.35, green: 0.34, blue: 0.84)),
+]
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -13,6 +27,7 @@ final class AppStore: ObservableObject {
     @Published var plan: String = "free"
     @Published var credits: Int = 0
     @Published var publicId: String = ""
+    @Published var userId: Int?
 
     // Bảo trì (admin bật → khoá app người dùng)
     @Published var maintenance: Bool = false
@@ -33,6 +48,18 @@ final class AppStore: ObservableObject {
     @Published var themeMode: String
     @Published var language: String
     @Published var systemPrompt: String
+    @Published var showPlanIntro: Bool = false   // hiện màn giới thiệu gói PRO/Free sau đăng nhập
+
+    // Màu accent người dùng chọn (tên: "blue", "purple", ...)
+    @Published var accentColorName: String
+    // Logo có hiệu ứng động hay không
+    @Published var logoAnimated: Bool
+
+    // Lời chào khi mở app (TTS)
+    @Published var welcomeEnabled: Bool
+    @Published var welcomeText: String
+    @Published var welcomeVoiceId: String   // AVSpeechSynthesisVoice.identifier hoặc "" = mặc định
+    @Published var welcomeRate: Float       // 0.3 (chậm) … 0.65 (nhanh); mặc định 0.5
 
     @Published var profiles: [ServerProfile] = []
 
@@ -46,6 +73,12 @@ final class AppStore: ObservableObject {
 
     private let d = UserDefaults.standard
 
+    /// Màu accent hiện tại của app (phụ thuộc vào accentColorName)
+    var accentColor: Color {
+        kAccentColors.first(where: { $0.name == accentColorName })?.color
+            ?? Color(red: 0.0, green: 0.58, blue: 0.96)
+    }
+
     init() {
         let savedURL = d.string(forKey: "baseURL") ?? ""
         baseURL = savedURL.isEmpty ? Config.defaultServerURL : savedURL
@@ -53,16 +86,31 @@ final class AppStore: ObservableObject {
         username = d.string(forKey: "username")
         email = d.string(forKey: "email")
         phone = d.string(forKey: "phone")
+        // Cài app mới: Keychain trên iOS KHÔNG tự xoá khi gỡ app → token cũ còn sót
+        // làm app "tự vào thẳng". UserDefaults bị xoá khi gỡ app, nên dùng cờ này
+        // để phát hiện lần cài mới và xoá token cũ → luôn bắt đầu ở màn đăng nhập.
+        if !d.bool(forKey: "kenios_installed_flag") {
+            Keychain.delete("token")
+            d.set(true, forKey: "kenios_installed_flag")
+        }
         token = Keychain.load("token")
         isAdmin = d.bool(forKey: "isAdmin")
         plan = d.string(forKey: "plan") ?? "free"
         credits = d.integer(forKey: "credits")
         publicId = d.string(forKey: "publicId") ?? ""
+        let uid = d.integer(forKey: "userId")
+        userId = uid > 0 ? uid : nil
         isDark = d.object(forKey: "isDark") as? Bool ?? true
         themeMode = d.string(forKey: "themeMode") ?? ((d.object(forKey: "isDark") as? Bool ?? true) ? "dark" : "light")
         language = d.string(forKey: "language") ?? "vi"
         systemPrompt = d.string(forKey: "systemPrompt") ?? ""
         biometricsEnabled = d.bool(forKey: "biometricsEnabled")
+        accentColorName = d.string(forKey: "accentColorName") ?? "blue"
+        logoAnimated = d.bool(forKey: "logoAnimated")
+        welcomeEnabled = d.bool(forKey: "welcomeEnabled")
+        welcomeText = d.string(forKey: "welcomeText") ?? "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"
+        welcomeVoiceId = d.string(forKey: "welcomeVoiceId") ?? ""
+        welcomeRate = d.object(forKey: "welcomeRate") as? Float ?? 0.5
         if let data = d.data(forKey: "profiles"),
            let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
             profiles = list
@@ -89,9 +137,91 @@ final class AppStore: ObservableObject {
         default: return nil
         }
     }
-    func setLanguage(_ v: String) { language = v; d.set(v, forKey: "language") }
+    func setLanguage(_ v: String) {
+        language = v; d.set(v, forKey: "language")
+        objectWillChange.send()   // ép toàn app vẽ lại ngay khi đổi ngôn ngữ
+    }
+
+    /// Dịch sang ngôn ngữ hiện tại.
+    /// vi = chuỗi tiếng Việt, en = chuỗi tiếng Anh (cũng là khoá tra cứu bảng dịch).
+    func t(_ vi: String, _ en: String) -> String {
+        switch language {
+        case "vi": return vi
+        case "en": return en
+        default:   return L10n.translate(en, to: language) ?? en
+        }
+    }
+
+    // ===== Nhớ tài khoản & mật khẩu (lưu trong Keychain, có mã hoá) =====
+    var rememberLogin: Bool {
+        get { d.bool(forKey: "rememberLogin") }
+        set { d.set(newValue, forKey: "rememberLogin") }
+    }
+    var savedUsername: String { Keychain.load("saved_username") ?? "" }
+    var savedPassword: String { Keychain.load("saved_password") ?? "" }
+
+    func saveCredentials(_ u: String, _ p: String) {
+        Keychain.save("saved_username", u)
+        Keychain.save("saved_password", p)
+        rememberLogin = true
+    }
+    func forgetCredentials() {
+        Keychain.delete("saved_username")
+        Keychain.delete("saved_password")
+        rememberLogin = false
+    }
     func setSystemPrompt(_ v: String) { systemPrompt = v; d.set(v, forKey: "systemPrompt") }
     func setBiometrics(_ v: Bool) { biometricsEnabled = v; d.set(v, forKey: "biometricsEnabled") }
+
+    func setAccentColor(_ name: String) { accentColorName = name; d.set(name, forKey: "accentColorName") }
+    func setLogoAnimated(_ v: Bool) { logoAnimated = v; d.set(v, forKey: "logoAnimated") }
+    func setWelcomeEnabled(_ v: Bool) { welcomeEnabled = v; d.set(v, forKey: "welcomeEnabled") }
+    func setWelcomeText(_ v: String) { welcomeText = v; d.set(v, forKey: "welcomeText") }
+    func setWelcomeVoiceId(_ v: String) { welcomeVoiceId = v; d.set(v, forKey: "welcomeVoiceId") }
+    func setWelcomeRate(_ v: Float) { welcomeRate = v; d.set(v, forKey: "welcomeRate") }
+
+    /// Xin quyền thông báo từ iOS (không force, người dùng chủ động bấm)
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+    }
+
+    /// Gửi local notification thông thường
+    func postLocalNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let req = UNNotificationRequest(identifier: UUID().uuidString,
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
+
+    /// Thông báo sản phẩm mới — hiện banner + đọc giọng nói khi app đang mở
+    func postProductNotification(title: String = "🛒 KENIOS Cửa hàng", body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "KENIOS_PRODUCT"
+        let req = UNNotificationRequest(identifier: "prod-\(UUID().uuidString)",
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
+
+    /// Thông báo bảo trì — hiện banner + đọc giọng nói khi app đang mở
+    func postMaintenanceNotification(message: String) {
+        let body = message.isEmpty
+            ? "Ứng dụng KENIOS đang được nâng cấp phiên bản. Vui lòng chờ trong giây lát."
+            : message
+        let content = UNMutableNotificationContent()
+        content.title = "🔧 KENIOS - Thông báo bảo trì"
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "KENIOS_MAINTENANCE"
+        let req = UNNotificationRequest(identifier: "maint-\(UUID().uuidString)",
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
 
     func saveServer(url: String, type: String) {
         baseURL = url; serverType = type
@@ -119,6 +249,7 @@ final class AppStore: ObservableObject {
         plan = resp.user.plan ?? "free"
         credits = resp.user.credits ?? 0
         publicId = resp.user.publicId ?? ""
+        userId = resp.user.id
         Keychain.save("token", resp.token)
         d.set(resp.user.username, forKey: "username")
         d.set(resp.user.email ?? "", forKey: "email")
@@ -127,6 +258,8 @@ final class AppStore: ObservableObject {
         d.set(plan, forKey: "plan")
         d.set(credits, forKey: "credits")
         d.set(publicId, forKey: "publicId")
+        d.set(resp.user.id, forKey: "userId")
+        showPlanIntro = true   // hiện màn giới thiệu gói PRO/Free sau khi đăng nhập
     }
 
     /// Tải lại hồ sơ + trạng thái bảo trì.
@@ -135,13 +268,28 @@ final class AppStore: ObservableObject {
             isAdmin = me.isAdmin ?? false
             plan = me.plan ?? "free"
             publicId = me.publicId ?? publicId
+            userId = me.id
             d.set(isAdmin, forKey: "isAdmin"); d.set(plan, forKey: "plan")
             d.set(publicId, forKey: "publicId")
+            d.set(me.id, forKey: "userId")
         }
         if let st = try? await api.appStatus() {
+            let wasOff = !maintenance
             maintenance = st.maintenance
             maintenanceMessage = st.message
+            // Đồng bộ vào UserDefaults để background task đọc được
+            d.set(st.maintenance, forKey: "bgLastMaintenance")
+            // Phát thông báo + giọng khi bảo trì vừa bật (chỉ với người dùng thường)
+            if st.maintenance && wasOff && !isAdmin {
+                postMaintenanceNotification(message: st.message)
+            }
         }
+    }
+
+    /// Lưu trạng thái hiện tại vào UserDefaults để background task dùng khi app bị tắt
+    func syncStateForBackground() {
+        d.set(maintenance, forKey: "bgLastMaintenance")
+        // bgLastCatCount được cập nhật từ StoreView sau mỗi lần reload
     }
 
     func refreshCredits() async {
@@ -156,6 +304,10 @@ final class AppStore: ObservableObject {
         if let phone { self.phone = phone; d.set(phone, forKey: "phone") }
     }
 
+    /// Bỏ qua tự-đăng-nhập đúng 1 lần ngay sau khi người dùng bấm Đăng xuất
+    /// (tránh kẹt: vừa đăng xuất lại tự vào). Lần mở app sau vẫn tự đăng nhập.
+    var suppressAutoLogin = false
+
     func logout() {
         token = nil; username = nil; isAdmin = false; plan = "free"; credits = 0
         Keychain.delete("token")
@@ -164,6 +316,8 @@ final class AppStore: ObservableObject {
         favorites = []; promptTemplates = []
         friends = []; friendRequests = []; directMessages = [:]
         d.set(false, forKey: "isAdmin")
+        showPlanIntro = false
+        suppressAutoLogin = true   // sau khi đăng xuất chỉ điền sẵn, không tự đăng nhập ngay
     }
 
     func loadProviders() async {

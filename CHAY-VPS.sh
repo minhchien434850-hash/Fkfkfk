@@ -5,7 +5,7 @@
 #
 #  CÁCH CHẠY (chỉ 3 bước):
 #    1) Tải code về VPS:
-#         git clone -b claude/app-issues-repo-creation-px0q60 <LINK_REPO> kenios
+#         git clone -b claude/new-session-0tfv1k <LINK_REPO> kenios
 #         cd kenios
 #    2) Cấp quyền & chạy:
 #         chmod +x CHAY-VPS.sh
@@ -46,7 +46,7 @@ source venv/bin/activate
 pip install --upgrade pip
 pip install "fastapi>=0.110" "uvicorn[standard]>=0.29" "httpx>=0.27" \
             "cryptography>=42" "python-multipart>=0.0.9" "TikTokLive>=6.0" \
-            "aiosmtpd>=1.4" "yt-dlp" "pypdf" "python-docx" "openpyxl" || true
+            "aiosmtpd>=1.4" "yt-dlp" "pypdf" "python-docx" "openpyxl" "PyJWT>=2.8" || true
 
 cat > "$WORK_DIR/.env" << EOF
 CODEBOX_SECRET=$SECRET

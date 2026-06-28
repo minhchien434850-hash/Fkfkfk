@@ -3,57 +3,59 @@ import CoreImage.CIFilterBuiltins
 
 // ======================== KENIOS — Bộ công cụ tiện ích cho nội dung ========================
 struct CreatorToolsView: View {
+    @EnvironmentObject var store: AppStore
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     KHeroHeader(icon: "square.grid.2x2.fill",
-                                title: "Công cụ",
-                                subtitle: "Bộ tiện ích sáng tạo · offline, nhanh gọn")
+                                title: store.t("Công cụ", "Tools"),
+                                subtitle: store.t("Bộ tiện ích sáng tạo · offline, nhanh gọn",
+                                                  "Creative utilities · offline, fast"))
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                 }
-                Section("Ảnh & Video") {
-                    navLink("Công cụ ảnh (tách nền · cải thiện · nén · nhiều ảnh)", "wand.and.stars", ImageToolsView())
-                    navLink("Watermark chữ lên ảnh", "signature", WatermarkView())
-                    navLink("Đổi đuôi ảnh (PNG ⇄ JPG)", "arrow.left.arrow.right.square", ImageConvertView())
-                    navLink("Trích nhạc từ video (M4A)", "music.note", AudioExtractView())
+                Section(store.t("Ảnh & Video", "Photo & Video")) {
+                    navLink("Công cụ ảnh (tách nền · cải thiện · nén · nhiều ảnh)", "Photo tools (cutout · enhance · compress · batch)", "wand.and.stars", ImageToolsView())
+                    navLink("Watermark chữ lên ảnh", "Text watermark on photo", "signature", WatermarkView())
+                    navLink("Đổi đuôi ảnh (PNG ⇄ JPG)", "Convert image (PNG ⇄ JPG)", "arrow.left.arrow.right.square", ImageConvertView())
+                    navLink("Trích nhạc từ video (M4A)", "Extract audio from video (M4A)", "music.note", AudioExtractView())
                 }
-                Section("Giọng đọc") {
-                    navLink("Giọng đọc nâng cao (máy + Google online)", "waveform", NewVoiceTTSView())
+                Section(store.t("Giọng đọc", "Text-to-speech")) {
+                    navLink("Giọng đọc nâng cao (máy + Google online)", "Advanced voice (device + Google online)", "waveform", NewVoiceTTSView())
                 }
-                Section("Internet · Tin tức · Mạng xã hội") {
-                    navLink("Tin tức · Thời sự · Mạng xã hội", "newspaper.fill", NewsToolsView())
+                Section(store.t("Internet · Tin tức · Mạng xã hội", "Internet · News · Social")) {
+                    navLink("Tin tức · Thời sự · Mạng xã hội", "News · Current affairs · Social", "newspaper.fill", NewsToolsView())
                 }
-                Section("Văn bản & Caption") {
-                    navLink("Đếm ký tự / từ", "textformat.123", CaptionCounterView())
-                    navLink("Chữ kiểu (fancy)", "sparkles", FancyTextView())
-                    navLink("Đổi HOA / thường", "textformat", TextCaseView())
-                    navLink("Tạo hashtag", "number", HashtagGenView())
+                Section(store.t("Văn bản & Caption", "Text & Caption")) {
+                    navLink("Đếm ký tự / từ", "Character / word count", "textformat.123", CaptionCounterView())
+                    navLink("Chữ kiểu (fancy)", "Fancy text", "sparkles", FancyTextView())
+                    navLink("Đổi HOA / thường", "Change UPPER / lower case", "textformat", TextCaseView())
+                    navLink("Tạo hashtag", "Hashtag generator", "number", HashtagGenView())
                 }
-                Section("Tạo & Bảo mật") {
-                    navLink("Tạo mật khẩu mạnh", "key.fill", PasswordGenView())
-                    navLink("Mã QR", "qrcode", QRMakerView())
-                    navLink("Ngẫu nhiên (xu · xúc xắc · số)", "die.face.5", RandomView())
+                Section(store.t("Tạo & Bảo mật", "Create & Security")) {
+                    navLink("Tạo mật khẩu mạnh", "Strong password generator", "key.fill", PasswordGenView())
+                    navLink("Mã QR", "QR code", "qrcode", QRMakerView())
+                    navLink("Ngẫu nhiên (xu · xúc xắc · số)", "Random (coin · dice · number)", "die.face.5", RandomView())
                 }
-                Section("Tính toán") {
-                    navLink("Máy tính", "plus.forwardslash.minus", MiniCalcView())
-                    navLink("Chuyển đổi đơn vị", "ruler", UnitConvertView())
-                    navLink("Đếm ngày / tuổi", "calendar", DateDiffView())
+                Section(store.t("Tính toán", "Calculation")) {
+                    navLink("Máy tính", "Calculator", "plus.forwardslash.minus", MiniCalcView())
+                    navLink("Chuyển đổi đơn vị", "Unit converter", "ruler", UnitConvertView())
+                    navLink("Đếm ngày / tuổi", "Date / age counter", "calendar", DateDiffView())
                 }
-                Section("Năng suất") {
-                    navLink("Ghi chú nhanh", "note.text", QuickNotesView())
-                    navLink("Hẹn giờ đếm ngược", "timer", CountdownView())
-                    navLink("Giờ vàng đăng bài", "clock.badge.checkmark", BestTimeView())
+                Section(store.t("Năng suất", "Productivity")) {
+                    navLink("Ghi chú nhanh", "Quick notes", "note.text", QuickNotesView())
+                    navLink("Hẹn giờ đếm ngược", "Countdown timer", "timer", CountdownView())
+                    navLink("Giờ vàng đăng bài", "Best time to post", "clock.badge.checkmark", BestTimeView())
                 }
             }
-            .navigationTitle("Công cụ")
+            .navigationTitle(store.t("Công cụ", "Tools"))
             .toolbar { ToolbarItem(placement: .topBarLeading) { ThreeDLogoText(size: 20) } }
         }
     }
 
-    private func navLink<V: View>(_ title: String, _ icon: String, _ dest: V) -> some View {
-        NavigationLink { dest } label: { Label(title, systemImage: icon) }
+    private func navLink<V: View>(_ vi: String, _ en: String, _ icon: String, _ dest: V) -> some View {
+        NavigationLink { dest } label: { Label(store.t(vi, en), systemImage: icon) }
     }
 }
 

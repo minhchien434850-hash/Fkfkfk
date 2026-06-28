@@ -690,8 +690,9 @@ struct TTSView: View {
                 VStack(alignment: .leading, spacing: 16) {
 
                     KHeroHeader(icon: "speaker.wave.2.fill",
-                                title: "Đọc văn bản",
-                                subtitle: "TTS · đọc bình luận TikTok Live · chạy nền")
+                                title: store.t("Đọc văn bản", "Read text"),
+                                subtitle: store.t("TTS · đọc bình luận TikTok Live · chạy nền",
+                                                  "TTS · read TikTok Live comments · background"))
 
                     // ----- TikTok Live: tự động đọc bình luận -----
                     section("TikTok Live — tự động đọc bình luận") {
@@ -723,11 +724,11 @@ struct TTSView: View {
                         HStack {
                             if liveConnected {
                                 Button(role: .destructive) { disconnectLive() } label: {
-                                    Label("Ngắt kết nối", systemImage: "stop.circle.fill").frame(maxWidth: .infinity)
+                                    Label(store.t("Ngắt kết nối", "Disconnect"), systemImage: "stop.circle.fill").frame(maxWidth: .infinity)
                                 }.buttonStyle(.bordered)
                             } else {
                                 Button { connectLive() } label: {
-                                    Label("Kết nối & đọc", systemImage: "play.circle.fill").frame(maxWidth: .infinity)
+                                    Label(store.t("Kết nối & đọc", "Connect & read"), systemImage: "play.circle.fill").frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(tiktokId.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -832,21 +833,21 @@ struct TTSView: View {
                         Button {
                             speakTranslated(renderEvent())
                         } label: {
-                            Label("Đọc thông báo", systemImage: "play.fill").frame(maxWidth: .infinity)
+                            Label(store.t("Đọc thông báo", "Read notice"), systemImage: "play.fill").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(personName.trimmingCharacters(in: .whitespaces).isEmpty)
-                        Text("Xem trước: \(renderEvent())").font(.caption2).foregroundStyle(.secondary)
+                        Text(store.t("Xem trước:", "Preview:") + " \(renderEvent())").font(.caption2).foregroundStyle(.secondary)
                     }
 
                     // ----- Đọc văn bản tự do -----
-                    section("Đọc văn bản (tự dịch sang tiếng Việt)") {
+                    section(store.t("Đọc văn bản (tự dịch sang tiếng Việt)", "Read text (auto-translate to Vietnamese)")) {
                         TextEditor(text: $freeText)
                             .font(.body).frame(minHeight: 110)
                             .padding(6).background(Color(.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                         Button { speakTranslated(freeText) } label: {
-                            Label("Đọc", systemImage: "play.fill").frame(maxWidth: .infinity)
+                            Label(store.t("Đọc", "Read"), systemImage: "play.fill").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(freeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -855,35 +856,46 @@ struct TTSView: View {
                     // ----- Điều khiển phát -----
                     HStack {
                         Button { tts.pauseOrContinue() } label: {
-                            Label(tts.isPaused ? "Tiếp tục" : "Tạm dừng",
+                            Label(tts.isPaused ? store.t("Tiếp tục", "Resume") : store.t("Tạm dừng", "Pause"),
                                   systemImage: tts.isPaused ? "play.fill" : "pause.fill")
                         }.buttonStyle(.bordered).disabled(!tts.isSpeaking && !tts.isPaused)
                         Button { tts.skipCurrent() } label: {
-                            Label("Bỏ qua", systemImage: "forward.end.fill")
+                            Label(store.t("Bỏ qua", "Skip"), systemImage: "forward.end.fill")
                         }.buttonStyle(.bordered).disabled(!tts.isSpeaking)
                         Spacer()
                         Button(role: .destructive) { tts.stop() } label: {
-                            Label("Dừng", systemImage: "stop.fill")
+                            Label(store.t("Dừng", "Stop"), systemImage: "stop.fill")
                         }.buttonStyle(.bordered).disabled(!tts.isSpeaking && !tts.isPaused)
                     }
                     if tts.pendingCount > 0 {
-                        Text("Đang chờ đọc: \(tts.pendingCount) đoạn")
+                        Text(store.t("Đang chờ đọc:", "Queued:") + " \(tts.pendingCount) " + store.t("đoạn", "items"))
                             .font(.caption2).foregroundStyle(.secondary)
                     }
 
                     // ----- Động cơ & Tinh chỉnh giọng -----
-                    section("Thiết lập Động cơ giọng nói") {
-                        Text("Động cơ").font(.caption).foregroundStyle(.secondary)
-                        Picker("Động cơ", selection: $tts.engineType) {
-                            ForEach(TTSEngine.EngineType.allCases) { type in
+                    section(store.t("Thiết lập Động cơ giọng nói", "Voice engine settings")) {
+                        Text(store.t("Động cơ", "Engine")).font(.caption).foregroundStyle(.secondary)
+                        // Giọng ElevenLabs chỉ dành cho gói PRO — Free không thấy lựa chọn này
+                        Picker(store.t("Động cơ", "Engine"), selection: $tts.engineType) {
+                            ForEach(TTSEngine.EngineType.allCases.filter { store.isPro || $0 != .elevenlabs }) { type in
                                 Text(type.label).tag(type)
                             }
                         }
                         .pickerStyle(.segmented)
                         .padding(.bottom, 8)
-                        
+                        .onAppear {
+                            // Free lỡ đang ở ElevenLabs (từ bản cũ) → đưa về giọng hệ thống
+                            if !store.isPro && tts.engineType == .elevenlabs { tts.engineType = .system }
+                        }
+                        if !store.isPro {
+                            Label(store.t("Giọng ElevenLabs (AI) chỉ có ở gói PRO. Nâng cấp để mở khoá.",
+                                          "ElevenLabs (AI) voice is PRO-only. Upgrade to unlock."),
+                                  systemImage: "crown.fill")
+                                .font(.caption2).foregroundStyle(Theme.gold)
+                        }
+
                         Toggle(isOn: $translateToVi) {
-                            Label("Tự dịch sang tiếng Việt khi đọc", systemImage: "character.bubble")
+                            Label(store.t("Tự dịch sang tiếng Việt khi đọc", "Auto-translate to Vietnamese when reading"), systemImage: "character.bubble")
                                 .font(.subheadline)
                         }.tint(Theme.accent)
 
@@ -907,8 +919,8 @@ struct TTSView: View {
                         slider("Cao độ", value: $tts.pitch, range: 0.5...2.0)
                         slider("Âm lượng", value: $tts.volume, range: 0...1)
 
-                        // ElevenLabs — đọc tiếng Việt
-                        if tts.engineType == .elevenlabs {
+                        // ElevenLabs — đọc tiếng Việt (chỉ PRO)
+                        if tts.engineType == .elevenlabs && store.isPro {
                             Divider().padding(.vertical, 4)
 
                             // --- Chọn tông giọng ElevenLabs ---
@@ -1038,7 +1050,7 @@ struct TTSView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Đọc (TTS)")
+            .navigationTitle(store.t("Đọc (TTS)", "Read (TTS)"))
         }
     }
 
