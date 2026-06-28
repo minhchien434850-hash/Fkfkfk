@@ -19,6 +19,8 @@ struct VideoProfileView: View {
     @State private var saving = false
     @State private var avatarPicker: PhotosPickerItem?
     @State private var uploadingAvatar = false
+    @State private var showReels = false
+    @State private var reelsIndex = 0
 
     private var isOwnProfile: Bool { store.userId == userId }
     private let cols = [GridItem(.flexible(), spacing: 2),
@@ -137,9 +139,12 @@ struct VideoProfileView: View {
                             .frame(maxWidth: .infinity).padding(.top, 40)
                     } else {
                         LazyVGrid(columns: cols, spacing: 2) {
-                            ForEach(posts) { p in
-                                VideoGridCell(post: p, token: store.token, baseURL: store.baseURL)
-                                    .aspectRatio(9/16, contentMode: .fill).clipped()
+                            ForEach(Array(posts.enumerated()), id: \.element.id) { idx, p in
+                                Button { reelsIndex = idx; showReels = true } label: {
+                                    VideoGridCell(post: p, token: store.token, baseURL: store.baseURL)
+                                        .aspectRatio(9/16, contentMode: .fill).clipped()
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -157,6 +162,9 @@ struct VideoProfileView: View {
             }
         }
         .task { await load() }
+        .fullScreenCover(isPresented: $showReels) {
+            ReelsFeedView(presetPosts: posts, startIndex: reelsIndex).environmentObject(store)
+        }
         .sheet(isPresented: $showEdit) { editSheet }
         .onChange(of: avatarPicker) { item in
             if let item { Task { await uploadAvatar(item) } }

@@ -34,7 +34,8 @@ struct VideoDetailView: View {
             Color.black.ignoresSafeArea()
 
             if let player {
-                VideoPlayer(player: player)
+                // Giữ NGUYÊN tỉ lệ video (ngang ra ngang, dọc ra dọc), không cắt
+                AspectVideoPlayer(player: player)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             } else {

@@ -4,10 +4,31 @@ import PhotosUI
 import UIKit
 
 
+// Player giữ NGUYÊN tỉ lệ video (không cắt, không phóng to/thu nhỏ).
+// Video ngang → hiện ngang (viền trên/dưới); video dọc → hiện dọc. Dùng AVPlayerLayer.resizeAspect.
+struct AspectVideoPlayer: UIViewRepresentable {
+    let player: AVPlayer
+    func makeUIView(context: Context) -> AspectPlayerUIView {
+        let v = AspectPlayerUIView()
+        v.playerLayer.player = player
+        v.playerLayer.videoGravity = .resizeAspect
+        return v
+    }
+    func updateUIView(_ uiView: AspectPlayerUIView, context: Context) {
+        if uiView.playerLayer.player !== player { uiView.playerLayer.player = player }
+    }
+}
+final class AspectPlayerUIView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+}
+
 // ======================== Reels — fullscreen cuộn dọc ========================
 struct ReelsFeedView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) var dismiss
+    var presetPosts: [PostItem]? = nil   // nếu có → xem chính các video này (vd từ hồ sơ), không tải feed
+    var startIndex: Int = 0
     @State private var posts: [PostItem] = []
     @State private var loading = false
     @State private var error: String?
@@ -108,6 +129,12 @@ struct ReelsFeedView: View {
     }
 
     private func load() async {
+        // Xem từ hồ sơ: dùng đúng danh sách truyền vào + nhảy tới video được bấm
+        if let preset = presetPosts {
+            posts = preset
+            currentIndex = max(0, min(startIndex, preset.count - 1))
+            return
+        }
         loading = true; error = nil
         do { posts = try await store.api.getFeed() }
         catch { self.error = error.localizedDescription }
@@ -183,15 +210,17 @@ struct ReelCard: View {
 
     var body: some View {
         ZStack {
-            // Nền mờ phủ kín để không bị viền đen xấu, video chính fit ở trên (không phóng to/thu nhỏ).
+            // Nền: video phủ kín dạng mờ để lấp viền cho đẹp (KHÔNG ảnh hưởng video chính).
             Color.black.ignoresSafeArea()
             if let thumb {
                 Image(uiImage: thumb).resizable().scaledToFill()
-                    .ignoresSafeArea().blur(radius: 24).opacity(0.5)
-                Image(uiImage: thumb).resizable().scaledToFit().ignoresSafeArea()
+                    .ignoresSafeArea().blur(radius: 30).opacity(0.6)
             }
+            // Video chính: GIỮ NGUYÊN tỉ lệ gốc, không cắt/phóng to. Ngang ra ngang, dọc ra dọc.
             if let player {
-                VideoPlayer(player: player).ignoresSafeArea().allowsHitTesting(false)
+                AspectVideoPlayer(player: player).ignoresSafeArea().allowsHitTesting(false)
+            } else if let thumb {
+                Image(uiImage: thumb).resizable().scaledToFit().ignoresSafeArea()
             } else {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 70)).foregroundStyle(.white.opacity(0.7))
