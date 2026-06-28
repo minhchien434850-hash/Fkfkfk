@@ -12,6 +12,7 @@ struct ReelsFeedView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var currentIndex = 0
+    @State private var dragOffset: CGFloat = 0
     @State private var commentsFor: PostIDWrapper?
 
     var body: some View {
@@ -32,24 +33,51 @@ struct ReelsFeedView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    TabView(selection: $currentIndex) {
-                        ForEach(Array(posts.enumerated()), id: \.offset) { idx, p in
+                    let h = geo.size.height
+                    let lo = max(0, currentIndex - 1)
+                    let hi = min(posts.count - 1, currentIndex + 1)
+                    // Pager dọc: vuốt LÊN = video kế tiếp, vuốt XUỐNG = xem lại video trước.
+                    // Chỉ render 3 video quanh vị trí hiện tại cho nhẹ máy.
+                    ZStack {
+                        ForEach(Array(lo...hi), id: \.self) { idx in
+                            let p = posts[idx]
                             ReelCard(post: p, token: store.token, baseURL: store.baseURL,
                                      isActive: currentIndex == idx,
                                      currentUserId: store.userId,
                                      onLike: { Task { await like(p) } },
                                      onComment: { commentsFor = PostIDWrapper(id: p.id) },
                                      onFollow: { Task { await toggleFollow(p) } })
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .rotationEffect(.degrees(90))
-                                .tag(idx)
+                                .frame(width: geo.size.width, height: h)
+                                .offset(y: CGFloat(idx - currentIndex) * h + dragOffset)
                         }
                     }
-                    .frame(width: geo.size.height, height: geo.size.width)
-                    .rotationEffect(.degrees(-90))
-                    .offset(x: (geo.size.width - geo.size.height) / 2,
-                            y: (geo.size.height - geo.size.width) / 2)
-                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .frame(width: geo.size.width, height: h)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.86), value: currentIndex)
+                    .gesture(
+                        DragGesture()
+                            .onChanged { v in
+                                var t = v.translation.height
+                                // Cản tay khi đã ở đầu/cuối (kéo vào khoảng trống)
+                                if (currentIndex == 0 && t > 0) || (currentIndex == posts.count - 1 && t < 0) {
+                                    t *= 0.3
+                                }
+                                dragOffset = t
+                            }
+                            .onEnded { v in
+                                let move = v.predictedEndTranslation.height
+                                let threshold = h * 0.18
+                                var idx = currentIndex
+                                if move < -threshold && currentIndex < posts.count - 1 {
+                                    idx += 1                       // vuốt lên → video kế tiếp
+                                } else if move > threshold && currentIndex > 0 {
+                                    idx -= 1                       // vuốt xuống → video vừa lướt qua
+                                }
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+                                    currentIndex = idx
+                                    dragOffset = 0
+                                }
+                            }
+                    )
                 }
             }
             .ignoresSafeArea()
@@ -255,10 +283,16 @@ struct ReelCard: View {
             guard let player else { return }
             if player.timeControlStatus == .paused { player.play() } else { player.pause() }
         }
-        .onAppear { loadThumb(); setupPlayer() }
+        .onAppear { loadThumb(); if isActive { setupPlayer() } }
         .onDisappear { teardown() }
         .onChange(of: isActive) { active in
-            if active { player?.seek(to: .zero); player?.play() } else { player?.pause() }
+            // Chỉ video đang xem mới tạo & phát player; rời đi thì giải phóng cho nhẹ máy
+            if active {
+                if player == nil { setupPlayer() }
+                player?.seek(to: .zero); player?.play()
+            } else {
+                teardown()
+            }
         }
     }
 
