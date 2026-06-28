@@ -301,6 +301,8 @@ struct StoreConfigEditor: View {
     @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
     @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
     @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
+    @AppStorage("storeCfgSectionOrder") private var cfgSectionOrder: String = ""
+    @AppStorage("storeCfgSectionHidden") private var cfgSectionHidden: String = ""
 
     private func sectionLabel(_ key: String) -> String {
         switch key {
@@ -669,8 +671,10 @@ struct StoreConfigEditor: View {
                 steps: editSteps.map { ["icon": $0.icon, "title": $0.title, "desc": $0.desc, "badge": $0.badge] },
                 announceEnabled: announceEnabled, announceText: announceText,
                 announceColor: announceColor, gamecatLimit: gamecatLimit)
-            // Lưu cache ngay để các màn khác giữ tên/logo mới kể cả khi tải lại lúc mạng chậm
+            // Lưu cache ngay để các màn khác giữ tên/logo + thứ tự bố cục mới kể cả khi mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
+            cfgSectionOrder = sections.joined(separator: ",")
+            cfgSectionHidden = hiddenSections.joined(separator: ",")
             isError = false; message = r.message
         } catch { isError = true; message = error.localizedDescription }
     }

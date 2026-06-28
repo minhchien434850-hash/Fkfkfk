@@ -158,6 +158,9 @@ struct StoreView: View {
     @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
     @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
     @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
+    // Cache thứ tự + mục ẩn để render đầu tiên giữ đúng bố cục (không nhảy khi config tải xong)
+    @AppStorage("storeCfgSectionOrder") private var cfgSectionOrder: String = ""
+    @AppStorage("storeCfgSectionHidden") private var cfgSectionHidden: String = ""
     @State private var storeHasData: Bool = false
     @State private var productSort: String = "default"  // default | priceAsc | priceDesc | name
     @State private var productFilter: String = "all"    // all | inStock
@@ -366,9 +369,11 @@ struct StoreView: View {
         // Thứ tự mặc định gọn gàng, ưu tiên thấy sản phẩm ngay
         let all = ["announce", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
                    "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "products", "footer"]
-        let hidden = Set((config?.sectionHidden ?? "")
+        let hiddenRaw = config?.sectionHidden ?? (cfgSectionHidden.isEmpty ? "" : cfgSectionHidden)
+        let hidden = Set(hiddenRaw
             .split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) })
-        guard let raw = (config?.sectionOrder ?? effectiveConfig?.sectionOrder), !raw.isEmpty else {
+        let cachedOrder = cfgSectionOrder.isEmpty ? nil : cfgSectionOrder
+        guard let raw = (config?.sectionOrder ?? cachedOrder), !raw.isEmpty else {
             return all.filter { !hidden.contains($0) }
         }
         let parts = raw.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -447,14 +452,14 @@ struct StoreView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         storeHeader
                         walletBar
-                        // Nút tải xuống cố định ngay dưới ví (luôn hiển thị nếu có file/link)
-                        if !downloads.isEmpty || !downloadableProducts.isEmpty { downloadsSection.id("downloads") }
-                        // Các mục hiển thị theo thứ tự admin sắp xếp (bỏ qua "downloads" vì đã hiện ở trên)
-                        // CHỈ gắn .id cho mục cần cuộn đến ("gamecat" — nút Mua ngay). Gắn .id cho TẤT CẢ
-                        // khiến ScrollView mất vị trí & nhảy lung tung khi kéo tải lại trang.
-                        ForEach(orderedSections.filter { $0 != "downloads" }, id: \.self) { key in
+                        // Các mục hiển thị ĐÚNG theo thứ tự admin đã sắp xếp (kể cả "Tải về").
+                        // CHỈ gắn .id cho mục cần cuộn đến ("gamecat" — nút Mua ngay, "downloads").
+                        // Gắn .id cho TẤT CẢ khiến ScrollView mất vị trí & nhảy khi kéo tải lại trang.
+                        ForEach(orderedSections, id: \.self) { key in
                             if key == "gamecat" {
                                 sectionView(key).id("gamecat")
+                            } else if key == "downloads" {
+                                sectionView(key).id("downloads")
                             } else {
                                 sectionView(key)
                             }
@@ -1309,30 +1314,18 @@ struct StoreView: View {
             $0.enabled && !$0.url.trimmingCharacters(in: .whitespaces).isEmpty
         }
         if !enabled.isEmpty || hasGroups {
+            // 1 nút duy nhất → bấm vào mở bảng liên hệ (admin & nhóm cộng đồng)
             Button { showContacts = true } label: {
-                HStack(spacing: -8) {
-                    ForEach(Array(enabled.prefix(3).enumerated()), id: \.offset) { idx, link in
-                        let p = socialPlatform(link.platform)
-                        Image(systemName: p.icon)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(p.color)
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(Color(.systemBackground).opacity(0.4), lineWidth: 1.5))
-                            .zIndex(Double(3 - idx))
-                    }
-                    if enabled.count > 3 || hasGroups {
-                        Text("+")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(Color.black.opacity(0.45))
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(Color(.systemBackground).opacity(0.4), lineWidth: 1.5))
-                    }
-                }
-                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        LinearGradient(colors: [Theme.accent, Theme.accent.opacity(0.75)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.5), lineWidth: 1.5))
+                    .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
             }
             .buttonStyle(.plain)
         }
@@ -1510,9 +1503,11 @@ struct StoreView: View {
         if let s = try? await showTask, s != showcase { showcase = s }
         if let c = try? await cfgTask {
             if c != config { config = c }
-            // lưu cache để lần sau (kể cả khi offline) vẫn giữ tên/logo/banner
+            // lưu cache để lần sau (kể cả khi offline) vẫn giữ tên/logo/banner + thứ tự bố cục
             cfgName = c.logoName; cfgLogo = c.logoUrl
             cfgBannerType = c.bannerType; cfgBannerUrl = c.bannerUrl
+            cfgSectionOrder = c.sectionOrder ?? ""
+            cfgSectionHidden = c.sectionHidden ?? ""
         }
         let dl = (try? await dlTask) ?? []
         if dl != downloads { downloads = dl }
