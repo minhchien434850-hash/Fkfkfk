@@ -12,6 +12,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Gắn nút "ẩn bàn phím" lên mọi ô nhập trong toàn app
+        KeyboardDismissBar.installGlobally()
+
         // Đặt delegate thông báo
         UNUserNotificationCenter.current().delegate = self
 
