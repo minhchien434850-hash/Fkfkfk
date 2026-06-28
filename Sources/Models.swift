@@ -290,6 +290,8 @@ struct StoreBuyResponse: Decodable {
     let downloadFileId: Int?
     let balance: Int
     let message: String
+    let delivery: String?      // tin nhắn giao key (sản phẩm + nền tảng + hạn dùng + key)
+    let expiresAt: Int?        // mốc hết hạn (unix), nil nếu vĩnh viễn
 }
 
 struct StoreDownloadItem: Identifiable, Decodable, Hashable {
@@ -357,6 +359,8 @@ struct StoreProductMine: Decodable, Hashable {
     let key: String?
     let downloadUrl: String?
     let downloadFileId: Int?
+    var delivery: String? = nil   // tin nhắn giao key
+    var expiresAt: Int? = nil     // mốc hết hạn (unix), nil nếu vĩnh viễn
 }
 
 struct StoreOrderCreateResponse: Decodable {
@@ -379,6 +383,8 @@ struct StoreOrder: Identifiable, Decodable, Hashable {
     let ref: String?
     let createdAt: Int?
     let key: String?
+    let delivery: String?      // tin nhắn giao key
+    let expiresAt: Int?        // mốc hết hạn (unix), nil nếu vĩnh viễn
     let downloadUrl: String?
     let downloadFileId: Int?
 }

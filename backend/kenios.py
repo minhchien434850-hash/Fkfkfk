@@ -749,6 +749,11 @@ def _migrate() -> None:
         # App bán hàng: loại sản phẩm (app/key vs acc game) + lưu key trực tiếp vào đơn
         ("store_products", "kind", "TEXT DEFAULT 'app'"),   # app | acc
         ("store_orders", "key_text", "TEXT"),
+        # Giao hàng: lưu thời hạn gói + nền tảng + ngày hết hạn + tin nhắn giao key
+        ("store_orders", "price_label",  "TEXT"),
+        ("store_orders", "platform",     "TEXT"),
+        ("store_orders", "expires_at",   "INTEGER"),
+        ("store_orders", "delivery_msg", "TEXT"),
         # Ví cửa hàng (số dư VND, tách biệt với app chính)
         ("users", "wallet", "INTEGER DEFAULT 0"),
     ]
@@ -3897,6 +3902,94 @@ def _finalize_payment_row(c, pay) -> bool:
     return True
 
 
+# ===================== Giao key: thời hạn · nền tảng · tin nhắn =====================
+# Quy đổi đơn vị thời hạn sang số giây (tháng = 30 ngày, năm = 365 ngày)
+_DURATION_UNITS = [
+    (("phút", "phut", "minute", "min"),          60),
+    (("giờ", "gio", "hour", "hr"),               3600),
+    (("ngày", "ngay", "day", "days"),            86400),
+    (("tuần", "tuan", "week", "weeks", "wk"),    7 * 86400),
+    (("tháng", "thang", "month", "months", "mo"),30 * 86400),
+    (("năm", "nam", "year", "years", "yr"),      365 * 86400),
+]
+_LIFETIME_HINTS = ("vĩnh viễn", "vinh vien", "trọn đời", "tron doi",
+                   "lifetime", "forever", "vĩnh", "vinh")
+
+
+def _duration_seconds(label: str):
+    """Đổi nhãn gói ('1 tháng', '30 ngày', '1 năm', 'vĩnh viễn'...) thành số giây.
+
+    Trả về None nếu là gói vĩnh viễn hoặc không xác định được thời hạn.
+    """
+    s = (label or "").strip().lower()
+    if not s:
+        return None
+    if any(h in s for h in _LIFETIME_HINTS):
+        return None
+    m = re.search(r"(\d+(?:[.,]\d+)?)", s)
+    qty = float(m.group(1).replace(",", ".")) if m else 1.0
+    # Ưu tiên đơn vị dài nhất (tránh 'ngày' lọt vào 'tháng')
+    for names, secs in sorted(_DURATION_UNITS, key=lambda u: -max(len(n) for n in u[0])):
+        if any(n in s for n in names):
+            return int(qty * secs)
+    return None
+
+
+def _platform_label(c, product_id: int) -> str:
+    """Suy ra nền tảng (iOS / Android) từ tên thư mục → danh mục chứa sản phẩm.
+
+    Nếu không nhận diện được thì dùng luôn tên thư mục cho khách dễ hiểu.
+    """
+    row = c.execute(
+        "SELECT f.name AS folder, cat.name AS category "
+        "FROM store_products p "
+        "JOIN store_folders f ON f.id=p.folder_id "
+        "JOIN store_categories cat ON cat.id=f.category_id "
+        "WHERE p.id=?", (product_id,)).fetchone()
+    if not row:
+        return ""
+    text = f"{row['folder'] or ''} {row['category'] or ''}".lower()
+    if any(k in text for k in ("ios", "iphone", "ipad", "apple")):
+        return "iOS"
+    if "android" in text:
+        return "Android"
+    return (row["folder"] or "").strip()
+
+
+def _fmt_dmy(ts) -> str:
+    return time.strftime("%d/%m/%Y", time.localtime(int(ts)))
+
+
+def _build_delivery_msg(c, product_id: int, price_label: str, key_text: str,
+                        created_at: int, expires_at, kind: str = "app") -> str:
+    """Soạn tin nhắn giao hàng gửi khách sau khi mua key/acc."""
+    prod = c.execute("SELECT name FROM store_products WHERE id=?", (product_id,)).fetchone()
+    pname = (prod["name"] if prod else "") or "(sản phẩm)"
+    item = "tài khoản" if (kind or "app") == "acc" else "key"
+    platform = _platform_label(c, product_id)
+    plat = f" [{platform}]" if platform else ""
+    dur = f" ({price_label})" if (price_label or "").strip() else ""
+    lines = [
+        f"🔑 Bạn đã mua 1 {item} {pname}{plat}{dur}",
+        f"🗓 Ngày mua: {_fmt_dmy(created_at)}",
+        f"⏳ Hết hạn: {_fmt_dmy(expires_at)}" if expires_at else "⏳ Thời hạn: Vĩnh viễn",
+        f"🔑 {item.capitalize()}: {key_text}",
+    ]
+    return "\n".join(lines)
+
+
+def _apply_delivery(c, order_id: int, product_id: int, price_label: str,
+                    key_text: str, created_at: int, kind: str = "app") -> dict:
+    """Tính nền tảng + ngày hết hạn + tin nhắn rồi lưu vào đơn. Trả về để API dùng lại."""
+    platform = _platform_label(c, product_id)
+    secs = _duration_seconds(price_label)
+    expires_at = (int(created_at) + secs) if secs else None
+    msg = _build_delivery_msg(c, product_id, price_label, key_text, created_at, expires_at, kind)
+    c.execute("UPDATE store_orders SET price_label=?, platform=?, expires_at=?, delivery_msg=? WHERE id=?",
+              (price_label or "", platform, expires_at, msg, order_id))
+    return {"platform": platform, "expires_at": expires_at, "delivery": msg}
+
+
 def _backup_sold_key(c, order, key_text: str) -> None:
     """Ghi 1 dòng JSON sao lưu key/acc đã bán vào file backup (admin xem được)."""
     prod = c.execute("SELECT name,kind FROM store_products WHERE id=?", (order["product_id"],)).fetchone()
@@ -3943,6 +4036,12 @@ def _finalize_store_order_row(c, order) -> bool:
     _backup_sold_key(c, order, key["key_text"])
     c.execute("UPDATE store_orders SET key_id=?, key_text=? WHERE id=?",
               (key["id"], key["key_text"], order["id"]))
+    # Soạn tin giao hàng (thời hạn + nền tảng + ngày hết hạn + key)
+    pr = c.execute("SELECT label FROM store_prices WHERE id=?", (order["price_id"],)).fetchone()
+    prod = c.execute("SELECT kind FROM store_products WHERE id=?", (order["product_id"],)).fetchone()
+    _apply_delivery(c, order["id"], order["product_id"], pr["label"] if pr else "",
+                    key["key_text"], order["created_at"] or int(time.time()),
+                    _row_kind(prod) if prod else "app")
     # Khách đã nhận key → tự động xoá key khỏi kho (không bao giờ bán lại)
     c.execute("DELETE FROM store_keys WHERE id=?", (key["id"],))
     log.info("Store xác nhận: đơn #%d, user=%d, product=%d (đã xoá key khỏi kho)",
@@ -4354,7 +4453,8 @@ def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
         if not prod:
             raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
         # Key đã được giao lưu trong đơn (key gốc đã bị xoá khỏi kho sau khi bán)
-        order = c.execute("SELECT key_text FROM store_orders WHERE product_id=? AND user_id=? "
+        order = c.execute("SELECT key_text,delivery_msg,expires_at FROM store_orders "
+                          "WHERE product_id=? AND user_id=? "
                           "AND status='completed' ORDER BY id DESC LIMIT 1",
                           (pid, user["id"])).fetchone()
         if not order:
@@ -4362,6 +4462,8 @@ def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
         return {
             "owned": True,
             "key": order["key_text"] or "",
+            "delivery": order["delivery_msg"] or "",
+            "expires_at": order["expires_at"],
             "download_url": prod["download_url"] or "",
             "download_file_id": prod["download_file_id"],
         }
@@ -4418,11 +4520,14 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
             (user["id"], b.product_id, price["id"], key["id"], key["key_text"], amount,
              "wallet", int(time.time())))
         oid = cur.lastrowid
+        now = int(time.time())
+        deliv = _apply_delivery(c, oid, b.product_id, price["label"], key["key_text"],
+                                now, _row_kind(prod))
         _backup_sold_key(c, {"id": oid, "product_id": b.product_id, "user_id": user["id"],
                              "amount": amount}, key["key_text"])
         c.execute("DELETE FROM store_keys WHERE id=?", (key["id"],))   # đã giao → xoá khỏi kho
         c.execute("INSERT INTO store_wallet_tx(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",
-                  (user["id"], "purchase", -amount, f"Mua {prod['name']}", int(time.time())))
+                  (user["id"], "purchase", -amount, f"Mua {prod['name']}", now))
         new_balance = _wallet_balance(c, user["id"])
     return {
         "ok": True, "owned": True, "order_id": oid,
@@ -4430,6 +4535,8 @@ def store_buy(b: StoreOrderIn, user=Depends(get_user)) -> dict[str, Any]:
         "download_url": prod["download_url"] or "",
         "download_file_id": prod["download_file_id"],
         "balance": new_balance,
+        "platform": deliv["platform"], "expires_at": deliv["expires_at"],
+        "delivery": deliv["delivery"],
         "message": "Mua thành công! Key đã được giao.",
     }
 
@@ -4484,20 +4591,24 @@ def store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
     with db() as c:
         rows = c.execute(
             "SELECT o.id,o.product_id,o.amount,o.status,o.ref,o.created_at,o.key_text,"
+            "o.delivery_msg,o.expires_at,"
             "p.name AS product_name,p.download_url,p.download_file_id "
             "FROM store_orders o LEFT JOIN store_products p ON p.id=o.product_id "
             "WHERE o.user_id=? ORDER BY o.id DESC", (user["id"],)).fetchall()
         out = []
         for r in rows:
             # key đã giao lưu thẳng trong đơn (store_keys gốc đã bị xoá sau khi bán)
-            key_text = r["key_text"] if r["status"] == "completed" else None
+            done = r["status"] == "completed"
+            key_text = r["key_text"] if done else None
             out.append({
                 "id": r["id"], "product_id": r["product_id"],
                 "product_name": r["product_name"] or "(đã xoá)",
                 "amount": r["amount"], "status": r["status"], "ref": r["ref"],
                 "created_at": r["created_at"], "key": key_text,
-                "download_url": (r["download_url"] or "") if r["status"] == "completed" else "",
-                "download_file_id": r["download_file_id"] if r["status"] == "completed" else None,
+                "delivery": (r["delivery_msg"] or "") if done else "",
+                "expires_at": r["expires_at"] if done else None,
+                "download_url": (r["download_url"] or "") if done else "",
+                "download_file_id": r["download_file_id"] if done else None,
             })
     return out
 
