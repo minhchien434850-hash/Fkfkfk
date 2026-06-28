@@ -48,7 +48,7 @@ struct ProfileIDWrapper: Identifiable { let id: Int }
 // ======================== Main container ========================
 struct VideoFeedView: View {
     @EnvironmentObject var store: AppStore
-    @State private var selectedTab = 1   // 0=Của tôi, 1=Feed, 2=Reels
+    @State private var selectedTab = 0   // 0=Của tôi, 1=Reels (fullscreen)
     @State private var profileSheet: ProfileIDWrapper?
 
     var body: some View {
@@ -56,20 +56,13 @@ struct VideoFeedView: View {
             VStack(spacing: 0) {
                 Picker("", selection: $selectedTab) {
                     Text(store.t("Của tôi", "My Videos")).tag(0)
-                    Text("Feed").tag(1)
-                    Text("Reels").tag(2)
+                    Text("Reels").tag(1)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-                if selectedTab == 0 {
-                    MyVideosView()
-                } else {
-                    VideoListView(onOpenProfile: { uid in
-                        profileSheet = ProfileIDWrapper(id: uid)
-                    })
-                }
+                MyVideosView()
             }
             .navigationTitle(store.t("Video", "Video"))
             .navigationBarTitleDisplayMode(.inline)
@@ -94,8 +87,8 @@ struct VideoFeedView: View {
             }
         }
         .fullScreenCover(isPresented: Binding(
-            get: { selectedTab == 2 },
-            set: { if !$0 { selectedTab = 1 } }
+            get: { selectedTab == 1 },
+            set: { if !$0 { selectedTab = 0 } }
         )) {
             ReelsFeedView().environmentObject(store)
         }
@@ -413,7 +406,7 @@ struct ComposeVideoView: View {
                         .lineLimit(2...5)
                 }
                 Section {
-                    Toggle(store.t("Công khai (hiện trên Reels & Feed)", "Public (visible in Reels & Feed)"),
+                    Toggle(store.t("Công khai (hiện trên Reels)", "Public (visible in Reels)"),
                            isOn: $isPublic)
                 }
                 Section {
@@ -812,236 +805,6 @@ struct VideoProfileView: View {
     }
 }
 
-// ======================== Feed công khai ========================
-struct VideoListView: View {
-    var onOpenProfile: ((Int) -> Void)?
-    @EnvironmentObject var store: AppStore
-    @State private var posts: [PostItem] = []
-    @State private var loading = false
-    @State private var error: String?
-    @State private var showCompose = false
-    @State private var commentsFor: PostIDWrapper?
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                KHeroHeader(icon: "play.rectangle.on.rectangle.fill",
-                            title: store.t("Video KENIOS", "KENIOS Video"),
-                            subtitle: store.t("Đăng & xem video ngay trong app của bạn",
-                                              "Post & watch videos right in your app"))
-
-                Button { showCompose = true } label: {
-                    Label(store.t("Đăng video mới", "New video"), systemImage: "plus.circle.fill")
-                        .frame(maxWidth: .infinity).frame(height: 46)
-                        .background(store.accentColor).foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-
-                if loading { ProgressView().frame(maxWidth: .infinity) }
-                if let error { Text(error).foregroundStyle(.red).font(.caption) }
-                if posts.isEmpty && !loading {
-                    Text(store.t("Chưa có video nào. Hãy đăng video đầu tiên!",
-                                 "No videos yet. Post the first one!"))
-                        .font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity).padding(.top, 30)
-                }
-
-                ForEach(posts) { p in postCard(p) }
-            }
-            .padding()
-        }
-        .task { await load() }
-        .refreshable { await load() }
-        .sheet(isPresented: $showCompose) {
-            ComposeVideoView { await load() }.environmentObject(store)
-        }
-        .sheet(item: $commentsFor) { w in
-            PostCommentsView(postId: w.id).environmentObject(store)
-        }
-    }
-
-    private func postCard(_ p: PostItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // Header: avatar + tên + nút follow/xoá
-            HStack {
-                Button {
-                    if let uid = p.userId { onOpenProfile?(uid) }
-                } label: {
-                    HStack(spacing: 8) {
-                        if let urlStr = p.avatarUrl, let url = URL(string: urlStr) {
-                            AsyncImage(url: url) { phase in
-                                if let img = phase.image {
-                                    img.resizable().scaledToFill()
-                                        .frame(width: 36, height: 36).clipShape(Circle())
-                                } else {
-                                    Image(systemName: "person.crop.circle.fill")
-                                        .font(.title2).foregroundStyle(store.accentColor)
-                                }
-                            }
-                        } else {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.title2).foregroundStyle(store.accentColor)
-                        }
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(p.username).font(.subheadline.bold())
-                            if let pid = p.publicId {
-                                Text("@\(pid)").font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                if let uid = p.userId, p.username != store.username {
-                    Button { Task { await toggleFollow(p) } } label: {
-                        Text((p.following ?? false)
-                             ? store.t("Đang theo dõi", "Following")
-                             : store.t("Theo dõi", "Follow"))
-                            .font(.caption.bold())
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background((p.following ?? false) ? Color.gray.opacity(0.3) : store.accentColor)
-                            .foregroundStyle((p.following ?? false) ? Color.secondary : Color.white)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain).id(uid)
-                }
-                if p.username == store.username || store.isAdmin {
-                    Button(role: .destructive) { Task { await delete(p) } } label: {
-                        Image(systemName: "trash").font(.caption)
-                    }
-                }
-            }
-
-            InlineVideoPlayer(postId: p.id, token: store.token, baseURL: store.baseURL)
-                .frame(height: 240)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-
-            if let cap = p.caption, !cap.isEmpty {
-                Text(cap).font(.subheadline)
-            }
-
-            // Thanh tương tác
-            HStack(spacing: 16) {
-                Button { Task { await like(p) } } label: {
-                    Label("\(p.likes)", systemImage: p.liked ? "heart.fill" : "heart")
-                        .foregroundStyle(p.liked ? .red : .secondary)
-                }
-                Button { commentsFor = PostIDWrapper(id: p.id) } label: {
-                    Label("\(p.comments ?? 0)", systemImage: "bubble.right")
-                        .foregroundStyle(.secondary)
-                }
-                Button { share(p) } label: {
-                    Image(systemName: "square.and.arrow.up").foregroundStyle(.secondary)
-                }
-                Spacer()
-                if let v = p.views {
-                    Label("\(v)", systemImage: "eye").font(.caption).foregroundStyle(.secondary)
-                }
-            }.font(.subheadline)
-        }
-        .padding()
-        .kCard(18)
-    }
-
-    private func load() async {
-        loading = true; error = nil
-        do { posts = try await store.api.getFeed() }
-        catch { self.error = error.localizedDescription }
-        loading = false
-    }
-
-    private func like(_ p: PostItem) async {
-        do {
-            let r = try await store.api.likePost(p.id)
-            if let idx = posts.firstIndex(where: { $0.id == p.id }) {
-                posts[idx].likes = r.likes
-                posts[idx].liked = r.liked
-            }
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func toggleFollow(_ p: PostItem) async {
-        guard let uid = p.userId else { return }
-        do {
-            if p.following ?? false { _ = try await store.api.unfollow(uid) }
-            else { _ = try await store.api.follow(uid) }
-            await load()
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func delete(_ p: PostItem) async {
-        do { _ = try await store.api.deletePost(p.id); posts.removeAll { $0.id == p.id } }
-        catch { self.error = error.localizedDescription }
-    }
-
-    private func share(_ p: PostItem) {
-        guard let url = keniosVideoURL(postId: p.id, token: nil, baseURL: store.baseURL) else { return }
-        let vc = UIActivityViewController(activityItems: [p.caption ?? "", url], applicationActivities: nil)
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }.first?
-            .windows.first?.rootViewController?.present(vc, animated: true)
-    }
-}
-
-// ======================== Player nhúng trong card ========================
-struct InlineVideoPlayer: View {
-    let postId: Int
-    let token: String?
-    let baseURL: String
-
-    @State private var player: AVPlayer?
-    @State private var thumb: UIImage?
-    @State private var isMuted = false
-
-    private var streamURL: URL? { keniosVideoURL(postId: postId, token: token, baseURL: baseURL) }
-
-    var body: some View {
-        ZStack {
-            Color.black
-            if let thumb, player == nil {
-                Image(uiImage: thumb).resizable().scaledToFill().clipped()
-            }
-            if let player {
-                VideoPlayer(player: player)
-                    .onDisappear { player.pause() }
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button {
-                            isMuted.toggle(); player.isMuted = isMuted
-                        } label: {
-                            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                                .font(.subheadline).foregroundStyle(.white)
-                                .padding(8).background(.black.opacity(0.45)).clipShape(Circle())
-                        }.padding(8)
-                    }
-                    Spacer()
-                }
-            } else {
-                Button { setupPlayer() } label: {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 60)).foregroundStyle(.white.opacity(0.95)).shadow(radius: 6)
-                }
-            }
-        }
-        .onAppear { loadThumb() }
-    }
-
-    private func loadThumb() {
-        guard thumb == nil, let url = streamURL else { return }
-        generateThumbnail(postId: postId, url: url) { img in self.thumb = img }
-    }
-
-    private func setupPlayer() {
-        guard let url = streamURL else { return }
-        let item = AVPlayerItem(url: url)
-        let p = AVPlayer(playerItem: item)
-        p.isMuted = isMuted; player = p; p.play()
-    }
-}
-
 // ======================== Reels — fullscreen cuộn dọc ========================
 struct ReelsFeedView: View {
     @EnvironmentObject var store: AppStore
@@ -1074,8 +837,10 @@ struct ReelsFeedView: View {
                         ForEach(Array(posts.enumerated()), id: \.offset) { idx, p in
                             ReelCard(post: p, token: store.token, baseURL: store.baseURL,
                                      isActive: currentIndex == idx,
+                                     currentUserId: store.userId,
                                      onLike: { Task { await like(p) } },
-                                     onComment: { commentsFor = PostIDWrapper(id: p.id) })
+                                     onComment: { commentsFor = PostIDWrapper(id: p.id) },
+                                     onFollow: { Task { await toggleFollow(p) } })
                                 .frame(width: geo.size.width, height: geo.size.height)
                                 .rotationEffect(.degrees(90))
                                 .tag(idx)
@@ -1131,6 +896,19 @@ struct ReelsFeedView: View {
             }
         } catch { self.error = error.localizedDescription }
     }
+
+    private func toggleFollow(_ p: PostItem) async {
+        guard let uid = p.userId else { return }
+        let nowFollowing = !(p.following ?? false)
+        do {
+            if nowFollowing { _ = try await store.api.follow(uid) }
+            else { _ = try await store.api.unfollow(uid) }
+            // Cập nhật mọi video của cùng tác giả để nút Theo dõi đồng bộ
+            for i in posts.indices where posts[i].userId == uid {
+                posts[i].following = nowFollowing
+            }
+        } catch { self.error = error.localizedDescription }
+    }
 }
 
 // ======================== ReelCard ========================
@@ -1139,8 +917,10 @@ struct ReelCard: View {
     let token: String?
     let baseURL: String
     let isActive: Bool
+    var currentUserId: Int? = nil
     var onLike: () -> Void
     var onComment: () -> Void
+    var onFollow: () -> Void = {}
 
     @State private var player: AVPlayer?
     @State private var thumb: UIImage?
@@ -1149,12 +929,39 @@ struct ReelCard: View {
     @State private var endObserver: NSObjectProtocol?
 
     private var streamURL: URL? { keniosVideoURL(postId: post.id, token: token, baseURL: baseURL) }
+    private var isMine: Bool { currentUserId != nil && post.userId == currentUserId }
+
+    @ViewBuilder private var avatarCircle: some View {
+        let initial = String(post.username.prefix(1)).uppercased()
+        if let s = post.avatarUrl, !s.isEmpty, let url = URL(string: s) {
+            AsyncImage(url: url) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Theme.accent.opacity(0.6)).overlay(Text(initial).font(.headline).foregroundStyle(.white))
+            }
+            .frame(width: 44, height: 44).clipShape(Circle())
+            .overlay(Circle().stroke(.white, lineWidth: 2))
+        } else {
+            Circle().fill(Theme.accent.opacity(0.6))
+                .frame(width: 44, height: 44)
+                .overlay(Text(initial).font(.headline).foregroundStyle(.white))
+                .overlay(Circle().stroke(.white, lineWidth: 2))
+        }
+    }
+    private var shareText: String {
+        let who = post.username.isEmpty ? "KENIOS" : post.username
+        let cap = (post.caption?.isEmpty == false) ? " – \(post.caption!)" : ""
+        return "Xem video của \(who) trên KENIOS\(cap)"
+    }
 
     var body: some View {
         ZStack {
+            // Nền mờ phủ kín để không bị viền đen xấu, video chính fit ở trên (không phóng to/thu nhỏ).
             Color.black.ignoresSafeArea()
             if let thumb {
-                Image(uiImage: thumb).resizable().scaledToFill().ignoresSafeArea()
+                Image(uiImage: thumb).resizable().scaledToFill()
+                    .ignoresSafeArea().blur(radius: 24).opacity(0.5)
+                Image(uiImage: thumb).resizable().scaledToFit().ignoresSafeArea()
             }
             if let player {
                 VideoPlayer(player: player).ignoresSafeArea().allowsHitTesting(false)
@@ -1185,8 +992,22 @@ struct ReelCard: View {
                         }
                     }
                     Spacer()
-                    VStack(spacing: 22) {
-                        // Like
+                    VStack(spacing: 20) {
+                        // Avatar + nút Theo dõi (ẩn nếu là video của chính mình)
+                        if !isMine {
+                            Button(action: onFollow) {
+                                ZStack(alignment: .bottom) {
+                                    avatarCircle
+                                    Image(systemName: (post.following ?? false) ? "checkmark.circle.fill" : "plus.circle.fill")
+                                        .font(.system(size: 18))
+                                        .foregroundStyle((post.following ?? false) ? .green : .red)
+                                        .background(Circle().fill(.white))
+                                        .offset(y: 9)
+                                }
+                                .frame(height: 52)
+                            }
+                        }
+                        // Tim
                         Button(action: onLike) {
                             VStack(spacing: 4) {
                                 Image(systemName: post.liked ? "heart.fill" : "heart")
@@ -1194,14 +1015,21 @@ struct ReelCard: View {
                                 Text("\(post.likes)").font(.caption).foregroundStyle(.white)
                             }
                         }
-                        // Comment
+                        // Bình luận
                         Button(action: onComment) {
                             VStack(spacing: 4) {
-                                Image(systemName: "bubble.right").font(.title2).foregroundStyle(.white)
+                                Image(systemName: "bubble.right.fill").font(.title2).foregroundStyle(.white)
                                 Text("\(post.comments ?? 0)").font(.caption).foregroundStyle(.white)
                             }
                         }
-                        // Mute
+                        // Chia sẻ
+                        ShareLink(item: shareText) {
+                            VStack(spacing: 4) {
+                                Image(systemName: "arrowshape.turn.up.right.fill").font(.title2).foregroundStyle(.white)
+                                Text("Chia sẻ").font(.caption).foregroundStyle(.white)
+                            }
+                        }
+                        // Tắt/bật tiếng
                         Button {
                             isMuted.toggle(); player?.isMuted = isMuted
                         } label: {
@@ -1209,6 +1037,7 @@ struct ReelCard: View {
                                 .font(.title3).foregroundStyle(.white)
                         }
                     }
+                    .shadow(color: .black.opacity(0.4), radius: 3)
                 }
                 .padding(.horizontal, 16).padding(.bottom, 56)
                 .background(
