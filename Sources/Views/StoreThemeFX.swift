@@ -98,14 +98,15 @@ final class LoopingPlayerUIView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
     private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 
-    init(url: URL) {
+    init(url: URL, fit: Bool = false) {
         super.init(frame: .zero)
         let item = AVPlayerItem(url: url)
         let p = AVQueuePlayer(playerItem: item)
         p.isMuted = true
         looper = AVPlayerLooper(player: p, templateItem: item)
         playerLayer.player = p
-        playerLayer.videoGravity = .resizeAspectFill
+        // fit = hiện ĐỦ video trong khung (không cắt); mặc định fill = lấp đầy (có thể cắt)
+        playerLayer.videoGravity = fit ? .resizeAspect : .resizeAspectFill
         p.play()
         queuePlayer = p
         // Tự phát lại khi app quay lại foreground (tránh video dừng khi mở lại)
@@ -127,7 +128,8 @@ final class LoopingPlayerUIView: UIView {
 
 struct LoopingVideoBackground: UIViewRepresentable {
     let url: URL
-    func makeUIView(context: Context) -> LoopingPlayerUIView { LoopingPlayerUIView(url: url) }
+    var fit: Bool = false   // true = hiện đủ video trong khung (không cắt)
+    func makeUIView(context: Context) -> LoopingPlayerUIView { LoopingPlayerUIView(url: url, fit: fit) }
     func updateUIView(_ uiView: LoopingPlayerUIView, context: Context) {}
 }
 

@@ -1205,7 +1205,8 @@ struct StoreView: View {
             if let c = effectiveConfig, !c.bannerUrl.isEmpty {
                 // ===== Banner-Hero: tiêu đề + dòng phụ + nút "Mua ngay" ĐÈ LÊN ảnh banner (1 khối) =====
                 StoreMediaCarousel(
-                    media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)], height: 235)
+                    media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)], height: 235,
+                    videoFit: true)   // video hero hiện ĐỦ khung, không bị cắt; kích thước hero giữ nguyên
                     .overlay {
                         LinearGradient(
                             colors: [.black.opacity(0.35), .clear, .black.opacity(0.78)],

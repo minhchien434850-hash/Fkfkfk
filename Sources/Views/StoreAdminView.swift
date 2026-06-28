@@ -347,7 +347,8 @@ struct StoreConfigEditor: View {
                                   "Paste cover image/video link (GIF / PNG / JPEG / WEBP / MP4)"), text: $bannerUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                 if !bannerUrl.isEmpty {
-                    StoreMediaCarousel(media: [StoreMedia(type: bannerType, url: bannerUrl)], height: 120)
+                    StoreMediaCarousel(media: [StoreMedia(type: bannerType, url: bannerUrl)], height: 120,
+                                       videoFit: true)   // xem trước đúng như hero (video đủ khung)
                         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 }
             } header: {

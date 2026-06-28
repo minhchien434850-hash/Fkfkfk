@@ -92,6 +92,7 @@ func kGroupNumber(_ n: Int) -> String {
 struct StoreMediaCarousel: View {
     let media: [StoreMedia]
     var height: CGFloat = 200
+    var videoFit: Bool = false   // true = video hiện ĐỦ khung, không bị cắt (dùng cho hero)
 
     var body: some View {
         if media.isEmpty {
@@ -103,8 +104,10 @@ struct StoreMediaCarousel: View {
             TabView {
                 ForEach(Array(media.prefix(5).enumerated()), id: \.offset) { _, m in
                     if m.type == "video", let url = URL(string: m.url) {
-                        LoopingVideoBackground(url: url)
+                        LoopingVideoBackground(url: url, fit: videoFit)
                             .frame(height: height)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.black)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                     } else if let url = URL(string: m.url) {
                         storeImage(url: url, height: height)
