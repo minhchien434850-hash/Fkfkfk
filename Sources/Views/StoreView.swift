@@ -1149,6 +1149,15 @@ struct StoreView: View {
                         .foregroundStyle(Theme.accent)
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }
+                // Lượt xem (mắt) + số key/acc còn lại
+                HStack(spacing: 8) {
+                    Label("\(kGroupNumber(p.views ?? 0))", systemImage: "eye.fill")
+                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                    Label("\(p.availableKeys)", systemImage: "key.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(p.availableKeys > 0 ? .green : .red)
+                }
+                .lineLimit(1).minimumScaleFactor(0.8)
                 HStack(spacing: 4) {
                     Image(systemName: "cart.fill")
                         .font(.system(size: 10))
@@ -1873,6 +1882,17 @@ struct StoreProductDetailView: View {
                         }
                     }
 
+                    // Lượt xem (mắt) + số key/acc còn lại
+                    HStack(spacing: 14) {
+                        Label("\(kGroupNumber(p.views ?? 0)) " + store.t("lượt xem", "views"), systemImage: "eye.fill")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Label(p.availableKeys > 0
+                              ? "\(store.t("Còn", "Left")) \(p.availableKeys) \(p.stockLabel)"
+                              : store.t("Hết hàng", "Out of stock"), systemImage: "key.fill")
+                            .font(.caption.bold())
+                            .foregroundStyle(p.availableKeys > 0 ? .green : .red)
+                    }
+
                     // Đã sở hữu thì vẫn hiện key cũ + cho phép MUA THÊM lần nữa (không giới hạn lượt mua)
                     if let m = mine, m.owned {
                         ownedSection(m)
@@ -1898,7 +1918,12 @@ struct StoreProductDetailView: View {
         }
         .navigationTitle(product?.name ?? store.t("Sản phẩm", "Product"))
         .navigationBarTitleDisplayMode(.inline)
-        .task { await reload(); trackRecentView(productId) }
+        .task {
+            // Mỗi lần mở sản phẩm = +1 lượt xem (không giới hạn), rồi tải lại để hiện số mới
+            try? await store.api.storeProductView(productId: productId)
+            await reload()
+            trackRecentView(productId)
+        }
         .sheet(isPresented: $showWallet, onDismiss: { Task { await reloadBalance() } }) {
             StoreWalletView()
         }

@@ -814,6 +814,8 @@ def _migrate() -> None:
         ("users", "bio", "TEXT"),
         # Video feed: lượt xem
         ("posts", "views", "INTEGER DEFAULT 0"),
+        # Sản phẩm cửa hàng: lượt xem (mỗi lần khách bấm vào +1)
+        ("store_products", "views", "INTEGER DEFAULT 0"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -4279,6 +4281,7 @@ def _product_public(c, row) -> dict:
         "media": _load_media(row["media"]),
         "prices": _product_prices(c, row["id"]),
         "available_keys": avail,
+        "views": (row["views"] if "views" in row.keys() else 0) or 0,
         "has_download": bool((row["download_url"] or "").strip()) or row["download_file_id"] is not None,
     }
 
@@ -4618,6 +4621,15 @@ def store_review(pid: int, b: ReviewIn, user=Depends(get_user)) -> dict[str, Any
             (pid, user["id"], stars, int(time.time())))
         total = c.execute("SELECT COUNT(*) n FROM store_reviews").fetchone()["n"]
     return {"ok": True, "total_reviews": total}
+
+
+@app.post("/store/products/{pid}/view")
+def store_product_view(pid: int) -> dict[str, Any]:
+    """Tăng lượt xem sản phẩm — mỗi lần khách bấm vào +1 (không giới hạn, công khai)."""
+    with db() as c:
+        c.execute("UPDATE store_products SET views=COALESCE(views,0)+1 WHERE id=?", (pid,))
+        row = c.execute("SELECT views FROM store_products WHERE id=?", (pid,)).fetchone()
+    return {"views": (row["views"] if row else 0) or 0}
 
 
 # -------------------- Khách mua bằng VÍ (giao hàng tức thì) --------------------

@@ -425,6 +425,7 @@ struct StoreProduct: Identifiable, Decodable, Hashable {
     let availableKeys: Int
     let hasDownload: Bool
     let kind: String?   // "app" (key/ứng dụng) | "acc" (acc game)
+    var views: Int? = nil   // lượt xem (mỗi lần khách bấm vào +1)
 
     var isAcc: Bool { (kind ?? "app") == "acc" }
     /// Nhãn cho phần "key/acc" tuỳ loại sản phẩm

@@ -383,6 +383,10 @@ struct APIClient {
         try decode(try await send("/store/products/\(productId)/review", method: "POST",
                                   json: ["stars": stars]))
     }
+    // Tăng lượt xem sản phẩm (mỗi lần khách bấm vào +1)
+    func storeProductView(productId: Int) async throws {
+        _ = try await send("/store/products/\(productId)/view", method: "POST")
+    }
     // Mua bằng số dư ví (giao hàng tức thì)
     func storeBuy(productId: Int, priceId: Int?, promoCode: String? = nil) async throws -> StoreBuyResponse {
         var body: [String: Any] = ["product_id": productId]
