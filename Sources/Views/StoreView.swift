@@ -2001,7 +2001,18 @@ struct StoreProductDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label(store.t("Bạn đã sở hữu sản phẩm này", "You already own this product"), systemImage: "checkmark.seal.fill")
                 .font(.headline).foregroundStyle(.green)
-            if let key = m.key, !key.isEmpty {
+            if let msg = m.delivery, !msg.isEmpty {
+                // Tin nhắn giao hàng đầy đủ: sản phẩm + nền tảng + thời hạn + ngày hết hạn + key
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(msg).font(.callout).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { UIPasteboard.general.string = msg } label: {
+                        Label(store.t("Sao chép", "Copy"), systemImage: "doc.on.doc").font(.caption.bold())
+                    }
+                }
+                .padding(12).background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else if let key = m.key, !key.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(product?.itemLabel ?? "KEY") " + store.t("của bạn", "(yours)")).font(.caption).foregroundStyle(.secondary)
                     HStack {
@@ -2157,8 +2168,9 @@ struct StoreProductDetailView: View {
             let r = try await store.api.storeBuy(productId: p.id, priceId: selectedPrice?.id)
             balance = r.balance
             mine = StoreProductMine(owned: true, key: r.key,
-                                    downloadUrl: r.downloadUrl, downloadFileId: r.downloadFileId)
-            info = r.message
+                                    downloadUrl: r.downloadUrl, downloadFileId: r.downloadFileId,
+                                    delivery: r.delivery, expiresAt: r.expiresAt)
+            info = r.delivery ?? r.message
         } catch {
             self.error = error.localizedDescription
             // Có thể do hết số dư (server kiểm tra lại) → mở ví
@@ -2250,7 +2262,16 @@ struct StoreMyOrdersView: View {
                     .foregroundStyle(o.status == "completed" ? .green : .orange)
             }
             Text(kFormatVND(o.amount)).font(.caption).foregroundStyle(Theme.accent)
-            if let key = o.key, !key.isEmpty {
+            if let msg = o.delivery, !msg.isEmpty {
+                HStack(alignment: .top) {
+                    Text(msg).font(.caption).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { UIPasteboard.general.string = msg } label: { Image(systemName: "doc.on.doc") }
+                        .buttonStyle(.borderless)
+                }
+                .padding(8).background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else if let key = o.key, !key.isEmpty {
                 HStack {
                     Text(key).font(.caption.monospaced()).textSelection(.enabled).lineLimit(2)
                     Spacer()
