@@ -294,7 +294,9 @@ struct StoreConfigEditor: View {
     @State private var sloganAnim = "none"
     @State private var promoImageUrl = ""
     @State private var promoProductId = 0
-    @State private var editSteps: [EditStep] = EditStep.defaults
+    @State private var statUsersBase = 0
+    @State private var statSoldBase = 0
+    @State private var statReviewsBase = 0
     @State private var message: String?
     @State private var isError = false
     @AppStorage("storeCfgName") private var cfgName: String = ""
@@ -313,7 +315,7 @@ struct StoreConfigEditor: View {
         case "wishlist":     return "Yêu thích"
         case "recent":       return "Đã xem gần đây"
         case "trust":        return "Thẻ tin cậy (4 ô)"
-        case "steps":        return "3 bước mua hàng"
+        case "steps":        return "Thống kê (người dùng · đã bán · đánh giá)"
         case "flash":        return "Flash sale (đếm ngược)"
         case "leaderboard":  return "Bảng xếp hạng nạp"
         case "transactions": return "Giao dịch gần đây"
@@ -565,17 +567,31 @@ struct StoreConfigEditor: View {
                     .font(.caption2)
             }
 
+            // 3 ô thống kê: Người dùng · Đã bán · Đánh giá (số ẢO + số THẬT tự cộng)
             Section {
-                NavigationLink {
-                    StoreStepsEditor(steps: $editSteps)
-                } label: {
-                    Label(store.t("3 bước hướng dẫn", "3 guide steps"), systemImage: "list.number")
+                HStack {
+                    Label(store.t("Người dùng (ảo)", "Users (virtual)"), systemImage: "person.2.fill")
+                    Spacer()
+                    TextField("0", value: $statUsersBase, format: .number)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 110)
+                }
+                HStack {
+                    Label(store.t("Đã bán (ảo)", "Sold (virtual)"), systemImage: "bag.fill")
+                    Spacer()
+                    TextField("0", value: $statSoldBase, format: .number)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 110)
+                }
+                HStack {
+                    Label(store.t("Đánh giá (ảo)", "Reviews (virtual)"), systemImage: "star.fill")
+                    Spacer()
+                    TextField("0", value: $statReviewsBase, format: .number)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 110)
                 }
             } header: {
-                Text(store.t("Bước hướng dẫn", "Guide steps"))
+                Text(store.t("Thống kê cửa hàng", "Store stats"))
             } footer: {
-                Text(store.t("Tuỳ chỉnh tiêu đề, mô tả và biểu tượng của 3 bước hiển thị trên trang cửa hàng.",
-                             "Customize the icon, title and description of the 3 steps shown on the storefront."))
+                Text(store.t("3 ô hiển thị đầu trang. Số bạn nhập là số ẢO ban đầu; hệ thống TỰ CỘNG số thật (người dùng đăng ký, sản phẩm đã bán, lượt đánh giá) vào đó.",
+                             "Three cards at the top. The number you enter is a virtual base; the system auto-adds the real counts (registered users, items sold, reviews) on top."))
                     .font(.caption2)
             }
 
@@ -658,11 +674,9 @@ struct StoreConfigEditor: View {
             sloganAnim = c.sloganAnim ?? "none"
             promoImageUrl = c.promoImageUrl ?? ""
             promoProductId = c.promoProductId ?? 0
-            if let s = c.steps, s.count == 3 {
-                editSteps = s.map { EditStep(icon: $0.icon, title: $0.title, desc: $0.desc, badge: $0.badge.isEmpty ? "" : $0.badge) }
-            } else {
-                editSteps = EditStep.defaults
-            }
+            statUsersBase = c.statUsersBase ?? 0
+            statSoldBase = c.statSoldBase ?? 0
+            statReviewsBase = c.statReviewsBase ?? 0
             announceEnabled = c.announceEnabled ?? false
             announceText = c.announceText ?? ""
             announceColor = c.announceColor ?? "accent"
@@ -689,7 +703,8 @@ struct StoreConfigEditor: View {
                 sloganEffect: sloganEffect, sloganAnim: sloganAnim,
                 promoImageUrl: promoImageUrl.isEmpty ? nil : promoImageUrl,
                 promoProductId: promoProductId > 0 ? promoProductId : nil,
-                steps: editSteps.map { ["icon": $0.icon, "title": $0.title, "desc": $0.desc, "badge": $0.badge] },
+                statUsersBase: statUsersBase, statSoldBase: statSoldBase,
+                statReviewsBase: statReviewsBase,
                 announceEnabled: announceEnabled, announceText: announceText,
                 announceColor: announceColor, gamecatLimit: gamecatLimit)
             // Lưu cache ngay để các màn khác giữ tên/logo + thứ tự bố cục mới kể cả khi mạng chậm
@@ -2720,95 +2735,5 @@ struct AdminPushNotificationView: View {
             result = error.localizedDescription; isError = true
         }
         sending = false
-    }
-}
-
-// ---- Cấu trúc bước hướng dẫn (dùng trong admin) ----
-struct EditStep: Identifiable {
-    let id = UUID()
-    var icon: String
-    var title: String
-    var desc: String
-    var badge: String   // số/ký tự trong vòng tròn
-
-    static let defaults: [EditStep] = [
-        EditStep(icon: "magnifyingglass",  title: "Chọn game",  desc: "Tìm & chọn gói phù hợp", badge: "1"),
-        EditStep(icon: "creditcard",       title: "Thanh toán", desc: "Nạp qua bank hoặc thẻ",  badge: "2"),
-        EditStep(icon: "arrow.down.circle",title: "Nhận key",   desc: "Key gửi tức thì",         badge: "3"),
-    ]
-
-    static let iconOptions: [(String, String)] = [
-        ("magnifyingglass",    "Tìm kiếm"),
-        ("cart",               "Giỏ hàng"),
-        ("creditcard",         "Thẻ / Ngân hàng"),
-        ("arrow.down.circle",  "Tải xuống"),
-        ("key",                "Key"),
-        ("gamecontroller",     "Game"),
-        ("bolt",               "Tức thì"),
-        ("lock.open",          "Mở khoá"),
-        ("star",               "Nổi bật"),
-        ("gift",               "Quà tặng"),
-        ("checkmark.circle",   "Hoàn thành"),
-        ("person.crop.circle", "Tài khoản"),
-        ("phone",              "Điện thoại"),
-        ("envelope",           "Email"),
-        ("shield.checkered",   "Bảo hành"),
-    ]
-}
-
-// ---- Editor 3 bước hướng dẫn ----
-struct StoreStepsEditor: View {
-    @EnvironmentObject var store: AppStore
-    @Binding var steps: [EditStep]
-
-    var body: some View {
-        Form {
-            ForEach($steps) { $step in
-                let idx = steps.firstIndex(where: { $0.id == step.id }).map { $0 + 1 } ?? 0
-                Section("Bước \(idx)") {
-                    // Chọn icon
-                    Picker(store.t("Biểu tượng", "Icon"), selection: $step.icon) {
-                        ForEach(EditStep.iconOptions, id: \.0) { sym, label in
-                            Label(label, systemImage: sym).tag(sym)
-                        }
-                    }
-                    // Xem trước icon + số hiện tại
-                    HStack {
-                        Spacer()
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: step.icon).font(.title3)
-                                .frame(width: 46, height: 46)
-                                .background(Color.accentColor.opacity(0.15))
-                                .foregroundColor(.accentColor)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            let badgeText = step.badge.isEmpty ? "\(idx)" : step.badge
-                            Text(badgeText).font(.system(size: 10, weight: .bold))
-                                .padding(.horizontal, 5).padding(.vertical, 2)
-                                .frame(minWidth: 18, minHeight: 18)
-                                .background(Color.accentColor).foregroundColor(.white)
-                                .clipShape(Capsule())
-                                .offset(x: badgeText.count > 2 ? 10 : 6, y: -6)
-                        }
-                        Spacer()
-                    }
-                    HStack {
-                        Text(store.t("Số hiển thị", "Badge"))
-                        Spacer()
-                        TextField(store.t("Mặc định (\(idx))", "Default (\(idx))"), text: $step.badge)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 80)
-                    }
-                    TextField(store.t("Tiêu đề (vd: Chọn game)", "Title (e.g. Choose game)"), text: $step.title)
-                    TextField(store.t("Mô tả ngắn", "Short description"), text: $step.desc)
-                }
-            }
-            Section {
-                Button(store.t("Đặt lại mặc định", "Reset to defaults"), role: .destructive) {
-                    steps = EditStep.defaults
-                }
-            }
-        }
-        .navigationTitle(store.t("3 bước hướng dẫn", "Guide steps"))
-        .navigationBarTitleDisplayMode(.inline)
     }
 }

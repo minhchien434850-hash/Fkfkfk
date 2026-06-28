@@ -377,6 +377,12 @@ struct APIClient {
     func storeProductMine(_ pid: Int) async throws -> StoreProductMine {
         try decode(try await send("/store/products/\(pid)/mine"))
     }
+    // Gửi đánh giá sản phẩm (để đếm "lượt đánh giá") — bỏ qua nếu lỗi
+    @discardableResult
+    func storeReview(productId: Int, stars: Int) async throws -> MessageResponse {
+        try decode(try await send("/store/products/\(productId)/review", method: "POST",
+                                  json: ["stars": stars]))
+    }
     // Mua bằng số dư ví (giao hàng tức thì)
     func storeBuy(productId: Int, priceId: Int?, promoCode: String? = nil) async throws -> StoreBuyResponse {
         var body: [String: Any] = ["product_id": productId]
@@ -439,7 +445,8 @@ struct APIClient {
                              sloganAnim: String? = nil,
                              promoImageUrl: String? = nil,
                              promoProductId: Int? = nil,
-                             steps: [[String: String]]? = nil,
+                             statUsersBase: Int? = nil, statSoldBase: Int? = nil,
+                             statReviewsBase: Int? = nil,
                              announceEnabled: Bool? = nil, announceText: String? = nil,
                              announceColor: String? = nil, gamecatLimit: Int? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
@@ -470,7 +477,9 @@ struct APIClient {
         if let sloganAnim { body["slogan_anim"] = sloganAnim }
         body["promo_image_url"] = promoImageUrl ?? ""
         if let promoProductId { body["promo_product_id"] = promoProductId }
-        if let steps { body["steps"] = steps }
+        if let statUsersBase { body["stat_users_base"] = statUsersBase }
+        if let statSoldBase { body["stat_sold_base"] = statSoldBase }
+        if let statReviewsBase { body["stat_reviews_base"] = statReviewsBase }
         if let announceEnabled { body["announce_enabled"] = announceEnabled }
         if let announceText { body["announce_text"] = announceText }
         if let announceColor { body["announce_color"] = announceColor }

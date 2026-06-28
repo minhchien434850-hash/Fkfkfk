@@ -80,6 +80,14 @@ func kFormatVND(_ amount: Int) -> String {
     return (f.string(from: NSNumber(value: amount)) ?? "\(amount)") + "đ"
 }
 
+// Số nguyên có dấu chấm nhóm nghìn (không có "đ") — dùng cho ô thống kê
+func kGroupNumber(_ n: Int) -> String {
+    let f = NumberFormatter()
+    f.numberStyle = .decimal
+    f.groupingSeparator = "."
+    return f.string(from: NSNumber(value: n)) ?? "\(n)"
+}
+
 // Carousel ảnh/video (link) — tối đa 5, hỗ trợ GIF động + video lặp vô hạn
 struct StoreMediaCarousel: View {
     let media: [StoreMedia]
@@ -475,7 +483,7 @@ struct StoreView: View {
         case "trust":
             trustBadgesSection
         case "steps":
-            stepsSection
+            statsSection
         case "flash":
             if let p = flashProduct { flashSection(p) }
         case "leaderboard":
@@ -656,37 +664,26 @@ struct StoreView: View {
     }
 
     // 3 bước: dùng config từ server nếu có, fallback về mặc định
-    private var stepsSection: some View {
-        let fallback: [(String, String, String)] = [
-            ("magnifyingglass",  store.t("Chọn game", "Choose game"),  store.t("Tìm & chọn gói phù hợp", "Find & pick a package")),
-            ("creditcard",       store.t("Thanh toán", "Payment"),     store.t("Nạp qua bank hoặc thẻ", "Pay via bank or card")),
-            ("arrow.down.circle",store.t("Nhận key", "Get key"),       store.t("Key gửi tức thì", "Key sent instantly")),
+    // 3 ô thống kê: Người dùng · Đã bán · Đánh giá. Số hiển thị = số ẢO (admin đặt) + số THẬT.
+    private var statsSection: some View {
+        let users   = (config?.statUsersBase ?? 0)   + (config?.statUsersReal ?? 0)
+        let sold    = (config?.statSoldBase ?? 0)    + (config?.statSoldReal ?? 0)
+        let reviews = (config?.statReviewsBase ?? 0) + (config?.statReviewsReal ?? 0)
+        let items: [(String, Int, String, Color)] = [
+            ("person.2.fill",  users,   store.t("Người dùng", "Users"),   Theme.accent),
+            ("bag.fill",       sold,    store.t("Đã bán", "Sold"),        .green),
+            ("star.fill",      reviews, store.t("Đánh giá", "Reviews"),   .orange),
         ]
-        let steps: [(String, String, String, String)] = {
-            if let s = config?.steps, s.count == 3 {
-                return s.enumerated().map { (i, st) in
-                    (st.icon, st.title, st.desc, st.badge.isEmpty ? "\(i+1)" : st.badge)
-                }
-            }
-            return fallback.enumerated().map { (i, t) in (t.0, t.1, t.2, "\(i+1)") }
-        }()
         return HStack(spacing: 10) {
-            ForEach(Array(steps.enumerated()), id: \.offset) { _, s in
+            ForEach(Array(items.enumerated()), id: \.offset) { _, s in
                 VStack(spacing: 6) {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: s.0).font(.title3)
-                            .frame(width: 46, height: 46)
-                            .background(Theme.accent.opacity(0.15)).foregroundStyle(Theme.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        Text(s.3).font(.system(size: 10, weight: .bold))
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .frame(minWidth: 18, minHeight: 18)
-                            .background(Theme.accent).foregroundStyle(.white)
-                            .clipShape(Capsule())
-                            .offset(x: s.3.count > 2 ? 10 : 6, y: -6)
-                    }
-                    Text(s.1).font(.caption.bold()).lineLimit(1)
-                    Text(s.2).font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center).lineLimit(2)
+                    Image(systemName: s.0).font(.title3)
+                        .frame(width: 46, height: 46)
+                        .background(s.3.opacity(0.15)).foregroundStyle(s.3)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    Text(kGroupNumber(s.1)).font(.headline.bold().monospacedDigit())
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                    Text(s.2).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
@@ -1850,6 +1847,8 @@ struct StoreProductDetailView: View {
         var dict = (try? JSONDecoder().decode([String: Int].self, from: Data(ratingsRaw.utf8))) ?? [:]
         dict["\(productId)"] = stars
         if let d = try? JSONEncoder().encode(dict) { ratingsRaw = String(data: d, encoding: .utf8) ?? "{}" }
+        // Gửi lên server để cộng vào "lượt đánh giá" (mỗi khách 1 đánh giá/sản phẩm)
+        Task { try? await store.api.storeReview(productId: productId, stars: stars) }
     }
 
     var body: some View {

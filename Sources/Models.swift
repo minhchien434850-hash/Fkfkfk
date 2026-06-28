@@ -280,8 +280,13 @@ struct StoreAppConfig: Decodable, Hashable {
     // Khuyến mãi (banner ảnh trong phần ví nạp tiền)
     var promoImageUrl: String? = nil
     var promoProductId: Int? = nil
-    // 3 bước hướng dẫn tuỳ chỉnh
-    var steps: [StoreStep]? = nil
+    // 3 ô thống kê: số ẢO admin đặt + số THẬT đếm từ server (hiển thị = ảo + thật)
+    var statUsersBase: Int? = nil
+    var statSoldBase: Int? = nil
+    var statReviewsBase: Int? = nil
+    var statUsersReal: Int? = nil
+    var statSoldReal: Int? = nil
+    var statReviewsReal: Int? = nil
     // Thanh thông báo chạy đầu trang
     var announceEnabled: Bool? = nil
     var announceText: String? = nil
@@ -290,12 +295,6 @@ struct StoreAppConfig: Decodable, Hashable {
     var gamecatLimit: Int? = nil
 }
 
-struct StoreStep: Codable, Hashable {
-    var icon: String
-    var title: String
-    var desc: String
-    var badge: String = ""   // số/ký tự hiển thị trong vòng tròn (mặc định = số thứ tự)
-}
 
 // ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----
 struct ShowcaseOrder: Decodable, Hashable, Identifiable {

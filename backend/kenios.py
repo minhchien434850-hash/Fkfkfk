@@ -594,6 +594,15 @@ def init_db() -> None:
                 created_at INTEGER
             );
 
+            -- Đánh giá sản phẩm (mỗi khách 1 đánh giá / sản phẩm) → đếm "lượt đánh giá"
+            CREATE TABLE IF NOT EXISTS store_reviews(
+                product_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                stars INTEGER DEFAULT 5,
+                created_at INTEGER,
+                PRIMARY KEY(product_id, user_id)
+            );
+
             -- Nạp tiền vào VÍ cửa hàng (tách biệt thanh toán app chính)
             CREATE TABLE IF NOT EXISTS store_topups(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4291,6 +4300,14 @@ def store_all_products() -> dict[str, Any]:
 
 @app.get("/store/config")
 def store_config() -> dict[str, Any]:
+    # Đếm số THẬT cho 3 ô thống kê (người dùng / sản phẩm đã bán / lượt đánh giá)
+    with db() as c:
+        real_users = c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
+        real_sold = c.execute("SELECT COUNT(*) n FROM store_orders WHERE status='completed'").fetchone()["n"]
+        try:
+            real_reviews = c.execute("SELECT COUNT(*) n FROM store_reviews").fetchone()["n"]
+        except Exception:
+            real_reviews = 0
     return {
         "logo_name": get_setting("store_logo_name", "KENIOS Store"),
         "logo_url": get_setting("store_logo_url", ""),
@@ -4331,8 +4348,13 @@ def store_config() -> dict[str, Any]:
         # Khuyến mãi (banner ảnh trong phần ví nạp tiền)
         "promo_image_url": get_setting("store_promo_image_url", ""),
         "promo_product_id": _int_setting("store_promo_product_id", 0),
-        # 3 bước hướng dẫn tuỳ chỉnh
-        "steps": _load_steps(),
+        # 3 ô thống kê: số ẢO admin đặt + số THẬT đếm từ DB (app hiển thị tổng = ảo + thật)
+        "stat_users_base": _int_setting("store_stat_users_base", 0),
+        "stat_sold_base": _int_setting("store_stat_sold_base", 0),
+        "stat_reviews_base": _int_setting("store_stat_reviews_base", 0),
+        "stat_users_real": real_users,
+        "stat_sold_real": real_sold,
+        "stat_reviews_real": real_reviews,
         # Thanh thông báo chạy (announcement) đầu trang cửa hàng
         "announce_enabled": get_setting("store_announce_enabled", "0") == "1",
         "announce_text": get_setting("store_announce_text", ""),
@@ -4340,15 +4362,6 @@ def store_config() -> dict[str, Any]:
         # Số sản phẩm hiển thị tối đa mỗi danh mục ở lưới "Danh mục Game"
         "gamecat_limit": _int_setting("store_gamecat_limit", 6),
     }
-
-
-def _load_steps() -> list:
-    """Đọc 3 bước hướng dẫn đã lưu (JSON). Trả [] nếu chưa cấu hình → app dùng mặc định."""
-    try:
-        v = json.loads(get_setting("store_steps", "[]") or "[]")
-        return v if isinstance(v, list) else []
-    except Exception:
-        return []
 
 
 def _int_setting(key: str, default: int = 0) -> int:
@@ -4590,6 +4603,23 @@ def store_product_mine(pid: int, user=Depends(get_user)) -> dict[str, Any]:
         }
 
 
+# -------------------- Đánh giá sản phẩm (đếm "lượt đánh giá") --------------------
+class ReviewIn(BaseModel):
+    stars: int = 5
+
+@app.post("/store/products/{pid}/review")
+def store_review(pid: int, b: ReviewIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Khách đánh giá sản phẩm — mỗi khách 1 đánh giá/sản phẩm (cập nhật nếu đã có)."""
+    stars = max(1, min(5, int(b.stars)))
+    with db() as c:
+        c.execute(
+            "INSERT INTO store_reviews(product_id,user_id,stars,created_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(product_id,user_id) DO UPDATE SET stars=excluded.stars",
+            (pid, user["id"], stars, int(time.time())))
+        total = c.execute("SELECT COUNT(*) n FROM store_reviews").fetchone()["n"]
+    return {"ok": True, "total_reviews": total}
+
+
 # -------------------- Khách mua bằng VÍ (giao hàng tức thì) --------------------
 class StoreOrderIn(BaseModel):
     product_id: int
@@ -4792,8 +4822,10 @@ class StoreConfigIn(BaseModel):
     # Khuyến mãi (banner ảnh trong phần ví nạp tiền)
     promo_image_url: Optional[str] = None
     promo_product_id: Optional[int] = None
-    # 3 bước hướng dẫn tuỳ chỉnh: [{icon,title,desc,badge}, ...]
-    steps: Optional[list[dict[str, str]]] = None
+    # 3 ô thống kê: số ảo admin đặt (số thật đếm tự động ở backend)
+    stat_users_base: Optional[int] = None
+    stat_sold_base: Optional[int] = None
+    stat_reviews_base: Optional[int] = None
     # Thanh thông báo chạy
     announce_enabled: Optional[bool] = None
     announce_text: Optional[str] = None
@@ -4840,19 +4872,10 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     # Khuyến mãi (banner)
     if b.promo_image_url is not None: set_setting("store_promo_image_url", b.promo_image_url.strip())
     if b.promo_product_id is not None: set_setting("store_promo_product_id", str(max(0, int(b.promo_product_id))))
-    # 3 bước hướng dẫn — lưu dạng JSON (chỉ giữ icon/title/desc/badge, tối đa 6 bước)
-    if b.steps is not None:
-        clean = []
-        for st in b.steps[:6]:
-            if not isinstance(st, dict):
-                continue
-            clean.append({
-                "icon": str(st.get("icon", "")).strip()[:40],
-                "title": str(st.get("title", "")).strip()[:40],
-                "desc": str(st.get("desc", "")).strip()[:80],
-                "badge": str(st.get("badge", "")).strip()[:6],
-            })
-        set_setting("store_steps", json.dumps(clean, ensure_ascii=False))
+    # 3 ô thống kê — số ảo (số thật cộng tự động ở store_config)
+    if b.stat_users_base is not None: set_setting("store_stat_users_base", str(max(0, int(b.stat_users_base))))
+    if b.stat_sold_base is not None: set_setting("store_stat_sold_base", str(max(0, int(b.stat_sold_base))))
+    if b.stat_reviews_base is not None: set_setting("store_stat_reviews_base", str(max(0, int(b.stat_reviews_base))))
     # Thanh thông báo
     if b.announce_enabled is not None: set_setting("store_announce_enabled", "1" if b.announce_enabled else "0")
     if b.announce_text is not None: set_setting("store_announce_text", b.announce_text.strip()[:200])
