@@ -598,20 +598,10 @@ struct StoreView: View {
                 if let c = contacts { StoreContactsSheet(contacts: c) }
             }
             .task {
+                // Chỉ tải 1 lần khi mở cửa hàng. KHÔNG tự poll 30s nữa —
+                // việc gán lại dữ liệu theo chu kỳ làm lưới sản phẩm vẽ lại,
+                // ảnh nạp lại → giao diện bị "giật". Muốn cập nhật: vuốt để làm mới.
                 await reload()
-                // Polling mỗi 30 giây để cập nhật sản phẩm mới real-time
-                let prevCatCount = categories.count
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 30_000_000_000)
-                    let oldCount = categories.count
-                    await reload()
-                    // Gửi thông báo nếu có danh mục/sản phẩm mới
-                    if categories.count > oldCount && oldCount > 0 {
-                        store.postProductNotification(
-                            body: "KENIOS vừa cập nhật \(categories.count - oldCount) danh mục sản phẩm mới!")
-                    }
-                    _ = prevCatCount  // suppress warning
-                }
             }
             .refreshable { await reload() }
             .onReceive(flashTimer) { t in
