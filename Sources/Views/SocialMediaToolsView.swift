@@ -67,6 +67,9 @@ struct SocialMediaToolsView: View {
     @AppStorage("live_cookie_youtube")  private var ckYouTube = ""
     @State private var selectedPlatforms: Set<String> = ["tiktok", "facebook", "youtube"]
     @State private var streamResults: [String: PlatformStreamResult] = [:]
+    // Restream: phát màn hình 1 lần → VPS chia ra nhiều nền tảng
+    @State private var restream: RestreamInfo?
+    @State private var restreamBusy = false
     @State private var showBrowser = false
     @State private var browserURL = ""
     @State private var streamError: String?
@@ -289,6 +292,9 @@ struct SocialMediaToolsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .kCard(16)
 
+                // Phát MÀN HÌNH → cả 3 nền tảng (VPS chia luồng)
+                restreamPane
+
                 // Phát Live đa nền tảng bằng stream key / link (lưu thủ công)
                 multiLivePane
 
@@ -372,6 +378,84 @@ struct SocialMediaToolsView: View {
         .padding(10)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Phát màn hình → cả 3 nền tảng (VPS restream)
+    private var okStreamCount: Int { streamResults.values.filter { $0.ok }.count }
+
+    private var restreamPane: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Phát MÀN HÌNH → cả 3 nền tảng").font(.headline)
+            Text("VPS nhận 1 luồng từ điện thoại rồi tự đẩy sang các nền tảng đã lấy key ở trên. Bạn chỉ cần quay màn hình MỘT lần.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if let r = restream, r.running, let ingest = r.ingestUrl {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Circle().fill(.red).frame(width: 9, height: 9)
+                        Text("Đang chia luồng tới \(r.targets ?? 0) nền tảng")
+                            .font(.caption.bold()).foregroundStyle(.red)
+                    }
+                    Text("URL đẩy luồng (dán vào app quay màn hình):").font(.caption2).foregroundStyle(.secondary)
+                    HStack {
+                        Text(ingest).font(.system(.caption2, design: .monospaced)).lineLimit(2)
+                        Spacer()
+                        Button { UIPasteboard.general.string = ingest } label: { Image(systemName: "doc.on.doc") }
+                    }
+                    .padding(8).background(Color(.systemBackground)).clipShape(RoundedRectangle(cornerRadius: 6))
+                    Button { Task { await stopRestream() } } label: {
+                        HStack { if restreamBusy { ProgressView() }; Text("Tắt Restream") }
+                            .font(.subheadline.bold()).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).frame(height: 44)
+                            .background(Color.red).clipShape(RoundedRectangle(cornerRadius: 10))
+                    }.disabled(restreamBusy)
+                }
+                .padding(10).background(Color.green.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 10))
+            } else {
+                Button { Task { await startRestream() } } label: {
+                    HStack {
+                        if restreamBusy { ProgressView().tint(.white) }
+                        Image(systemName: "rectangle.on.rectangle.angled")
+                        Text("Bật Restream (\(okStreamCount) đích đã sẵn sàng)")
+                    }
+                    .font(.subheadline.bold()).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 48)
+                    .background(restreamBusy || okStreamCount == 0 ? Color.gray : Color.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }.disabled(restreamBusy || okStreamCount == 0)
+                Text("⚠️ Cần 'Tạo Live' ở trên trước để có key. VPS phải cài ffmpeg và mở cổng 1935.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            Text("📲 Sau khi bật: mở app quay màn hình (Larix/Streamlabs) → dán URL đẩy luồng ở trên → bật quay màn hình → bạn live ra cả 3 nền tảng cùng lúc.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kCard(16)
+        .task { restream = try? await store.api.restreamStatus() }
+    }
+
+    private func startRestream() async {
+        restreamBusy = true; streamError = nil
+        defer { restreamBusy = false }
+        let targets: [[String: String]] = ["tiktok", "facebook", "youtube"].compactMap { p in
+            guard let v = streamResults[p], v.ok else { return nil }
+            return ["name": platformName(p), "rtmp": v.rtmp, "key": v.key]
+        }
+        guard !targets.isEmpty else {
+            streamError = "Chưa có nền tảng nào sẵn sàng. Hãy bấm 'Tạo Live' ở trên trước."
+            return
+        }
+        do { restream = try await store.api.restreamStart(targets: targets) }
+        catch { streamError = error.localizedDescription }
+    }
+
+    private func stopRestream() async {
+        restreamBusy = true
+        defer { restreamBusy = false }
+        do { restream = try await store.api.restreamStop() }
+        catch { streamError = error.localizedDescription }
     }
 
     // MARK: - Phát Live đa nền tảng (stream key / link)

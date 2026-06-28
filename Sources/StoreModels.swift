@@ -341,6 +341,14 @@ struct StreamKeyResponse: Decodable {
     let title: String?
 }
 
+// Restream: VPS nhận 1 luồng rồi chia ra nhiều nền tảng
+struct RestreamInfo: Decodable {
+    let running: Bool
+    let ingestUrl: String?
+    let key: String?
+    let targets: Int?
+}
+
 // TikTok Live (đọc bình luận tự động)
 struct TikTokLiveStatus: Decodable {
     let ok: Bool?

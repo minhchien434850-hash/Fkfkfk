@@ -369,6 +369,17 @@ extension APIClient {
         return try decode(try await send("/social/stream/youtube", method: "POST", json: body))
     }
 
+    // ---- Restream đa nền tảng (VPS chia luồng bằng ffmpeg) ----
+    func restreamStart(targets: [[String: String]]) async throws -> RestreamInfo {
+        try decode(try await send("/live/restream/start", method: "POST", json: ["targets": targets]))
+    }
+    func restreamStop() async throws -> RestreamInfo {
+        try decode(try await send("/live/restream/stop", method: "POST", json: [:]))
+    }
+    func restreamStatus() async throws -> RestreamInfo {
+        try decode(try await send("/live/restream/status"))
+    }
+
     // ---- TikTok Live: đọc bình luận tự động (như TikFinity) ----
     func tiktokLiveConnect(username: String) async throws -> TikTokLiveStatus {
         try decode(try await send("/social/tiktok/live/connect", method: "POST",

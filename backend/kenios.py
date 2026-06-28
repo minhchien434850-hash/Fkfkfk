@@ -3507,6 +3507,88 @@ async def tiktok_stream(b: TikTokStreamIn, user=Depends(get_user)) -> dict[str, 
         raise HTTPException(status_code=400, detail=f"Không thể tạo phòng Live trên TikTok: {e}")
 
 
+# ======================== Restream đa nền tảng (VPS tự nhân luồng bằng ffmpeg) ========================
+# Điện thoại đẩy MỘT luồng (màn hình) tới rtmp://VPS:1935/live/<key>, VPS dùng ffmpeg
+# sao chép (không mã hoá lại) và đẩy ĐỒNG THỜI sang TikTok + Facebook + YouTube.
+_restream_proc: Optional[subprocess.Popen] = None
+_restream_meta: dict[str, Any] = {}
+
+
+class RestreamTarget(BaseModel):
+    name: str = ""
+    rtmp: str
+    key: str
+
+
+class RestreamStartIn(BaseModel):
+    targets: list[RestreamTarget]
+
+
+def _restream_host(request: Request) -> str:
+    h = os.getenv("RTMP_HOST", "").strip()
+    if h:
+        return h
+    host = request.headers.get("host", "") or (request.client.host if request.client else "")
+    return host.split(":")[0] or "127.0.0.1"
+
+
+def _restream_stop_proc() -> None:
+    global _restream_proc
+    if _restream_proc is not None:
+        try:
+            _restream_proc.terminate()
+        except Exception:
+            pass
+        _restream_proc = None
+
+
+@app.post("/live/restream/start")
+def restream_start(b: RestreamStartIn, request: Request, user=Depends(get_user)) -> dict[str, Any]:
+    global _restream_proc, _restream_meta
+    outs: list[str] = []
+    for t in b.targets:
+        rtmp = (t.rtmp or "").strip().rstrip("/")
+        key = (t.key or "").strip()
+        if rtmp and key:
+            outs.append(f"[f=flv]{rtmp}/{key}")
+    if not outs:
+        raise HTTPException(status_code=400, detail="Chưa có đích phát hợp lệ (RTMP + key).")
+    if not shutil.which("ffmpeg"):
+        raise HTTPException(status_code=400, detail="VPS chưa cài ffmpeg. Cài: apt install ffmpeg")
+    _restream_stop_proc()
+    ingest_key = secrets.token_hex(8)
+    ingest_local = f"rtmp://0.0.0.0:1935/live/{ingest_key}"
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning",
+           "-listen", "1", "-i", ingest_local,
+           "-c", "copy", "-f", "tee", "-map", "0", "|".join(outs)]
+    try:
+        _restream_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Không khởi động được ffmpeg: {e}")
+    host = _restream_host(request)
+    _restream_meta = {"running": True,
+                      "ingest_url": f"rtmp://{host}:1935/live/{ingest_key}",
+                      "key": ingest_key, "targets": len(outs),
+                      "started_at": int(time.time()), "uid": user["id"]}
+    return _restream_meta
+
+
+@app.post("/live/restream/stop")
+def restream_stop(user=Depends(get_user)) -> dict[str, Any]:
+    _restream_stop_proc()
+    _restream_meta.clear()
+    return {"running": False, "stopped": True}
+
+
+@app.get("/live/restream/status")
+def restream_status() -> dict[str, Any]:
+    running = _restream_proc is not None and (_restream_proc.poll() is None)
+    if not running:
+        _restream_meta.clear()
+        return {"running": False}
+    return {**_restream_meta, "running": True}
+
+
 # ======================== TikTok Live: đọc bình luận tự động (như TikFinity) ========================
 # Kết nối tới phòng LIVE của một username TikTok và thu các sự kiện (bình luận, quà,
 # follow, share, vào phòng) vào bộ đệm để app lấy về rồi đọc bằng TTS.
