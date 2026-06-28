@@ -42,6 +42,29 @@ systemctl restart kenios
 
 ---
 
+## 🔴 LIVE. BẬT MÁY CHỦ LIVE (để "Phát trực tiếp bằng camera" có hình) — làm 1 LẦN
+
+Muốn nút **Phát trực tiếp bằng camera** trong app hiện hình cho người xem, VPS phải
+có máy chủ nhận luồng RTMP + phát HLS. Làm 2 bước:
+
+**1) Cài máy chủ RTMP + HLS (1 lệnh):**
+```bash
+bash <(curl -s https://raw.githubusercontent.com/minhchien434850-hash/Fkfkfk/claude/read-branch-file-2lxkte/live-server/install-rtmp.sh)
+```
+→ Cài nginx + module RTMP + ffmpeg, mở cổng **1935** (nhận luồng) và **8080** (phát HLS).
+
+**2) Báo cho backend biết IP máy chủ live (1 lệnh, chạy 1 lần):**
+```bash
+echo LIVE_SERVER=103.131.56.11 >> /root/kenios/.env && systemctl restart kenios
+```
+> `LIVE_SERVER` giúp app tạo đúng link `rtmp://103.131.56.11:1935/live` và
+> `http://103.131.56.11:8080/hls/...`. Nếu sau này đổi IP/đổi domain thì sửa lại dòng này.
+
+Sau đó vào app: **Khám phá → Live Now → Phát trực tiếp bằng camera** → bấm **Bắt đầu phát**.
+Người xem mở phòng live sẽ thấy hình (trễ ~5–15 giây là bình thường với HLS).
+
+---
+
 ## 🧩 C. (TÙY CHỌN) Cài C/C++ để chạy code C++
 
 ```bash
