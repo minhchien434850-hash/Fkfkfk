@@ -29,6 +29,49 @@ struct GIFWebView: UIViewRepresentable {
     }
 }
 
+// ============================ Bộ nhớ đệm ảnh (chống nhấp nháy khi quay lại trang) ============================
+/// Giữ ảnh đã tải trong RAM để khi rời trang rồi vào lại KHÔNG phải tải lại (đứng yên 100%).
+enum StoreImageCache {
+    nonisolated(unsafe) static let memory = NSCache<NSURL, UIImage>()
+}
+
+/// Ảnh tải từ link có CACHE — thay cho AsyncImage để không nhấp nháy/nạp lại.
+struct CachedAsyncImage<Content: View, Placeholder: View>: View {
+    let url: URL
+    @ViewBuilder var content: (Image) -> Content
+    @ViewBuilder var placeholder: () -> Placeholder
+
+    @State private var uiImage: UIImage?
+
+    var body: some View {
+        Group {
+            if let img = uiImage ?? StoreImageCache.memory.object(forKey: url as NSURL) {
+                content(Image(uiImage: img))
+            } else {
+                placeholder().task(id: url) { await load() }
+            }
+        }
+    }
+
+    private func load() async {
+        if let cached = StoreImageCache.memory.object(forKey: url as NSURL) {
+            uiImage = cached; return
+        }
+        var req = URLRequest(url: url)
+        req.cachePolicy = .returnCacheDataElseLoad   // tận dụng URLCache trên đĩa giữa các lần mở app
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let img = UIImage(data: data) else { return }
+        StoreImageCache.memory.setObject(img, forKey: url as NSURL)
+        uiImage = img
+    }
+}
+
+/// True nếu link là ảnh động (GIF/WEBP) → render bằng WKWebView để chạy động.
+func isAnimatedImage(_ s: String) -> Bool {
+    let l = s.lowercased()
+    return l.contains(".gif") || l.contains(".webp")
+}
+
 // ============================ Tiện ích chung ============================
 func kFormatVND(_ amount: Int) -> String {
     let f = NumberFormatter()
@@ -69,13 +112,13 @@ struct StoreMediaCarousel: View {
 // Hiển thị ảnh từ link — tự động dùng GIFWebView khi là .gif
 @ViewBuilder
 private func storeImage(url: URL, height: CGFloat) -> some View {
-    if url.absoluteString.lowercased().contains(".gif") {
+    if isAnimatedImage(url.absoluteString) {
         GIFWebView(url: url)
             .frame(height: height)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 14))
     } else {
-        AsyncImage(url: url) { img in
+        CachedAsyncImage(url: url) { img in
             img.resizable().scaledToFill()
         } placeholder: {
             ProgressView().frame(maxWidth: .infinity)
@@ -100,10 +143,10 @@ struct StoreThumb: View {
                 if m.type == "video", let url = URL(string: m.url) {
                     LoopingVideoBackground(url: url)
                 } else if let url = URL(string: m.url) {
-                    if m.url.lowercased().contains(".gif") {
+                    if isAnimatedImage(m.url) {
                         GIFWebView(url: url)
                     } else {
-                        AsyncImage(url: url) { img in
+                        CachedAsyncImage(url: url) { img in
                             img.resizable().scaledToFill()
                         } placeholder: {
                             Color(.tertiarySystemBackground)
@@ -845,23 +888,29 @@ struct StoreView: View {
             if let promoUrl = config?.promoImageUrl, !promoUrl.isEmpty, let url = URL(string: promoUrl) {
                 if let pid = config?.promoProductId, pid > 0 {
                     NavigationLink { StoreProductDetailView(productId: pid) } label: {
-                        AsyncImage(url: url) { phase in
-                            if case .success(let img) = phase { img.resizable().scaledToFill() }
-                            else { Color(.secondarySystemBackground) }
-                        }
-                        .frame(maxHeight: 80).frame(maxWidth: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
+                        promoImageView(url: url, raw: promoUrl)
+                            .frame(maxHeight: 80).frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
                     }
                     .buttonStyle(.plain)
                 } else {
-                    AsyncImage(url: url) { phase in
-                        if case .success(let img) = phase { img.resizable().scaledToFill() }
-                        else { Color.clear }
-                    }
-                    .frame(maxHeight: 80).frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    promoImageView(url: url, raw: promoUrl)
+                        .frame(maxHeight: 80).frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
+            }
+        }
+    }
+
+    @ViewBuilder private func promoImageView(url: URL, raw: String) -> some View {
+        if isAnimatedImage(raw) {
+            GIFWebView(url: url, contentMode: "cover")
+        } else {
+            CachedAsyncImage(url: url) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Color(.secondarySystemBackground)
             }
         }
     }
@@ -1103,8 +1152,14 @@ struct StoreView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
                             if let m = cat.media.first, m.type != "video", let url = URL(string: m.url) {
-                                AsyncImage(url: url) { img in img.resizable().scaledToFill() }
-                                placeholder: { Color(.tertiarySystemBackground) }
+                                Group {
+                                    if isAnimatedImage(m.url) {
+                                        GIFWebView(url: url)
+                                    } else {
+                                        CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                        placeholder: { Color(.tertiarySystemBackground) }
+                                    }
+                                }
                                     .frame(width: 38, height: 38).clipShape(RoundedRectangle(cornerRadius: 8))
                             } else {
                                 Image(systemName: "folder.fill").foregroundStyle(Theme.gold)
@@ -1345,10 +1400,10 @@ struct StoreView: View {
                     HStack(alignment: .bottom, spacing: 12) {
                         if !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
                             Group {
-                                if c.logoUrl.lowercased().contains(".gif") {
+                                if isAnimatedImage(c.logoUrl) {
                                     GIFWebView(url: url, contentMode: "cover")
                                 } else {
-                                    AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
                                     placeholder: { Color(.tertiarySystemBackground) }
                                 }
                             }
@@ -1394,10 +1449,10 @@ struct StoreView: View {
                 HStack(alignment: .top, spacing: 12) {
                     if let c = effectiveConfig, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
                         Group {
-                            if c.logoUrl.lowercased().contains(".gif") {
+                            if isAnimatedImage(c.logoUrl) {
                                 GIFWebView(url: url, contentMode: "cover")
                             } else {
-                                AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
                                 placeholder: { Color(.secondarySystemBackground) }
                             }
                         }
@@ -1622,8 +1677,14 @@ struct StoreFolderListView: View {
 
     @ViewBuilder private func folderThumb(_ f: StoreFolder) -> some View {
         if let m = f.media.first, m.type != "video", let url = URL(string: m.url) {
-            AsyncImage(url: url) { img in img.resizable().scaledToFill() }
-            placeholder: { Color(.tertiarySystemBackground) }
+            Group {
+                if isAnimatedImage(m.url) {
+                    GIFWebView(url: url)
+                } else {
+                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                    placeholder: { Color(.tertiarySystemBackground) }
+                }
+            }
                 .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
         } else {
             Image(systemName: "folder.fill").foregroundStyle(Theme.gold)
@@ -1773,11 +1834,13 @@ struct StoreProductDetailView: View {
                         }
                     }
 
+                    // Đã sở hữu thì vẫn hiện key cũ + cho phép MUA THÊM lần nữa (không giới hạn lượt mua)
                     if let m = mine, m.owned {
                         ownedSection(m)
+                    }
+                    buySection(p)
+                    if let m = mine, m.owned {
                         ratingSection
-                    } else {
-                        buySection(p)
                     }
 
                     if let c = contacts, (!c.contact.isEmpty || !c.groups.isEmpty) {

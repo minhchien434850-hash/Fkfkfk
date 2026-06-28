@@ -150,6 +150,12 @@ struct KENIOSApp: App {
     @StateObject private var store = AppStore()
 
     init() {
+        // Bộ nhớ đệm ảnh lớn (RAM 100MB + đĩa 500MB) → ảnh logo/danh mục/sản phẩm
+        // không phải tải lại mỗi lần vào trang, giữ qua cả lần mở app sau.
+        let cache = URLCache(memoryCapacity: 100 * 1024 * 1024,
+                             diskCapacity: 500 * 1024 * 1024, diskPath: "kenios_img_cache")
+        URLCache.shared = cache
+
         // ===== Giao diện navy cao cấp: nền xanh đen sâu, thẻ navy, chữ trắng =====
         let bg      = Theme.bgNavyUI
         let card    = Theme.cardNavyUI
