@@ -335,6 +335,27 @@ struct StoreConfigEditor: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
 
+            // Ảnh / Video bìa hiển thị to ở đầu cửa hàng (phía sau tên & slogan)
+            Section {
+                Picker(store.t("Loại bìa", "Cover type"), selection: $bannerType) {
+                    Text("Ảnh / GIF").tag("image")
+                    Text("Video / MP4").tag("video")
+                }.pickerStyle(.segmented)
+                TextField(store.t("Dán link ảnh/video bìa (GIF / PNG / JPEG / WEBP / MP4)",
+                                  "Paste cover image/video link (GIF / PNG / JPEG / WEBP / MP4)"), text: $bannerUrl)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                if !bannerUrl.isEmpty {
+                    StoreMediaCarousel(media: [StoreMedia(type: bannerType, url: bannerUrl)], height: 120)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                }
+            } header: {
+                Text(store.t("Ảnh / Video bìa (banner hero)", "Cover image / video (hero banner)"))
+            } footer: {
+                Text(store.t("Ảnh hoặc video nền hiển thị to ở đầu cửa hàng, phía sau tên & slogan. Hỗ trợ link video URL hoặc PNG / GIF / JPEG / WEBP. Để trống = không hiện bìa.",
+                             "Large background image or video at the top of the store, behind the name & slogan. Supports a video URL or PNG / GIF / JPEG / WEBP. Empty = no cover."))
+                    .font(.caption2)
+            }
+
             // Dòng giới thiệu (slogan) dưới tên cửa hàng + chọn font đa dạng
             Section(store.t("Dòng giới thiệu (slogan)", "Slogan")) {
                 TextField(store.t("Vd: Cửa hàng sản phẩm số · key · tải về", "e.g. Digital store · keys · downloads"), text: $slogan, axis: .vertical)
