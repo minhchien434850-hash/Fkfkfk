@@ -190,6 +190,7 @@ struct LiveNowHubView: View {
             Picker("", selection: $seg) {
                 Text(store.t("Phòng Live", "Live Rooms")).tag(0)
                 Text(store.t("Phát đa nền tảng", "Go Live")).tag(1)
+                Text(store.t("Lớp phủ", "Overlay")).tag(2)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal)
@@ -199,8 +200,10 @@ struct LiveNowHubView: View {
             // Mỗi view con tự bọc NavigationStack riêng nên hiển thị đầy đủ tiêu đề/thanh công cụ
             if seg == 0 {
                 LiveView()
-            } else {
+            } else if seg == 1 {
                 SocialMediaToolsView(initialSegment: 2)   // mở thẳng Live Tools
+            } else {
+                OverlayDesignerView()
             }
         }
     }
