@@ -27,6 +27,16 @@ struct OverlayDesignerView: View {
         .init(id: "neon",    name: "Neon"),
         .init(id: "gaming",  name: "Gaming"),
         .init(id: "minimal", name: "Tối giản"),
+        .init(id: "cyber",   name: "Cyber"),
+        .init(id: "kawaii",  name: "Dễ thương"),
+        .init(id: "gold",    name: "Sang trọng"),
+        .init(id: "retro",   name: "Vaporwave"),
+        .init(id: "news",    name: "Bản tin"),
+        .init(id: "music",   name: "Âm nhạc"),
+        .init(id: "tiktok",  name: "TikTok"),
+        .init(id: "fire",    name: "Lửa"),
+        .init(id: "rainbow", name: "Cầu vồng"),
+        .init(id: "esports", name: "Esports"),
         .init(id: "none",    name: "Không khung"),
     ]
 
@@ -227,6 +237,16 @@ struct OverlayCanvas: View {
                 case "neon":    neon(w, h)
                 case "gaming":  gaming(w, h)
                 case "minimal": minimal(w, h)
+                case "cyber":   cyber(w, h)
+                case "kawaii":  kawaii(w, h)
+                case "gold":    gold(w, h)
+                case "retro":   retro(w, h)
+                case "news":    news(w, h)
+                case "music":   music(w, h)
+                case "tiktok":  tiktok(w, h)
+                case "fire":    fire(w, h)
+                case "rainbow": rainbow(w, h)
+                case "esports": esports(w, h)
                 default:        Color.clear
                 }
             }
@@ -341,6 +361,184 @@ struct OverlayCanvas: View {
             .clipShape(Capsule())
             .padding(w*0.05)
             .padding(.bottom, h*0.04)
+        }
+    }
+
+    // ---- Cyber (xanh dương công nghệ) ----
+    @ViewBuilder private func cyber(_ w: CGFloat, _ h: CGFloat) -> some View {
+        let c = Color(red: 0.1, green: 0.7, blue: 1)
+        ZStack {
+            Rectangle().stroke(c, lineWidth: w*0.006).padding(w*0.04)
+            VStack {
+                HStack {
+                    Text(name).font(.system(size: w*0.05, weight: .black)).foregroundStyle(.white)
+                    Spacer()
+                    HStack(spacing: w*0.015) {
+                        Circle().fill(.red).frame(width: w*0.025, height: w*0.025)
+                        Text("LIVE").font(.system(size: w*0.035, weight: .bold)).foregroundStyle(.white)
+                    }
+                }
+                .padding(.horizontal, w*0.06).padding(.vertical, w*0.03).background(c.opacity(0.18))
+                Spacer()
+                Text(subtitle).font(.system(size: w*0.04, weight: .semibold)).foregroundStyle(c)
+                    .frame(maxWidth: .infinity).padding(.vertical, w*0.025).background(.black.opacity(0.5))
+            }
+            .padding(w*0.04)
+        }
+    }
+
+    // ---- Dễ thương (hồng, tim) ----
+    @ViewBuilder private func kawaii(_ w: CGFloat, _ h: CGFloat) -> some View {
+        let p = Color(red: 1, green: 0.55, blue: 0.75)
+        ZStack {
+            RoundedRectangle(cornerRadius: w*0.08).stroke(p, lineWidth: w*0.02).padding(w*0.04)
+            VStack {
+                HStack(spacing: w*0.02) {
+                    Image(systemName: "heart.fill").foregroundStyle(p).font(.system(size: w*0.045))
+                    Text(name).font(.system(size: w*0.045, weight: .bold)).foregroundStyle(p)
+                    Image(systemName: "heart.fill").foregroundStyle(p).font(.system(size: w*0.045))
+                }.padding(.top, h*0.04)
+                Spacer()
+                Text(subtitle).font(.system(size: w*0.038, weight: .semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, w*0.05).padding(.vertical, w*0.02).background(p).clipShape(Capsule())
+                    .padding(.bottom, h*0.05)
+            }
+        }
+    }
+
+    // ---- Sang trọng (vàng gold) ----
+    @ViewBuilder private func gold(_ w: CGFloat, _ h: CGFloat) -> some View {
+        let g = LinearGradient(colors: [Color(red:1,green:0.85,blue:0.4), Color(red:0.8,green:0.6,blue:0.15)],
+                               startPoint: .leading, endPoint: .trailing)
+        ZStack {
+            RoundedRectangle(cornerRadius: w*0.03).stroke(g, lineWidth: w*0.012).padding(w*0.04)
+            VStack {
+                Spacer()
+                Text(name).font(.system(size: w*0.06, weight: .black, design: .serif)).foregroundStyle(g)
+                Rectangle().fill(g).frame(width: w*0.4, height: w*0.006)
+                Text(subtitle).font(.system(size: w*0.035, weight: .medium, design: .serif)).foregroundStyle(.white.opacity(0.9))
+                Spacer().frame(height: h*0.08)
+            }
+        }
+    }
+
+    // ---- Vaporwave (hồng/tím retro) ----
+    @ViewBuilder private func retro(_ w: CGFloat, _ h: CGFloat) -> some View {
+        let grad = LinearGradient(colors: [Color(red:1,green:0.3,blue:0.6), Color(red:0.3,green:0.5,blue:1)],
+                                  startPoint: .top, endPoint: .bottom)
+        ZStack {
+            RoundedRectangle(cornerRadius: w*0.02).stroke(grad, lineWidth: w*0.02).padding(w*0.04)
+            VStack {
+                Circle().fill(grad).frame(width: w*0.18, height: w*0.18).padding(.top, h*0.05)
+                Spacer()
+                Text(name).font(.system(size: w*0.06, weight: .black)).foregroundStyle(.white).italic()
+                Text(subtitle).font(.system(size: w*0.035)).foregroundStyle(.white.opacity(0.85)).padding(.bottom, h*0.06)
+            }
+        }
+    }
+
+    // ---- Bản tin (lower-third đỏ) ----
+    @ViewBuilder private func news(_ w: CGFloat, _ h: CGFloat) -> some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 0) {
+                Text("LIVE").font(.system(size: w*0.04, weight: .black)).foregroundStyle(.white)
+                    .padding(.horizontal, w*0.04).padding(.vertical, w*0.03).background(.red)
+                VStack(alignment: .leading, spacing: w*0.01) {
+                    Text(name).font(.system(size: w*0.045, weight: .heavy)).foregroundStyle(.white)
+                    Text(subtitle).font(.system(size: w*0.03)).foregroundStyle(.white.opacity(0.85))
+                }.padding(.horizontal, w*0.03).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(Color(red: 0.05, green: 0.1, blue: 0.35))
+            .padding(.bottom, h*0.06).padding(.horizontal, w*0.04)
+        }
+    }
+
+    // ---- Âm nhạc (equalizer) ----
+    @ViewBuilder private func music(_ w: CGFloat, _ h: CGFloat) -> some View {
+        let c = Color(red: 0.6, green: 0.2, blue: 1)
+        VStack {
+            Spacer()
+            HStack(alignment: .bottom, spacing: w*0.012) {
+                ForEach(0..<7, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: w*0.005).fill(c)
+                        .frame(width: w*0.02, height: w*(0.03 + 0.015*CGFloat((i % 3) + 1)))
+                }
+            }
+            Text(name).font(.system(size: w*0.05, weight: .black)).foregroundStyle(.white).padding(.top, w*0.02)
+            Text(subtitle).font(.system(size: w*0.032)).foregroundStyle(c).padding(.bottom, h*0.06)
+        }
+    }
+
+    // ---- TikTok (gradient dưới + @tên) ----
+    @ViewBuilder private func tiktok(_ w: CGFloat, _ h: CGFloat) -> some View {
+        VStack {
+            Spacer()
+            HStack(spacing: w*0.02) {
+                Image(systemName: "music.note").foregroundStyle(.white).font(.system(size: w*0.04))
+                VStack(alignment: .leading, spacing: w*0.005) {
+                    Text("@" + name).font(.system(size: w*0.045, weight: .bold)).foregroundStyle(.white)
+                    Text(subtitle).font(.system(size: w*0.032)).foregroundStyle(.white.opacity(0.9))
+                }
+                Spacer()
+            }
+            .padding(w*0.05)
+            .background(LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .top, endPoint: .bottom))
+        }
+    }
+
+    // ---- Lửa (đỏ/cam) ----
+    @ViewBuilder private func fire(_ w: CGFloat, _ h: CGFloat) -> some View {
+        let grad = LinearGradient(colors: [Color(red:1,green:0.6,blue:0), Color(red:1,green:0.1,blue:0)],
+                                  startPoint: .top, endPoint: .bottom)
+        ZStack {
+            RoundedRectangle(cornerRadius: w*0.04).stroke(grad, lineWidth: w*0.02)
+                .shadow(color: .orange.opacity(0.7), radius: w*0.02).padding(w*0.04)
+            VStack {
+                HStack(spacing: w*0.02) {
+                    Image(systemName: "flame.fill").foregroundStyle(grad).font(.system(size: w*0.05))
+                    Text("LIVE").font(.system(size: w*0.045, weight: .black)).foregroundStyle(.white)
+                }.padding(.top, h*0.04)
+                Spacer()
+                Text(name).font(.system(size: w*0.055, weight: .black)).foregroundStyle(.white)
+                Text(subtitle).font(.system(size: w*0.035)).foregroundStyle(.orange).padding(.bottom, h*0.05)
+            }
+        }
+    }
+
+    // ---- Cầu vồng ----
+    @ViewBuilder private func rainbow(_ w: CGFloat, _ h: CGFloat) -> some View {
+        let grad = AngularGradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red], center: .center)
+        ZStack {
+            RoundedRectangle(cornerRadius: w*0.05).stroke(grad, lineWidth: w*0.025).padding(w*0.04)
+            VStack {
+                Spacer()
+                Text(name).font(.system(size: w*0.06, weight: .black)).foregroundStyle(.white).shadow(radius: 3)
+                Text(subtitle).font(.system(size: w*0.035, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                    .padding(.bottom, h*0.06)
+            }
+        }
+    }
+
+    // ---- Esports ----
+    @ViewBuilder private func esports(_ w: CGFloat, _ h: CGFloat) -> some View {
+        let c = Color(red: 0.1, green: 0.9, blue: 0.6)
+        ZStack {
+            VStack {
+                HStack {
+                    Text(name).font(.system(size: w*0.045, weight: .black)).foregroundStyle(.black)
+                        .padding(.horizontal, w*0.04).padding(.vertical, w*0.02).background(c).clipShape(Capsule())
+                    Spacer()
+                    Text("● LIVE").font(.system(size: w*0.035, weight: .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, w*0.03).padding(.vertical, w*0.02).background(.red).clipShape(Capsule())
+                }.padding(w*0.05)
+                Spacer()
+            }
+            VStack {
+                Spacer()
+                Text(subtitle).font(.system(size: w*0.04, weight: .heavy)).foregroundStyle(c)
+                    .frame(maxWidth: .infinity).padding(.vertical, w*0.03).background(.black.opacity(0.7))
+            }
         }
     }
 }
