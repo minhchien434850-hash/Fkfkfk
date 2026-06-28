@@ -184,6 +184,43 @@ struct StoreThumb: View {
     }
 }
 
+/// Dải tự cuộn (giao dịch / nạp tiền gần đây) — đổi 6 dòng mỗi 5 giây.
+/// TÁCH RIÊNG khỏi StoreView: timer + chỉ số cuộn nằm trong chính view này nên
+/// mỗi 5 giây CHỈ dải này vẽ lại, KHÔNG kéo cả cửa hàng vẽ lại theo (hết nháy).
+struct AutoScrollTicker<Item: Identifiable, Row: View>: View {
+    let items: [Item]
+    var visible: Int = 6
+    @ViewBuilder let row: (Item) -> Row
+
+    @State private var index = 0
+    private let timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    private var window: [Item] {
+        guard items.count > visible else { return items }
+        let start = ((index % items.count) + items.count) % items.count
+        return (0..<visible).map { items[(start + $0) % items.count] }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(window) { item in
+                VStack(spacing: 0) {
+                    row(item).padding(.vertical, 8)
+                    Divider()
+                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .move(edge: .top).combined(with: .opacity)))
+            }
+        }
+        .padding(.horizontal, 12)
+        .clipped()
+        .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+        .animation(.easeInOut(duration: 0.55), value: index)
+        .onReceive(timer) { _ in if items.count > visible { index += 1 } }
+    }
+}
+
 // ============================ App bán hàng (khách) ============================
 struct StoreView: View {
     @EnvironmentObject var store: AppStore
@@ -222,10 +259,10 @@ struct StoreView: View {
     @State private var scrollTarget: String?   // dùng cho ScrollViewReader scroll đến section
     @State private var flashNow = Date()   // cập nhật để đồng hồ flash sale đếm ngược
     @State private var showcaseTick: Int = 0   // tăng mỗi 5 phút → xoay vòng showcase
-    @State private var tickerIndex: Int = 0    // tăng mỗi 5 giây → cuộn danh sách giao dịch/nạp tiền
     private let flashTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let showcaseTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
-    private let tickerTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    // (Dải giao dịch/nạp tiền tự cuộn 5 giây nằm trong AutoScrollTicker — không
+    //  còn timer ở đây để khỏi kéo cả cửa hàng vẽ lại gây nháy.)
 
     // Tên hiển thị trong showcase — 200 tên Việt Nam không lặp
     private let showcaseNames: [String] = [
@@ -610,7 +647,6 @@ struct StoreView: View {
                 }
             }
             .onReceive(showcaseTimer) { _ in showcaseTick += 1 }
-            .onReceive(tickerTimer) { _ in tickerIndex += 1 }
         }
     }
 
@@ -768,87 +804,52 @@ struct StoreView: View {
         switch r { case 1: return .orange; case 2: return .gray; case 3: return .brown; default: return Theme.accent }
     }
 
-    // Giao dịch gần đây (realtime)
-    // Cửa sổ cuộn: lấy `visible` dòng bắt đầu từ tickerIndex, vòng lại khi hết danh sách.
-    private func tickerWindow<T>(_ items: [T], _ visible: Int) -> [T] {
-        guard items.count > visible else { return items }
-        let start = ((tickerIndex % items.count) + items.count) % items.count
-        return (0..<visible).map { items[(start + $0) % items.count] }
-    }
-
+    // Giao dịch gần đây (realtime) — dải tự cuộn nằm trong AutoScrollTicker
     private func transactionsSection(_ orders: [ShowcaseOrder]) -> some View {
-        let shown = tickerWindow(orders, 6)
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(store.t("Giao dịch gần đây", "Recent purchases"), systemImage: "bag.fill").font(.headline)
                 Spacer(); realtimeBadge
             }
-            VStack(spacing: 0) {
-                ForEach(shown) { o in
-                    VStack(spacing: 0) {
-                        HStack(spacing: 10) {
-                            Text(String(o.user.prefix(1)).uppercased()).font(.caption.bold())
-                                .frame(width: 30, height: 30).background(Theme.accent.opacity(0.15))
-                                .foregroundStyle(Theme.accent).clipShape(Circle())
-                            VStack(alignment: .leading, spacing: 1) {
-                                (Text(o.user).bold() + Text(" " + store.t("mua","bought") + " ") + Text(o.product).bold())
-                                    .font(.caption).lineLimit(1)
-                                Text((o.label.isEmpty ? "" : o.label + " · ") + timeAgo(o.at))
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 4)
-                            Text(kFormatVND(o.amount)).font(.caption.bold()).foregroundStyle(.primary)
-                        }
-                        .padding(.vertical, 8)
-                        Divider()
+            AutoScrollTicker(items: orders) { o in
+                HStack(spacing: 10) {
+                    Text(String(o.user.prefix(1)).uppercased()).font(.caption.bold())
+                        .frame(width: 30, height: 30).background(Theme.accent.opacity(0.15))
+                        .foregroundStyle(Theme.accent).clipShape(Circle())
+                    VStack(alignment: .leading, spacing: 1) {
+                        (Text(o.user).bold() + Text(" " + store.t("mua","bought") + " ") + Text(o.product).bold())
+                            .font(.caption).lineLimit(1)
+                        Text((o.label.isEmpty ? "" : o.label + " · ") + timeAgo(o.at))
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .move(edge: .top).combined(with: .opacity)))
+                    Spacer(minLength: 4)
+                    Text(kFormatVND(o.amount)).font(.caption.bold()).foregroundStyle(.primary)
                 }
             }
-            .padding(.horizontal, 12)
-            .clipped()
-            .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
-            .animation(.easeInOut(duration: 0.55), value: tickerIndex)
         }
     }
 
     // Nạp tiền gần đây (realtime) — tự cuộn lên 5 giây/lần
     private func topupsSection(_ topups: [ShowcaseTopup]) -> some View {
-        let shown = tickerWindow(topups, 6)
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label(store.t("Nạp tiền gần đây", "Recent top-ups"), systemImage: "wallet.pass.fill").font(.headline)
                 Spacer(); realtimeBadge
             }
-            VStack(spacing: 0) {
-                ForEach(shown) { t in
-                    VStack(spacing: 0) {
-                        HStack(spacing: 10) {
-                            Text(String(t.user.prefix(1)).uppercased()).font(.caption.bold())
-                                .frame(width: 30, height: 30).background(Color.green.opacity(0.15))
-                                .foregroundStyle(.green).clipShape(Circle())
-                            VStack(alignment: .leading, spacing: 1) {
-                                (Text(t.user).bold() + Text(" " + store.t("đã nạp","topped up")))
-                                    .font(.caption).lineLimit(1)
-                                Text(timeAgo(t.at)).font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 4)
-                            Text("+" + kFormatVND(t.amount)).font(.caption.bold()).foregroundStyle(.green)
-                        }
-                        .padding(.vertical, 8)
-                        Divider()
+            AutoScrollTicker(items: topups) { t in
+                HStack(spacing: 10) {
+                    Text(String(t.user.prefix(1)).uppercased()).font(.caption.bold())
+                        .frame(width: 30, height: 30).background(Color.green.opacity(0.15))
+                        .foregroundStyle(.green).clipShape(Circle())
+                    VStack(alignment: .leading, spacing: 1) {
+                        (Text(t.user).bold() + Text(" " + store.t("đã nạp","topped up")))
+                            .font(.caption).lineLimit(1)
+                        Text(timeAgo(t.at)).font(.caption2).foregroundStyle(.secondary)
                     }
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .move(edge: .top).combined(with: .opacity)))
+                    Spacer(minLength: 4)
+                    Text("+" + kFormatVND(t.amount)).font(.caption.bold()).foregroundStyle(.green)
                 }
             }
-            .padding(.horizontal, 12)
-            .clipped()
-            .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
-            .animation(.easeInOut(duration: 0.55), value: tickerIndex)
         }
     }
 
