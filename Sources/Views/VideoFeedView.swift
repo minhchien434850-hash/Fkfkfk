@@ -181,35 +181,40 @@ struct VideoGridCell: View {
     private var streamURL: URL? { keniosVideoURL(postId: post.id, token: token, baseURL: baseURL) }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Color.black
-            if let thumb {
-                Image(uiImage: thumb).resizable().scaledToFill()
-            } else {
-                Image(systemName: "play.fill")
-                    .font(.title3).foregroundStyle(.white.opacity(0.5))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            // Badge riêng tư / lượt xem
-            HStack(spacing: 3) {
-                if post.isPublic != true {
-                    Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.white)
+        // Color.black định hình ô = đúng bề rộng cột × tỉ lệ 3:4 (contentMode .fit → KHÔNG tràn cột).
+        // Ảnh thumbnail phủ kín ô rồi cắt gọn, badge ghim ở đáy.
+        Color.black
+            .aspectRatio(3.0/4.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                if let thumb {
+                    Image(uiImage: thumb).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "play.fill")
+                        .font(.title3).foregroundStyle(.white.opacity(0.5))
                 }
-                Spacer()
-                Image(systemName: "eye").font(.system(size: 9)).foregroundStyle(.white)
-                Text("\(post.views ?? 0)").font(.system(size: 9)).foregroundStyle(.white)
             }
-            .padding(.horizontal, 4).padding(.bottom, 3)
-            .background(
-                LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
-            )
-        }
-        .aspectRatio(3/4, contentMode: .fill)
-        .clipped()
-        .contentShape(Rectangle())
-        .onAppear {
-            guard thumb == nil, let url = streamURL else { return }
-            generateThumbnail(postId: post.id, url: url) { img in self.thumb = img }
-        }
+            .overlay(alignment: .bottom) {
+                // Badge riêng tư / lượt xem
+                HStack(spacing: 3) {
+                    if post.isPublic != true {
+                        Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.white)
+                    }
+                    Spacer()
+                    Image(systemName: "eye").font(.system(size: 9)).foregroundStyle(.white)
+                    Text("\(post.views ?? 0)").font(.system(size: 9)).foregroundStyle(.white)
+                }
+                .padding(.horizontal, 4).padding(.bottom, 3)
+                .frame(maxWidth: .infinity)
+                .background(
+                    LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                )
+            }
+            .clipped()
+            .contentShape(Rectangle())
+            .onAppear {
+                guard thumb == nil, let url = streamURL else { return }
+                generateThumbnail(postId: post.id, url: url) { img in self.thumb = img }
+            }
     }
 }
