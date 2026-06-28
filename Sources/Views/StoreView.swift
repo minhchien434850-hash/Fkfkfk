@@ -496,13 +496,11 @@ struct StoreView: View {
                         storeHeader
                         walletBar
                         // Các mục hiển thị ĐÚNG theo thứ tự admin đã sắp xếp (kể cả "Tải về").
-                        // CHỈ gắn .id cho mục cần cuộn đến ("gamecat" — nút Mua ngay, "downloads").
-                        // Gắn .id cho TẤT CẢ khiến ScrollView mất vị trí & nhảy khi kéo tải lại trang.
+                        // Gắn .id cho mục cần cuộn đến: "products" (nút Mua ngay → Tất cả sản phẩm),
+                        // "gamecat", "downloads". Gắn .id cho mọi mục dễ khiến ScrollView nhảy khi tải lại.
                         ForEach(orderedSections, id: \.self) { key in
-                            if key == "gamecat" {
-                                sectionView(key).id("gamecat")
-                            } else if key == "downloads" {
-                                sectionView(key).id("downloads")
+                            if key == "products" || key == "gamecat" || key == "downloads" {
+                                sectionView(key).id(key)
                             } else {
                                 sectionView(key)
                             }
@@ -1513,7 +1511,11 @@ struct StoreView: View {
                 }())
                 .font(.subheadline).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Button { scrollTarget = "gamecat" } label: {
+                Button {
+                    // Luôn cuộn tới mục "Tất cả sản phẩm" (key "products") dù admin sắp xếp ở đâu.
+                    // Nếu admin ẩn mục đó thì rơi về "gamecat" (Danh mục Game) cho chắc.
+                    scrollTarget = orderedSections.contains("products") ? "products" : "gamecat"
+                } label: {
                     HStack(spacing: 6) {
                         Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
                         Image(systemName: "arrow.right")
