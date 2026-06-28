@@ -1420,64 +1420,25 @@ struct StoreView: View {
     }
 
     private var storeHeader: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 12) {
             if let c = effectiveConfig, !c.bannerUrl.isEmpty {
-                ZStack(alignment: .bottomLeading) {
-                    StoreMediaCarousel(
-                        media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)], height: 185)
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.65)],
-                        startPoint: .center, endPoint: .bottom)
-                    .frame(height: 185)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    HStack(alignment: .bottom, spacing: 12) {
-                        if !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
-                            Group {
-                                if isAnimatedImage(c.logoUrl) {
-                                    GIFWebView(url: url, contentMode: "cover")
-                                } else {
-                                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
-                                    placeholder: { Color(.tertiarySystemBackground) }
-                                }
-                            }
-                            .frame(width: 50, height: 50)
-                            .clipShape(RoundedRectangle(cornerRadius: 11))
-                            .overlay(RoundedRectangle(cornerRadius: 11).stroke(Color.white.opacity(0.25), lineWidth: 1))
-                            .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
-                        } else {
-                            Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
-                                .frame(width: 50, height: 50)
-                                .background(.ultraThinMaterial)
-                                .clipShape(RoundedRectangle(cornerRadius: 11))
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            AnimatedStoreLogo(
-                                text: displayName,
-                                effect: c.logoEffect ?? "rainbow",
-                                fontStyle: c.logoFont ?? "rounded",
-                                anim: c.logoAnim ?? "shimmer",
-                                size: 22)
-                            let sloganText: String = {
-                                let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
-                                return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
-                            }()
-                            if let eff = config?.sloganEffect, eff != "none" {
-                                AnimatedStoreText(
-                                    text: sloganText,
-                                    effect: eff,
-                                    font: keniosFont(config?.sloganFont ?? "rounded", size: 12),
-                                    anim: config?.sloganAnim ?? "none")
-                            } else {
-                                Text(sloganText)
-                                    .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
-                                    .foregroundStyle(.white.opacity(0.85))
-                            }
-                        }
-                        Spacer()
-                        headerContactIcons
+                // ===== Banner-Hero: tiêu đề + dòng phụ + nút "Mua ngay" ĐÈ LÊN ảnh banner (1 khối) =====
+                StoreMediaCarousel(
+                    media: [StoreMedia(type: c.bannerType, url: c.bannerUrl)], height: 235)
+                    .overlay {
+                        LinearGradient(
+                            colors: [.black.opacity(0.10), .black.opacity(0.78)],
+                            startPoint: .top, endPoint: .bottom)
                     }
-                    .padding(.horizontal, 14).padding(.bottom, 14)
-                }
+                    .overlay(alignment: .topTrailing) {
+                        headerContactIcons.padding(12)
+                    }
+                    .overlay(alignment: .bottomLeading) {
+                        heroBlock(onImage: true)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     if let c = effectiveConfig, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
@@ -1526,43 +1487,52 @@ struct StoreView: View {
                     headerContactIcons
                 }
                 .padding(.vertical, 8)
+                // Không có banner thì hiện hero trên nền thường, ngay dưới hàng logo.
+                heroBlock(onImage: false)
             }
+        }
+    }
 
-            // ===== Hero gộp chung trong header: tiêu đề lớn + dòng phụ + nút Mua ngay (1 khối duy nhất) =====
-            VStack(alignment: .leading, spacing: 10) {
-                // Tiêu đề Hero lớn (kèm hiệu ứng/font) — chỉ hiện khi admin đặt riêng, tránh trùng slogan
-                if let t = config?.heroTitle, !t.trimmingCharacters(in: .whitespaces).isEmpty {
-                    AnimatedStoreText(
-                        text: t,
-                        effect: config?.heroEffect ?? "gradient",
-                        font: keniosFont(config?.heroFont ?? "rounded-bold", size: 20),
-                        anim: config?.heroAnim ?? "none")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineLimit(3)
+    // Khối hero: tiêu đề lớn + dòng phụ + nút "Mua ngay".
+    // onImage=true → nằm ĐÈ lên ảnh banner (dòng phụ chữ trắng, nút nền trắng cho nổi).
+    @ViewBuilder
+    private func heroBlock(onImage: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            let heroTitle: String = {
+                let t = (config?.heroTitle ?? "").trimmingCharacters(in: .whitespaces)
+                return t.isEmpty
+                    ? store.t("GAME CHẤT LƯỢNG CAO · GIÁ TỐT NHẤT", "TOP QUALITY · BEST PRICE")
+                    : t
+            }()
+            AnimatedStoreText(
+                text: heroTitle,
+                effect: config?.heroEffect ?? "gradient",
+                font: keniosFont(config?.heroFont ?? "rounded-bold", size: 20),
+                anim: config?.heroAnim ?? "none")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lineLimit(3)
+            Text({
+                let s = (config?.heroSubtitle ?? "").trimmingCharacters(in: .whitespaces)
+                return s.isEmpty
+                    ? store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty")
+                    : s
+            }())
+            .font(.subheadline)
+            .foregroundStyle(onImage ? Color.white.opacity(0.92) : Color.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                // Luôn cuộn tới mục "Tất cả sản phẩm"; nếu admin ẩn thì rơi về "gamecat".
+                scrollTarget = orderedSections.contains("products") ? "products" : "gamecat"
+            } label: {
+                HStack(spacing: 6) {
+                    Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
+                    Image(systemName: "arrow.right")
                 }
-                Text({
-                    if let s = config?.heroSubtitle, !s.trimmingCharacters(in: .whitespaces).isEmpty { return s }
-                    return store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty")
-                }())
-                .font(.subheadline).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    // Luôn cuộn tới mục "Tất cả sản phẩm" (key "products") dù admin sắp xếp ở đâu.
-                    // Nếu admin ẩn mục đó thì rơi về "gamecat" (Danh mục Game) cho chắc.
-                    scrollTarget = orderedSections.contains("products") ? "products" : "gamecat"
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
-                        Image(systemName: "arrow.right")
-                    }
-                    .padding(.horizontal, 24).padding(.vertical, 12)
-                    .background(Theme.accent).foregroundStyle(.white)
-                    .clipShape(Capsule())
-                }
+                .padding(.horizontal, 24).padding(.vertical, 12)
+                .background(onImage ? Color.white : Theme.accent)
+                .foregroundStyle(onImage ? Theme.accent : Color.white)
+                .clipShape(Capsule())
             }
-            .padding(.top, 10)
-            // Không thụt ngang cố định nữa: hero thẳng lề trang như banner, Ví cửa hàng,
-            // thẻ sản phẩm... (trước đây +14 khi có banner làm tiêu đề bị lệch).
         }
     }
 
