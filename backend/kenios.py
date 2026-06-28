@@ -79,6 +79,7 @@ MAIL_DOMAIN     = os.getenv("MAIL_DOMAIN", "kenios.store")
 # Email người gửi cho mail hệ thống (OTP...). Để trống = no-reply@MAIL_DOMAIN.
 # Đặt = email đã xác minh trong Brevo (vd Gmail của bạn) để khỏi cấu hình DNS.
 MAIL_FROM       = os.getenv("MAIL_FROM", "")
+MAIL_FROM_NAME  = os.getenv("MAIL_FROM_NAME", "KENIOS")   # tên hiển thị người gửi
 MAIL_ENABLE     = os.getenv("MAIL_ENABLE", "1") == "1"      # bật bộ nhận thư SMTP nội bộ
 MAIL_SMTP_PORT  = int(os.getenv("MAIL_SMTP_PORT", "25"))    # cổng nhận thư đến (cần MX + mở port 25)
 SMTP_RELAY_HOST = os.getenv("SMTP_RELAY_HOST", "")          # gửi ra ngoài qua relay (vd smtp.gmail.com)
@@ -3660,9 +3661,10 @@ def send_system_mail(to: str, subject: str, body: str) -> str:
     if SMTP_RELAY_HOST:
         try:
             m = _EmailMessage()
-            m["From"] = sender; m["To"] = to; m["Subject"] = subject
+            m["From"] = f"{MAIL_FROM_NAME} <{sender}>"; m["To"] = to; m["Subject"] = subject
+            m["Reply-To"] = sender
             m.set_content(body)
-            with _smtplib.SMTP(SMTP_RELAY_HOST, SMTP_RELAY_PORT, timeout=30) as s:
+            with _smtplib.SMTP(SMTP_RELAY_HOST, SMTP_RELAY_PORT, timeout=15) as s:
                 s.starttls()
                 if SMTP_RELAY_USER:
                     s.login(SMTP_RELAY_USER, SMTP_RELAY_PASS)
