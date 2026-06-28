@@ -5979,33 +5979,54 @@ def admin_maintenance(b: MaintenanceIn, admin=Depends(get_admin)) -> dict[str, A
 
 # ======================== Video feed (TikTok của riêng app) ========================
 class PostIn(BaseModel):
-    file_id: int
+    file_id: int = 0          # 0 = tin chỉ có chữ (không kèm ảnh/video)
     caption: str = ""
 
 
 @app.post("/posts")
 def create_post(b: PostIn, user=Depends(get_user)) -> dict[str, Any]:
+    fid = int(b.file_id or 0)
+    caption = (b.caption or "").strip()[:1000]
     with db() as c:
-        f = c.execute("SELECT id FROM files WHERE id=? AND user_id=?",
-                      (b.file_id, user["id"])).fetchone()
-        if not f:
-            raise HTTPException(status_code=404, detail="Không tìm thấy video của bạn để đăng.")
+        if fid > 0:
+            f = c.execute("SELECT id FROM files WHERE id=? AND user_id=?",
+                          (fid, user["id"])).fetchone()
+            if not f:
+                raise HTTPException(status_code=404, detail="Không tìm thấy tệp của bạn để đăng.")
+        elif not caption:
+            raise HTTPException(status_code=400, detail="Hãy nhập nội dung hoặc đính kèm ảnh/video.")
         cur = c.execute(
             "INSERT INTO posts(user_id,file_id,caption,likes,created_at) VALUES(?,?,?,0,?)",
-            (user["id"], b.file_id, (b.caption or "")[:300], int(time.time())))
+            (user["id"], fid, caption, int(time.time())))
         pid = cur.lastrowid
-    return {"id": pid, "message": "Đã đăng video."}
+    return {"id": pid, "message": "Đã đăng."}
 
 
-def _posts_for(c, viewer_id: int, where: str = "", params: tuple = ()) -> list[dict[str, Any]]:
-    """Lấy danh sách bài (video feed) kèm trạng thái like/follow của người xem,
-    số bình luận & lượt xem. `where` là điều kiện thêm vào (vd 'p.user_id=?')."""
+def _post_kind(file_id, mime) -> str:
+    """Phân loại bài: text (không media) | image (ảnh) | video."""
+    if not file_id:
+        return "text"
+    if (mime or "").lower().startswith("image/"):
+        return "image"
+    return "video"
+
+def _posts_for(c, viewer_id: int, where: str = "", params: tuple = (),
+               kind_filter: str = "") -> list[dict[str, Any]]:
+    """Lấy danh sách bài kèm like/follow của người xem, số bình luận & lượt xem.
+    kind_filter: 'video' = chỉ video (Reels) | 'social' = ảnh + tin chữ | '' = tất cả."""
+    conds = []
+    if where:
+        conds.append(where)
+    if kind_filter == "video":
+        conds.append("(p.file_id>0 AND COALESCE(f.mime,'') NOT LIKE 'image/%')")
+    elif kind_filter == "social":
+        conds.append("(COALESCE(p.file_id,0)=0 OR f.mime LIKE 'image/%')")
     sql = ("SELECT p.id, p.caption, p.likes, p.created_at, p.file_id, p.user_id, "
            "p.views, u.username, u.public_id, u.avatar_url, f.name, f.mime "
            "FROM posts p JOIN users u ON p.user_id=u.id "
-           "JOIN files f ON p.file_id=f.id ")
-    if where:
-        sql += f"WHERE {where} "
+           "LEFT JOIN files f ON p.file_id=f.id ")
+    if conds:
+        sql += "WHERE " + " AND ".join(conds) + " "
     sql += "ORDER BY p.id DESC LIMIT 100"
     rows = c.execute(sql, params).fetchall()
     liked = {r["post_id"] for r in c.execute(
@@ -6021,6 +6042,7 @@ def _posts_for(c, viewer_id: int, where: str = "", params: tuple = ()) -> list[d
         "username": r["username"], "public_id": r["public_id"],
         "avatar_url": r["avatar_url"] or "",
         "name": r["name"], "mime": r["mime"],
+        "kind": _post_kind(r["file_id"], r["mime"]),
         "views": r["views"] or 0, "comments": cmt.get(r["id"], 0),
         "is_public": True,
         "liked": r["id"] in liked,
@@ -6030,20 +6052,29 @@ def _posts_for(c, viewer_id: int, where: str = "", params: tuple = ()) -> list[d
 
 @app.get("/feed")
 def feed(user=Depends(get_user)) -> list[dict[str, Any]]:
+    # Reels: chỉ video
     with db() as c:
-        return _posts_for(c, user["id"])
+        return _posts_for(c, user["id"], kind_filter="video")
+
+
+@app.get("/social/feed")
+def social_feed(user=Depends(get_user)) -> list[dict[str, Any]]:
+    # Bảng tin mạng xã hội: ảnh + tin chữ (không gồm video)
+    with db() as c:
+        return _posts_for(c, user["id"], kind_filter="social")
 
 
 @app.get("/me/posts")
 def my_posts(user=Depends(get_user)) -> list[dict[str, Any]]:
+    # Lưới video ở hồ sơ: chỉ video
     with db() as c:
-        return _posts_for(c, user["id"], "p.user_id=?", (user["id"],))
+        return _posts_for(c, user["id"], "p.user_id=?", (user["id"],), kind_filter="video")
 
 
 @app.get("/users/{uid}/posts")
 def user_posts(uid: int, user=Depends(get_user)) -> list[dict[str, Any]]:
     with db() as c:
-        return _posts_for(c, user["id"], "p.user_id=?", (uid,))
+        return _posts_for(c, user["id"], "p.user_id=?", (uid,), kind_filter="video")
 
 
 def _vmime(name: str, mime: Optional[str]) -> str:
