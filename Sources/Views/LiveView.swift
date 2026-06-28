@@ -13,8 +13,6 @@ struct LiveView: View {
     @State private var newTitle = ""
     @State private var newHLS = ""
     @State private var openRoom: LiveRoom?
-    @State private var hostCameraRoom: LiveRoom?
-    @State private var startingCamera = false
 
     var body: some View {
         NavigationStack {
@@ -23,19 +21,6 @@ struct LiveView: View {
                     KHeroHeader(icon: "dot.radiowaves.left.and.right",
                                 title: "Live",
                                 subtitle: "Mở phòng live · bình luận thời gian thực")
-
-                    // Phát thẳng bằng camera điện thoại (như TikTok) — không cần app ngoài
-                    Button { Task { await startCameraLive() } } label: {
-                        HStack {
-                            if startingCamera { ProgressView().tint(.white).padding(.trailing, 2) }
-                            Label(startingCamera ? "Đang mở camera..." : "Phát trực tiếp bằng camera",
-                                  systemImage: "camera.fill")
-                        }
-                        .frame(maxWidth: .infinity).frame(height: 48)
-                        .background(Theme.heroGradient).foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .disabled(startingCamera)
 
                     // Mở phòng (dán link HLS từ OBS/Larix, hoặc live bằng chữ)
                     Button { newTitle = ""; newHLS = ""; showCreate = true } label: {
@@ -67,9 +52,6 @@ struct LiveView: View {
             .sheet(isPresented: $showCreate) { createSheet }
             .fullScreenCover(item: $openRoom) { r in
                 LiveRoomView(room: r)
-            }
-            .fullScreenCover(item: $hostCameraRoom) { r in
-                HostCameraLiveView(room: r).environmentObject(store)
             }
         }
     }
@@ -133,21 +115,6 @@ struct LiveView: View {
             await load()
             // mở phòng vừa tạo
             if let room = try? await store.api.liveInfo(r.id) { openRoom = room }
-        } catch { self.error = error.localizedDescription }
-    }
-
-    /// Tạo phòng rồi mở màn phát camera (app tự sinh streamKey + link HLS).
-    private func startCameraLive() async {
-        startingCamera = true
-        defer { startingCamera = false }
-        do {
-            let r = try await store.api.liveCreate(title: "", hlsUrl: "")
-            if let room = try? await store.api.liveInfo(r.id) {
-                hostCameraRoom = room
-                await load()
-            } else {
-                self.error = "Không mở được phòng live."
-            }
         } catch { self.error = error.localizedDescription }
     }
 }
