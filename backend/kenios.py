@@ -89,7 +89,12 @@ SMTP_RELAY_HOST = os.getenv("SMTP_RELAY_HOST", "")          # gửi ra ngoài qu
 SMTP_RELAY_PORT = int(os.getenv("SMTP_RELAY_PORT", "587"))
 SMTP_RELAY_USER = os.getenv("SMTP_RELAY_USER", "")
 SMTP_RELAY_PASS = os.getenv("SMTP_RELAY_PASS", "")
-OTP_DEBUG       = os.getenv("OTP_DEBUG", "0") == "1"        # trả mã trong response để test khi chưa có mail
+OTP_DEBUG       = os.getenv("OTP_DEBUG", "0") == "1"        # trả mã trong response để test khi chưa có mail/SMS
+# Gửi SMS (OTP qua số điện thoại). Cấu hình 1 trong các cách dưới, hoặc bật OTP_DEBUG để test.
+SMS_RELAY_URL    = os.getenv("SMS_RELAY_URL", "")           # webhook/gateway nhận POST {to,text} (vd eSMS/SpeedSMS proxy)
+SMS_TWILIO_SID   = os.getenv("SMS_TWILIO_SID", "")
+SMS_TWILIO_TOKEN = os.getenv("SMS_TWILIO_TOKEN", "")
+SMS_TWILIO_FROM  = os.getenv("SMS_TWILIO_FROM", "")         # số/brandname gửi đi
 
 # ----- KENIOS AI: model tự host của riêng bạn (không dùng API key của ai) -----
 KENIOS_AI_ENABLE = os.getenv("KENIOS_AI_ENABLE", "1") == "1"
@@ -1794,24 +1799,36 @@ def register(b: RegisterIn, request: Request) -> dict[str, Any]:
     if len(b.username) < 3 or len(b.password) < 6:
         raise HTTPException(status_code=400,
             detail="Username ≥3 ký tự, mật khẩu ≥6 ký tự.")
-    # Nếu có gửi mã xác nhận thì bắt buộc khớp (xác minh email qua OTP)
-    if b.code is not None and (b.email or "").strip():
-        if not _otp_check(b.email, b.code):
-            raise HTTPException(status_code=400,
-                detail="Mã xác nhận sai hoặc đã hết hạn. Vui lòng lấy mã mới.")
+    email = (b.email or "").strip()
+    phone_raw = (b.phone or "").strip()
+    # Đăng ký bằng Gmail HOẶC Số điện thoại — phải có ít nhất một
+    if not email and not phone_raw:
+        raise HTTPException(status_code=400,
+            detail="Hãy đăng ký bằng Gmail hoặc số điện thoại.")
+    # Bắt buộc mã xác nhận (OTP) khớp với phương thức đã chọn
+    code = (b.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400,
+            detail="Thiếu mã xác nhận. Hãy bấm 'Gửi mã' rồi nhập mã được gửi tới.")
+    ident = email.lower() if email else _normalize_phone(phone_raw)
+    if not _otp_check(ident, code):
+        raise HTTPException(status_code=400,
+            detail="Mã xác nhận sai hoặc đã hết hạn. Vui lòng lấy mã mới.")
+    phone = _normalize_phone(phone_raw) if phone_raw else None
+    email_val = email or None
     with db() as c:
         if c.execute("SELECT 1 FROM users WHERE username=?", (b.username,)).fetchone():
             raise HTTPException(status_code=409, detail="Username đã tồn tại.")
         cur = c.execute(
             "INSERT INTO users(username,email,phone,pw_hash,plan,credits,created_at) "
             "VALUES(?,?,?,?,'free',0,?)",
-            (b.username, b.email, b.phone, hash_pw(b.password), int(time.time())),
+            (b.username, email_val, phone, hash_pw(b.password), int(time.time())),
         )
         uid = cur.lastrowid
         pid = _ensure_public_id(c, uid)
     return {"token": make_token(uid),
-            "user": {"id": uid, "username": b.username, "email": b.email,
-                     "phone": b.phone, "public_id": pid, "is_admin": False,
+            "user": {"id": uid, "username": b.username, "email": email_val,
+                     "phone": phone, "public_id": pid, "is_admin": False,
                      "plan": "free", "credits": 0, "lang": "vi", "status": "active"}}
 
 
@@ -3920,15 +3937,70 @@ def send_system_mail(to: str, subject: str, body: str,
     return "none"
 
 
-# ===================== Mã xác nhận email (OTP) =====================
+# ===================== Mã xác nhận email / SMS (OTP) =====================
 class OtpSendIn(BaseModel):
-    email: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
     purpose: str = "register"
 
 
 class OtpVerifyIn(BaseModel):
-    email: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
     code: str
+
+
+def _normalize_phone(p: str) -> str:
+    """Chuẩn hoá số điện thoại: chỉ giữ chữ số và dấu +."""
+    return re.sub(r"[^0-9+]", "", (p or "").strip())
+
+
+def _send_sms(phone: str, text: str) -> str:
+    """Gửi SMS qua nhà cung cấp đã cấu hình. Trả 'external' nếu gửi được, 'none' nếu chưa cấu hình."""
+    # 1) Webhook/gateway tự chọn (eSMS, SpeedSMS, proxy riêng...) nhận POST {to, text}
+    if SMS_RELAY_URL:
+        try:
+            with httpx.Client(timeout=20) as c:
+                r = c.post(SMS_RELAY_URL, json={"to": phone, "text": text})
+            if r.status_code < 400:
+                return "external"
+        except Exception as e:
+            logging.warning("SMS relay lỗi: %s", e)
+    # 2) Twilio
+    if SMS_TWILIO_SID and SMS_TWILIO_TOKEN and SMS_TWILIO_FROM:
+        try:
+            to = phone if phone.startswith("+") else "+" + phone
+            with httpx.Client(timeout=20) as c:
+                r = c.post(
+                    f"https://api.twilio.com/2010-04-01/Accounts/{SMS_TWILIO_SID}/Messages.json",
+                    data={"To": to, "From": SMS_TWILIO_FROM, "Body": text},
+                    auth=(SMS_TWILIO_SID, SMS_TWILIO_TOKEN))
+            if r.status_code < 400:
+                return "external"
+        except Exception as e:
+            logging.warning("SMS Twilio lỗi: %s", e)
+    return "none"
+
+
+def _otp_store_and_send_sms(phone: str, purpose: str) -> dict[str, Any]:
+    phone_n = _normalize_phone(phone)
+    if len(re.sub(r"\D", "", phone_n)) < 8:
+        raise HTTPException(status_code=400, detail="Số điện thoại không hợp lệ.")
+    code = f"{secrets.randbelow(1000000):06d}"
+    exp = int(time.time()) + 300  # 5 phút
+    with db() as c:
+        c.execute("INSERT INTO otp_codes(email,code,purpose,exp,attempts) VALUES(?,?,?,?,0) "
+                  "ON CONFLICT(email) DO UPDATE SET code=excluded.code, purpose=excluded.purpose, "
+                  "exp=excluded.exp, attempts=0", (phone_n, code, purpose, exp))
+    text = f"KENIOS: Ma xac nhan dang ky cua ban la {code} (hieu luc 5 phut)."
+    channel = _send_sms(phone_n, text)
+    resp: dict[str, Any] = {"sent": channel != "none", "channel": channel}
+    if channel == "none":
+        resp["hint"] = ("Máy chủ chưa cấu hình gửi SMS. Đặt SMS_RELAY_URL hoặc Twilio "
+                        "(SMS_TWILIO_SID/TOKEN/FROM), hoặc bật OTP_DEBUG=1 để test.")
+    if OTP_DEBUG:
+        resp["debug_code"] = code
+    return resp
 
 
 def _otp_store_and_send(email: str, purpose: str) -> dict[str, Any]:
@@ -3993,12 +4065,15 @@ def _otp_check(email: str, code: str) -> bool:
 @app.post("/auth/send-otp")
 def auth_send_otp(b: OtpSendIn, request: Request) -> dict[str, Any]:
     _rate_limit(request, "otp", limit=6, window=600)
-    return _otp_store_and_send(b.email, b.purpose or "register")
+    if (b.phone or "").strip():
+        return _otp_store_and_send_sms(b.phone, b.purpose or "register")
+    return _otp_store_and_send(b.email or "", b.purpose or "register")
 
 
 @app.post("/auth/verify-otp")
 def auth_verify_otp(b: OtpVerifyIn) -> dict[str, Any]:
-    return {"valid": _otp_check(b.email, b.code)}
+    ident = _normalize_phone(b.phone) if (b.phone or "").strip() else (b.email or "")
+    return {"valid": _otp_check(ident, b.code)}
 
 
 def start_mail_smtp() -> None:

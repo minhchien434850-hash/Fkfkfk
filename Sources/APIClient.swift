@@ -109,10 +109,12 @@ struct APIClient {
         return convId
     }
 
-    // Gửi mã xác nhận (OTP) qua email
-    func sendOtp(email: String, purpose: String = "register") async throws -> OtpSendResponse {
-        try decode(try await send("/auth/send-otp", method: "POST",
-                                  json: ["email": email, "purpose": purpose], auth: false))
+    // Gửi mã xác nhận (OTP) qua email hoặc số điện thoại (SMS)
+    func sendOtp(email: String = "", phone: String = "", purpose: String = "register") async throws -> OtpSendResponse {
+        var json: [String: Any] = ["purpose": purpose]
+        if !email.isEmpty { json["email"] = email }
+        if !phone.isEmpty { json["phone"] = phone }
+        return try decode(try await send("/auth/send-otp", method: "POST", json: json, auth: false))
     }
     func login(_ username: String, _ password: String) async throws -> AuthResponse {
         try decode(try await send("/auth/login", method: "POST",

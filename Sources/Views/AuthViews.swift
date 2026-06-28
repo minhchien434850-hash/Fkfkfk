@@ -156,34 +156,77 @@ struct RegisterView: View {
     @Environment(\.dismiss) var dismiss
     @State private var username = ""
     @State private var password = ""
+    @State private var method = "email"   // "email" | "phone"
     @State private var email = ""
     @State private var phone = ""
     @State private var loading = false
     @State private var error: String?
     @State private var registered = false
 
-    // OTP — mã xác nhận email
+    // OTP — mã xác nhận (email hoặc SMS)
     @State private var codeSent = false
     @State private var code = ""
     @State private var sendingCode = false
     @State private var otpInfo: String?
 
+    private var isEmail: Bool { method == "email" }
     private var emailValid: Bool { email.contains("@") && email.contains(".") }
+    private var phoneValid: Bool { phone.filter(\.isNumber).count >= 8 }
+    private var identValid: Bool { isEmail ? emailValid : phoneValid }
+    private var canRegister: Bool {
+        username.count >= 3 && password.count >= 6 && identValid && codeSent && code.count >= 4
+    }
 
     var body: some View {
         Form {
-            Section(store.t("Tạo tài khoản", "Create account")) {
+            Section(store.t("Tài khoản", "Account")) {
                 TextField(store.t("Username * (≥3 ký tự)", "Username * (≥3 chars)"), text: $username)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .textContentType(.username)
                 SecureField(store.t("Mật khẩu * (≥6 ký tự)", "Password * (≥6 chars)"), text: $password)
-                    .textContentType(.newPassword)   // iOS gợi ý lưu mật khẩu mới vào Apple ID
-                TextField(store.t("Gmail (tuỳ chọn)", "Gmail (optional)"), text: $email)
-                    .textInputAutocapitalization(.never).keyboardType(.emailAddress)
-                    .autocorrectionDisabled()
-                TextField(store.t("Số điện thoại (tuỳ chọn)", "Phone number (optional)"), text: $phone).keyboardType(.phonePad)
-                Text(store.t("Chỉ cần SĐT hoặc Gmail là được — không cần mã xác nhận.",
-                             "Just a phone or Gmail is enough — no verification code needed."))
+                    .textContentType(.newPassword)
+            }
+
+            Section(store.t("Đăng ký bằng", "Register with")) {
+                Picker("", selection: $method) {
+                    Text("Gmail").tag("email")
+                    Text(store.t("Số điện thoại", "Phone")).tag("phone")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: method) { _ in codeSent = false; code = ""; otpInfo = nil; error = nil }
+
+                if isEmail {
+                    TextField(store.t("Nhập Gmail của bạn", "Enter your Gmail"), text: $email)
+                        .textInputAutocapitalization(.never).keyboardType(.emailAddress)
+                        .autocorrectionDisabled().textContentType(.emailAddress)
+                } else {
+                    TextField(store.t("Nhập số điện thoại", "Enter phone number"), text: $phone)
+                        .keyboardType(.phonePad).textContentType(.telephoneNumber)
+                }
+
+                // Gửi mã + nhập mã
+                Button {
+                    Task { await sendCode() }
+                } label: {
+                    HStack {
+                        if sendingCode { ProgressView().padding(.trailing, 6) }
+                        Image(systemName: "paperplane.fill")
+                        Text(codeSent ? store.t("Gửi lại mã", "Resend code")
+                                      : store.t("Gửi mã xác nhận", "Send verification code"))
+                    }
+                }
+                .disabled(sendingCode || !identValid)
+
+                if codeSent {
+                    TextField(store.t("Nhập mã 6 số", "Enter 6-digit code"), text: $code)
+                        .keyboardType(.numberPad).textContentType(.oneTimeCode)
+                }
+                if let otpInfo {
+                    Text(otpInfo).font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(isEmail
+                     ? store.t("Chọn Gmail thì không cần số điện thoại.", "With Gmail, no phone needed.")
+                     : store.t("Chọn số điện thoại thì không cần Gmail.", "With phone, no Gmail needed."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -197,7 +240,7 @@ struct RegisterView: View {
                 Button { Task { await doRegister() } } label: {
                     HStack { if loading { ProgressView().padding(.trailing, 6) }; Text(store.t("Tạo tài khoản", "Create account")) }
                 }
-                .disabled(loading || registered)
+                .disabled(loading || registered || !canRegister)
             }
         }
         .navigationTitle(store.t("Đăng ký", "Register"))
@@ -206,15 +249,22 @@ struct RegisterView: View {
     private func sendCode() async {
         sendingCode = true; error = nil; otpInfo = nil
         do {
-            let r = try await store.api.sendOtp(email: email)
+            let r = isEmail ? try await store.api.sendOtp(email: email)
+                            : try await store.api.sendOtp(phone: phone)
             codeSent = true
+            let dest = isEmail ? email : phone
             switch r.channel {
-            case "external": otpInfo = "Đã gửi mã tới \(email). Kiểm tra hộp thư (cả mục Spam)."
-            case "internal": otpInfo = "Đã gửi mã vào hộp thư \(email)."
+            case "external":
+                otpInfo = isEmail
+                    ? store.t("Đã gửi mã tới \(dest). Kiểm tra hộp thư (cả Spam).", "Code sent to \(dest). Check inbox/Spam.")
+                    : store.t("Đã gửi mã SMS tới \(dest).", "SMS code sent to \(dest).")
+            case "internal":
+                otpInfo = store.t("Đã gửi mã vào hộp thư \(dest).", "Code sent to \(dest).")
             default:
-                otpInfo = r.hint ?? "Chưa gửi được mã. Kiểm tra cấu hình email trên máy chủ."
+                otpInfo = r.hint ?? store.t("Chưa gửi được mã. Kiểm tra cấu hình máy chủ.",
+                                            "Couldn't send code. Check server config.")
             }
-            if let dbg = r.debugCode { otpInfo = "Mã (chế độ thử): \(dbg)" }
+            if let dbg = r.debugCode { otpInfo = store.t("Mã (chế độ thử): \(dbg)", "Code (debug): \(dbg)") }
         } catch { self.error = error.localizedDescription }
         sendingCode = false
     }
@@ -222,15 +272,14 @@ struct RegisterView: View {
     private func doRegister() async {
         loading = true; error = nil
         do {
-            // chỉ gửi mã nếu người dùng thực sự đã nhập (không bắt buộc)
-            let otp = (codeSent && code.count >= 4) ? code : nil
-            // Tạo tài khoản nhưng KHÔNG tự đăng nhập — quay lại màn đăng nhập.
-            _ = try await store.api.register(username, password, email: email, phone: phone, code: otp)
-            // Ghi tên vừa tạo để màn đăng nhập điền sẵn
+            // Gửi đúng phương thức đã chọn + mã xác nhận (bắt buộc)
+            let em = isEmail ? email : ""
+            let ph = isEmail ? "" : phone
+            _ = try await store.api.register(username, password, email: em, phone: ph, code: code)
             UserDefaults.standard.set(username, forKey: "pendingLoginUser")
             registered = true
             try? await Task.sleep(nanoseconds: 900_000_000)
-            dismiss()   // quay về màn đăng nhập để người dùng đăng nhập
+            dismiss()   // quay về màn đăng nhập
         } catch { self.error = error.localizedDescription }
         loading = false
     }
