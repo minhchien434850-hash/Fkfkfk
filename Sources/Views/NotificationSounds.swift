@@ -18,6 +18,7 @@ struct NotifSoundPreset: Identifiable {
 // Danh sách âm thanh chọn được (trên 20 lựa chọn) — người dùng gán cho từng loại sự kiện.
 let kNotifSounds: [NotifSoundPreset] = [
     .init(id: "none",     label: "Không có",   icon: "speaker.slash.fill",            segments: []),
+    .init(id: "custom",   label: "Tùy chỉnh",  icon: "link",                          segments: []),
     .init(id: "ding",     label: "Ding",       icon: "bell.fill",                     segments: [(880, 0.26)]),
     .init(id: "dingdong", label: "Ding Dong",  icon: "bell.badge.fill",               segments: [(659, 0.16), (880, 0.24)]),
     .init(id: "coin",     label: "Xu",         icon: "dollarsign.circle.fill",        segments: [(988, 0.09), (1319, 0.26)]),

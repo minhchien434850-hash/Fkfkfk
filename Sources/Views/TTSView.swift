@@ -434,7 +434,7 @@ struct TTSView: View {
 
     @ViewBuilder private var notifSoundSection: some View {
         section("Âm thanh thông báo (như TikFinity) · phát TRƯỚC khi đọc") {
-            Text("Hơn 50 âm thanh. CHẠM vào 1 âm để NGHE THỬ ngay; âm đang chọn có dấu ✓. App phát âm báo trước rồi mới đọc.")
+            Text("Hơn 50 âm thanh + ô \"Tùy chỉnh\": dán link mp3 bất kỳ (meme cười, la hét, airhorn…) để dùng âm riêng. CHẠM 1 âm để NGHE THỬ; âm đang chọn có dấu ✓.")
                 .font(.caption2).foregroundStyle(.secondary)
             ForEach(notifEventLabels, id: \.id) { ev in
                 soundChipRow(ev.id, label: ev.label, icon: ev.icon)
@@ -442,16 +442,19 @@ struct TTSView: View {
         }
     }
 
+    // Binding 2 chiều cho link âm thanh tùy chỉnh của 1 sự kiện.
+    private func notifUrlBinding(_ type: String) -> Binding<String> {
+        Binding(get: { tts.notifSoundUrl(for: type) },
+                set: { tts.setNotifSoundUrl($0, for: type) })
+    }
+
     @ViewBuilder private func soundChipRow(_ type: String, label: String, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Label(label, systemImage: icon).font(.subheadline.bold()).foregroundStyle(Theme.accent)
                 Spacer()
-                // Nghe thử lại đúng âm đang chọn cho sự kiện này
-                Button {
-                    let id = tts.notifSoundId(for: type)
-                    if id != "none" { tts.previewNotifSound(id) }
-                } label: {
+                // Nghe thử đúng âm đang chọn cho sự kiện này (kể cả link tùy chỉnh)
+                Button { tts.previewNotif(for: type) } label: {
                     Label("Nghe thử", systemImage: "play.circle.fill").font(.caption)
                 }.buttonStyle(.plain).foregroundStyle(.green)
             }
@@ -460,8 +463,8 @@ struct TTSView: View {
                     ForEach(kNotifSounds) { s in
                         let on = tts.notifSoundId(for: type) == s.id
                         Button {
-                            // Chạm = nghe thử NGAY + chọn âm này cho sự kiện
-                            if s.id != "none" { tts.previewNotifSound(s.id) }
+                            // Chạm = chọn âm; âm tổng hợp thì nghe thử luôn (custom đợi dán link).
+                            if s.id != "none" && s.id != "custom" { tts.previewNotifSound(s.id) }
                             tts.setNotifSound(s.id, for: type)
                         } label: {
                             VStack(spacing: 3) {
@@ -485,6 +488,14 @@ struct TTSView: View {
                     }
                 }
                 .padding(.vertical, 2)
+            }
+            // Ô dán link khi chọn "Tùy chỉnh" — dùng âm meme tùy ý (mp3).
+            if tts.notifSoundId(for: type) == "custom" {
+                TextField("Dán link .mp3 (vd meme cười, la hét, airhorn…)", text: notifUrlBinding(type))
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .keyboardType(.URL).font(.caption)
+                    .padding(8).background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
         .padding(.vertical, 4)

@@ -33,6 +33,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     let synth = AVSpeechSynthesizer()
     var silentPlayer: AVAudioPlayer?
     var notifPlayer: AVAudioPlayer?   // phát âm thanh thông báo (follow/quà/share…) TRƯỚC khi đọc
+    var notifDataCache: [String: Data] = [:]   // cache audio meme tải từ link (khỏi tải lại mỗi lần)
 
     // Google TTS Queue
     var googleQueue: [String] = []

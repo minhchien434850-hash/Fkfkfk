@@ -24,13 +24,38 @@ extension TTSEngine {
         objectWillChange.send()
     }
 
-    /// Phát âm thanh thông báo cho loại sự kiện rồi GỌI `then` (đọc text). Nếu không có âm → đọc ngay.
-    func playNotif(for type: String, then: @escaping () -> Void) {
-        let sid = notifSoundId(for: type)
-        guard let preset = kNotifSounds.first(where: { $0.id == sid }),
-              let data = NotifSoundSynth.makeWAV(preset.segments) else {
-            then(); return
-        }
+    // Link âm thanh tự dán (meme cười, la hét, airhorn…) cho từng sự kiện khi chọn "Tùy chỉnh".
+    func notifSoundUrl(for type: String) -> String {
+        UserDefaults.standard.string(forKey: "tts_sound_url_\(type)") ?? ""
+    }
+    func setNotifSoundUrl(_ url: String, for type: String) {
+        UserDefaults.standard.set(url.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "tts_sound_url_\(type)")
+        objectWillChange.send()
+    }
+
+    // Tải (và cache) audio từ link mp3/wav để phát làm âm thông báo.
+    func fetchNotifData(_ url: URL, completion: @escaping (Data?) -> Void) {
+        let key = url.absoluteString
+        if let cached = notifDataCache[key] { completion(cached); return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 10
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+                     forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: req) { [weak self] data, resp, _ in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            DispatchQueue.main.async {
+                if let data, (code == 200 || code == 0), data.count > 200 {
+                    self?.notifDataCache[key] = data
+                    completion(data)
+                } else {
+                    completion(nil)
+                }
+            }
+        }.resume()
+    }
+
+    // Phát 1 đoạn audio đã có Data, rồi gọi `then` khi phát xong (then = nil nếu chỉ nghe thử).
+    func playNotifData(_ data: Data, then: (() -> Void)? = nil) {
         activateSession()
         do {
             let p = try AVAudioPlayer(data: data)
@@ -39,23 +64,52 @@ extension TTSEngine {
             let dur = p.duration
             p.play()
             notifPlayer = p
-            // Đọc NGAY SAU khi âm thanh phát xong (đúng yêu cầu: âm trước, đọc sau).
-            DispatchQueue.main.asyncAfter(deadline: .now() + dur + 0.05) { then() }
+            if let then { DispatchQueue.main.asyncAfter(deadline: .now() + dur + 0.05) { then() } }
         } catch {
-            then()
+            then?()
         }
     }
 
-    /// Nghe thử 1 âm thanh (dùng cho màn chọn âm).
+    /// Phát âm thanh thông báo cho loại sự kiện rồi GỌI `then` (đọc text). Nếu không có âm → đọc ngay.
+    func playNotif(for type: String, then: @escaping () -> Void) {
+        let sid = notifSoundId(for: type)
+        if sid == "none" { then(); return }
+        // Âm tùy chỉnh: tải từ link người dùng dán (meme cười/la hét…) rồi phát trước, đọc sau.
+        if sid == "custom" {
+            let s = notifSoundUrl(for: type)
+            guard !s.isEmpty, let url = URL(string: s) else { then(); return }
+            fetchNotifData(url) { [weak self] data in
+                guard let self, let data else { then(); return }
+                self.playNotifData(data) { then() }
+            }
+            return
+        }
+        guard let preset = kNotifSounds.first(where: { $0.id == sid }),
+              let data = NotifSoundSynth.makeWAV(preset.segments) else {
+            then(); return
+        }
+        playNotifData(data) { then() }
+    }
+
+    /// Nghe thử 1 âm TỔNG HỢP theo id (dùng khi chạm chip).
     func previewNotifSound(_ id: String) {
         guard let preset = kNotifSounds.first(where: { $0.id == id }),
               let data = NotifSoundSynth.makeWAV(preset.segments) else { return }
-        activateSession()
-        if let p = try? AVAudioPlayer(data: data) {
-            p.volume = volume
-            p.prepareToPlay()
-            p.play()
-            notifPlayer = p
+        playNotifData(data, then: nil)
+    }
+
+    /// Nghe thử đúng âm ĐANG CHỌN của 1 sự kiện (xử lý cả "custom" theo link).
+    func previewNotif(for type: String) {
+        let sid = notifSoundId(for: type)
+        if sid == "custom" {
+            let s = notifSoundUrl(for: type)
+            guard !s.isEmpty, let url = URL(string: s) else { return }
+            fetchNotifData(url) { [weak self] data in
+                guard let self, let data else { return }
+                self.playNotifData(data, then: nil)
+            }
+        } else if sid != "none" {
+            previewNotifSound(sid)
         }
     }
 
