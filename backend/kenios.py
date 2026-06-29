@@ -3476,13 +3476,23 @@ async def tiktok_stream(b: TikTokStreamIn, user=Depends(get_user)) -> dict[str, 
         "Cookie": cookie_header,
         "X-Requested-With": "XMLHttpRequest",
     }
-    # Tham số web-app TikTok thường bắt buộc
+    # Tham số web-app TikTok thường bắt buộc (kèm msToken lấy từ cookie nếu có)
     params = {
         "aid": "1988",
         "app_language": "vi",
+        "app_name": "tiktok_web",
+        "browser_language": "vi-VN",
+        "browser_platform": "Win32",
+        "channel": "tiktok_web",
+        "cookie_enabled": "true",
         "device_platform": "web_pc",
+        "focus_state": "true",
         "priority_region": "VN",
+        "region": "VN",
+        "webcast_language": "vi",
     }
+    if cookie_dict.get("msToken"):
+        params["msToken"] = cookie_dict["msToken"]
 
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
@@ -3529,14 +3539,17 @@ async def tiktok_stream(b: TikTokStreamIn, user=Depends(get_user)) -> dict[str, 
 
         # Trích thông báo lỗi rõ ràng từ TikTok
         data = res_json.get("data") if isinstance(res_json.get("data"), dict) else {}
-        err_msg = (data.get("prompts")
-                   or res_json.get("message")
-                   or "Tài khoản chưa đủ điều kiện Live (cần đủ follower / bật quyền Live OBS) hoặc Cookie hết hạn.")
-        raise HTTPException(status_code=400, detail=err_msg)
+        tk_msg = data.get("prompts") or res_json.get("message")
+        guide = ("TikTok chặn lấy key tự động (cần chữ ký X-Bogus) hoặc tài khoản chưa có quyền LIVE. "
+                 "CÁCH CHẮC CHẮN: vào TikTok LIVE Studio (máy tính) hoặc live.tiktok.com → chọn "
+                 "‘Phát bằng phần mềm/OBS’ → COPY Server URL + Stream Key → dán vào mục "
+                 "‘Phát Live đa nền tảng’ trong app rồi dùng Restream.")
+        raise HTTPException(status_code=400, detail=(f"{tk_msg}. {guide}" if tk_msg else guide))
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
-        raise HTTPException(status_code=400, detail=f"Không thể tạo phòng Live trên TikTok: {e}")
+        raise HTTPException(status_code=400, detail=f"Không lấy được key TikTok tự động: {e}. "
+                            "Hãy lấy key thủ công ở TikTok LIVE Studio rồi dán vào mục Phát Live đa nền tảng.")
 
 
 # ======================== Restream đa nền tảng (VPS tự nhân luồng bằng ffmpeg) ========================
