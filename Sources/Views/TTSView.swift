@@ -325,12 +325,14 @@ struct TTSView: View {
                     section(store.t("Thiết lập Động cơ giọng nói", "Voice engine settings")) {
                         Text(store.t("Động cơ", "Engine")).font(.caption).foregroundStyle(.secondary)
                         // Giọng ElevenLabs chỉ dành cho gói PRO — Free không thấy lựa chọn này
+                        // Dùng menu (thả xuống) vì có nhiều động cơ, nhãn dài — segmented sẽ bị chật, khó đọc.
                         Picker(store.t("Động cơ", "Engine"), selection: $tts.engineType) {
                             ForEach(TTSEngine.EngineType.allCases.filter { store.isPro || $0 != .elevenlabs }) { type in
                                 Text(type.label).tag(type)
                             }
                         }
-                        .pickerStyle(.segmented)
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.bottom, 8)
                         .onAppear {
                             // Free lỡ đang ở ElevenLabs (từ bản cũ) → đưa về giọng hệ thống
@@ -548,6 +550,18 @@ struct TTSView: View {
                             }
 
                             Text("Lưu ý: iOS chưa có giọng \"Siri\" riêng cho tiếng Việt — giọng Cao cấp (Linh) là gần Siri nhất. Muốn hay & tự nhiên hơn nữa, hãy dùng \"Chị Google (Online)\".")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // ----- Ghi chú cho chế độ Siri Anh·Việt (phiên âm) -----
+                    if tts.engineType == .siriEnVi {
+                        section("Siri tiếng Anh đọc phiên âm tiếng Việt") {
+                            Label("Chế độ thử nghiệm", systemImage: "flask.fill")
+                                .font(.subheadline.bold()).foregroundStyle(.orange)
+                            Text("App tự đổi chữ tiếng Việt sang cách viết kiểu Anh rồi cho giọng Siri tiếng Anh đọc. Vì giọng Anh KHÔNG có dấu thanh tiếng Việt nên sẽ đọc \"lơ lớ\", không dấu — nghe vui/tham khảo, chưa chuẩn 100%.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Text("Để giọng Anh hay nhất: iOS → Cài đặt → Trợ năng → Nội dung nói → Giọng nói → English → tải giọng Siri / Cao cấp.")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
