@@ -154,7 +154,7 @@ struct LoginView: View {
         googleLoading = true; error = nil
         do {
             let idToken = try await GoogleOAuth.shared.signInIdToken(clientID: googleClientId)
-            let resp = try await store.api.googleLogin(idToken: idToken)
+            let resp = try await store.api.googleLogin(idToken: idToken, deviceId: store.deviceId)
             store.setAuth(resp)
             await store.loadProviders(); await store.loadKeys()
         } catch { self.error = error.localizedDescription }
@@ -323,7 +323,7 @@ struct RegisterView: View {
             // Gửi đúng phương thức đã chọn + mã xác nhận (bắt buộc)
             let em = isEmail ? email : ""
             let ph = isEmail ? "" : phone
-            _ = try await store.api.register(username, password, email: em, phone: ph, code: code)
+            _ = try await store.api.register(username, password, email: em, phone: ph, code: code, deviceId: store.deviceId)
             UserDefaults.standard.set(username, forKey: "pendingLoginUser")
             registered = true
             try? await Task.sleep(nanoseconds: 900_000_000)
@@ -476,7 +476,7 @@ struct OtpLoginView: View {
         do {
             let em = isEmail ? email : ""
             let ph = isEmail ? "" : phone
-            let resp = try await store.api.loginOtp(email: em, phone: ph, code: code)
+            let resp = try await store.api.loginOtp(email: em, phone: ph, code: code, deviceId: store.deviceId)
             store.setAuth(resp)
             await store.loadProviders(); await store.loadKeys()
         } catch { self.error = error.localizedDescription }

@@ -447,6 +447,10 @@ def init_db() -> None:
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
+            CREATE TABLE IF NOT EXISTS trial_devices(
+                device_id TEXT PRIMARY KEY,
+                used_at INTEGER
+            );
             CREATE TABLE IF NOT EXISTS error_logs(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
@@ -965,6 +969,24 @@ def get_user(authorization: Optional[str] = Header(default=None)) -> sqlite3.Row
                           (row["id"],))
                 row = c.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
     return row
+
+
+TRIAL_DAYS = 7   # số ngày dùng thử Pro cho tài khoản mới
+
+
+def _grant_new_user_trial(c, uid: int, device_id: str) -> bool:
+    """Tự cấp Pro 7 ngày cho TÀI KHOẢN MỚI. Mỗi THIẾT BỊ chỉ được 1 lần (chống tạo nhiều acc).
+    Trả về True nếu đã cấp."""
+    did = (device_id or "").strip()[:128]
+    now = int(time.time())
+    if did:
+        used = c.execute("SELECT 1 FROM trial_devices WHERE device_id=?", (did,)).fetchone()
+        if used:
+            return False   # thiết bị này đã dùng trial → không cấp lại
+        c.execute("INSERT OR IGNORE INTO trial_devices(device_id,used_at) VALUES(?,?)", (did, now))
+    c.execute("UPDATE users SET plan='pro', plan_expires=?, plan_expired_notice=0 WHERE id=?",
+              (now + TRIAL_DAYS * 86400, uid))
+    return True
 
 
 def _gen_public_id(c) -> str:
@@ -1552,6 +1574,7 @@ class RegisterIn(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     code: Optional[str] = None     # mã xác nhận gửi qua email (nếu có email)
+    device_id: Optional[str] = None   # định danh thiết bị → trial 7 ngày chỉ 1 lần/máy
 
 class LoginIn(BaseModel):
     username: str
@@ -1843,10 +1866,10 @@ def register(b: RegisterIn, request: Request) -> dict[str, Any]:
         )
         uid = cur.lastrowid
         pid = _ensure_public_id(c, uid)
-    return {"token": make_token(uid),
-            "user": {"id": uid, "username": b.username, "email": email_val,
-                     "phone": phone, "public_id": pid, "is_admin": False,
-                     "plan": "free", "credits": 0, "lang": "vi", "status": "active"}}
+        # Tự cấp Pro dùng thử 7 ngày (mỗi thiết bị 1 lần)
+        _grant_new_user_trial(c, uid, b.device_id or "")
+        row = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    return {"token": make_token(uid), "user": _user_dict(row)}
 
 
 @app.post("/auth/login")
@@ -1868,6 +1891,7 @@ class LoginOtpIn(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     code: str
+    device_id: Optional[str] = None
 
 
 def _unique_username(c, base: str) -> str:
@@ -1921,6 +1945,7 @@ def login_otp(b: LoginOtpIn, request: Request) -> dict[str, Any]:
         )
         uid = cur.lastrowid
         _ensure_public_id(c, uid)
+        _grant_new_user_trial(c, uid, b.device_id or "")   # Pro 7 ngày (mỗi thiết bị 1 lần)
         row = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     return {"token": make_token(uid), "user": _user_dict(row)}
 
@@ -1937,6 +1962,7 @@ def _google_login_client_id() -> str:
 
 class GoogleAuthIn(BaseModel):
     id_token: str
+    device_id: Optional[str] = None
 
 
 @app.post("/auth/google")
@@ -1984,6 +2010,7 @@ def auth_google(b: GoogleAuthIn, request: Request) -> dict[str, Any]:
         )
         uid = cur.lastrowid
         _ensure_public_id(c, uid)
+        _grant_new_user_trial(c, uid, b.device_id or "")   # Pro 7 ngày (mỗi thiết bị 1 lần)
         row = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     return {"token": make_token(uid), "user": _user_dict(row)}
 

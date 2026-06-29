@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import UserNotifications
 
 // Bảng màu accent người dùng có thể chọn
@@ -249,6 +250,11 @@ final class AppStore: ObservableObject {
     func selectProfile(_ p: ServerProfile) { saveServer(url: p.url, type: p.type) }
     func deleteProfile(_ p: ServerProfile) {
         profiles.removeAll { $0.id == p.id }; persistProfiles()
+    }
+
+    /// Định danh thiết bị (để trial 7 ngày chỉ 1 lần/máy). Ổn định trên cùng 1 máy/cùng nhà cung cấp.
+    var deviceId: String {
+        UIDevice.current.identifierForVendor?.uuidString ?? ""
     }
 
     func setAuth(_ resp: AuthResponse) {

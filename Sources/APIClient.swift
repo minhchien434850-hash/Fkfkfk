@@ -68,11 +68,12 @@ struct APIClient {
 
     // ---- Tài khoản ----
     func register(_ username: String, _ password: String, email: String?, phone: String?,
-                  code: String? = nil) async throws -> AuthResponse {
+                  code: String? = nil, deviceId: String? = nil) async throws -> AuthResponse {
         var body: [String: Any] = ["username": username, "password": password]
         if let email, !email.isEmpty { body["email"] = email }
         if let phone, !phone.isEmpty { body["phone"] = phone }
         if let code, !code.isEmpty { body["code"] = code }
+        if let deviceId, !deviceId.isEmpty { body["device_id"] = deviceId }
         return try decode(try await send("/auth/register", method: "POST", json: body, auth: false))
     }
     // ---- Chat streaming (trả lời hiện dần) ----
@@ -121,16 +122,19 @@ struct APIClient {
                                   json: ["username": username, "password": password], auth: false))
     }
     /// Đăng nhập KHÔNG MẬT KHẨU bằng mã OTP gửi Gmail/SĐT (có tài khoản → vào; chưa có → tự tạo).
-    func loginOtp(email: String = "", phone: String = "", code: String) async throws -> AuthResponse {
+    func loginOtp(email: String = "", phone: String = "", code: String,
+                  deviceId: String? = nil) async throws -> AuthResponse {
         var json: [String: Any] = ["code": code]
         if !email.isEmpty { json["email"] = email }
         if !phone.isEmpty { json["phone"] = phone }
+        if let deviceId, !deviceId.isEmpty { json["device_id"] = deviceId }
         return try decode(try await send("/auth/login-otp", method: "POST", json: json, auth: false))
     }
     /// Đăng nhập bằng tài khoản Google: gửi id_token (Google OAuth) cho server xác thực.
-    func googleLogin(idToken: String) async throws -> AuthResponse {
-        try decode(try await send("/auth/google", method: "POST",
-                                  json: ["id_token": idToken], auth: false))
+    func googleLogin(idToken: String, deviceId: String? = nil) async throws -> AuthResponse {
+        var json: [String: Any] = ["id_token": idToken]
+        if let deviceId, !deviceId.isEmpty { json["device_id"] = deviceId }
+        return try decode(try await send("/auth/google", method: "POST", json: json, auth: false))
     }
     /// Lưu âm thanh thông báo DÙNG CHUNG (toàn cục) lên máy chủ — mọi người đều thấy.
     func saveNotifSounds(_ sounds: [String: Any]) async throws {
