@@ -350,6 +350,22 @@ struct TTSView: View {
                                 .font(.subheadline)
                         }.tint(Theme.accent)
 
+                        // Bộ lọc tiếng lóng/viết tắt đã tự áp dụng cho mọi giọng (iOS · Siri · Google).
+                        // Link mở trình đọc tiếng Việt chuẩn riêng (xem trước văn bản sau khi lọc).
+                        NavigationLink {
+                            VietnameseSiriTTSView()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "wand.and.stars").foregroundStyle(.green).frame(width: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Đọc tiếng Việt chuẩn (lọc tiếng lóng)").font(.subheadline.bold())
+                                    Text("Tự đổi 'ko→không', 'đc→được'… rồi đọc bằng giọng vi-VN").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            }.padding(.vertical, 4)
+                        }
+
                         Text("Kiểu giọng (Chỉ dành cho iOS · Siri · Google — không áp dụng cho ElevenLabs)").font(.caption).foregroundStyle(.secondary)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack {
