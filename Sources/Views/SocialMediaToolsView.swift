@@ -409,6 +409,30 @@ struct SocialMediaToolsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
+    // Hộp hướng dẫn dùng chung (các bước + nút mở link).
+    @ViewBuilder
+    private func guideBox(_ title: String, _ lines: [String], links: [(String, String)]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption.bold())
+            ForEach(lines.indices, id: \.self) { i in
+                Text(lines[i]).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(links.indices, id: \.self) { i in
+                if let url = URL(string: links[i].1) {
+                    Link(destination: url) {
+                        Label(links[i].0, systemImage: "arrow.up.right.square.fill").font(.caption2.bold())
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(9)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     // YouTube: đăng nhập Google (OAuth) để lấy token — cookie không tạo được live
     @ViewBuilder
     private func youtubeAuthBlock(hasToken: Bool) -> some View {
@@ -445,6 +469,23 @@ struct SocialMediaToolsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 9))
                 }
                 .disabled(ytSigningIn || !ytClientID.hasSuffix("apps.googleusercontent.com"))
+
+                guideBox("📋 Cách lấy Google Client ID (miễn phí, không cần thẻ):", [
+                    "1. Mở Google Cloud Console → tạo dự án.",
+                    "2. APIs & Services → Library → bật 'YouTube Data API v3'.",
+                    "3. OAuth consent screen → chọn External → điền tên app + email.",
+                    "4. Credentials → Create Credentials → OAuth client ID → loại 'iOS'.",
+                    "5. Bundle ID: com.kenios.codebox → Create.",
+                    "6. Copy Client ID dạng …apps.googleusercontent.com → dán vào ô trên."
+                ], links: [("Mở Google Cloud Console", "https://console.cloud.google.com/apis/credentials")])
+
+                guideBox("🔁 Dự phòng — nếu đăng nhập KHÔNG được:", [
+                    "Dùng Stream Key thủ công thay cho đăng nhập OAuth:",
+                    "1. Mở YouTube Studio → nút 'Tạo' → 'Phát trực tiếp'.",
+                    "2. Chọn 'Phát trực tiếp' (Streaming software).",
+                    "3. Copy 'Khóa luồng' (Stream key); URL máy chủ là: rtmp://a.rtmp.youtube.com/live2",
+                    "4. Quay lại app → mục 'Phát đa nền tảng' → dán Stream Key vào ô YouTube để phát."
+                ], links: [("Mở YouTube Studio (Phát trực tiếp)", "https://studio.youtube.com/")])
             }
             if let e = ytAuthError {
                 Text(e).font(.caption2).foregroundStyle(.red)
@@ -505,6 +546,22 @@ struct SocialMediaToolsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 9))
                 }
                 .disabled(fbSigningIn || fbAppID.count < 10 || !fbAppID.allSatisfy(\.isNumber))
+
+                guideBox("📋 Cách lấy Facebook App ID:", [
+                    "1. Mở Facebook for Developers → My Apps → Create App.",
+                    "2. Chọn loại 'Other' → 'Consumer' → đặt tên app.",
+                    "3. Settings → Basic → copy 'App ID' (chỉ gồm chữ số).",
+                    "4. Thêm sản phẩm 'Facebook Login' cho app.",
+                    "5. Dán App ID (chỉ chữ số) vào ô trên."
+                ], links: [("Mở Facebook for Developers", "https://developers.facebook.com/apps/")])
+
+                guideBox("🔁 Dự phòng — nếu đăng nhập KHÔNG được:", [
+                    "Dùng Stream Key thủ công thay cho đăng nhập OAuth:",
+                    "1. Mở Facebook Live Producer (trên trình duyệt máy tính/điện thoại).",
+                    "2. Chọn 'Sử dụng khóa luồng' (Use stream key).",
+                    "3. Copy 'Khóa luồng' (Stream key) + Server URL (rtmps://…).",
+                    "4. Quay lại app → 'Phát đa nền tảng' → dán Stream Key vào ô Facebook để phát."
+                ], links: [("Mở Facebook Live Producer", "https://www.facebook.com/live/producer")])
             }
             if let e = fbAuthError {
                 Text(e).font(.caption2).foregroundStyle(.red)
