@@ -148,6 +148,39 @@ private func storeImage(url: URL, height: CGFloat) -> some View {
     }
 }
 
+// ============================ Logo Cửa hàng — tự nhận diện URL và phát đúng định dạng ============================
+/// Admin dán URL vào TextField → component tự kiểm tra đuôi:
+///   .mp4/.mov/.m3u8/.m4v/.webm → video lặp vô hạn (AVPlayer, tắt tiếng, ẩn nút, chặn chạm)
+///   .gif/.webp → ảnh động qua WKWebView
+///   .png/.jpg/.jpeg → ảnh tĩnh có cache
+struct StoreLogoPlayer: View {
+    let urlString: String
+    var size: CGFloat = 48
+    var cornerRadius: CGFloat = 11
+    var fit: Bool = false
+
+    var body: some View {
+        Group {
+            if let url = URL(string: urlString), !urlString.isEmpty {
+                if isVideoLink(urlString) {
+                    LoopingVideoBackground(url: url, fit: fit)
+                } else if isAnimatedImage(urlString) {
+                    GIFWebView(url: url, contentMode: fit ? "contain" : "cover")
+                } else {
+                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                    placeholder: { Color(.tertiarySystemBackground) }
+                }
+            } else {
+                Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Color.black.opacity(urlString.isEmpty ? 0 : 1))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .allowsHitTesting(false)
+    }
+}
+
 // Ảnh/video thu nhỏ — hỗ trợ video lặp vô hạn tự động
 struct StoreThumb: View {
     let media: [StoreMedia]

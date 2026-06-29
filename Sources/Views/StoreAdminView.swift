@@ -339,11 +339,7 @@ struct StoreConfigEditor: View {
                 if !logoUrl.isEmpty {
                     HStack {
                         Spacer()
-                        StoreThumb(media: [StoreMedia(type: isVideoLink(logoUrl) ? "video" : "image", url: logoUrl)],
-                                   height: 60)
-                            .frame(width: 60, height: 60)
-                            .background(Color.black)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        StoreLogoPlayer(urlString: logoUrl, size: 64, cornerRadius: 12)
                         Spacer()
                     }
                 }

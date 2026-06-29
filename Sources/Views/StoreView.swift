@@ -1215,27 +1215,8 @@ struct StoreView: View {
                     // Logo + slogan ở góc trên-trái (chữ trắng cho nổi trên ảnh)
                     .overlay(alignment: .topLeading) {
                         HStack(spacing: 10) {
-                            if !c.logoUrl.isEmpty, let lurl = URL(string: c.logoUrl) {
-                                Group {
-                                    if isVideoLink(c.logoUrl) {
-                                        LoopingVideoBackground(url: lurl)
-                                    } else if isAnimatedImage(c.logoUrl) {
-                                        GIFWebView(url: lurl, contentMode: "cover")
-                                    } else {
-                                        CachedAsyncImage(url: lurl) { img in img.resizable().scaledToFill() }
-                                        placeholder: { Color(.tertiarySystemBackground) }
-                                    }
-                                }
-                                .frame(width: 48, height: 48)
-                                .background(Color.black)
-                                .clipShape(RoundedRectangle(cornerRadius: 11))
+                            StoreLogoPlayer(urlString: c.logoUrl, size: 48)
                                 .overlay(RoundedRectangle(cornerRadius: 11).stroke(.white.opacity(0.25), lineWidth: 1))
-                            } else {
-                                Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
-                                    .frame(width: 48, height: 48)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(RoundedRectangle(cornerRadius: 11))
-                            }
                             VStack(alignment: .leading, spacing: 2) {
                                 AnimatedStoreLogo(
                                     text: displayName,
@@ -1265,28 +1246,7 @@ struct StoreView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             } else {
                 HStack(alignment: .top, spacing: 12) {
-                    if let c = effectiveConfig, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
-                        Group {
-                            if isVideoLink(c.logoUrl) {
-                                LoopingVideoBackground(url: url)
-                            } else if isAnimatedImage(c.logoUrl) {
-                                GIFWebView(url: url, contentMode: "cover")
-                            } else {
-                                CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
-                                placeholder: { Color(.secondarySystemBackground) }
-                            }
-                        }
-                        .frame(width: 50, height: 50)
-                        .background(Color.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 11))
-                    } else {
-                        Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
-                            .frame(width: 50, height: 50)
-                            .background(LinearGradient(
-                                colors: [Theme.accent.opacity(0.2), Color(.secondarySystemBackground)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .clipShape(RoundedRectangle(cornerRadius: 11))
-                    }
+                    StoreLogoPlayer(urlString: effectiveConfig?.logoUrl ?? "", size: 50)
                     VStack(alignment: .leading, spacing: 3) {
                         AnimatedStoreLogo(
                             text: displayName,
