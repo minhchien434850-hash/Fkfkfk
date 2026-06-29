@@ -3,7 +3,6 @@ import UniformTypeIdentifiers
 import QuickLook
 import WebKit
 import Photos
-import ReplayKit
 
 // Điểm phát Live (RTMP + stream key) lưu lại để phát đa nền tảng
 struct LiveTarget: Identifiable, Codable {

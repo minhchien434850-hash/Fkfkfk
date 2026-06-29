@@ -158,7 +158,7 @@ struct CookieWebView: UIViewRepresentable {
             let isTikTokLoggedIn = url.contains("tiktok.com") &&
                 (url.contains("/foryou") || url.contains("/@") || url.contains("/following"))
             let isFacebookLoggedIn = url.contains("facebook.com") &&
-                !url.contains("/login") && !url.contains("m.facebook.com/")
+                !url.contains("/login") && (url.contains("/home") || url.contains("/?sk=") || url.contains("/feed"))
             let isYouTubeLoggedIn = url.contains("youtube.com") &&
                 !url.contains("/signin") && url.contains("/feed")
 

@@ -135,7 +135,6 @@ final class H264Encoder {
     private var sps: Data?
     private var pps: Data?
     private var pendingNALUs: [Data] = []
-    private let queue = DispatchQueue(label: "h264.encode")
 
     init() {}
 
@@ -265,8 +264,6 @@ import AudioToolbox
 
 final class AACEncoder {
     private var converter: AudioConverterRef?
-    private var aacBuffer = Data()
-    private var pcmBuffer = Data()
 
     func encode(sampleBuffer: CMSampleBuffer) -> Data {
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer),
@@ -276,7 +273,7 @@ final class AACEncoder {
         guard let asbd else { return Data() }
 
         if converter == nil { setupConverter(inputFormat: asbd) }
-        guard converter != nil else { return Data() }
+        guard let conv = converter else { return Data() }
 
         var totalLength = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
@@ -284,41 +281,33 @@ final class AACEncoder {
                                     totalLengthOut: &totalLength, dataPointerOut: &dataPointer)
         guard let dataPointer, totalLength > 0 else { return Data() }
 
-        pcmBuffer = Data(bytes: dataPointer, count: totalLength)
-
         let outBufferSize = 1024
-        var outBuffer = Data(count: outBufferSize)
-        var outPacketDesc = AudioStreamPacketDescription()
+        let outRaw = UnsafeMutablePointer<UInt8>.allocate(capacity: outBufferSize)
+        defer { outRaw.deallocate() }
 
-        var ioOutputDataPacketSize: UInt32 = 1
+        var ioPacketSize: UInt32 = 1
         var outABL = AudioBufferList(
             mNumberBuffers: 1,
             mBuffers: AudioBuffer(
                 mNumberChannels: 1,
                 mDataByteSize: UInt32(outBufferSize),
-                mData: nil
+                mData: UnsafeMutableRawPointer(outRaw)
+            )
+        )
+        var inABL = AudioBufferList(
+            mNumberBuffers: 1,
+            mBuffers: AudioBuffer(
+                mNumberChannels: UInt32(asbd.mChannelsPerFrame),
+                mDataByteSize: UInt32(totalLength),
+                mData: UnsafeMutableRawPointer(dataPointer)
             )
         )
 
-        let result = outBuffer.withUnsafeMutableBytes { outPtr -> OSStatus in
-            outABL.mBuffers.mData = outPtr.baseAddress
-            return pcmBuffer.withUnsafeBytes { pcmPtr -> OSStatus in
-                var inABL = AudioBufferList(
-                    mNumberBuffers: 1,
-                    mBuffers: AudioBuffer(
-                        mNumberChannels: UInt32(asbd.mChannelsPerFrame),
-                        mDataByteSize: UInt32(totalLength),
-                        mData: UnsafeMutableRawPointer(mutating: pcmPtr.baseAddress!)
-                    )
-                )
-                return AudioConverterConvertComplexBuffer(converter!, &ioOutputDataPacketSize,
-                                                          &inABL, &outABL)
-            }
-        }
-
+        let result = AudioConverterConvertComplexBuffer(conv, &ioPacketSize, &inABL, &outABL)
         guard result == noErr else { return Data() }
+
         let encodedSize = Int(outABL.mBuffers.mDataByteSize)
-        return outBuffer.prefix(encodedSize)
+        return Data(bytes: outRaw, count: encodedSize)
     }
 
     private func setupConverter(inputFormat: AudioStreamBasicDescription) {
