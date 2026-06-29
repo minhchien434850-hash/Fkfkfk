@@ -285,7 +285,9 @@ final class AACEncoder {
         let outRaw = UnsafeMutablePointer<UInt8>.allocate(capacity: outBufferSize)
         defer { outRaw.deallocate() }
 
-        var ioPacketSize: UInt32 = 1
+        let frameCount: UInt32 = asbd.mBytesPerFrame > 0
+            ? UInt32(totalLength) / UInt32(asbd.mBytesPerFrame)
+            : 1024
         var outABL = AudioBufferList(
             mNumberBuffers: 1,
             mBuffers: AudioBuffer(
@@ -303,7 +305,7 @@ final class AACEncoder {
             )
         )
 
-        let result = AudioConverterConvertComplexBuffer(conv, &ioPacketSize, &inABL, &outABL)
+        let result = AudioConverterConvertComplexBuffer(conv, frameCount, &inABL, &outABL)
         guard result == noErr else { return Data() }
 
         let encodedSize = Int(outABL.mBuffers.mDataByteSize)
