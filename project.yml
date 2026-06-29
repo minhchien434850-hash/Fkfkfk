@@ -44,26 +44,7 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        LSApplicationQueriesSchemes:
-          - com.garena.game.kgvn
-          - riotgamesapi
-          - mobilelegends
-          - com.tencent.ig
-          - com.dts.freefireth
-          - codmobile
-          - fortnite
-          - valorant
-          - com.vng.crossfire.legends
-          - com.gameloft.asphalt9
-          - mariokart
-          - fifamobile
-          - yuanshengame
-          - robloxmobile
-          - minecraft
-          - hsrglobal
-          - clashofclans
-          - clashroyale
-          - brawlstars
+        LSApplicationQueriesSchemes: []
     entitlements:
       path: Sources/KENIOS.entitlements
     settings:
