@@ -254,8 +254,11 @@ struct MergePDFTool: View {
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             if let result { ToolResultCard(url: result) }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { res in
-            if case .success(let urls) = res { inputs = urls.compactMap { copyToTemp($0) }; result = nil }
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: true) { urls in
+                inputs = urls.compactMap { copyToTemp($0) }; result = nil
+                showImporter = false
+            }
         }
     }
     private func merge() {
@@ -315,9 +318,12 @@ struct PagesPDFTool: View {
             }
             if let result { ToolResultCard(url: result) }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
-            if case .success(let urls) = res, let u = urls.first, let local = copyToTemp(u) {
-                input = local; loadThumbs(local)
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: false) { urls in
+                if let u = urls.first, let local = copyToTemp(u) {
+                    input = local; loadThumbs(local)
+                }
+                showImporter = false
             }
         }
     }
@@ -369,8 +375,11 @@ struct PasswordPDFTool: View {
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             if let result { ToolResultCard(url: result) }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
-            if case .success(let urls) = res, let u = urls.first { input = copyToTemp(u); result = nil }
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: false) { urls in
+                if let u = urls.first { input = copyToTemp(u); result = nil }
+                showImporter = false
+            }
         }
     }
     private func apply() {
@@ -418,10 +427,13 @@ struct CompressPDFTool: View {
                 ToolResultCard(url: result)
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
-            if case .success(let urls) = res, let u = urls.first {
-                input = copyToTemp(u); result = nil; newSize = 0
-                origSize = (try? FileManager.default.attributesOfItem(atPath: input?.path ?? ""))?[.size] as? Int ?? 0
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: false) { urls in
+                if let u = urls.first {
+                    input = copyToTemp(u); result = nil; newSize = 0
+                    origSize = (try? FileManager.default.attributesOfItem(atPath: input?.path ?? ""))?[.size] as? Int ?? 0
+                }
+                showImporter = false
             }
         }
     }
@@ -487,16 +499,19 @@ struct TrimAudioTool: View {
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
             if let result { ToolResultCard(url: result) }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.audio], allowsMultipleSelection: false) { res in
-            if case .success(let urls) = res, let u = urls.first, let local = copyToTemp(u) {
-                input = local; result = nil
-                Task {
-                    let asset = AVURLAsset(url: local)
-                    if let d = try? await asset.load(.duration) {
-                        let secs = CMTimeGetSeconds(d)
-                        await MainActor.run { duration = secs; start = 0; end = secs }
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(contentTypes: [.audio, .mp3, .mpeg4Audio], allowsMultipleSelection: false) { urls in
+                if let u = urls.first, let local = copyToTemp(u) {
+                    input = local; result = nil
+                    Task {
+                        let asset = AVURLAsset(url: local)
+                        if let d = try? await asset.load(.duration) {
+                            let secs = CMTimeGetSeconds(d)
+                            await MainActor.run { duration = secs; start = 0; end = secs }
+                        }
                     }
                 }
+                showImporter = false
             }
         }
     }
