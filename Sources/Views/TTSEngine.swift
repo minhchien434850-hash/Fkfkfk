@@ -93,6 +93,10 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     @Published var isPaused = false
 
     @Published var voiceId: String = ""          // identifier của AVSpeechSynthesisVoice
+    // Giọng riêng cho chế độ "Giọng Siri (iOS)" — người dùng tự chọn trong app, app nhớ lại.
+    @Published var siriVoiceId: String = UserDefaults.standard.string(forKey: "tts_siri_voice_id") ?? "" {
+        didSet { UserDefaults.standard.set(siriVoiceId, forKey: "tts_siri_voice_id") }
+    }
     @Published var rate: Float = UserDefaults.standard.object(forKey: "tts_rate") as? Float ?? AVSpeechUtteranceDefaultSpeechRate {
         didSet {
             UserDefaults.standard.set(rate, forKey: "tts_rate")
@@ -193,7 +197,12 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     
     private func playSiriTTS(_ text: String) {
         let u = AVSpeechUtterance(string: text)
-        if let v = bestSiriVoice() { u.voice = v }
+        // Ưu tiên giọng người dùng tự chọn trong app; nếu chưa chọn thì tự lấy giọng tốt nhất.
+        if !siriVoiceId.isEmpty, let v = AVSpeechSynthesisVoice(identifier: siriVoiceId) {
+            u.voice = v
+        } else if let v = bestSiriVoice() {
+            u.voice = v
+        }
         u.rate = rate
         u.pitchMultiplier = pitch
         u.volume = volume

@@ -121,6 +121,18 @@ struct TTSView: View {
 
     private var vietnameseVoiceCount: Int { Self.cachedVietnameseCount }
 
+    // Danh sách giọng cho chế độ Siri: giọng tiếng Việt trước (chất lượng cao xếp đầu),
+    // rồi tới các giọng còn lại. Giúp người dùng chọn nhanh giọng "gần Siri" nhất.
+    private var siriCandidateVoices: [AVSpeechSynthesisVoice] {
+        func rank(_ q: AVSpeechSynthesisVoiceQuality) -> Int {
+            switch q { case .premium: return 0; case .enhanced: return 1; default: return 2 }
+        }
+        let vi = Self.cachedVoices.filter { $0.language.hasPrefix("vi") }
+            .sorted { rank($0.quality) < rank($1.quality) }
+        let others = Self.cachedVoices.filter { !$0.language.hasPrefix("vi") }
+        return vi + others
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -481,6 +493,61 @@ struct TTSView: View {
                                 }
                             }
                             Text("Muốn thêm giọng tự nhiên hơn: iOS → Cài đặt → Trợ năng → Nội dung nói → Giọng nói → tải thêm.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // ----- Chọn giọng cho chế độ "Giọng Siri (iOS)" -----
+                    if tts.engineType == .siri {
+                        section("Giọng Siri / iOS — chọn giọng có sẵn trên máy bạn") {
+                            Text("App đã tìm các giọng máy bạn đang có. Chọn 1 giọng (ưu tiên Cao cấp/Nâng cao nghe gần Siri nhất), bấm loa để nghe thử.")
+                                .font(.caption2).foregroundStyle(.secondary)
+
+                            // Tự động: app tự chọn giọng tốt nhất
+                            Button { tts.siriVoiceId = "" } label: {
+                                HStack {
+                                    Image(systemName: tts.siriVoiceId.isEmpty ? "largecircle.fill.circle" : "circle")
+                                        .foregroundStyle(Theme.accent)
+                                    VStack(alignment: .leading) {
+                                        Text("Tự động (giọng tốt nhất)").font(.subheadline)
+                                        Text("App tự chọn giọng chất lượng cao nhất").font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                            }.buttonStyle(.plain).padding(.vertical, 6)
+                            Divider()
+
+                            VStack(spacing: 0) {
+                                ForEach(siriCandidateVoices, id: \.identifier) { v in
+                                    HStack {
+                                        Button { tts.siriVoiceId = v.identifier } label: {
+                                            HStack {
+                                                Image(systemName: tts.siriVoiceId == v.identifier ? "largecircle.fill.circle" : "circle")
+                                                    .foregroundStyle(Theme.accent)
+                                                VStack(alignment: .leading) {
+                                                    Text(v.name).font(.subheadline)
+                                                    Text("\(v.language) · \(qualityText(v.quality))")
+                                                        .font(.caption2)
+                                                        .foregroundStyle(v.quality == .default ? .secondary : .green)
+                                                }
+                                                Spacer()
+                                            }
+                                        }.buttonStyle(.plain)
+                                        Button {
+                                            let u = AVSpeechUtterance(string: "Xin chào, đây là giọng đọc thử nghiệm.")
+                                            u.voice = v
+                                            u.rate = tts.rate
+                                            u.pitchMultiplier = tts.pitch
+                                            previewSynth.speak(u)
+                                        } label: {
+                                            Image(systemName: "speaker.wave.2.fill").foregroundStyle(.secondary)
+                                        }.buttonStyle(.plain)
+                                    }.padding(.vertical, 6)
+                                    Divider()
+                                }
+                            }
+
+                            Text("Lưu ý: iOS chưa có giọng \"Siri\" riêng cho tiếng Việt — giọng Cao cấp (Linh) là gần Siri nhất. Muốn hay & tự nhiên hơn nữa, hãy dùng \"Chị Google (Online)\".")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
