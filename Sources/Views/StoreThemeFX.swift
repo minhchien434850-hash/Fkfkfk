@@ -134,8 +134,9 @@ struct StoreBackground: View {
                 if url.lowercased().contains(".gif") {
                     GIFWebView(url: u, contentMode: "cover")
                 } else {
-                    AsyncImage(url: u) { img in img.resizable().scaledToFill() }
-                    placeholder: { Color.clear }
+                    // Dùng ảnh có CACHE → khi quay lại tab/app không bị trắng/đen rồi mới hiện.
+                    CachedAsyncImage(url: u) { img in img.resizable().scaledToFill() }
+                        placeholder: { Color.clear }
                 }
             } else {
                 Color.clear
@@ -146,37 +147,73 @@ struct StoreBackground: View {
     }
 }
 
-// Video nền lặp vô hạn, tắt tiếng — tự động phát lại khi app lên foreground
+// BỂ CHỨA player video (giữ sống theo URL) — chống "chớp đen" khi quay lại tab/app.
+// Player vẫn chạy ngầm khi rời màn → quay lại GẮN LẠI là có khung hình ngay, không phải tải lại từ đen.
+final class LoopingPlayerPool {
+    static let shared = LoopingPlayerPool()
+    private var cache: [String: (player: AVQueuePlayer, looper: AVPlayerLooper)] = [:]
+    private var order: [String] = []
+    private let capacity = 10   // giữ tối đa 10 video gần nhất để khỏi tốn bộ nhớ
+
+    func player(for url: URL) -> AVQueuePlayer {
+        let key = url.absoluteString
+        if let e = cache[key] { touch(key); return e.player }
+        let item = AVPlayerItem(url: url)
+        let p = AVQueuePlayer(playerItem: item)
+        p.isMuted = true
+        p.actionAtItemEnd = .none
+        let looper = AVPlayerLooper(player: p, templateItem: item)
+        cache[key] = (p, looper)
+        order.append(key)
+        while order.count > capacity {
+            let k = order.removeFirst()
+            cache[k]?.player.pause()
+            cache[k] = nil
+        }
+        return p
+    }
+    private func touch(_ key: String) {
+        if let i = order.firstIndex(of: key) { order.remove(at: i); order.append(key) }
+    }
+}
+
+// Video nền lặp vô hạn, tắt tiếng — dùng player từ bể chứa (không tải lại → không chớp đen).
 final class LoopingPlayerUIView: UIView {
-    private var queuePlayer: AVQueuePlayer?
-    private var looper: AVPlayerLooper?
+    private var player: AVQueuePlayer?
     private var activeObserver: NSObjectProtocol?
     override class var layerClass: AnyClass { AVPlayerLayer.self }
     private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 
     init(url: URL, fit: Bool = false) {
         super.init(frame: .zero)
-        let item = AVPlayerItem(url: url)
-        let p = AVQueuePlayer(playerItem: item)
-        p.isMuted = true
-        looper = AVPlayerLooper(player: p, templateItem: item)
+        backgroundColor = .clear
+        let p = LoopingPlayerPool.shared.player(for: url)
+        player = p
         playerLayer.player = p
         // fit = hiện ĐỦ video trong khung (không cắt); mặc định fill = lấp đầy (có thể cắt)
         playerLayer.videoGravity = fit ? .resizeAspect : .resizeAspectFill
         p.play()
-        queuePlayer = p
         // Tự phát lại khi app quay lại foreground (tránh video dừng khi mở lại)
         activeObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
-            object: nil, queue: .main) { [weak p] _ in p?.play() }
+            object: nil, queue: .main) { [weak self] _ in
+                guard let self else { return }
+                if self.playerLayer.player !== self.player { self.playerLayer.player = self.player }
+                self.player?.play()
+            }
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil { queuePlayer?.play() }
+        if window != nil {
+            // Gắn lại player vào layer này (phòng khi nó vừa ở layer khác) rồi phát tiếp ngay.
+            if playerLayer.player !== player { playerLayer.player = player }
+            player?.play()
+        }
     }
 
     deinit {
+        // KHÔNG huỷ player — bể chứa giữ nó sống để lần sau quay lại không bị chớp đen.
         if let obs = activeObserver { NotificationCenter.default.removeObserver(obs) }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
