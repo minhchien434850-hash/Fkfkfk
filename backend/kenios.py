@@ -4304,10 +4304,24 @@ def _otp_store_and_send(email: str, purpose: str) -> dict[str, Any]:
         c.execute("INSERT INTO otp_codes(email,code,purpose,exp,attempts) VALUES(?,?,?,?,0) "
                   "ON CONFLICT(email) DO UPDATE SET code=excluded.code, purpose=excluded.purpose, "
                   "exp=excluded.exp, attempts=0", (email, code, purpose, exp))
+    action = ("đăng nhập" if purpose == "login"
+              else "đăng ký tài khoản" if purpose == "register"
+              else "xác minh tài khoản")
+    year = time.strftime("%Y")
+    eula = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+    privacy = "https://www.apple.com/legal/privacy/"
     subject = "Mã xác nhận KENIOS"
-    body = (f"Mã xác nhận của bạn là: {code}\n"
-            f"Mã có hiệu lực trong 5 phút.\n"
-            f"Nếu bạn không yêu cầu, hãy bỏ qua email này.")
+    body = (
+        f"KENIOS — Mã xác nhận\n\n"
+        f"Bạn (hoặc ai đó) vừa yêu cầu mã để {action} trên ứng dụng KENIOS.\n\n"
+        f"Mã xác nhận của bạn là: {code}\n"
+        f"Mã có hiệu lực trong 5 phút và chỉ dùng được MỘT lần.\n\n"
+        f"Vì sự an toàn, KHÔNG chia sẻ mã này cho bất kỳ ai — kể cả người tự xưng là nhân viên KENIOS.\n"
+        f"Nếu bạn không yêu cầu mã này, hãy bỏ qua email — tài khoản của bạn vẫn an toàn.\n\n"
+        f"Điều khoản sử dụng (EULA chuẩn của Apple): {eula}\n"
+        f"Chính sách quyền riêng tư của Apple: {privacy}\n\n"
+        f"© {year} KENIOS"
+    )
     html = ("""
 <div style="font-family:Arial,Helvetica,sans-serif;background:#f4f5f7;padding:28px;">
   <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.08);">
@@ -4317,13 +4331,32 @@ def _otp_store_and_send(email: str, purpose: str) -> dict[str, Any]:
       <img src="cid:badge" width="26" height="26" style="vertical-align:middle;margin-left:5px;">
     </div>
     <div style="padding:30px 26px;text-align:center;">
-      <p style="color:#333;font-size:15px;margin:0 0 16px;">Mã xác nhận của bạn là:</p>
-      <div style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#3b6eff;">__CODE__</div>
-      <p style="color:#888;font-size:13px;margin:18px 0 0;line-height:1.6;">Mã có hiệu lực trong <b>5 phút</b>.<br>Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>
+      <p style="color:#222;font-size:16px;font-weight:bold;margin:0 0 6px;">Xin chào,</p>
+      <p style="color:#444;font-size:14px;line-height:1.6;margin:0 0 18px;">
+        Bạn (hoặc ai đó) vừa yêu cầu mã để <b>__ACTION__</b> trên ứng dụng <b>KENIOS</b>.
+        Nhập mã bên dưới vào ứng dụng để tiếp tục:
+      </p>
+      <div style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#3b6eff;margin:6px 0;">__CODE__</div>
+      <p style="color:#666;font-size:13px;margin:14px 0 0;line-height:1.7;">
+        Mã có hiệu lực trong <b>5 phút</b> và chỉ dùng được <b>một lần</b>.
+      </p>
+      <div style="background:#fff7ed;border:1px solid #fdba74;border-radius:10px;padding:12px 14px;margin:18px 0 0;text-align:left;">
+        <p style="color:#9a3412;font-size:12.5px;margin:0;line-height:1.6;">
+          🔒 <b>Vì an toàn:</b> KHÔNG chia sẻ mã này cho bất kỳ ai, kể cả người tự xưng là nhân viên KENIOS.
+          Nếu bạn không yêu cầu mã, hãy bỏ qua email — tài khoản của bạn vẫn an toàn.
+        </p>
+      </div>
     </div>
-    <div style="background:#fafafa;padding:14px;text-align:center;color:#aaa;font-size:12px;">© KENIOS</div>
+    <div style="background:#fafafa;padding:18px 22px;text-align:center;color:#888;font-size:12px;line-height:1.7;border-top:1px solid #eee;">
+      Khi sử dụng KENIOS, bạn đồng ý với:<br>
+      <a href="__EULA__" style="color:#3b6eff;text-decoration:none;">Điều khoản sử dụng (EULA của Apple)</a>
+      &nbsp;·&nbsp;
+      <a href="__PRIVACY__" style="color:#3b6eff;text-decoration:none;">Chính sách quyền riêng tư của Apple</a>
+      <br><span style="color:#bbb;">© __YEAR__ KENIOS</span>
+    </div>
   </div>
-</div>""").replace("__CODE__", code)
+</div>""").replace("__CODE__", code).replace("__ACTION__", action) \
+           .replace("__EULA__", eula).replace("__PRIVACY__", privacy).replace("__YEAR__", year)
     channel = send_system_mail(email, subject, body, html=html,
                                images={"logo": KENIOS_LOGO_B64, "badge": VERIFIED_BADGE_B64})
     resp: dict[str, Any] = {"sent": channel != "none", "channel": channel}
