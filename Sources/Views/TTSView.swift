@@ -498,7 +498,7 @@ struct TTSView: View {
 
     @ViewBuilder private var notifSoundSection: some View {
         section("Âm thanh thông báo (như TikFinity) · phát TRƯỚC khi đọc") {
-            Text("Chọn âm thanh cho 3 sự kiện: tặng quà, follow, chia sẻ. Khi có sự kiện, app phát âm thanh báo trước rồi mới đọc. Bấm để chọn & nghe thử.")
+            Text("Hơn 50 âm thanh. CHẠM vào 1 âm để NGHE THỬ ngay; âm đang chọn có dấu ✓. App phát âm báo trước rồi mới đọc.")
                 .font(.caption2).foregroundStyle(.secondary)
             ForEach(notifEventLabels, id: \.id) { ev in
                 soundChipRow(ev.id, label: ev.label, icon: ev.icon)
@@ -508,24 +508,43 @@ struct TTSView: View {
 
     @ViewBuilder private func soundChipRow(_ type: String, label: String, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label(label, systemImage: icon).font(.subheadline.bold()).foregroundStyle(Theme.accent)
+            HStack {
+                Label(label, systemImage: icon).font(.subheadline.bold()).foregroundStyle(Theme.accent)
+                Spacer()
+                // Nghe thử lại đúng âm đang chọn cho sự kiện này
+                Button {
+                    let id = tts.notifSoundId(for: type)
+                    if id != "none" { tts.previewNotifSound(id) }
+                } label: {
+                    Label("Nghe thử", systemImage: "play.circle.fill").font(.caption)
+                }.buttonStyle(.plain).foregroundStyle(.green)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(kNotifSounds) { s in
                         let on = tts.notifSoundId(for: type) == s.id
                         Button {
-                            tts.setNotifSound(s.id, for: type)
+                            // Chạm = nghe thử NGAY + chọn âm này cho sự kiện
                             if s.id != "none" { tts.previewNotifSound(s.id) }
+                            tts.setNotifSound(s.id, for: type)
                         } label: {
                             VStack(spacing: 3) {
                                 Image(systemName: s.icon).font(.body)
-                                Text(s.label).font(.caption2)
+                                Text(s.label).font(.caption2).lineLimit(1)
                             }
-                            .frame(width: 70, height: 54)
+                            .frame(width: 72, height: 56)
                             .background(on ? Theme.accent.opacity(0.28) : Color(.secondarySystemBackground))
                             .foregroundStyle(on ? Theme.accent : .primary)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? Theme.accent : .clear, lineWidth: 1.5))
+                            .overlay(alignment: .topTrailing) {
+                                if on {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.caption2).foregroundStyle(.green)
+                                        .background(Circle().fill(.white).frame(width: 12, height: 12))
+                                        .offset(x: -3, y: 3)
+                                }
+                            }
                         }.buttonStyle(.plain)
                     }
                 }
