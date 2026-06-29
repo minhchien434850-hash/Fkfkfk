@@ -2,10 +2,11 @@ import SwiftUI
 import AVKit
 import Foundation
 
-// ============================ Logo cửa hàng có hiệu ứng động ============================
-// effect: rainbow | gold | neon | glow | none
-// font:   rounded | serif | mono | default
-// anim:   shimmer | wave | pulse | none
+// ============================ Logo cửa hàng / app có hiệu ứng động ============================
+// effect: rainbow|gradient|gold|silver|neon|glow|fire|ocean|sunset|candy|galaxy|mint|accent|none
+// font:   rounded|serif|mono|default
+// anim:   shimmer|wave|pulse|bounce|rotate|blink|rgb|none
+// LƯU Ý: mọi hiệu ứng (anim) đều CHẠY trên MỌI màu (effect) — không còn cảnh chọn xong mà đứng im.
 struct AnimatedStoreLogo: View {
     let text: String
     var effect: String = "rainbow"
@@ -13,56 +14,111 @@ struct AnimatedStoreLogo: View {
     var anim: String = "shimmer"
     var size: CGFloat = 26
 
-    private var font: Font {
-        let design: Font.Design
-        switch fontStyle {
-        case "serif": design = .serif
-        case "mono":  design = .monospaced
-        case "rounded": design = .rounded
-        default: design = .default
-        }
-        return .system(size: size, weight: .heavy, design: design)
-    }
-    private let rainbow: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red]
+    private var font: Font { keniosLogoFont(fontStyle, size: size) }
 
     var body: some View {
         TimelineView(.animation) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
-            let phase = (t.truncatingRemainder(dividingBy: 3)) / 3   // 0..1
-            styled(phase)
-                .scaleEffect(anim == "pulse" ? 1 + 0.06 * sin(phase * 2 * .pi) : 1)
-                .rotationEffect(.degrees(anim == "wave" ? 2.5 * sin(phase * 2 * .pi) : 0))
-                .animation(.linear(duration: 0.1), value: phase)
+            let p = (t.truncatingRemainder(dividingBy: 2)) / 2   // 0..1 mỗi 2 giây
+            LogoEffectText(text: text, effect: effect, font: font)
+                .modifier(LogoAnimModifier(anim: anim, phase: p))
+                .overlay { if anim == "shimmer" { ShimmerSweep(text: text, font: font, phase: p) } }
         }
-        .frame(height: size + 8)
+        .frame(height: size + 10)
     }
+}
 
-    @ViewBuilder private func styled(_ phase: Double) -> some View {
+// Bộ biến đổi chuyển động (áp cho mọi màu): nảy, lắc, nhịp đập, nhấp nháy, đổi màu…
+struct LogoAnimModifier: ViewModifier {
+    let anim: String
+    let phase: Double
+    func body(content: Content) -> some View {
+        let s = sin(phase * 2 * .pi)
+        return content
+            .scaleEffect(anim == "pulse" ? 1 + 0.08 * s : 1)
+            .offset(y: (anim == "wave" || anim == "bounce") ? CGFloat(5 * s) : 0)
+            .rotationEffect(.degrees(anim == "rotate" ? 3.5 * s : 0))
+            .opacity(anim == "blink" ? 0.45 + 0.55 * abs(sin(phase * .pi)) : 1)
+            .hueRotation(.degrees(anim == "rgb" ? phase * 360 : 0))
+    }
+}
+
+// Văn bản đổ màu theo hiệu ứng (dùng chung cho logo + slogan + hero).
+struct LogoEffectText: View {
+    let text: String
+    let effect: String
+    let font: Font
+    private let rainbow: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red]
+
+    var body: some View {
         let base = Text(text).font(font)
         switch effect {
         case "rainbow":
             base.foregroundStyle(LinearGradient(colors: rainbow, startPoint: .leading, endPoint: .trailing))
-                .hueRotation(.degrees(anim == "none" ? 0 : phase * 360))
         case "gradient":
-            base.foregroundStyle(LinearGradient(colors: [Theme.accent, .cyan, .purple],
-                                                startPoint: .leading, endPoint: .trailing))
+            base.foregroundStyle(LinearGradient(colors: [Theme.accent, .cyan, .purple], startPoint: .leading, endPoint: .trailing))
         case "gold":
-            base.foregroundStyle(LinearGradient(
-                colors: [Color(red: 0.95, green: 0.78, blue: 0.25), .yellow, Color(red: 0.82, green: 0.6, blue: 0.12)],
-                startPoint: .top, endPoint: .bottom))
-                .shadow(color: .yellow.opacity(0.5), radius: 4)
+            base.foregroundStyle(LinearGradient(colors: [Color(red: 0.95, green: 0.78, blue: 0.25), .yellow, Color(red: 0.82, green: 0.6, blue: 0.12)], startPoint: .top, endPoint: .bottom))
+                .shadow(color: .yellow.opacity(0.5), radius: 3)
+        case "silver":
+            base.foregroundStyle(LinearGradient(colors: [.white, Color(white: 0.55), .white], startPoint: .top, endPoint: .bottom))
         case "neon":
-            base.foregroundStyle(.cyan)
-                .shadow(color: .cyan, radius: 8).shadow(color: .blue, radius: 14)
+            base.foregroundStyle(.cyan).shadow(color: .cyan, radius: 8).shadow(color: .blue, radius: 14)
         case "glow":
-            base.foregroundStyle(.white)
-                .shadow(color: .white.opacity(0.85), radius: anim == "none" ? 4 : 4 + 6 * abs(sin(phase * .pi)))
+            base.foregroundStyle(.white).shadow(color: .white.opacity(0.85), radius: 6)
+        case "fire":
+            base.foregroundStyle(LinearGradient(colors: [.yellow, .orange, .red], startPoint: .bottom, endPoint: .top))
+                .shadow(color: .orange.opacity(0.6), radius: 5)
+        case "ocean":
+            base.foregroundStyle(LinearGradient(colors: [.cyan, .blue, .teal], startPoint: .leading, endPoint: .trailing))
+        case "sunset":
+            base.foregroundStyle(LinearGradient(colors: [.orange, .pink, .purple], startPoint: .leading, endPoint: .trailing))
+        case "candy":
+            base.foregroundStyle(LinearGradient(colors: [.pink, .purple, .cyan], startPoint: .leading, endPoint: .trailing))
+        case "galaxy":
+            base.foregroundStyle(LinearGradient(colors: [.purple, .indigo, .blue, .purple], startPoint: .leading, endPoint: .trailing))
+                .shadow(color: .purple.opacity(0.5), radius: 4)
+        case "mint":
+            base.foregroundStyle(LinearGradient(colors: [.green, .mint, .teal], startPoint: .leading, endPoint: .trailing))
         case "accent":
             base.foregroundStyle(Theme.accent)
+        case "secondary":
+            base.foregroundStyle(.secondary)
         default:
             base.foregroundStyle(.primary)
         }
     }
+}
+
+// Vệt sáng "lung linh" quét qua chữ — nhìn rõ trên MỌI màu.
+struct ShimmerSweep: View {
+    let text: String
+    let font: Font
+    let phase: Double
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            LinearGradient(colors: [.clear, .white.opacity(0.95), .clear],
+                           startPoint: .leading, endPoint: .trailing)
+                .frame(width: max(40, w * 0.35))
+                .offset(x: -w * 0.7 + (w * 1.4) * phase)
+                .blendMode(.plusLighter)
+        }
+        .mask(Text(text).font(font))
+        .allowsHitTesting(false)
+    }
+}
+
+// Font cho logo (đậm khối) theo kiểu chữ chọn.
+func keniosLogoFont(_ style: String, size: CGFloat) -> Font {
+    let design: Font.Design
+    switch style {
+    case "serif": design = .serif
+    case "mono":  design = .monospaced
+    case "rounded": design = .rounded
+    default: design = .default
+    }
+    return .system(size: size, weight: .heavy, design: design)
 }
 
 // ============================ Nền cửa hàng full màn hình (ảnh/GIF/video) ============================
@@ -160,56 +216,32 @@ struct AnimatedStoreText: View {
     var font: Font = .body
     var anim: String = "none"
 
-    private let rainbow: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red]
-
     var body: some View {
         TimelineView(.animation) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
-            let phase = (t.truncatingRemainder(dividingBy: 3)) / 3
-            styled(phase)
-                .scaleEffect(anim == "pulse" ? 1 + 0.06 * sin(phase * 2 * .pi) : 1)
-                .rotationEffect(.degrees(anim == "wave" ? 2.5 * sin(phase * 2 * .pi) : 0))
-        }
-    }
-
-    @ViewBuilder private func styled(_ phase: Double) -> some View {
-        let base = Text(text).font(font)
-        switch effect {
-        case "rainbow":
-            base.foregroundStyle(LinearGradient(colors: rainbow, startPoint: .leading, endPoint: .trailing))
-                .hueRotation(.degrees(anim == "none" ? 0 : phase * 360))
-        case "gradient":
-            base.foregroundStyle(LinearGradient(colors: [Theme.accent, .cyan, .purple],
-                                                startPoint: .leading, endPoint: .trailing))
-        case "gold":
-            base.foregroundStyle(LinearGradient(
-                colors: [Color(red: 0.95, green: 0.78, blue: 0.25), .yellow,
-                         Color(red: 0.82, green: 0.6, blue: 0.12)],
-                startPoint: .top, endPoint: .bottom))
-        case "neon":
-            base.foregroundStyle(.cyan).shadow(color: .cyan, radius: 8).shadow(color: .blue, radius: 14)
-        case "glow":
-            base.foregroundStyle(.white)
-                .shadow(color: .white.opacity(0.85), radius: anim == "none" ? 4 : 4 + 6 * abs(sin(phase * .pi)))
-        case "accent":
-            base.foregroundStyle(Theme.accent)
-        default:
-            base.foregroundStyle(.secondary)
+            let p = (t.truncatingRemainder(dividingBy: 2)) / 2
+            LogoEffectText(text: text, effect: effect == "none" ? "secondary" : effect, font: font)
+                .modifier(LogoAnimModifier(anim: anim, phase: p))
+                .overlay { if anim == "shimmer" { ShimmerSweep(text: text, font: font, phase: p) } }
         }
     }
 }
 
 // Danh sách tuỳ chọn hiệu ứng / font (dùng cho cả cửa hàng & cài đặt app)
 let kLogoEffects: [(String, String)] = [
-    ("rainbow", "7 màu chạy"), ("gradient", "Gradient màu app"),
-    ("gold", "Vàng kim"), ("neon", "Neon"),
-    ("glow", "Phát sáng"), ("accent", "Màu accent"), ("none", "Không")
+    ("rainbow", "7 màu chạy"), ("gradient", "Gradient màu app"), ("gold", "Vàng kim"),
+    ("silver", "Bạc"), ("neon", "Neon"), ("glow", "Phát sáng"),
+    ("fire", "Lửa"), ("ocean", "Đại dương"), ("sunset", "Hoàng hôn"),
+    ("candy", "Kẹo ngọt"), ("galaxy", "Thiên hà"), ("mint", "Bạc hà"),
+    ("accent", "Màu accent"), ("none", "Không")
 ]
 let kLogoFonts: [(String, String)] = [
     ("rounded", "Bo tròn"), ("default", "Mặc định"), ("serif", "Có chân"), ("mono", "Đơn cách")
 ]
 let kLogoAnims: [(String, String)] = [
-    ("shimmer", "Lung linh"), ("wave", "Lượn sóng"), ("pulse", "Nhịp đập"), ("none", "Tĩnh")
+    ("shimmer", "Lung linh"), ("wave", "Lượn sóng"), ("pulse", "Nhịp đập"),
+    ("bounce", "Nảy"), ("rotate", "Lắc lư"), ("blink", "Nhấp nháy"),
+    ("rgb", "Đổi màu"), ("none", "Tĩnh")
 ]
 
 // Bộ font đa dạng cho dòng giới thiệu (slogan) cửa hàng
