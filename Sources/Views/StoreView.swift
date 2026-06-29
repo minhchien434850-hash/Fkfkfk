@@ -1095,7 +1095,8 @@ struct StoreView: View {
                     text: sloganText,
                     effect: sloganEff,
                     font: keniosFont(config?.sloganFont ?? "rounded", size: 12),
-                    anim: sloganAnim)
+                    anim: sloganAnim,
+                    solidColor: Color(hexString: config?.sloganColor))
                     .multilineTextAlignment(.center)
             } else {
                 Text(sloganText)
@@ -1265,7 +1266,8 @@ struct StoreView: View {
                                 text: sloganText,
                                 effect: eff,
                                 font: keniosFont(config?.sloganFont ?? "rounded", size: 12),
-                                anim: config?.sloganAnim ?? "none")
+                                anim: config?.sloganAnim ?? "none",
+                                solidColor: Color(hexString: config?.sloganColor))
                         } else {
                             Text(sloganText)
                                 .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
@@ -1297,18 +1299,32 @@ struct StoreView: View {
                 text: heroTitle,
                 effect: config?.heroEffect ?? "gradient",
                 font: keniosFont(config?.heroFont ?? "rounded-bold", size: 20),
-                anim: config?.heroAnim ?? "none")
+                anim: config?.heroAnim ?? "none",
+                solidColor: Color(hexString: config?.heroColor))
             .frame(maxWidth: .infinity, alignment: .leading)
             .lineLimit(3)
-            Text({
+            let heroSub: String = {
                 let s = (config?.heroSubtitle ?? "").trimmingCharacters(in: .whitespaces)
                 return s.isEmpty
                     ? store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty")
                     : s
-            }())
-            .font(.subheadline)
-            .foregroundStyle(onImage ? Color.white.opacity(0.92) : Color.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            }()
+            let subEff = (config?.heroSubEffect ?? "").trimmingCharacters(in: .whitespaces)
+            if !subEff.isEmpty {
+                // Admin đã tuỳ chỉnh màu/hiệu ứng cho dòng phụ
+                AnimatedStoreText(
+                    text: heroSub,
+                    effect: subEff,
+                    font: keniosFont(config?.heroSubFont ?? "rounded", size: 15),
+                    anim: config?.heroSubAnim ?? "none",
+                    solidColor: Color(hexString: config?.heroSubColor))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(heroSub)
+                    .font(.subheadline)
+                    .foregroundStyle(onImage ? Color.white.opacity(0.92) : Color.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Button {
                 // Luôn cuộn tới mục "Tất cả sản phẩm"; nếu admin ẩn thì rơi về "gamecat".
                 scrollTarget = orderedSections.contains("products") ? "products" : "gamecat"

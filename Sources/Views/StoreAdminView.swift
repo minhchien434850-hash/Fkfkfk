@@ -291,8 +291,14 @@ struct StoreConfigEditor: View {
     @State private var heroEffect = "gradient"
     @State private var heroFont = "rounded-bold"
     @State private var heroAnim = "none"
+    @State private var heroColor = Color(hexString: "#3B6EFF")!     // màu tự chọn cho tiêu đề
+    @State private var heroSubEffect = ""                          // rỗng = giữ kiểu mặc định (trắng/xám)
+    @State private var heroSubFont = "rounded"
+    @State private var heroSubAnim = "none"
+    @State private var heroSubColor = Color.white                  // màu tự chọn cho dòng phụ
     @State private var sloganEffect = "none"
     @State private var sloganAnim = "none"
+    @State private var sloganColor = Color.white                   // màu tự chọn cho slogan
     @State private var promoImageUrl = ""
     @State private var promoProductId = 0
     @State private var statUsersBase = 0
@@ -389,6 +395,9 @@ struct StoreConfigEditor: View {
                 Picker(store.t("Hiệu ứng màu slogan", "Slogan color effect"), selection: $sloganEffect) {
                     ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
                 }
+                if sloganEffect == "solid" {
+                    ColorPicker(store.t("Chọn màu slogan", "Slogan color"), selection: $sloganColor, supportsOpacity: false)
+                }
                 Picker(store.t("Chuyển động slogan", "Slogan animation"), selection: $sloganAnim) {
                     ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
                 }
@@ -397,26 +406,40 @@ struct StoreConfigEditor: View {
                         text: slogan.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : slogan,
                         effect: sloganEffect,
                         font: keniosFont(sloganFont, size: 14),
-                        anim: sloganAnim)
+                        anim: sloganAnim,
+                        solidColor: sloganColor)
                     Spacer() }
             }
 
             // Phần hero (banner chính): tiêu đề lớn + dòng phụ + hiệu ứng
             Section {
-                HStack { Spacer()
+                // Xem trước cả tiêu đề + dòng phụ
+                VStack(alignment: .leading, spacing: 4) {
                     AnimatedStoreText(
                         text: heroTitle.isEmpty ? store.t("GAME CHẤT LƯỢNG CAO · GIÁ TỐT NHẤT", "TOP QUALITY · BEST PRICE") : heroTitle,
                         effect: heroEffect,
                         font: keniosFont(heroFont, size: 17),
-                        anim: heroAnim)
+                        anim: heroAnim,
+                        solidColor: heroColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Spacer() }
+                    AnimatedStoreText(
+                        text: heroSubtitle.isEmpty ? store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty") : heroSubtitle,
+                        effect: heroSubEffect.isEmpty ? "secondary" : heroSubEffect,
+                        font: keniosFont(heroSubFont, size: 13),
+                        anim: heroSubAnim,
+                        solidColor: heroSubColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(8).frame(maxWidth: .infinity)
+                .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+
                 TextField(store.t("Tiêu đề lớn (bỏ trống = dùng slogan)", "Hero title (blank = use slogan)"), text: $heroTitle, axis: .vertical)
-                    .lineLimit(1...3)
-                TextField(store.t("Dòng phụ (bỏ trống = mặc định)", "Subtitle (blank = default)"), text: $heroSubtitle, axis: .vertical)
                     .lineLimit(1...3)
                 Picker(store.t("Hiệu ứng màu tiêu đề", "Title color effect"), selection: $heroEffect) {
                     ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                if heroEffect == "solid" {
+                    ColorPicker(store.t("Chọn màu tiêu đề", "Title color"), selection: $heroColor, supportsOpacity: false)
                 }
                 Picker(store.t("Font tiêu đề", "Title font"), selection: $heroFont) {
                     ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
@@ -424,11 +447,30 @@ struct StoreConfigEditor: View {
                 Picker(store.t("Chuyển động tiêu đề", "Title animation"), selection: $heroAnim) {
                     ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
                 }
+
+                Divider()
+                TextField(store.t("Dòng phụ (bỏ trống = mặc định)", "Subtitle (blank = default)"), text: $heroSubtitle, axis: .vertical)
+                    .lineLimit(1...3)
+                Picker(store.t("Hiệu ứng màu dòng phụ", "Subtitle color effect"), selection: $heroSubEffect) {
+                    Text(store.t("Mặc định (trắng/xám)", "Default (white/gray)")).tag("")
+                    ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                if heroSubEffect == "solid" {
+                    ColorPicker(store.t("Chọn màu dòng phụ", "Subtitle color"), selection: $heroSubColor, supportsOpacity: false)
+                }
+                if !heroSubEffect.isEmpty {
+                    Picker(store.t("Font dòng phụ", "Subtitle font"), selection: $heroSubFont) {
+                        ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    Picker(store.t("Chuyển động dòng phụ", "Subtitle animation"), selection: $heroSubAnim) {
+                        ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                }
             } header: {
                 Text(store.t("Phần hero (banner chính)", "Hero section (main banner)"))
             } footer: {
-                Text(store.t("Tiêu đề lớn và dòng phụ trong banner đầu trang. Hỗ trợ 7 màu liên tục, gradient và hiệu ứng động.",
-                             "Large title and subtitle in the top hero banner. Supports 7-color rainbow, gradient, and animations."))
+                Text(store.t("Tiêu đề lớn và dòng phụ trong banner đầu trang. Chọn “Màu tự chọn 🎨” để hiện bảng chọn màu bất kỳ, hoặc dùng gradient/7 màu và hiệu ứng động.",
+                             "Large title and subtitle in the top hero banner. Pick “Custom color 🎨” to choose any color, or use gradient/rainbow and animations."))
                     .font(.caption2)
             }
 
@@ -692,8 +734,14 @@ struct StoreConfigEditor: View {
             heroEffect = c.heroEffect ?? "gradient"
             heroFont = c.heroFont ?? "rounded-bold"
             heroAnim = c.heroAnim ?? "none"
+            heroColor = Color(hexString: c.heroColor) ?? Color(hexString: "#3B6EFF")!
+            heroSubEffect = c.heroSubEffect ?? ""
+            heroSubFont = c.heroSubFont ?? "rounded"
+            heroSubAnim = c.heroSubAnim ?? "none"
+            heroSubColor = Color(hexString: c.heroSubColor) ?? .white
             sloganEffect = c.sloganEffect ?? "none"
             sloganAnim = c.sloganAnim ?? "none"
+            sloganColor = Color(hexString: c.sloganColor) ?? .white
             promoImageUrl = c.promoImageUrl ?? ""
             promoProductId = c.promoProductId ?? 0
             statUsersBase = c.statUsersBase ?? 0
@@ -723,7 +771,11 @@ struct StoreConfigEditor: View {
                 flashTitle: flashTitle,
                 heroTitle: heroTitle, heroSubtitle: heroSubtitle,
                 heroEffect: heroEffect, heroFont: heroFont, heroAnim: heroAnim,
+                heroColor: heroColor.hexStringRGB,
+                heroSubEffect: heroSubEffect, heroSubFont: heroSubFont,
+                heroSubAnim: heroSubAnim, heroSubColor: heroSubColor.hexStringRGB,
                 sloganEffect: sloganEffect, sloganAnim: sloganAnim,
+                sloganColor: sloganColor.hexStringRGB,
                 promoImageUrl: promoImageUrl.isEmpty ? nil : promoImageUrl,
                 promoProductId: promoProductId > 0 ? promoProductId : nil,
                 statUsersBase: statUsersBase, statSoldBase: statSoldBase,

@@ -35,12 +35,19 @@ struct StoreAppConfig: Decodable, Hashable {
     // Hero section (banner chính đầu trang)
     var heroTitle: String? = nil     // tiêu đề lớn (nil = dùng slogan hoặc mặc định)
     var heroSubtitle: String? = nil  // dòng phụ (nil = mặc định)
-    var heroEffect: String? = nil    // rainbow|gradient|gold|neon|glow|accent|none
+    var heroEffect: String? = nil    // rainbow|gradient|gold|neon|glow|accent|solid|none
     var heroFont: String? = nil      // font cho tiêu đề hero
     var heroAnim: String? = nil      // shimmer|wave|pulse|none
+    var heroColor: String? = nil     // màu tự chọn cho tiêu đề (hex, dùng khi heroEffect=="solid")
+    // Dòng phụ (subtitle) — tuỳ chỉnh màu/hiệu ứng/chuyển động riêng
+    var heroSubEffect: String? = nil // rainbow|gradient|...|solid|none
+    var heroSubFont: String? = nil   // font cho dòng phụ
+    var heroSubAnim: String? = nil   // shimmer|wave|pulse|none
+    var heroSubColor: String? = nil  // màu tự chọn cho dòng phụ (hex)
     // Slogan / dòng giới thiệu — thêm hiệu ứng màu & chuyển động
-    var sloganEffect: String? = nil  // rainbow|gradient|gold|neon|glow|accent|none
+    var sloganEffect: String? = nil  // rainbow|gradient|gold|neon|glow|accent|solid|none
     var sloganAnim: String? = nil    // shimmer|wave|pulse|none
+    var sloganColor: String? = nil   // màu tự chọn cho slogan (hex)
     // Khuyến mãi (banner ảnh trong phần ví nạp tiền)
     var promoImageUrl: String? = nil
     var promoProductId: Int? = nil

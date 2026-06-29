@@ -48,11 +48,14 @@ struct LogoEffectText: View {
     let text: String
     let effect: String
     let font: Font
+    var solidColor: Color? = nil   // dùng khi effect == "solid" (màu admin tự chọn)
     private let rainbow: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red]
 
     var body: some View {
         let base = Text(text).font(font)
         switch effect {
+        case "solid":
+            base.foregroundStyle(solidColor ?? .primary)
         case "rainbow":
             base.foregroundStyle(LinearGradient(colors: rainbow, startPoint: .leading, endPoint: .trailing))
         case "gradient":
@@ -252,20 +255,57 @@ struct AnimatedStoreText: View {
     var effect: String = "none"
     var font: Font = .body
     var anim: String = "none"
+    var solidColor: Color? = nil   // màu admin tự chọn (khi effect == "solid")
 
     var body: some View {
         TimelineView(.animation) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             let p = (t.truncatingRemainder(dividingBy: 2)) / 2
-            LogoEffectText(text: text, effect: effect == "none" ? "secondary" : effect, font: font)
+            LogoEffectText(text: text, effect: effect == "none" ? "secondary" : effect, font: font, solidColor: solidColor)
                 .modifier(LogoAnimModifier(anim: anim, phase: p))
                 .overlay { if anim == "shimmer" { ShimmerSweep(text: text, font: font, phase: p) } }
         }
     }
 }
 
+// Chuyển chuỗi hex (#RRGGBB / RRGGBB / #RRGGBBAA) → Color. Rỗng/không hợp lệ = nil.
+extension Color {
+    init?(hexString: String?) {
+        guard var s = hexString?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6 || s.count == 8, let v = UInt64(s, radix: 16) else { return nil }
+        let r, g, b, a: Double
+        if s.count == 8 {
+            r = Double((v >> 24) & 0xFF) / 255
+            g = Double((v >> 16) & 0xFF) / 255
+            b = Double((v >> 8) & 0xFF) / 255
+            a = Double(v & 0xFF) / 255
+        } else {
+            r = Double((v >> 16) & 0xFF) / 255
+            g = Double((v >> 8) & 0xFF) / 255
+            b = Double(v & 0xFF) / 255
+            a = 1
+        }
+        self = Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+    }
+
+    // Color → "#RRGGBB" để lưu lên server.
+    var hexStringRGB: String {
+        #if canImport(UIKit)
+        let ui = UIColor(self)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return String(format: "#%02X%02X%02X",
+                      Int(round(r * 255)), Int(round(g * 255)), Int(round(b * 255)))
+        #else
+        return "#000000"
+        #endif
+    }
+}
+
 // Danh sách tuỳ chọn hiệu ứng / font (dùng cho cả cửa hàng & cài đặt app)
 let kLogoEffects: [(String, String)] = [
+    ("solid", "Màu tự chọn 🎨"),
     ("rainbow", "7 màu chạy"), ("gradient", "Gradient màu app"), ("gold", "Vàng kim"),
     ("silver", "Bạc"), ("neon", "Neon"), ("glow", "Phát sáng"),
     ("fire", "Lửa"), ("ocean", "Đại dương"), ("sunset", "Hoàng hôn"),

@@ -5246,9 +5246,16 @@ def store_config() -> dict[str, Any]:
         "hero_effect": get_setting("store_hero_effect", "gradient"),
         "hero_font": get_setting("store_hero_font", "rounded"),
         "hero_anim": get_setting("store_hero_anim", "shimmer"),
+        "hero_color": get_setting("store_hero_color", ""),
+        # Dòng phụ (subtitle) — màu/hiệu ứng/chuyển động riêng
+        "hero_sub_effect": get_setting("store_hero_sub_effect", ""),
+        "hero_sub_font": get_setting("store_hero_sub_font", "rounded"),
+        "hero_sub_anim": get_setting("store_hero_sub_anim", "none"),
+        "hero_sub_color": get_setting("store_hero_sub_color", ""),
         # Hiệu ứng / chuyển động cho slogan
         "slogan_effect": get_setting("store_slogan_effect", "none"),
         "slogan_anim": get_setting("store_slogan_anim", "none"),
+        "slogan_color": get_setting("store_slogan_color", ""),
         # Khuyến mãi (banner ảnh trong phần ví nạp tiền)
         "promo_image_url": get_setting("store_promo_image_url", ""),
         "promo_product_id": _int_setting("store_promo_product_id", 0),
@@ -5741,9 +5748,16 @@ class StoreConfigIn(BaseModel):
     hero_effect: Optional[str] = None
     hero_font: Optional[str] = None
     hero_anim: Optional[str] = None
+    hero_color: Optional[str] = None
+    # Dòng phụ (subtitle) — màu/hiệu ứng/chuyển động riêng
+    hero_sub_effect: Optional[str] = None
+    hero_sub_font: Optional[str] = None
+    hero_sub_anim: Optional[str] = None
+    hero_sub_color: Optional[str] = None
     # Hiệu ứng / chuyển động cho slogan
     slogan_effect: Optional[str] = None
     slogan_anim: Optional[str] = None
+    slogan_color: Optional[str] = None
     # Khuyến mãi (banner ảnh trong phần ví nạp tiền)
     promo_image_url: Optional[str] = None
     promo_product_id: Optional[int] = None
@@ -5793,9 +5807,16 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.hero_effect is not None: set_setting("store_hero_effect", b.hero_effect.strip()[:20])
     if b.hero_font is not None: set_setting("store_hero_font", b.hero_font.strip()[:20])
     if b.hero_anim is not None: set_setting("store_hero_anim", b.hero_anim.strip()[:20])
-    # Slogan effect / anim
+    if b.hero_color is not None: set_setting("store_hero_color", b.hero_color.strip()[:9])
+    # Dòng phụ (subtitle)
+    if b.hero_sub_effect is not None: set_setting("store_hero_sub_effect", b.hero_sub_effect.strip()[:20])
+    if b.hero_sub_font is not None: set_setting("store_hero_sub_font", b.hero_sub_font.strip()[:20])
+    if b.hero_sub_anim is not None: set_setting("store_hero_sub_anim", b.hero_sub_anim.strip()[:20])
+    if b.hero_sub_color is not None: set_setting("store_hero_sub_color", b.hero_sub_color.strip()[:9])
+    # Slogan effect / anim / color
     if b.slogan_effect is not None: set_setting("store_slogan_effect", b.slogan_effect.strip()[:20])
     if b.slogan_anim is not None: set_setting("store_slogan_anim", b.slogan_anim.strip()[:20])
+    if b.slogan_color is not None: set_setting("store_slogan_color", b.slogan_color.strip()[:9])
     # Khuyến mãi (banner)
     if b.promo_image_url is not None: set_setting("store_promo_image_url", b.promo_image_url.strip())
     if b.promo_product_id is not None: set_setting("store_promo_product_id", str(max(0, int(b.promo_product_id))))

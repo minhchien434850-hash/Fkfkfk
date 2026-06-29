@@ -487,9 +487,11 @@ struct APIClient {
                              flashTitle: String? = nil,
                              heroTitle: String? = nil, heroSubtitle: String? = nil,
                              heroEffect: String? = nil, heroFont: String? = nil,
-                             heroAnim: String? = nil,
+                             heroAnim: String? = nil, heroColor: String? = nil,
+                             heroSubEffect: String? = nil, heroSubFont: String? = nil,
+                             heroSubAnim: String? = nil, heroSubColor: String? = nil,
                              sloganEffect: String? = nil,
-                             sloganAnim: String? = nil,
+                             sloganAnim: String? = nil, sloganColor: String? = nil,
                              promoImageUrl: String? = nil,
                              promoProductId: Int? = nil,
                              statUsersBase: Int? = nil, statSoldBase: Int? = nil,
@@ -521,8 +523,14 @@ struct APIClient {
         if let heroEffect { body["hero_effect"] = heroEffect }
         if let heroFont { body["hero_font"] = heroFont }
         if let heroAnim { body["hero_anim"] = heroAnim }
+        if let heroColor { body["hero_color"] = heroColor }
+        body["hero_sub_effect"] = heroSubEffect ?? ""
+        if let heroSubFont { body["hero_sub_font"] = heroSubFont }
+        if let heroSubAnim { body["hero_sub_anim"] = heroSubAnim }
+        if let heroSubColor { body["hero_sub_color"] = heroSubColor }
         if let sloganEffect { body["slogan_effect"] = sloganEffect }
         if let sloganAnim { body["slogan_anim"] = sloganAnim }
+        if let sloganColor { body["slogan_color"] = sloganColor }
         body["promo_image_url"] = promoImageUrl ?? ""
         if let promoProductId { body["promo_product_id"] = promoProductId }
         if let statUsersBase { body["stat_users_base"] = statUsersBase }
