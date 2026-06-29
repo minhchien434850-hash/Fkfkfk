@@ -141,6 +141,9 @@ extension TTSEngine {
         list.removeAll { $0["url"] == url }
         saveCustomSounds(list)
     }
+    // Yêu cầu giao diện vẽ lại sau khi kho âm dùng chung được tải từ máy chủ.
+    func reloadNotif() { objectWillChange.send() }
+
     // Nghe thử 1 link bất kỳ (kho tùy chỉnh).
     func previewCustomUrl(_ s: String) {
         guard let url = URL(string: s), !s.isEmpty else { return }

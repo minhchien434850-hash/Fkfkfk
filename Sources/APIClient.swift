@@ -132,9 +132,15 @@ struct APIClient {
         try decode(try await send("/auth/google", method: "POST",
                                   json: ["id_token": idToken], auth: false))
     }
-    /// Lưu âm thanh thông báo + kho tùy chỉnh theo user lên máy chủ (cài lại app/build lại vẫn còn).
+    /// Lưu âm thanh thông báo DÙNG CHUNG (toàn cục) lên máy chủ — mọi người đều thấy.
     func saveNotifSounds(_ sounds: [String: Any]) async throws {
-        _ = try await send("/me/notif-sounds", method: "POST", json: ["sounds": sounds])
+        _ = try await send("/notif-sounds", method: "POST", json: ["sounds": sounds])
+    }
+    /// Đọc âm thanh thông báo dùng chung (toàn cục) — trả về chuỗi JSON ("" nếu chưa đặt).
+    func getNotifSounds() async throws -> String {
+        struct R: Decodable { let json: String }
+        let r: R = try decode(try await send("/notif-sounds", auth: true))
+        return r.json
     }
     func forgot(_ username: String) async throws -> ForgotResponse {
         try decode(try await send("/auth/forgot-password", method: "POST",

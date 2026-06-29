@@ -268,9 +268,16 @@ final class AppStore: ObservableObject {
         d.set(credits, forKey: "credits")
         d.set(publicId, forKey: "publicId")
         d.set(resp.user.id, forKey: "userId")
-        // Khôi phục âm thanh thông báo đã lưu trên máy chủ (giữ nguyên sau khi cài lại app/build lại)
-        if let ns = resp.user.notifSounds, !ns.isEmpty { applyNotifSounds(ns) }
         showPlanIntro = true   // hiện màn giới thiệu gói PRO/Free sau khi đăng nhập
+        // Tải âm thanh thông báo DÙNG CHUNG (toàn cục) từ máy chủ
+        Task { await loadNotifSounds() }
+    }
+
+    /// Tải cấu hình âm thanh thông báo dùng chung từ máy chủ và áp vào máy.
+    func loadNotifSounds() async {
+        if let json = try? await api.getNotifSounds(), !json.isEmpty {
+            applyNotifSounds(json)
+        }
     }
 
     /// Ghi cấu hình âm thanh thông báo (JSON từ máy chủ) vào UserDefaults để TTS dùng.

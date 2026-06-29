@@ -430,6 +430,8 @@ struct TTSView: View {
                 .padding()
             }
             .navigationTitle(store.t("Đọc (TTS)", "Read (TTS)"))
+            // Tải lại kho âm DÙNG CHUNG mỗi khi mở màn (ai thêm thì mọi người đều thấy)
+            .task { await store.loadNotifSounds(); tts.reloadNotif() }
         }
     }
 

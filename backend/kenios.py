@@ -1007,8 +1007,6 @@ def _user_dict(row) -> dict[str, Any]:
         "plan_expires": 0 if row["is_admin"] else (row["plan_expires"] or 0),
         "credits": row["credits"], "lang": row["lang"] or "vi",
         "status": row["status"] or "active",
-        # Âm thanh thông báo đã lưu (chuỗi JSON; "" nếu chưa đặt)
-        "notif_sounds": (row["notif_sounds"] if "notif_sounds" in row.keys() else "") or "",
     }
 
 
@@ -2041,27 +2039,21 @@ def update_profile(b: ProfileIn, user=Depends(get_user)) -> dict[str, Any]:
 
 
 class NotifSoundsIn(BaseModel):
-    sounds: dict[str, Any]   # {"gift":{"id":..,"url":..}, "follow":{...}, "share":{...}}
+    sounds: dict[str, Any]   # {"gift":{"id":..,"url":..}, "follow":{...}, "share":{...}, "library":[...]}
 
 
-@app.post("/me/notif-sounds")
+@app.post("/notif-sounds")
 def save_notif_sounds(b: NotifSoundsIn, user=Depends(get_user)) -> dict[str, Any]:
-    """Lưu âm thanh thông báo (quà/follow/share) theo USER → cài lại app / build lại vẫn còn."""
-    with db() as c:
-        c.execute("UPDATE users SET notif_sounds=? WHERE id=?",
-                  (json.dumps(b.sounds), user["id"]))
+    """Lưu âm thanh thông báo DÙNG CHUNG (toàn cục): bất kỳ ai cũng thêm/đổi được,
+    mọi người (khách + admin) đều thấy giống nhau. Cài lại app / build lại vẫn còn."""
+    set_setting("notif_sounds_global", json.dumps(b.sounds))
     return {"ok": True}
 
 
-@app.get("/me/notif-sounds")
+@app.get("/notif-sounds")
 def get_notif_sounds(user=Depends(get_user)) -> dict[str, Any]:
-    with db() as c:
-        row = c.execute("SELECT notif_sounds FROM users WHERE id=?", (user["id"],)).fetchone()
-    raw = (row["notif_sounds"] if row and "notif_sounds" in row.keys() else "") or ""
-    try:
-        return {"sounds": json.loads(raw) if raw else {}}
-    except Exception:
-        return {"sounds": {}}
+    """Đọc âm thanh thông báo dùng chung (toàn cục)."""
+    return {"json": get_setting("notif_sounds_global", "")}
 
 
 # ======================== API Keys (User) ========================
