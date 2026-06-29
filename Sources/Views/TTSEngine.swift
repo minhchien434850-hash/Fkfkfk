@@ -26,7 +26,8 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     
     // Google TTS Queue
     private var googleQueue: [String] = []
-    private var googlePlayer: AVPlayer?
+    private var googleAudio: AVAudioPlayer?      // phát từ Data đã tải sẵn (mượt, không khoảng lặng)
+    private var googleNextData: Data?            // PREFETCH: audio của đoạn KẾ đã tải sẵn trong lúc đọc đoạn này
     private var isPlayingGoogle = false
     private var googleItemToken = 0   // chống "kẹt" 1 đoạn: watchdog so khớp token
 
@@ -96,7 +97,8 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         didSet {
             UserDefaults.standard.set(rate, forKey: "tts_rate")
             // Đổi tốc độ NGAY cho Google đang phát (không cần đợi đoạn mới)
-            if isPlayingGoogle, !isPaused { googlePlayer?.rate = googleSpeed }
+            googleAudio?.enableRate = true
+            googleAudio?.rate = googleSpeed
         }
     }
     @Published var pitch: Float = UserDefaults.standard.object(forKey: "tts_pitch") as? Float ?? 1.0 {
@@ -106,7 +108,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         didSet {
             UserDefaults.standard.set(volume, forKey: "tts_volume")
             // Cập nhật âm lượng ngay cho audio đang phát (Google / ElevenLabs), không cần đợi đọc câu mới.
-            googlePlayer?.volume = volume
+            googleAudio?.volume = volume
             elevenPlayer?.volume = volume
         }
     }
@@ -149,7 +151,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
             activateSession()
             if silentPlayer != nil { startBackgroundMode() }
             if isPlayingEleven, !isPaused { elevenPlayer?.play() }
-            if isPlayingGoogle, !isPaused { googlePlayer?.play() }
+            if isPlayingGoogle, !isPaused { googleAudio?.play() }
         }
     }
 
@@ -298,14 +300,50 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         return chunks
     }
     
+    // Tải audio 1 đoạn từ Google (TRẢ VỀ Data hoàn chỉnh) — phát bằng AVAudioPlayer nên KHÔNG
+    // có khoảng lặng do streaming. Có User-Agent giống trình duyệt thật để Google không chặn.
+    private func fetchGoogle(_ text: String, completion: @escaping (Data?) -> Void) {
+        guard let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=\(encoded)") else {
+            completion(nil); return
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 8
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+                     forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            // Audio rỗng/bị chặn thường rất nhỏ → coi như thất bại.
+            if let data, code == 200, data.count > 200 {
+                completion(data)
+            } else {
+                completion(nil)
+            }
+        }.resume()
+    }
+
+    // PREFETCH: tải sẵn audio của đoạn KẾ TIẾP trong lúc đoạn hiện tại đang đọc → hết khoảng lặng.
+    private func prefetchNextGoogle() {
+        guard googleNextData == nil, let next = googleQueue.first else { return }
+        fetchGoogle(next) { [weak self] data in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Chỉ giữ nếu đoạn này vẫn là đoạn đầu hàng đợi (chưa bị bỏ do live đông).
+                if self.googleQueue.first == next { self.googleNextData = data }
+            }
+        }
+    }
+
     private func playNextGoogleItem() {
         guard !googleQueue.isEmpty else {
             isPlayingGoogle = false
             isSpeaking = false
+            googleNextData = nil
             pendingCount = elevenQueue.count
+            updateNowPlaying(playing: false)
             return
         }
-        
+
         isPlayingGoogle = true
         isSpeaking = true
         googleItemToken += 1
@@ -313,70 +351,44 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         let text = googleQueue.removeFirst()
         pendingCount = googleQueue.count + elevenQueue.count
 
-        guard let encodedText = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
-            playNextGoogleItem()
-            return
-        }
-        
-        let urlString = "https://translate.google.com/translate_tts?ie=UTF-8&tl=vi&client=tw-ob&q=\(encodedText)"
-        guard let url = URL(string: urlString) else {
-            playNextGoogleItem()
-            return
-        }
-        
-        // QUAN TRỌNG: Google chặn rất nhiều request không có User-Agent giống trình duyệt thật
-        // (trả về lỗi hoặc audio rỗng) → luôn đính kèm User-Agent để giảm tỉ lệ bị từ chối.
-        let asset = AVURLAsset(url: url, options: [
-            "AVURLAssetHTTPHeaderFieldsKey": [
-                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
-            ]
-        ])
-        let playerItem = AVPlayerItem(asset: asset)
-        // Giữ cao độ giọng khi đổi tốc độ (timeDomain hợp với giọng nói) → nghe rõ, không méo.
-        playerItem.audioTimePitchAlgorithm = .timeDomain
-
-        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(googleItemDidPlayToEndTime), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
-        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(googleItemFailedToPlay), name: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
-
-        if googlePlayer == nil {
-            googlePlayer = AVPlayer(playerItem: playerItem)
+        // Nếu đã prefetch sẵn đoạn này → phát NGAY (không đợi mạng = không có khoảng lặng).
+        if let data = googleNextData {
+            googleNextData = nil
+            playGoogleData(data, token: token, retryText: text)
         } else {
-            googlePlayer?.replaceCurrentItem(with: playerItem)
-        }
-
-        googlePlayer?.volume = volume
-        // Phát ngay ở ĐÚNG tốc độ đã chọn (giữ cao độ).
-        googlePlayer?.playImmediately(atRate: googleSpeed)
-
-        // Watchdog chống "đứng im": nếu đoạn này không xong sau (ước lượng + đệm) → bỏ qua, đọc tiếp.
-        let estimate = max(4.0, Double(text.count) / 11.0) / Double(googleSpeed)
-        DispatchQueue.main.asyncAfter(deadline: .now() + estimate + 7.0) { [weak self] in
-            guard let self, self.isPlayingGoogle, self.googleItemToken == token, !self.isPaused else { return }
-            // Vẫn kẹt ở đúng đoạn này quá lâu → chuyển đoạn kế (không để im lặng mãi).
-            self.googlePlayer?.pause()
-            self.playNextGoogleItem()
-        }
-
-        // Kiểm tra sớm 4.5s: nếu Google chặn (status .failed) → bỏ đoạn, đọc tiếp ngay.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
-            guard let self, self.isPlayingGoogle, self.googleItemToken == token else { return }
-            if self.googlePlayer?.currentItem?.status == .failed {
-                self.playNextGoogleItem()
+            // Chưa kịp prefetch → tải đoạn này rồi phát.
+            fetchGoogle(text) { [weak self] data in
+                DispatchQueue.main.async {
+                    guard let self, self.googleItemToken == token, self.isPlayingGoogle else { return }
+                    if let data {
+                        self.playGoogleData(data, token: token, retryText: nil)
+                    } else {
+                        // Google chặn/timeout đoạn này → bỏ qua, đọc tiếp ngay (không đứng im).
+                        self.playNextGoogleItem()
+                    }
+                }
             }
         }
     }
-    
-    @objc private func googleItemDidPlayToEndTime(notification: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.playNextGoogleItem()
-        }
-    }
-    
-    @objc private func googleItemFailedToPlay(notification: Notification) {
-        DispatchQueue.main.async { [weak self] in
-            self?.playNextGoogleItem()
+
+    // Phát audio đã tải xong bằng AVAudioPlayer (mượt, chỉnh tốc độ giữ cao độ).
+    private func playGoogleData(_ data: Data, token: Int, retryText: String?) {
+        do {
+            activateSession()
+            let player = try AVAudioPlayer(data: data)
+            player.delegate = self
+            player.enableRate = true
+            player.rate = googleSpeed
+            player.volume = volume
+            player.prepareToPlay()
+            player.play()
+            googleAudio = player
+            updateNowPlaying(playing: true)
+            // Ngay khi bắt đầu phát đoạn này → tải sẵn đoạn KẾ (prefetch) để liền mạch.
+            prefetchNextGoogle()
+        } catch {
+            // Data hỏng → bỏ đoạn, đọc tiếp.
+            if self.googleItemToken == token { playNextGoogleItem() }
         }
     }
 
@@ -474,8 +486,9 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     func stop() {
         synth.stopSpeaking(at: .immediate)
         googleQueue.removeAll()
-        googlePlayer?.pause()
-        googlePlayer = nil
+        googleNextData = nil
+        googleAudio?.stop()
+        googleAudio = nil
         isPlayingGoogle = false
         elevenQueue.removeAll()
         elevenPlayer?.stop()
@@ -494,7 +507,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
             elevenPlayer?.stop()
             playNextEleven()
         } else if isPlayingGoogle {
-            googlePlayer?.pause()
+            googleAudio?.stop()
             playNextGoogleItem()
         } else if synth.isSpeaking {
             synth.stopSpeaking(at: .immediate)
@@ -504,6 +517,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     // ElevenLabs phát xong 1 đoạn → đọc đoạn tiếp theo
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         if player === elevenPlayer { playNextEleven() }
+        else if player === googleAudio { playNextGoogleItem() }
     }
 
     func pauseOrContinue() {
@@ -512,10 +526,10 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
             else if isSpeaking { elevenPlayer?.pause(); isPaused = true }
         } else if engineType == .google {
             if isPaused {
-                googlePlayer?.playImmediately(atRate: googleSpeed)
+                googleAudio?.play()
                 isPaused = false
             } else if isSpeaking {
-                googlePlayer?.pause()
+                googleAudio?.pause()
                 isPaused = true
             }
         } else {
