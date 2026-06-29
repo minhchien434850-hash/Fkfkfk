@@ -17,13 +17,11 @@ struct TTSView: View {
     @State private var search = ""
     private let previewSynth = AVSpeechSynthesizer()
 
-    // ----- Tải file âm thanh / trích video → lấy link cho âm thông báo -----
+    // ----- Tải file âm thanh → lấy link cho âm thông báo -----
     @State private var showAudioImporter = false
-    @State private var showVideoImporter = false
     @State private var audioImportType = "gift"   // "__lib" = thêm vào kho; còn lại = gán cho sự kiện
     @State private var audioUploading = false
     @State private var newCustomLink = ""         // ô dán link liên tiếp để thêm vào kho
-    @State private var showPermAlert = false       // cảnh báo khi chưa cấp quyền Ảnh/Video
 
     // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
     @State private var translateToVi = true
@@ -455,20 +453,15 @@ struct TTSView: View {
                 soundChipRow(ev.id, label: ev.label, icon: ev.icon)
             }
         }
-        .fileImporter(isPresented: $showAudioImporter, allowedContentTypes: [.audio],
-                      allowsMultipleSelection: false) { result in
-            if case .success(let urls) = result, let fileURL = urls.first {
-                let t = audioImportType
-                Task { await uploadAudio(fileURL, for: t) }
-            }
+        .sheet(isPresented: $showAudioImporter) {
+            // Bộ chọn file có ô TÍCH (✓) + nút "Mở"; nhận mọi file âm thanh.
+            DocumentPicker(contentTypes: [.audio, .mpeg4Audio, .mp3, .wav], allowsMultipleSelection: true) { urls in
+                if let fileURL = urls.first {
+                    let t = audioImportType
+                    Task { await uploadAudio(fileURL, for: t) }
+                }
+            }.ignoresSafeArea()
         }
-        .fileImporter(isPresented: $showVideoImporter, allowedContentTypes: [.movie, .video, .mpeg4Movie],
-                      allowsMultipleSelection: false) { result in
-            if case .success(let urls) = result, let v = urls.first {
-                Task { await extractAudioAndAdd(v) }
-            }
-        }
-        .mediaPermissionAlert($showPermAlert)
     }
 
     // Khu vực thêm âm vào KHO tùy chỉnh (dán link / tải file / trích video) + danh sách kho.
@@ -491,17 +484,14 @@ struct TTSView: View {
             }
             HStack {
                 Button {
-                    Task { if await MediaPermission.ensurePhotos() { audioImportType = "__lib"; showAudioImporter = true } else { showPermAlert = true } }
+                    audioImportType = "__lib"; showAudioImporter = true
                 } label: {
                     Label("Tải file âm thanh", systemImage: "square.and.arrow.up").font(.caption)
                 }.buttonStyle(.bordered).disabled(audioUploading)
-                Button {
-                    Task { if await MediaPermission.ensurePhotos() { showVideoImporter = true } else { showPermAlert = true } }
-                } label: {
-                    Label("Trích từ video", systemImage: "film.fill").font(.caption)
-                }.buttonStyle(.bordered).disabled(audioUploading)
                 if audioUploading { ProgressView().scaleEffect(0.7) }
             }
+            Text("Muốn trích âm thanh TỪ VIDEO → vào Khám phá › Chuyển đổi › tab \"Trích âm thanh → mp3\", lấy link rồi dán vào ô trên.")
+                .font(.caption2).foregroundStyle(.secondary)
             let lib = tts.customSounds()
             if !lib.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -542,32 +532,6 @@ struct TTSView: View {
                 tts.setNotifSound("custom", for: type)
                 tts.setNotifSoundUrl(url, for: type)
             }
-            await store.saveNotifSounds()
-        }
-        audioUploading = false
-    }
-
-    /// Trích âm thanh từ video đã chọn (xuất .m4a) → tải lên → thêm vào kho dưới dạng link.
-    private func extractAudioAndAdd(_ videoURL: URL) async {
-        audioUploading = true
-        let access = videoURL.startAccessingSecurityScopedResource()
-        defer { if access { videoURL.stopAccessingSecurityScopedResource() } }
-        let asset = AVAsset(url: videoURL)
-        let out = FileManager.default.temporaryDirectory
-            .appendingPathComponent("audio_\(Int(Date().timeIntervalSince1970)).m4a")
-        try? FileManager.default.removeItem(at: out)
-        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
-            audioUploading = false; return
-        }
-        export.outputURL = out
-        export.outputFileType = .m4a
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            export.exportAsynchronously { cont.resume() }
-        }
-        if export.status == .completed, let data = try? Data(contentsOf: out),
-           let link = try? await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
-                                                       mime: "audio/mp4", name: out.lastPathComponent) {
-            tts.addCustomSound(url: link, name: "Video→Âm")
             await store.saveNotifSounds()
         }
         audioUploading = false
@@ -662,7 +626,7 @@ struct TTSView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 HStack {
                     Button {
-                        Task { if await MediaPermission.ensurePhotos() { audioImportType = type; showAudioImporter = true } else { showPermAlert = true } }
+                        audioImportType = type; showAudioImporter = true
                     } label: {
                         Label(audioUploading ? "Đang tải lên…" : "Tải file âm thanh từ máy",
                               systemImage: "square.and.arrow.up").font(.caption)

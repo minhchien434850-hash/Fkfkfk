@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
@@ -248,6 +249,13 @@ struct MediaConverterView: View {
     @State private var uploading = false
     @AppStorage("mediaLinkHistory") private var historyRaw: String = "[]"
 
+    // Tab: "media" = ảnh/video → link; "audio" = video/âm thanh → mp3 link
+    @State private var mode = "media"
+    @State private var showAudioPicker = false
+    @State private var audioExtracting = false
+    @State private var audioResultLink = ""
+    @State private var audioError: String?
+
     private var history: [MediaLinkRecord] {
         (try? JSONDecoder().decode([MediaLinkRecord].self, from: Data(historyRaw.utf8))) ?? []
     }
@@ -258,10 +266,74 @@ struct MediaConverterView: View {
                 Section {
                     KHeroHeader(icon: "wand.and.stars",
                                 title: store.t("Chuyển đổi Media", "Media Converter"),
-                                subtitle: store.t("Ảnh / Video → GIF · PNG link", "Image / Video → GIF · PNG link"))
+                                subtitle: store.t("Ảnh/Video → link · Trích âm thanh → mp3", "Image/Video → link · Extract audio → mp3"))
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
 
+                // Tab chọn chế độ
+                Section {
+                    Picker("", selection: $mode) {
+                        Text(store.t("Ảnh/Video → Link", "Image/Video → Link")).tag("media")
+                        Text(store.t("Trích âm thanh → mp3", "Extract audio → mp3")).tag("audio")
+                    }.pickerStyle(.segmented)
+                }
+
+                if mode == "audio" { audioExtractSections }
+                else { mediaConvertSections }
+            }
+            .navigationTitle(store.t("Chuyển đổi Media", "Media Converter"))
+            .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: picker) { item in
+                guard let item else { return }
+                Task { await uploadPicked(item) }
+            }
+            .sheet(isPresented: $showAudioPicker) {
+                // Nhận video HOẶC file âm thanh, hiện ô tích (✓) + nút "Mở".
+                DocumentPicker(contentTypes: [.movie, .video, .audio], allowsMultipleSelection: true) { urls in
+                    if let url = urls.first { Task { await extractAudioToLink(url) } }
+                }.ignoresSafeArea()
+            }
+        }
+    }
+
+    // ===== Tab TRÍCH ÂM THANH: tải video/âm thanh → trích ra mp3 → link =====
+    @ViewBuilder private var audioExtractSections: some View {
+        Section(store.t("Tải video hoặc file âm thanh", "Upload video or audio file")) {
+            Button { showAudioPicker = true } label: {
+                HStack {
+                    if audioExtracting { ProgressView().padding(.trailing, 4) }
+                    Label(audioExtracting ? store.t("Đang trích xuất...", "Extracting...")
+                                          : store.t("Chọn video / file âm thanh", "Choose video / audio file"),
+                          systemImage: "waveform.badge.plus")
+                }
+            }.disabled(audioExtracting)
+            Text(store.t("Chọn 1 video hoặc file âm thanh → app trích phần âm thanh, tạo file .m4a (mp3) rồi trả về link dùng được ngay (đặt làm âm thanh thông báo, v.v.).",
+                         "Pick a video or audio file → the app extracts the audio to an .m4a (mp3) file and returns a ready-to-use link."))
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        if !audioResultLink.isEmpty {
+            Section(store.t("Link âm thanh (mp3)", "Audio link (mp3)")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(audioResultLink).font(.caption).foregroundStyle(store.accentColor).textSelection(.enabled)
+                    Button { UIPasteboard.general.string = audioResultLink } label: {
+                        Label(store.t("Copy link", "Copy link"), systemImage: "doc.on.doc").font(.caption.bold())
+                    }
+                }
+            }
+            Section(store.t("Dùng link này ở đâu", "Where to use this link")) {
+                Text(store.t("Copy link rồi dán vào 'Kho âm tùy chỉnh' trong mục Đọc (TTS) để làm âm thanh thông báo (tặng quà/follow/chia sẻ).",
+                             "Copy and paste into the custom sound library in Read (TTS) to use as a notification sound."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        if let audioError {
+            Section { Text(audioError).foregroundStyle(.red).font(.caption) }
+        }
+    }
+
+    // ===== Tab ẢNH/VIDEO → LINK (giữ nguyên cũ) =====
+    @ViewBuilder private var mediaConvertSections: some View {
+        Group {
                 Section(store.t("Chọn ảnh/video từ máy → tạo link", "Pick image/video → create link")) {
                     PhotosPicker(selection: $picker, matching: .any(of: [.images, .videos])) {
                         HStack {
@@ -368,14 +440,37 @@ struct MediaConverterView: View {
                     }
                     .font(.caption)
                 }
-            }
-            .navigationTitle(store.t("Chuyển đổi Media", "Media Converter"))
-            .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: picker) { item in
-                guard let item else { return }
-                Task { await uploadPicked(item) }
-            }
         }
+    }
+
+    /// Trích âm thanh từ video/file âm thanh → xuất .m4a → tải lên → trả link.
+    private func extractAudioToLink(_ srcURL: URL) async {
+        audioExtracting = true; audioError = nil; audioResultLink = ""
+        let access = srcURL.startAccessingSecurityScopedResource()
+        defer { if access { srcURL.stopAccessingSecurityScopedResource() } }
+        let asset = AVAsset(url: srcURL)
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("audio_\(Int(Date().timeIntervalSince1970)).m4a")
+        try? FileManager.default.removeItem(at: out)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            audioError = store.t("Không tạo được bộ trích xuất.", "Could not create exporter."); audioExtracting = false; return
+        }
+        export.outputURL = out
+        export.outputFileType = .m4a
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously { cont.resume() }
+        }
+        if export.status == .completed, let data = try? Data(contentsOf: out) {
+            do {
+                let link = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                                                           mime: "audio/mp4", name: out.lastPathComponent)
+                audioResultLink = link
+            } catch { audioError = error.localizedDescription }
+        } else {
+            audioError = store.t("Trích xuất âm thanh thất bại (file không có âm thanh hoặc lỗi).",
+                                 "Audio extraction failed (no audio track or error).")
+        }
+        audioExtracting = false
     }
 
     @ViewBuilder

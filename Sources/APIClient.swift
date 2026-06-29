@@ -536,20 +536,12 @@ struct APIClient {
     }
     // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)
     func mediaUpload(dataBase64: String, mime: String, name: String) async throws -> String {
-        // BẮT BUỘC cấp quyền Ảnh/Video trước khi tải lên (áp dụng cho TOÀN APP).
-        guard await MediaPermission.ensurePhotos() else {
-            throw APIError.message("Cần cấp quyền Ảnh/Video để tải lên. Vào Cài đặt → KENIOS → Ảnh để cấp quyền rồi thử lại.")
-        }
         let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",
             json: ["data_base64": dataBase64, "mime": mime, "name": name]))
         return root + r.path
     }
     // Tải ảnh/video lên (công khai /media/{id}) → trả về FILE ID để đăng bài
     func mediaUploadId(dataBase64: String, mime: String, name: String) async throws -> Int {
-        // BẮT BUỘC cấp quyền Ảnh/Video trước khi tải lên (áp dụng cho TOÀN APP).
-        guard await MediaPermission.ensurePhotos() else {
-            throw APIError.message("Cần cấp quyền Ảnh/Video để tải lên. Vào Cài đặt → KENIOS → Ảnh để cấp quyền rồi thử lại.")
-        }
         let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",
             json: ["data_base64": dataBase64, "mime": mime, "name": name]))
         return r.id
