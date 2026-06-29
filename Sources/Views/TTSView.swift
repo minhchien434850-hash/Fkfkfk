@@ -280,7 +280,7 @@ struct TTSView: View {
                             textField(selectedEvent == "gift" ? "Quà (content)" : "Nội dung bình luận", $content)
                         }
                         Button {
-                            speakTranslated(renderEvent())
+                            speakTranslated(renderEvent(), eventType: selectedEvent)
                         } label: {
                             Label(store.t("Đọc thông báo", "Read notice"), systemImage: "play.fill").frame(maxWidth: .infinity)
                         }
@@ -288,6 +288,9 @@ struct TTSView: View {
                         .disabled(personName.trimmingCharacters(in: .whitespaces).isEmpty)
                         Text(store.t("Xem trước:", "Preview:") + " \(renderEvent())").font(.caption2).foregroundStyle(.secondary)
                     }
+
+                    // ----- Âm thanh thông báo (quà · follow · share) -----
+                    notifSoundSection
 
                     // ----- Đọc văn bản tự do -----
                     section(store.t("Đọc văn bản (tự dịch sang tiếng Việt)", "Read text (auto-translate to Vietnamese)")) {
@@ -486,6 +489,52 @@ struct TTSView: View {
         }
     }
 
+    // ----- Âm thanh thông báo cho 3 sự kiện: tặng quà · follow · chia sẻ -----
+    private let notifEventLabels: [(id: String, label: String, icon: String)] = [
+        ("gift",   "Tặng quà", "gift.fill"),
+        ("follow", "Follow",   "heart.fill"),
+        ("share",  "Chia sẻ",  "square.and.arrow.up.fill")
+    ]
+
+    @ViewBuilder private var notifSoundSection: some View {
+        section("Âm thanh thông báo (như TikFinity) · phát TRƯỚC khi đọc") {
+            Text("Chọn âm thanh cho 3 sự kiện: tặng quà, follow, chia sẻ. Khi có sự kiện, app phát âm thanh báo trước rồi mới đọc. Bấm để chọn & nghe thử.")
+                .font(.caption2).foregroundStyle(.secondary)
+            ForEach(notifEventLabels, id: \.id) { ev in
+                soundChipRow(ev.id, label: ev.label, icon: ev.icon)
+            }
+        }
+    }
+
+    @ViewBuilder private func soundChipRow(_ type: String, label: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(label, systemImage: icon).font(.subheadline.bold()).foregroundStyle(Theme.accent)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(kNotifSounds) { s in
+                        let on = tts.notifSoundId(for: type) == s.id
+                        Button {
+                            tts.setNotifSound(s.id, for: type)
+                            if s.id != "none" { tts.previewNotifSound(s.id) }
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: s.icon).font(.body)
+                                Text(s.label).font(.caption2)
+                            }
+                            .frame(width: 70, height: 54)
+                            .background(on ? Theme.accent.opacity(0.28) : Color(.secondarySystemBackground))
+                            .foregroundStyle(on ? Theme.accent : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? Theme.accent : .clear, lineWidth: 1.5))
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     // ----- Chọn giọng hệ thống (iOS mặc định) -----
     @ViewBuilder private var systemVoiceSection: some View {
         section("Giọng đọc hệ thống (\(Self.cachedVoices.count) giọng · \(vietnameseVoiceCount) tiếng Việt)") {
@@ -645,7 +694,8 @@ struct TTSView: View {
                         liveFeed.append(ev)
                         if readTypes.contains(ev.type) {
                             let text = await liveSpeechText(ev)
-                            tts.speak(text)
+                            // Phát âm thanh thông báo (quà/follow/share) TRƯỚC rồi mới đọc.
+                            tts.announce(text, eventType: ev.type)
                         }
                     }
                     if liveFeed.count > 120 { liveFeed.removeFirst(liveFeed.count - 120) }
@@ -693,19 +743,23 @@ struct TTSView: View {
     }
 
     /// Đọc 1 đoạn text: nếu bật dịch thì dịch sang tiếng Việt trước rồi mới đọc.
-    private func speakTranslated(_ text: String) {
+    /// Có eventType (gift/follow/share) → phát âm thanh thông báo TRƯỚC khi đọc.
+    private func speakTranslated(_ text: String, eventType: String? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
+        func read(_ s: String) {
+            if let ev = eventType { tts.announce(s, eventType: ev) } else { tts.speak(s) }
+        }
         if translateToVi {
             Task {
                 if let tr = try? await store.api.translate(text: t), !tr.text.isEmpty {
-                    tts.speak(tr.text)
+                    read(tr.text)
                 } else {
-                    tts.speak(t)
+                    read(t)
                 }
             }
         } else {
-            tts.speak(t)
+            read(t)
         }
     }
 
