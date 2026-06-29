@@ -4,12 +4,13 @@ import UniformTypeIdentifiers
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, library, read, fun, games, tools, github, settings, admin, mediaConverter, messenger
+    case liveNow, fileTools, library, read, fun, games, tools, github, settings, admin, mediaConverter, messenger
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .liveNow:        return "Live Now"
+        case .fileTools:      return "Công cụ tệp"
         case .library:        return "Thư viện"
         case .read:           return "Đọc (TTS)"
         case .fun:            return "Giải trí"
@@ -25,6 +26,7 @@ enum HubDest: String, Identifiable {
     var subtitle: String {
         switch self {
         case .liveNow:        return "Phát trực tiếp · TikTok · FB · YouTube"
+        case .fileTools:      return "PDF · Âm thanh · Quét · Ảnh"
         case .library:        return "Video · file đã tải"
         case .read:           return "Đọc văn bản · giọng mới"
         case .fun:            return "Phim · nhạc · web"
@@ -41,6 +43,7 @@ enum HubDest: String, Identifiable {
     var titleEN: String {
         switch self {
         case .liveNow:        return "Live Now"
+        case .fileTools:      return "File Tools"
         case .library:        return "Library"
         case .read:           return "Read (TTS)"
         case .fun:            return "Entertainment"
@@ -56,6 +59,7 @@ enum HubDest: String, Identifiable {
     var subtitleEN: String {
         switch self {
         case .liveNow:        return "Go live · TikTok · FB · YouTube"
+        case .fileTools:      return "PDF · Audio · Scan · Image"
         case .library:        return "Videos · downloaded files"
         case .read:           return "Read text · new voices"
         case .fun:            return "Movies · music · web"
@@ -71,6 +75,7 @@ enum HubDest: String, Identifiable {
     var icon: String {
         switch self {
         case .liveNow:        return "dot.radiowaves.left.and.right"
+        case .fileTools:      return "doc.badge.gearshape.fill"
         case .library:        return "clock.arrow.circlepath"
         case .read:           return "speaker.wave.2.fill"
         case .fun:            return "play.tv.fill"
@@ -86,6 +91,7 @@ enum HubDest: String, Identifiable {
     var colors: [Color] {
         switch self {
         case .liveNow:        return [Color(red: 0.98, green: 0.2, blue: 0.25), Color(red: 0.8, green: 0.05, blue: 0.2)]
+        case .fileTools:      return [Color(red: 0.0, green: 0.7, blue: 0.65), Color(red: 0.0, green: 0.45, blue: 0.7)]
         case .library:        return [Color(red: 0.0, green: 0.6, blue: 0.95), Color(red: 0.0, green: 0.4, blue: 0.85)]
         case .read:           return [Color(red: 0.0, green: 0.78, blue: 0.7), Color(red: 0.0, green: 0.55, blue: 0.7)]
         case .fun:            return [Color(red: 0.95, green: 0.3, blue: 0.5), Color(red: 0.75, green: 0.2, blue: 0.55)]
@@ -109,7 +115,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .library, .read, .fun, .games, .tools, .github, .mediaConverter, .messenger, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .tools, .github, .mediaConverter, .messenger, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -163,6 +169,7 @@ struct ExploreHubView: View {
     private func destView(_ d: HubDest) -> some View {
         switch d {
         case .liveNow:        LiveNowHubView()
+        case .fileTools:      FileToolsView()
         case .library:        LibraryView()
         case .read:           TTSView()
         case .fun:            MediaWebView(model: browserModel)
