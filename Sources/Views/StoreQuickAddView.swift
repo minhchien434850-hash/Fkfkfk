@@ -543,7 +543,8 @@ struct StoreQuickAddView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await loadCategories() }
             .sheet(isPresented: $showImporter) {
-                DocumentPicker(allowsMultipleSelection: false) { urls in
+                // allowsMultipleSelection: true → iOS hiện ô TÍCH (✓) + nút "Mở" (Open); nhận MỌI loại file.
+                DocumentPicker(allowsMultipleSelection: true) { urls in
                     if let url = urls.first { Task { await uploadFile(url) } }
                 }
                 .ignoresSafeArea()
@@ -553,7 +554,7 @@ struct StoreQuickAddView: View {
                 set: { if !$0 { showDownloadPickerFor = nil } }
             )) {
                 if let pid = showDownloadPickerFor {
-                    DocumentPicker(allowsMultipleSelection: false) { urls in
+                    DocumentPicker(allowsMultipleSelection: true) { urls in
                         showDownloadPickerFor = nil
                         if let url = urls.first { Task { await uploadDownloadFile(url, productId: pid) } }
                     }
