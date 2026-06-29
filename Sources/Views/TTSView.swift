@@ -23,6 +23,7 @@ struct TTSView: View {
     @State private var audioImportType = "gift"   // "__lib" = thêm vào kho; còn lại = gán cho sự kiện
     @State private var audioUploading = false
     @State private var newCustomLink = ""         // ô dán link liên tiếp để thêm vào kho
+    @State private var showPermAlert = false       // cảnh báo khi chưa cấp quyền Ảnh/Video
 
     // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
     @State private var translateToVi = true
@@ -467,6 +468,7 @@ struct TTSView: View {
                 Task { await extractAudioAndAdd(v) }
             }
         }
+        .mediaPermissionAlert($showPermAlert)
     }
 
     // Khu vực thêm âm vào KHO tùy chỉnh (dán link / tải file / trích video) + danh sách kho.
@@ -488,10 +490,14 @@ struct TTSView: View {
                     .disabled(newCustomLink.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             HStack {
-                Button { audioImportType = "__lib"; showAudioImporter = true } label: {
+                Button {
+                    Task { if await MediaPermission.ensurePhotos() { audioImportType = "__lib"; showAudioImporter = true } else { showPermAlert = true } }
+                } label: {
                     Label("Tải file âm thanh", systemImage: "square.and.arrow.up").font(.caption)
                 }.buttonStyle(.bordered).disabled(audioUploading)
-                Button { showVideoImporter = true } label: {
+                Button {
+                    Task { if await MediaPermission.ensurePhotos() { showVideoImporter = true } else { showPermAlert = true } }
+                } label: {
                     Label("Trích từ video", systemImage: "film.fill").font(.caption)
                 }.buttonStyle(.bordered).disabled(audioUploading)
                 if audioUploading { ProgressView().scaleEffect(0.7) }
@@ -656,7 +662,7 @@ struct TTSView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 HStack {
                     Button {
-                        audioImportType = type; showAudioImporter = true
+                        Task { if await MediaPermission.ensurePhotos() { audioImportType = type; showAudioImporter = true } else { showPermAlert = true } }
                     } label: {
                         Label(audioUploading ? "Đang tải lên…" : "Tải file âm thanh từ máy",
                               systemImage: "square.and.arrow.up").font(.caption)
