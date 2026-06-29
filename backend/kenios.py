@@ -1923,6 +1923,16 @@ def login_otp(b: LoginOtpIn, request: Request) -> dict[str, Any]:
     return {"token": make_token(uid), "user": _user_dict(row)}
 
 
+# Client ID iOS mặc định cho "Đăng nhập bằng Google" (iOS client KHÔNG có secret → công khai được).
+# Có thể override bằng biến môi trường GOOGLE_OAUTH_CLIENT_ID hoặc setting google_login_client_id.
+GOOGLE_LOGIN_CLIENT_ID_DEFAULT = "547598708540-p2jbf9hp3emgu69fjgsg56ha8abimnr8.apps.googleusercontent.com"
+
+
+def _google_login_client_id() -> str:
+    return (os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
+            or get_setting("google_login_client_id", GOOGLE_LOGIN_CLIENT_ID_DEFAULT)).strip()
+
+
 class GoogleAuthIn(BaseModel):
     id_token: str
 
@@ -1950,9 +1960,8 @@ def auth_google(b: GoogleAuthIn, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Xác thực Google thất bại. Vui lòng thử lại.")
     if str(info.get("email_verified", "")).lower() not in ("true", "1"):
         raise HTTPException(status_code=401, detail="Email Google chưa được xác minh.")
-    # (Tuỳ chọn) Kiểm tra token đúng ứng dụng của mình nếu đã cấu hình client id.
-    want = (os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
-            or get_setting("google_login_client_id", "")).strip()
+    # Kiểm tra token đúng ứng dụng của mình (chống token từ app khác).
+    want = _google_login_client_id()
     if want and str(info.get("aud", "")) != want:
         raise HTTPException(status_code=401, detail="Token Google không khớp ứng dụng.")
     # Đăng nhập nếu đã có tài khoản với email này; chưa có thì tự tạo (passwordless).
@@ -5124,9 +5133,8 @@ def store_config() -> dict[str, Any]:
         "logo_name": get_setting("store_logo_name", "KENIOS Store"),
         "logo_url": get_setting("store_logo_url", ""),
         "logo_type": get_setting("store_logo_type", "image"),
-        # Client ID iOS để app hiện nút "Đăng nhập bằng Google" (rỗng = ẩn nút)
-        "google_client_id": (os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
-                             or get_setting("google_login_client_id", "")),
+        # Client ID iOS để app hiện nút "Đăng nhập bằng Google"
+        "google_client_id": _google_login_client_id(),
         "banner_type": get_setting("store_banner_type", "image"),
         "banner_url": get_setting("store_banner_url", ""),
         "topup_bonus_percent": _topup_bonus_percent(),
