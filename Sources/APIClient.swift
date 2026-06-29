@@ -198,8 +198,10 @@ struct APIClient {
         try decode(try await send("/admin/users/\(uid)/password", method: "POST",
                                   json: ["new_password": newPassword]))
     }
-    func adminSetPlan(_ uid: Int, plan: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/users/\(uid)/plan", method: "POST", json: ["plan": plan]))
+    func adminSetPlan(_ uid: Int, plan: String, days: Int? = nil) async throws -> MessageResponse {
+        var body: [String: Any] = ["plan": plan]
+        if let days { body["days"] = days }
+        return try decode(try await send("/admin/users/\(uid)/plan", method: "POST", json: body))
     }
     func adminSuspend(_ uid: Int, minutes: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/users/\(uid)/suspend", method: "POST", json: ["minutes": minutes]))
@@ -356,9 +358,9 @@ struct APIClient {
     func adminGetPro() async throws -> ProPriceSettings {
         try decode(try await send("/admin/payment/pro"))
     }
-    func adminSetPro(price: Int, label: String) async throws -> ProPriceSettings {
+    func adminSetPro(package: String, price: Int) async throws -> ProPriceSettings {
         try decode(try await send("/admin/payment/pro", method: "POST",
-                                  json: ["price": price, "label": label]))
+                                  json: ["package": package, "price": price]))
     }
 
     // ============================ APP BÁN HÀNG (STORE) ============================

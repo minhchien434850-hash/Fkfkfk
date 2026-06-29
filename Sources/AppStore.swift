@@ -26,6 +26,8 @@ final class AppStore: ObservableObject {
     @Published var isAdmin: Bool = false
     @Published var plan: String = "free"
     @Published var credits: Int = 0
+    @Published var planExpires: Int = 0          // unix giây; 0 = không hạn / vĩnh viễn
+    @Published var planExpiredNotice = false     // gói vừa hết hạn → hiện thông báo 1 lần
     @Published var publicId: String = ""
     @Published var userId: Int?
 
@@ -35,6 +37,13 @@ final class AppStore: ObservableObject {
 
     /// Admin luôn Pro vĩnh viễn; còn lại tuỳ gói.
     var isPro: Bool { isAdmin || plan.lowercased() == "pro" }
+
+    /// Ngày hết hạn gói (dd/MM/yyyy) hoặc nil nếu vĩnh viễn / không có hạn.
+    var planExpiryText: String? {
+        guard !isAdmin, planExpires > 0 else { return nil }
+        let f = DateFormatter(); f.dateFormat = "dd/MM/yyyy"
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(planExpires)))
+    }
 
     @Published var providers: [Provider] = []
     @Published var configuredKeys: Set<String> = []
@@ -267,6 +276,8 @@ final class AppStore: ObservableObject {
         if let me = try? await api.getMe() {
             isAdmin = me.isAdmin ?? false
             plan = me.plan ?? "free"
+            planExpires = me.planExpires ?? 0
+            if me.planExpired == true { planExpiredNotice = true }
             publicId = me.publicId ?? publicId
             userId = me.id
             d.set(isAdmin, forKey: "isAdmin"); d.set(plan, forKey: "plan")

@@ -179,8 +179,11 @@ struct AdminView: View {
                                         Task { await ban(u, !((u.banned ?? 0) == 1)) }
                                     }
                                     Menu(store.t("Đặt gói", "Set plan")) {
-                                        Button("Free") { Task { await setPlan(u, "free") } }
-                                        Button("Pro") { Task { await setPlan(u, "pro") } }
+                                        Button(store.t("PRO · nửa tháng", "PRO · half month")) { Task { await setPlan(u, "pro", 15) } }
+                                        Button(store.t("PRO · 1 tháng", "PRO · 1 month")) { Task { await setPlan(u, "pro", 30) } }
+                                        Button(store.t("PRO · 1 năm", "PRO · 1 year")) { Task { await setPlan(u, "pro", 365) } }
+                                        Button(store.t("PRO · vĩnh viễn", "PRO · lifetime")) { Task { await setPlan(u, "pro", 0) } }
+                                        Button("Free", role: .destructive) { Task { await setPlan(u, "free", nil) } }
                                     }
                                     if (u.status ?? "active") == "suspended" {
                                         Button(store.t("Mở lại hoạt động", "Re-activate")) { Task { await unsuspend(u) } }
@@ -326,8 +329,8 @@ struct AdminView: View {
         catch { self.error = error.localizedDescription }
     }
 
-    private func setPlan(_ u: AdminUser, _ plan: String) async {
-        do { _ = try await store.api.adminSetPlan(u.id, plan: plan); await reload() }
+    private func setPlan(_ u: AdminUser, _ plan: String, _ days: Int?) async {
+        do { _ = try await store.api.adminSetPlan(u.id, plan: plan, days: days); await reload() }
         catch { self.error = error.localizedDescription }
     }
 

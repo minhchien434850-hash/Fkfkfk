@@ -18,6 +18,8 @@ struct UserInfo: Decodable, Hashable {
     let publicId: String?
     let isAdmin: Bool?
     let plan: String?
+    let planExpires: Int?
+    let planExpired: Bool?
     let credits: Int?
     let lang: String?
     let status: String?
@@ -146,6 +148,8 @@ struct PaymentPackage: Identifiable, Decodable, Hashable {
     let credits: Int
     let amount: Int
     let label: String
+    let name: String?
+    let days: Int?
 }
 struct BankInfo: Decodable {
     let bank: String
@@ -237,4 +241,5 @@ struct FavoriteMessage: Identifiable, Decodable, Hashable {
 struct ProPriceSettings: Decodable, Hashable {
     let price: Int
     let label: String
+    let packages: [PaymentPackage]?
 }

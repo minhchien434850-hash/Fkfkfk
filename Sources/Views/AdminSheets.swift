@@ -170,45 +170,49 @@ struct BankSettingsSheet: View {
 struct ProPriceSheet: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) var dismiss
-    @State private var priceText = ""
-    @State private var label = "Nâng cấp PRO"
+    @State private var packages: [PaymentPackage] = []
+    @State private var prices: [String: String] = [:]   // id -> text giá
     @State private var message: String?
     @State private var isError = false
     @State private var loading = false
 
-    private var priceValue: Int? { Int(priceText.filter { $0.isNumber }) }
-
     var body: some View {
         NavigationStack {
             Form {
-                Section("Giá nâng cấp PRO (VND)") {
-                    HStack {
-                        TextField("Ví dụ: 199000", text: $priceText)
-                            .keyboardType(.numberPad)
-                        Text("đ").foregroundStyle(.secondary)
+                Section("Giá 3 gói PRO (VND)") {
+                    if packages.isEmpty {
+                        Text("Đang tải...").foregroundStyle(.secondary)
                     }
-                    TextField("Tên gói (ví dụ: Nâng cấp PRO)", text: $label)
-                    if let p = priceValue {
-                        Text("Khách sẽ thấy: \(label) — \(formatVND(p))đ")
-                            .font(.caption).foregroundStyle(Theme.accent)
+                    ForEach(packages) { p in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(p.name ?? p.id).font(.subheadline.bold())
+                            HStack {
+                                TextField("Giá VND", text: Binding(
+                                    get: { prices[p.id] ?? "\(p.amount)" },
+                                    set: { prices[p.id] = $0.filter { $0.isNumber } }))
+                                    .keyboardType(.numberPad)
+                                Text("đ").foregroundStyle(.secondary)
+                            }
+                            if let d = p.days { Text("Thời hạn \(d) ngày").font(.caption2).foregroundStyle(.secondary) }
+                        }
                     }
                 }
                 Section {
                     Button {
-                        Task { await save() }
+                        Task { await saveAll() }
                     } label: {
                         HStack {
                             if loading { ProgressView().padding(.trailing, 4) }
-                            Text(loading ? "Đang lưu..." : "Lưu giá")
+                            Text(loading ? "Đang lưu..." : "Lưu tất cả giá")
                         }
                     }
-                    .disabled(priceValue == nil || loading)
+                    .disabled(loading || packages.isEmpty)
                 }
                 if let message {
                     Text(message).font(.footnote).foregroundStyle(isError ? .red : .green)
                 }
                 Section {
-                    Text("Chỉ còn 1 gói nâng cấp PRO duy nhất. Khách chuyển khoản đúng số tiền này, admin xác nhận (hoặc webhook tự động) là tài khoản được nâng lên PRO. Không dùng credits.")
+                    Text("3 gói PRO theo thời hạn: tháng / 6 tháng / 1 năm. Khách bấm vào gói nào sẽ hiện QR chuyển khoản đúng số tiền đó; xác nhận xong tài khoản lên PRO tới ngày hết hạn. Không dùng credits.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -219,24 +223,23 @@ struct ProPriceSheet: View {
         }
     }
 
-    private func formatVND(_ amount: Int) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = "."
-        return f.string(from: NSNumber(value: amount)) ?? "\(amount)"
-    }
     private func load() async {
-        if let r = try? await store.api.adminGetPro() {
-            priceText = "\(r.price)"
-            label = r.label
+        if let r = try? await store.api.adminGetPro(), let pkgs = r.packages {
+            packages = pkgs
+            for p in pkgs { prices[p.id] = "\(p.amount)" }
         }
     }
-    private func save() async {
-        guard let p = priceValue else { return }
+
+    private func saveAll() async {
         loading = true; message = nil
         do {
-            let r = try await store.api.adminSetPro(price: p, label: label.trimmingCharacters(in: .whitespaces))
-            isError = false
-            message = "Đã lưu. Giá hiện tại: \(formatVND(r.price))đ"
-            priceText = "\(r.price)"; label = r.label
+            for p in packages {
+                if let txt = prices[p.id], let v = Int(txt.filter { $0.isNumber }) {
+                    let r = try await store.api.adminSetPro(package: p.id, price: v)
+                    if let pkgs = r.packages { packages = pkgs }
+                }
+            }
+            isError = false; message = "Đã lưu giá 3 gói."
         } catch {
             isError = true; message = error.localizedDescription
         }

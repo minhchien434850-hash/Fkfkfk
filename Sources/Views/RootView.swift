@@ -52,6 +52,7 @@ struct MainTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("defaultLaunchTab") private var defaultLaunchTab = 2
     @State private var didInitTab = false
+    @State private var showUpgrade = false
 
     var body: some View {
         // Chỉ 5 tab chính cho gọn & rõ — các mục khác nằm trong "Khám phá"
@@ -109,6 +110,16 @@ struct MainTabView: View {
             // Mở lại app từ nền → kiểm tra bảo trì ngay
             if phase == .active { Task { await store.refreshMe() } }
         }
+        // Thông báo khi gói PRO vừa hết hạn (tự chuyển về Free)
+        .alert(store.t("Gói PRO đã hết hạn", "PRO plan expired"),
+               isPresented: $store.planExpiredNotice) {
+            Button(store.t("Gia hạn", "Renew")) { showUpgrade = true }
+            Button(store.t("Đóng", "Close"), role: .cancel) {}
+        } message: {
+            Text(store.t("Gói PRO của bạn đã hết hạn và được chuyển về Free. Gia hạn để tiếp tục dùng các tính năng PRO.",
+                         "Your PRO plan has expired and was switched to Free. Renew to keep using PRO features."))
+        }
+        .sheet(isPresented: $showUpgrade) { PaymentView().environmentObject(store) }
     }
 
     private func tabName(_ t: Int) -> String {

@@ -65,12 +65,21 @@ struct SettingsView: View {
                         Text(store.isPro ? "PRO" : "Free")
                             .foregroundStyle(store.isPro ? .green : .secondary)
                     }
-                    HStack {
-                        Text("Credits")
-                        Spacer()
-                        Text("\(store.credits)").foregroundStyle(Theme.accent)
+                    if store.isPro, let exp = store.planExpiryText {
+                        HStack {
+                            Text(store.t("Hết hạn", "Expires"))
+                            Spacer()
+                            Text(exp).foregroundStyle(.secondary)
+                        }
+                    } else if store.isPro && !store.isAdmin {
+                        HStack {
+                            Text(store.t("Hạn dùng", "Validity"))
+                            Spacer()
+                            Text(store.t("Vĩnh viễn", "Lifetime")).foregroundStyle(.secondary)
+                        }
                     }
-                    Button(store.t("Nạp credits", "Buy credits")) { showPayment = true }
+                    Button(store.isPro ? store.t("Gia hạn / Đổi gói", "Renew / Change plan")
+                                       : store.t("Nâng cấp gói", "Upgrade plan")) { showPayment = true }
                     TextField("Gmail", text: $email)
                         .textInputAutocapitalization(.never).keyboardType(.emailAddress)
                     TextField(store.t("Số điện thoại", "Phone number"), text: $phone).keyboardType(.phonePad)
