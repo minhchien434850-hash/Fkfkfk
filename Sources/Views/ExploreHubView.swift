@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, tools, github, settings, admin, mediaConverter, messenger
+    case liveNow, fileTools, library, read, fun, games, tools, github, settings, admin, mediaConverter, messenger, vpn
     var id: String { rawValue }
 
     var title: String {
@@ -21,6 +21,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "Quản trị"
         case .mediaConverter: return "Chuyển đổi"
         case .messenger:      return "Nhắn tin"
+        case .vpn:            return "VPN"
         }
     }
     var subtitle: String {
@@ -37,9 +38,9 @@ enum HubDest: String, Identifiable {
         case .admin:          return "Quản lý người dùng"
         case .mediaConverter: return "Ảnh/Video → GIF · PNG"
         case .messenger:      return "Thủ công · Tự động Web"
+        case .vpn:            return "WireGuard · Bảo mật mạng"
         }
     }
-    // Bản tiếng Anh (khoá dịch) — dùng với store.t(title, titleEN)
     var titleEN: String {
         switch self {
         case .liveNow:        return "Live Now"
@@ -54,6 +55,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "Admin"
         case .mediaConverter: return "Convert"
         case .messenger:      return "Messaging"
+        case .vpn:            return "VPN"
         }
     }
     var subtitleEN: String {
@@ -70,6 +72,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "Manage users"
         case .mediaConverter: return "Image/Video → GIF · PNG"
         case .messenger:      return "Manual · Auto Web"
+        case .vpn:            return "WireGuard · Secure network"
         }
     }
     var icon: String {
@@ -86,6 +89,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "person.2.badge.gearshape.fill"
         case .mediaConverter: return "wand.and.stars"
         case .messenger:      return "bubble.left.and.bubble.right.fill"
+        case .vpn:            return "lock.shield.fill"
         }
     }
     var colors: [Color] {
@@ -102,6 +106,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return [Color(red: 1.0, green: 0.78, blue: 0.0), Color(red: 0.9, green: 0.55, blue: 0.0)]
         case .mediaConverter: return [Color(red: 0.6, green: 0.1, blue: 0.9), Color(red: 0.9, green: 0.2, blue: 0.6)]
         case .messenger:      return [Color(red: 0.05, green: 0.7, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.75)]
+        case .vpn:            return [Color(red: 0.1, green: 0.5, blue: 0.9), Color(red: 0.05, green: 0.3, blue: 0.7)]
         }
     }
     var gradient: LinearGradient {
@@ -115,7 +120,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .tools, .github, .mediaConverter, .messenger, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .tools, .vpn, .github, .mediaConverter, .messenger, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -180,9 +185,10 @@ struct ExploreHubView: View {
         case .admin:          AdminView()
         case .mediaConverter: MediaConverterView()
         case .messenger:
-            // Nhắn tin (thủ công/tự động/tool nhóm) chỉ dành cho gói PRO
             if store.isPro { MessengerHubView().environmentObject(store) }
             else { ProLockCard(feature: store.t("Nhắn tin", "Messaging")) }
+        case .vpn:
+            VPNView()
         }
     }
 }

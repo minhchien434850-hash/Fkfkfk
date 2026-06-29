@@ -5,6 +5,7 @@ on:
     branches: [ "**" ]
     paths:
       - "Sources/**"
+      - "PacketTunnelExtension/**"
       - "project.yml"
       - "build-app.sh"
       - ".github/workflows/build-app.yml"
