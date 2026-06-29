@@ -268,7 +268,31 @@ final class AppStore: ObservableObject {
         d.set(credits, forKey: "credits")
         d.set(publicId, forKey: "publicId")
         d.set(resp.user.id, forKey: "userId")
+        // Khôi phục âm thanh thông báo đã lưu trên máy chủ (giữ nguyên sau khi cài lại app/build lại)
+        if let ns = resp.user.notifSounds, !ns.isEmpty { applyNotifSounds(ns) }
         showPlanIntro = true   // hiện màn giới thiệu gói PRO/Free sau khi đăng nhập
+    }
+
+    /// Ghi cấu hình âm thanh thông báo (JSON từ máy chủ) vào UserDefaults để TTS dùng.
+    func applyNotifSounds(_ json: String) {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return }
+        for ev in ["gift", "follow", "share"] {
+            guard let s = obj[ev] else { continue }
+            if let id = s["id"], !id.isEmpty { d.set(id, forKey: "tts_sound_\(ev)") }
+            if let url = s["url"] { d.set(url, forKey: "tts_sound_url_\(ev)") }
+        }
+    }
+
+    /// Đẩy cấu hình âm thanh thông báo hiện tại (3 sự kiện) lên máy chủ để lưu lâu dài.
+    func saveNotifSounds() async {
+        var dict: [String: [String: String]] = [:]
+        for ev in ["gift", "follow", "share"] {
+            let id = d.string(forKey: "tts_sound_\(ev)") ?? ""
+            let url = d.string(forKey: "tts_sound_url_\(ev)") ?? ""
+            dict[ev] = ["id": id, "url": url]
+        }
+        try? await api.saveNotifSounds(dict)
     }
 
     /// Tải lại hồ sơ + trạng thái bảo trì.

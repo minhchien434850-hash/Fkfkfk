@@ -23,6 +23,7 @@ struct UserInfo: Decodable, Hashable {
     let credits: Int?
     let lang: String?
     let status: String?
+    let notifSounds: String?   // JSON âm thanh thông báo đã lưu trên máy chủ
 }
 
 struct AuthResponse: Decodable { let token: String; let user: UserInfo }

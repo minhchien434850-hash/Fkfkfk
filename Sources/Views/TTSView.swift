@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import MediaPlayer
+import UniformTypeIdentifiers
 
 // Mô hình (LiveEventType, VoiceStyle, ElevenTonePreset…) đã tách sang TTSModels.swift.
 
@@ -15,6 +16,11 @@ struct TTSView: View {
     @State private var selectedEvent = "gift"
     @State private var search = ""
     private let previewSynth = AVSpeechSynthesizer()
+
+    // ----- Tải file âm thanh lên máy chủ → lấy link cho âm thông báo -----
+    @State private var showAudioImporter = false
+    @State private var audioImportType = "gift"
+    @State private var audioUploading = false
 
     // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
     @State private var translateToVi = true
@@ -434,12 +440,38 @@ struct TTSView: View {
 
     @ViewBuilder private var notifSoundSection: some View {
         section("Âm thanh thông báo (như TikFinity) · phát TRƯỚC khi đọc") {
-            Text("Hơn 50 âm thanh + ô \"Tùy chỉnh\": dán link mp3 bất kỳ (meme cười, la hét, airhorn…) để dùng âm riêng. CHẠM 1 âm để NGHE THỬ; âm đang chọn có dấu ✓.")
+            Text("Hơn 50 âm thanh + ô \"Tùy chỉnh\": dán link .mp3 HOẶC tải file âm thanh từ máy lên (ra link riêng). Lưu trên máy chủ → cài lại app/build lại VẪN CÒN. CHẠM 1 âm để NGHE THỬ; âm đang chọn có dấu ✓.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Text("Nguồn âm meme miễn phí: myinstants.com · freesound.org · pixabay.com/sound-effects (tải file .mp3 rồi bấm \"Tải file âm thanh\", hoặc copy link .mp3 dán vào ô).")
                 .font(.caption2).foregroundStyle(.secondary)
             ForEach(notifEventLabels, id: \.id) { ev in
                 soundChipRow(ev.id, label: ev.label, icon: ev.icon)
             }
         }
+        .fileImporter(isPresented: $showAudioImporter, allowedContentTypes: [.audio],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let fileURL = urls.first {
+                let t = audioImportType
+                Task { await uploadAudio(fileURL, for: t) }
+            }
+        }
+    }
+
+    /// Đọc file âm thanh đã chọn → tải lên máy chủ → lấy link, gán làm âm tùy chỉnh + lưu lâu dài.
+    private func uploadAudio(_ fileURL: URL, for type: String) async {
+        audioUploading = true
+        let access = fileURL.startAccessingSecurityScopedResource()
+        defer { if access { fileURL.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: fileURL) else { audioUploading = false; return }
+        let name = fileURL.lastPathComponent
+        let mime = name.lowercased().hasSuffix(".wav") ? "audio/wav"
+                 : name.lowercased().hasSuffix(".m4a") ? "audio/mp4" : "audio/mpeg"
+        if let url = try? await store.api.mediaUpload(dataBase64: data.base64EncodedString(), mime: mime, name: name) {
+            tts.setNotifSound("custom", for: type)
+            tts.setNotifSoundUrl(url, for: type)
+            await store.saveNotifSounds()
+        }
+        audioUploading = false
     }
 
     // Binding 2 chiều cho link âm thanh tùy chỉnh của 1 sự kiện.
@@ -466,6 +498,7 @@ struct TTSView: View {
                             // Chạm = chọn âm; âm tổng hợp thì nghe thử luôn (custom đợi dán link).
                             if s.id != "none" && s.id != "custom" { tts.previewNotifSound(s.id) }
                             tts.setNotifSound(s.id, for: type)
+                            Task { await store.saveNotifSounds() }   // lưu lên máy chủ
                         } label: {
                             VStack(spacing: 3) {
                                 Image(systemName: s.icon).font(.body)
@@ -489,13 +522,27 @@ struct TTSView: View {
                 }
                 .padding(.vertical, 2)
             }
-            // Ô dán link khi chọn "Tùy chỉnh" — dùng âm meme tùy ý (mp3).
+            // Ô dán link / tải file khi chọn "Tùy chỉnh" — dùng âm meme tùy ý (mp3).
             if tts.notifSoundId(for: type) == "custom" {
                 TextField("Dán link .mp3 (vd meme cười, la hét, airhorn…)", text: notifUrlBinding(type))
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.URL).font(.caption)
+                    .submitLabel(.done)
+                    .onSubmit { Task { await store.saveNotifSounds() } }   // lưu link lên máy chủ
                     .padding(8).background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                HStack {
+                    Button {
+                        audioImportType = type; showAudioImporter = true
+                    } label: {
+                        Label(audioUploading ? "Đang tải lên…" : "Tải file âm thanh từ máy",
+                              systemImage: "square.and.arrow.up").font(.caption)
+                    }.buttonStyle(.bordered).disabled(audioUploading)
+                    Spacer()
+                    Button { Task { await store.saveNotifSounds() } } label: {
+                        Label("Lưu", systemImage: "checkmark.circle.fill").font(.caption)
+                    }.buttonStyle(.bordered).tint(.green)
+                }
             }
         }
         .padding(.vertical, 4)

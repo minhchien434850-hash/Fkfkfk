@@ -851,6 +851,8 @@ def _migrate() -> None:
         ("users", "plan_expired_notice", "INTEGER DEFAULT 0"),
         # Đơn thanh toán: số ngày gói (để khi xác nhận biết cộng hạn bao lâu)
         ("payments", "plan_days", "INTEGER DEFAULT 0"),
+        # Âm thanh thông báo (quà/follow/share) lưu theo user → cài lại app/build lại vẫn còn
+        ("users", "notif_sounds", "TEXT"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -1005,6 +1007,8 @@ def _user_dict(row) -> dict[str, Any]:
         "plan_expires": 0 if row["is_admin"] else (row["plan_expires"] or 0),
         "credits": row["credits"], "lang": row["lang"] or "vi",
         "status": row["status"] or "active",
+        # Âm thanh thông báo đã lưu (chuỗi JSON; "" nếu chưa đặt)
+        "notif_sounds": (row["notif_sounds"] if "notif_sounds" in row.keys() else "") or "",
     }
 
 
@@ -2034,6 +2038,30 @@ def update_profile(b: ProfileIn, user=Depends(get_user)) -> dict[str, Any]:
     with db() as c:
         c.execute(f"UPDATE users SET {', '.join(fields)} WHERE id=?", vals)
     return {"message": "Cập nhật thành công."}
+
+
+class NotifSoundsIn(BaseModel):
+    sounds: dict[str, Any]   # {"gift":{"id":..,"url":..}, "follow":{...}, "share":{...}}
+
+
+@app.post("/me/notif-sounds")
+def save_notif_sounds(b: NotifSoundsIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Lưu âm thanh thông báo (quà/follow/share) theo USER → cài lại app / build lại vẫn còn."""
+    with db() as c:
+        c.execute("UPDATE users SET notif_sounds=? WHERE id=?",
+                  (json.dumps(b.sounds), user["id"]))
+    return {"ok": True}
+
+
+@app.get("/me/notif-sounds")
+def get_notif_sounds(user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        row = c.execute("SELECT notif_sounds FROM users WHERE id=?", (user["id"],)).fetchone()
+    raw = (row["notif_sounds"] if row and "notif_sounds" in row.keys() else "") or ""
+    try:
+        return {"sounds": json.loads(raw) if raw else {}}
+    except Exception:
+        return {"sounds": {}}
 
 
 # ======================== API Keys (User) ========================
