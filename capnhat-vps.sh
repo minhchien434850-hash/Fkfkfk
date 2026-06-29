@@ -38,14 +38,28 @@ rm -rf kenios-new
 
 echo "==> Khởi động lại dịch vụ..."
 systemctl restart kenios
-sleep 2
 
-echo "==> Kiểm tra sức khoẻ:"
-if curl -s http://127.0.0.1/health | grep -q '"status"'; then
-  echo ""
+# Backend nạp nhiều thư viện (TikTokLive, yt-dlp...) nên có thể mất vài giây mới
+# trả lời. Thử lại tối đa ~20 giây, kiểm tra CẢ cổng 8000 (uvicorn) lẫn cổng 80 (nginx).
+echo "==> Kiểm tra sức khoẻ (chờ backend khởi động)..."
+OK=""
+for i in $(seq 1 20); do
+  if curl -s http://127.0.0.1:8000/health | grep -q '"status"' \
+     || curl -s http://127.0.0.1/health | grep -q '"status"'; then
+    OK="1"; break
+  fi
+  sleep 1
+done
+
+echo ""
+if [ -n "$OK" ]; then
   echo "✅ XONG! Backend đã cập nhật ($NEW_COMMIT) & đang chạy."
   echo "   → Vào app lấy lại mã OTP mới để thấy email nội dung mới."
+elif systemctl is-active --quiet kenios; then
+  echo "✅ Dịch vụ kenios ĐANG CHẠY ($NEW_COMMIT) — nhưng health chưa trả lời."
+  echo "   Có thể backend còn đang khởi động. Thử lại sau 10 giây:"
+  echo "     curl -s http://127.0.0.1:8000/health; echo"
 else
-  echo ""
-  echo "⚠️  Chưa thấy phản hồi health. Xem log: journalctl -u kenios -n 30 --no-pager"
+  echo "⚠️  Dịch vụ kenios CHƯA chạy được. Xem log lỗi:"
+  echo "     journalctl -u kenios -n 30 --no-pager"
 fi
