@@ -25,6 +25,7 @@ struct StoreView: View {
     // Cache cấu hình cửa hàng — giữ tên/logo/banner khi mất kết nối, không bị reset về mặc định
     @AppStorage("storeCfgName") private var cfgName: String = ""
     @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
+    @AppStorage("storeCfgLogoType") private var cfgLogoType: String = "image"
     @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
     @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
     // Cache thứ tự + mục ẩn để render đầu tiên giữ đúng bố cục (không nhảy khi config tải xong)
@@ -180,6 +181,7 @@ struct StoreView: View {
         if let c = config { return c }
         if cfgName.isEmpty && cfgLogo.isEmpty && cfgBannerUrl.isEmpty { return nil }
         return StoreAppConfig(logoName: cfgName, logoUrl: cfgLogo,
+                              logoType: cfgLogoType,
                               bannerType: cfgBannerType, bannerUrl: cfgBannerUrl,
                               topupBonusPercent: nil)
     }
@@ -1215,7 +1217,7 @@ struct StoreView: View {
                     // Logo + slogan ở góc trên-trái (chữ trắng cho nổi trên ảnh)
                     .overlay(alignment: .topLeading) {
                         HStack(spacing: 10) {
-                            StoreLogoPlayer(urlString: c.logoUrl, size: 48)
+                            StoreLogoPlayer(urlString: c.logoUrl, mediaType: c.logoType, size: 48)
                                 .overlay(RoundedRectangle(cornerRadius: 11).stroke(.white.opacity(0.25), lineWidth: 1))
                             VStack(alignment: .leading, spacing: 2) {
                                 AnimatedStoreLogo(
@@ -1246,7 +1248,7 @@ struct StoreView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             } else {
                 HStack(alignment: .top, spacing: 12) {
-                    StoreLogoPlayer(urlString: effectiveConfig?.logoUrl ?? "", size: 50)
+                    StoreLogoPlayer(urlString: effectiveConfig?.logoUrl ?? "", mediaType: effectiveConfig?.logoType, size: 50)
                     VStack(alignment: .leading, spacing: 3) {
                         AnimatedStoreLogo(
                             text: displayName,
@@ -1354,7 +1356,7 @@ struct StoreView: View {
         if let c = try? await cfgTask {
             if c != config { config = c }
             // lưu cache để lần sau (kể cả khi offline) vẫn giữ tên/logo/banner + thứ tự bố cục
-            cfgName = c.logoName; cfgLogo = c.logoUrl
+            cfgName = c.logoName; cfgLogo = c.logoUrl; cfgLogoType = c.logoType ?? "image"
             cfgBannerType = c.bannerType; cfgBannerUrl = c.bannerUrl
             cfgSectionOrder = c.sectionOrder ?? ""
             cfgSectionHidden = c.sectionHidden ?? ""

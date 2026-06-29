@@ -10,6 +10,7 @@ struct StoreMedia: Decodable, Hashable {
 struct StoreAppConfig: Decodable, Hashable {
     let logoName: String
     let logoUrl: String
+    var logoType: String? = nil    // image | video (nil = tự đoán theo đuôi URL)
     let bannerType: String   // image | video
     let bannerUrl: String
     let topupBonusPercent: Int?

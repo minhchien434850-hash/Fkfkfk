@@ -260,6 +260,7 @@ struct StoreConfigEditor: View {
     @EnvironmentObject var store: AppStore
     @State private var logoName = ""
     @State private var logoUrl = ""
+    @State private var logoType = "image"
     @State private var bannerType = "image"
     @State private var bannerUrl = ""
     @State private var logoEffect = "rainbow"
@@ -301,6 +302,7 @@ struct StoreConfigEditor: View {
     @State private var isError = false
     @AppStorage("storeCfgName") private var cfgName: String = ""
     @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
+    @AppStorage("storeCfgLogoType") private var cfgLogoType: String = "image"
     @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
     @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
     @AppStorage("storeCfgSectionOrder") private var cfgSectionOrder: String = ""
@@ -333,13 +335,17 @@ struct StoreConfigEditor: View {
         Form {
             Section {
                 TextField(store.t("Tên cửa hàng / logo", "Store name / logo"), text: $logoName)
+                Picker(store.t("Loại logo", "Logo type"), selection: $logoType) {
+                    Text("Ảnh / GIF").tag("image")
+                    Text("Video / MP4").tag("video")
+                }.pickerStyle(.segmented)
                 TextField(store.t("Link logo: VIDEO (MP4) hoặc PNG / GIF / JPEG / WEBP",
                                   "Logo link: VIDEO (MP4) or PNG / GIF / JPEG / WEBP"), text: $logoUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                 if !logoUrl.isEmpty {
                     HStack {
                         Spacer()
-                        StoreLogoPlayer(urlString: logoUrl, size: 64, cornerRadius: 12)
+                        StoreLogoPlayer(urlString: logoUrl, mediaType: logoType, size: 64, cornerRadius: 12)
                         Spacer()
                     }
                 }
@@ -652,9 +658,10 @@ struct StoreConfigEditor: View {
 
     private func load() async {
         // Hiện ngay giá trị đã lưu (cache) để không bị trống/khôi phục mặc định khi mạng chậm
-        logoName = cfgName; logoUrl = cfgLogo; bannerType = cfgBannerType; bannerUrl = cfgBannerUrl
+        logoName = cfgName; logoUrl = cfgLogo; logoType = cfgLogoType; bannerType = cfgBannerType; bannerUrl = cfgBannerUrl
         if let c = try? await store.api.storeConfig() {
             logoName = c.logoName; logoUrl = c.logoUrl
+            logoType = c.logoType ?? cfgLogoType
             bannerType = c.bannerType; bannerUrl = c.bannerUrl
             logoEffect = c.logoEffect ?? "rainbow"; logoFont = c.logoFont ?? "rounded"
             logoAnim = c.logoAnim ?? "shimmer"
@@ -723,7 +730,7 @@ struct StoreConfigEditor: View {
                 announceEnabled: announceEnabled, announceText: announceText,
                 announceColor: announceColor, gamecatLimit: gamecatLimit)
             // Lưu cache ngay để các màn khác giữ tên/logo + thứ tự bố cục mới kể cả khi mạng chậm
-            cfgName = logoName; cfgLogo = logoUrl; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
+            cfgName = logoName; cfgLogo = logoUrl; cfgLogoType = logoType; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             cfgSectionOrder = sections.joined(separator: ",")
             cfgSectionHidden = hiddenSections.joined(separator: ",")
             isError = false; message = r.message

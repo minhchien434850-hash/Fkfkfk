@@ -155,14 +155,20 @@ private func storeImage(url: URL, height: CGFloat) -> some View {
 ///   .png/.jpg/.jpeg → ảnh tĩnh có cache
 struct StoreLogoPlayer: View {
     let urlString: String
+    var mediaType: String? = nil
     var size: CGFloat = 48
     var cornerRadius: CGFloat = 11
     var fit: Bool = false
 
+    private var isVideo: Bool {
+        if let t = mediaType { return t == "video" }
+        return isVideoLink(urlString)
+    }
+
     var body: some View {
         Group {
             if let url = URL(string: urlString), !urlString.isEmpty {
-                if isVideoLink(urlString) {
+                if isVideo {
                     LoopingVideoBackground(url: url, fit: fit)
                 } else if isAnimatedImage(urlString) {
                     GIFWebView(url: url, contentMode: fit ? "contain" : "cover")
