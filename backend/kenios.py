@@ -695,6 +695,7 @@ def init_db() -> None:
     # Giao diện app bán hàng (chỉ admin chỉnh)
     _seed_setting("store_logo_name", os.getenv("STORE_LOGO_NAME", "KENIOS Store"))
     _seed_setting("store_logo_url", "")
+    _seed_setting("store_logo_type", "image")     # image | video
     _seed_setting("store_banner_type", "image")   # image | video
     _seed_setting("store_banner_url", "")
     _seed_setting("store_topup_bonus_percent", "0")   # % thưởng khi nạp tiền vào ví
@@ -5007,6 +5008,7 @@ def store_config() -> dict[str, Any]:
     return {
         "logo_name": get_setting("store_logo_name", "KENIOS Store"),
         "logo_url": get_setting("store_logo_url", ""),
+        "logo_type": get_setting("store_logo_type", "image"),
         "banner_type": get_setting("store_banner_type", "image"),
         "banner_url": get_setting("store_banner_url", ""),
         "topup_bonus_percent": _topup_bonus_percent(),
@@ -5508,6 +5510,7 @@ def store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
 class StoreConfigIn(BaseModel):
     logo_name: Optional[str] = None
     logo_url: Optional[str] = None
+    logo_type: Optional[str] = None     # image | video
     banner_type: Optional[str] = None   # image | video
     banner_url: Optional[str] = None
     logo_effect: Optional[str] = None
@@ -5553,6 +5556,8 @@ class StoreConfigIn(BaseModel):
 def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
     if b.logo_name is not None: set_setting("store_logo_name", b.logo_name.strip()[:60])
     if b.logo_url is not None: set_setting("store_logo_url", b.logo_url.strip())
+    if b.logo_type is not None:
+        set_setting("store_logo_type", "video" if b.logo_type == "video" else "image")
     if b.banner_type is not None:
         set_setting("store_banner_type", "video" if b.banner_type == "video" else "image")
     if b.banner_url is not None: set_setting("store_banner_url", b.banner_url.strip())

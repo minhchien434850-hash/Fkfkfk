@@ -448,6 +448,7 @@ struct APIClient {
 
     // -- Admin: giao diện store --
     func adminStoreSetConfig(logoName: String, logoUrl: String,
+                             logoType: String? = nil,
                              bannerType: String, bannerUrl: String,
                              logoEffect: String? = nil, logoFont: String? = nil,
                              logoAnim: String? = nil, bgType: String? = nil,
@@ -472,6 +473,7 @@ struct APIClient {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
+        if let logoType { body["logo_type"] = logoType }
         if let flashEnabled { body["flash_enabled"] = flashEnabled }
         if let flashProductId { body["flash_product_id"] = flashProductId }
         if let flashEnd { body["flash_end"] = flashEnd }

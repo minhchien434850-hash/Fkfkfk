@@ -710,6 +710,7 @@ struct StoreConfigEditor: View {
         do {
             let r = try await store.api.adminStoreSetConfig(
                 logoName: logoName, logoUrl: logoUrl,
+                logoType: logoType,
                 bannerType: bannerType, bannerUrl: bannerUrl,
                 logoEffect: logoEffect, logoFont: logoFont, logoAnim: logoAnim,
                 bgType: bgType, bgUrl: bgUrl,
