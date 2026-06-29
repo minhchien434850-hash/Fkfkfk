@@ -35,6 +35,7 @@ struct ReelsFeedView: View {
     @State private var currentIndex = 0
     @State private var dragOffset: CGFloat = 0
     @State private var commentsFor: PostIDWrapper?
+    @State private var muted = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -66,9 +67,7 @@ struct ReelsFeedView: View {
                                      isActive: currentIndex == idx,
                                      currentUserId: store.userId,
                                      onLike: { Task { await like(p) } },
-                                     onComment: { commentsFor = PostIDWrapper(id: p.id) },
-                                     onFollow: { Task { await toggleFollow(p) } },
-                                     onSave: { Task { await save(p) } })
+                                     muted: muted)
                                 .frame(width: geo.size.width, height: h)
                                 .offset(y: CGFloat(idx - currentIndex) * h + dragOffset)
                         }
@@ -104,6 +103,11 @@ struct ReelsFeedView: View {
             }
             .ignoresSafeArea()
 
+            // ===== Nút CỐ ĐỊNH trên màn hình (không đi theo video) =====
+            if !posts.isEmpty {
+                fixedOverlay(posts[min(currentIndex, posts.count - 1)])
+            }
+
             // Nút đóng
             HStack {
                 Spacer()
@@ -127,6 +131,100 @@ struct ReelsFeedView: View {
         .sheet(item: $commentsFor) { w in
             PostCommentsView(postId: w.id).environmentObject(store)
         }
+    }
+
+    // Lớp nút cố định trên màn hình cho video đang xem (currentIndex)
+    @ViewBuilder
+    private func fixedOverlay(_ p: PostItem) -> some View {
+        let isMine = (store.userId != nil && p.userId == store.userId)
+        VStack {
+            Spacer()
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(p.username).font(.headline.bold()).foregroundStyle(.white)
+                    if let cap = p.caption, !cap.isEmpty {
+                        Text(cap).font(.subheadline).foregroundStyle(.white.opacity(0.9)).lineLimit(2)
+                    }
+                    if let v = p.views {
+                        HStack(spacing: 3) {
+                            Image(systemName: "eye").font(.caption2)
+                            Text("\(v)").font(.caption2)
+                        }.foregroundStyle(.white.opacity(0.75))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(spacing: 18) {
+                    if !isMine {
+                        Button { Task { await toggleFollow(p) } } label: {
+                            ZStack(alignment: .bottom) {
+                                avatarCircle(p)
+                                Image(systemName: (p.following ?? false) ? "checkmark.circle.fill" : "plus.circle.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle((p.following ?? false) ? .green : .red)
+                                    .background(Circle().fill(.white))
+                                    .offset(y: 9)
+                            }.frame(height: 52)
+                        }
+                    }
+                    Button { Task { await like(p) } } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: p.liked ? "heart.fill" : "heart")
+                                .font(.title2).foregroundStyle(p.liked ? .red : .white)
+                            Text("\(p.likes)").font(.caption).foregroundStyle(.white)
+                        }
+                    }
+                    Button { commentsFor = PostIDWrapper(id: p.id) } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "bubble.right.fill").font(.title2).foregroundStyle(.white)
+                            Text("\(p.comments ?? 0)").font(.caption).foregroundStyle(.white)
+                        }
+                    }
+                    Button { Task { await save(p) } } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: (p.saved ?? false) ? "bookmark.fill" : "bookmark")
+                                .font(.title2).foregroundStyle((p.saved ?? false) ? .yellow : .white)
+                            Text("Lưu").font(.caption).foregroundStyle(.white)
+                        }
+                    }
+                    ShareLink(item: shareText(p)) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "arrowshape.turn.up.right.fill").font(.title2).foregroundStyle(.white)
+                            Text("Chia sẻ").font(.caption).foregroundStyle(.white)
+                        }
+                    }
+                    Button { muted.toggle() } label: {
+                        Image(systemName: muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.title3).foregroundStyle(.white)
+                    }
+                }
+                .shadow(color: .black.opacity(0.5), radius: 3)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 44)
+        }
+        .allowsHitTesting(true)
+    }
+
+    @ViewBuilder
+    private func avatarCircle(_ p: PostItem) -> some View {
+        let initial = String(p.username.prefix(1)).uppercased()
+        if let s = p.avatarUrl, !s.isEmpty, let url = URL(string: s) {
+            AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+            placeholder: { Circle().fill(Theme.accent.opacity(0.6)).overlay(Text(initial).font(.headline).foregroundStyle(.white)) }
+                .frame(width: 44, height: 44).clipShape(Circle())
+                .overlay(Circle().stroke(.white, lineWidth: 2))
+        } else {
+            Circle().fill(Theme.accent.opacity(0.6)).frame(width: 44, height: 44)
+                .overlay(Text(initial).font(.headline).foregroundStyle(.white))
+                .overlay(Circle().stroke(.white, lineWidth: 2))
+        }
+    }
+
+    private func shareText(_ p: PostItem) -> String {
+        let who = p.username.isEmpty ? "KENIOS" : p.username
+        let cap = (p.caption?.isEmpty == false) ? " – \(p.caption!)" : ""
+        return "Xem video của \(who) trên KENIOS\(cap)"
     }
 
     private func load() async {
@@ -181,51 +279,21 @@ struct ReelCard: View {
     let isActive: Bool
     var currentUserId: Int? = nil
     var onLike: () -> Void
-    var onComment: () -> Void
-    var onFollow: () -> Void = {}
-    var onSave: () -> Void = {}
+    var muted: Bool = false
 
     @State private var player: AVPlayer?
     @State private var thumb: UIImage?
-    @State private var isMuted = false
     @State private var showLikeBurst = false
     @State private var endObserver: NSObjectProtocol?
 
     private var streamURL: URL? { keniosVideoURL(postId: post.id, token: token, baseURL: baseURL) }
-    private var isMine: Bool { currentUserId != nil && post.userId == currentUserId }
-
-    @ViewBuilder private var avatarCircle: some View {
-        let initial = String(post.username.prefix(1)).uppercased()
-        if let s = post.avatarUrl, !s.isEmpty, let url = URL(string: s) {
-            AsyncImage(url: url) { img in
-                img.resizable().scaledToFill()
-            } placeholder: {
-                Circle().fill(Theme.accent.opacity(0.6)).overlay(Text(initial).font(.headline).foregroundStyle(.white))
-            }
-            .frame(width: 44, height: 44).clipShape(Circle())
-            .overlay(Circle().stroke(.white, lineWidth: 2))
-        } else {
-            Circle().fill(Theme.accent.opacity(0.6))
-                .frame(width: 44, height: 44)
-                .overlay(Text(initial).font(.headline).foregroundStyle(.white))
-                .overlay(Circle().stroke(.white, lineWidth: 2))
-        }
-    }
-    private var shareText: String {
-        let who = post.username.isEmpty ? "KENIOS" : post.username
-        let cap = (post.caption?.isEmpty == false) ? " – \(post.caption!)" : ""
-        return "Xem video của \(who) trên KENIOS\(cap)"
-    }
 
     var body: some View {
+        // GIỐNG HỆT màn xem video: nền đen + video VỪA KHUNG (không cắt, không phóng to).
+        // Các nút (follow/tim/bình luận/chia sẻ) KHÔNG nằm ở đây — chúng cố định trên màn hình
+        // ở ReelsFeedView nên không bị lệch theo video.
         ZStack {
-            // Nền: video phủ kín dạng mờ để lấp viền cho đẹp (KHÔNG ảnh hưởng video chính).
             Color.black.ignoresSafeArea()
-            if let thumb {
-                Image(uiImage: thumb).resizable().scaledToFill()
-                    .ignoresSafeArea().blur(radius: 30).opacity(0.6)
-            }
-            // Video chính: GIỮ NGUYÊN tỉ lệ gốc, không cắt/phóng to. Ngang ra ngang, dọc ra dọc.
             if let player {
                 AspectVideoPlayer(player: player).ignoresSafeArea().allowsHitTesting(false)
             } else if let thumb {
@@ -234,90 +302,13 @@ struct ReelCard: View {
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 70)).foregroundStyle(.white.opacity(0.7))
             }
-
             if showLikeBurst {
                 Image(systemName: "heart.fill")
                     .font(.system(size: 110)).foregroundStyle(.red)
                     .transition(.scale.combined(with: .opacity))
             }
-
-            VStack {
-                Spacer()
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(post.username).font(.headline.bold()).foregroundStyle(.white)
-                        if let cap = post.caption, !cap.isEmpty {
-                            Text(cap).font(.subheadline).foregroundStyle(.white.opacity(0.9)).lineLimit(2)
-                        }
-                        if let v = post.views {
-                            HStack(spacing: 3) {
-                                Image(systemName: "eye").font(.caption2)
-                                Text("\(v)").font(.caption2)
-                            }.foregroundStyle(.white.opacity(0.75))
-                        }
-                    }
-                    Spacer()
-                    VStack(spacing: 20) {
-                        // Avatar + nút Theo dõi (ẩn nếu là video của chính mình)
-                        if !isMine {
-                            Button(action: onFollow) {
-                                ZStack(alignment: .bottom) {
-                                    avatarCircle
-                                    Image(systemName: (post.following ?? false) ? "checkmark.circle.fill" : "plus.circle.fill")
-                                        .font(.system(size: 18))
-                                        .foregroundStyle((post.following ?? false) ? .green : .red)
-                                        .background(Circle().fill(.white))
-                                        .offset(y: 9)
-                                }
-                                .frame(height: 52)
-                            }
-                        }
-                        // Tim
-                        Button(action: onLike) {
-                            VStack(spacing: 4) {
-                                Image(systemName: post.liked ? "heart.fill" : "heart")
-                                    .font(.title2).foregroundStyle(post.liked ? .red : .white)
-                                Text("\(post.likes)").font(.caption).foregroundStyle(.white)
-                            }
-                        }
-                        // Bình luận
-                        Button(action: onComment) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "bubble.right.fill").font(.title2).foregroundStyle(.white)
-                                Text("\(post.comments ?? 0)").font(.caption).foregroundStyle(.white)
-                            }
-                        }
-                        // Lưu (bookmark)
-                        Button(action: onSave) {
-                            VStack(spacing: 4) {
-                                Image(systemName: (post.saved ?? false) ? "bookmark.fill" : "bookmark")
-                                    .font(.title2).foregroundStyle((post.saved ?? false) ? .yellow : .white)
-                                Text("Lưu").font(.caption).foregroundStyle(.white)
-                            }
-                        }
-                        // Chia sẻ
-                        ShareLink(item: shareText) {
-                            VStack(spacing: 4) {
-                                Image(systemName: "arrowshape.turn.up.right.fill").font(.title2).foregroundStyle(.white)
-                                Text("Chia sẻ").font(.caption).foregroundStyle(.white)
-                            }
-                        }
-                        // Tắt/bật tiếng
-                        Button {
-                            isMuted.toggle(); player?.isMuted = isMuted
-                        } label: {
-                            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                                .font(.title3).foregroundStyle(.white)
-                        }
-                    }
-                    .shadow(color: .black.opacity(0.4), radius: 3)
-                }
-                .padding(.horizontal, 16).padding(.bottom, 56)
-                .background(
-                    LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
-                )
-            }
         }
+        .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             onLike()
             withAnimation(.spring(response: 0.3)) { showLikeBurst = true }
@@ -331,6 +322,7 @@ struct ReelCard: View {
         }
         .onAppear { loadThumb(); if isActive { setupPlayer() } }
         .onDisappear { teardown() }
+        .onChange(of: muted) { m in player?.isMuted = m }
         .onChange(of: isActive) { active in
             // Chỉ video đang xem mới tạo & phát player; rời đi thì giải phóng cho nhẹ máy
             if active {
@@ -351,7 +343,7 @@ struct ReelCard: View {
         guard player == nil, let url = streamURL else { return }
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
-        p.isMuted = isMuted
+        p.isMuted = muted
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
             p.seek(to: .zero); p.play()

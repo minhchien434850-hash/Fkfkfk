@@ -41,7 +41,8 @@ struct SocialFeedView: View {
                                    onLike: { Task { await like(p) } },
                                    onComment: { commentsFor = PostIDWrapper(id: p.id) },
                                    onSave: { Task { await save(p) } },
-                                   onProfile: { if let uid = p.userId { onOpenProfile?(uid) } })
+                                   onProfile: { if let uid = p.userId { onOpenProfile?(uid) } },
+                                   onDelete: { Task { await deletePost(p) } })
                 }
                 if let error { Text(error).font(.caption).foregroundStyle(.red) }
             }
@@ -157,6 +158,13 @@ struct SocialFeedView: View {
             if let i = posts.firstIndex(where: { $0.id == p.id }) { posts[i].saved = r.saved }
         } catch { self.error = error.localizedDescription }
     }
+
+    private func deletePost(_ p: PostItem) async {
+        do {
+            _ = try await store.api.deletePost(p.id)
+            posts.removeAll { $0.id == p.id }
+        } catch { self.error = error.localizedDescription }
+    }
 }
 
 // ======================== Thẻ bài viết ========================
@@ -167,20 +175,36 @@ struct SocialPostCard: View {
     var onComment: () -> Void
     var onSave: () -> Void = {}
     var onProfile: () -> Void = {}
+    var onDelete: () -> Void = {}
     @State private var showFullImage = false
+    @State private var confirmDelete = false
+
+    private var canDelete: Bool { (post.userId != nil && post.userId == store.userId) || store.isAdmin }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button(action: onProfile) {
-                HStack(spacing: 10) {
-                    avatar
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(post.username).font(.subheadline.bold()).foregroundStyle(.primary)
-                        Text(socialTimeAgo(post.createdAt)).font(.caption2).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Button(action: onProfile) {
+                    HStack(spacing: 10) {
+                        avatar
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(post.username).font(.subheadline.bold()).foregroundStyle(.primary)
+                            Text(socialTimeAgo(post.createdAt)).font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
-                    Spacer()
+                }.buttonStyle(.plain)
+                Spacer()
+                if canDelete {
+                    Button(role: .destructive) { confirmDelete = true } label: {
+                        Image(systemName: "trash").foregroundStyle(.red)
+                    }
+                    .confirmationDialog(store.t("Xóa bài viết này?", "Delete this post?"),
+                                        isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button(store.t("Xóa", "Delete"), role: .destructive) { onDelete() }
+                        Button(store.t("Hủy", "Cancel"), role: .cancel) {}
+                    }
                 }
-            }.buttonStyle(.plain)
+            }
 
             if let cap = post.caption, !cap.isEmpty {
                 Text(cap).font(.body).fixedSize(horizontal: false, vertical: true)
