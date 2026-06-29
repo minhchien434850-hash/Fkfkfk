@@ -3,6 +3,7 @@ import PDFKit
 import VisionKit
 import AVFoundation
 import PhotosUI
+import PencilKit
 import UniformTypeIdentifiers
 
 // ============================ Công cụ tệp (PDF · Âm thanh · Hình ảnh) ============================
@@ -12,7 +13,9 @@ func ftTmp(_ name: String) -> URL { FileManager.default.temporaryDirectory.appen
 func ftStamp() -> Int { Int(Date().timeIntervalSince1970) }
 
 enum FileTool: String, Identifiable {
-    case scan, imagesToPDF, mergePDF, pagesPDF, passwordPDF, compressPDF, trimAudio, cropImage
+    case scan, imagesToPDF, mergePDF, pagesPDF, passwordPDF, compressPDF
+    case pdfToText, textToPDF, pdfMeta, signPDF
+    case trimAudio, cropImage
     var id: String { rawValue }
 
     var title: String {
@@ -23,6 +26,10 @@ enum FileTool: String, Identifiable {
         case .pagesPDF:    return "Quản lý trang"
         case .passwordPDF: return "Đặt mật khẩu"
         case .compressPDF: return "Giảm dung lượng"
+        case .pdfToText:   return "PDF → Văn bản"
+        case .textToPDF:   return "Văn bản → PDF"
+        case .pdfMeta:     return "Sửa thông tin PDF"
+        case .signPDF:     return "Ký tên / Vẽ lên PDF"
         case .trimAudio:   return "Cắt âm thanh"
         case .cropImage:   return "Cắt ảnh"
         }
@@ -35,6 +42,10 @@ enum FileTool: String, Identifiable {
         case .pagesPDF:    return "square.grid.2x2.fill"
         case .passwordPDF: return "lock.fill"
         case .compressPDF: return "arrow.down.right.and.arrow.up.left"
+        case .pdfToText:   return "doc.text.magnifyingglass"
+        case .textToPDF:   return "text.badge.plus"
+        case .pdfMeta:     return "info.circle.fill"
+        case .signPDF:     return "signature"
         case .trimAudio:   return "waveform"
         case .cropImage:   return "crop"
         }
@@ -47,6 +58,10 @@ enum FileTool: String, Identifiable {
         case .pagesPDF:    return Color(red: 0.0, green: 0.7, blue: 0.55)
         case .passwordPDF: return Color(red: 0.2, green: 0.55, blue: 0.95)
         case .compressPDF: return Color(red: 0.9, green: 0.35, blue: 0.45)
+        case .pdfToText:   return Color(red: 0.35, green: 0.5, blue: 0.95)
+        case .textToPDF:   return Color(red: 0.45, green: 0.6, blue: 0.2)
+        case .pdfMeta:     return Color(red: 0.5, green: 0.5, blue: 0.6)
+        case .signPDF:     return Color(red: 0.85, green: 0.3, blue: 0.6)
         case .trimAudio:   return Color(red: 0.0, green: 0.7, blue: 0.7)
         case .cropImage:   return Color(red: 0.55, green: 0.4, blue: 0.95)
         }
@@ -61,7 +76,7 @@ struct FileToolsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    group("Trình sửa PDF", [.imagesToPDF, .mergePDF, .pagesPDF, .passwordPDF, .compressPDF])
+                    group("Trình sửa PDF", [.imagesToPDF, .mergePDF, .pagesPDF, .passwordPDF, .compressPDF, .pdfToText, .textToPDF, .pdfMeta, .signPDF])
                     group("Trình sửa âm thanh", [.trimAudio])
                     group("Hình ảnh", [.scan, .cropImage])
                 }
@@ -109,6 +124,10 @@ struct FileToolsView: View {
         case .pagesPDF:    PagesPDFTool()
         case .passwordPDF: PasswordPDFTool()
         case .compressPDF: CompressPDFTool()
+        case .pdfToText:   PDFToTextTool()
+        case .textToPDF:   TextToPDFTool()
+        case .pdfMeta:     PDFMetaTool()
+        case .signPDF:     SignPDFTool()
         case .trimAudio:   TrimAudioTool()
         case .cropImage:   CropImageTool()
         }
@@ -713,4 +732,244 @@ struct CropOverlay: View {
         }
         if r.width > 30 && r.height > 30 { cropRect = r }
     }
+}
+
+// ============================ 9) PDF → Văn bản ============================
+struct PDFToTextTool: View {
+    @State private var showImporter = false
+    @State private var text = ""
+    @State private var result: URL?
+
+    var body: some View {
+        ToolScaffold(title: "PDF → Văn bản") {
+            Text("Trích toàn bộ chữ trong PDF ra văn bản.").font(.caption).foregroundStyle(.secondary)
+            bigButton("Chọn file PDF", "folder.fill") { showImporter = true }
+            if !text.isEmpty {
+                TextEditor(text: .constant(text)).frame(height: 240)
+                    .padding(6).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+                Button { UIPasteboard.general.string = text } label: {
+                    Label("Copy văn bản", systemImage: "doc.on.doc")
+                }.buttonStyle(.bordered)
+                if let result { ToolResultCard(url: result) }
+            }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
+            if case .success(let urls) = res, let u = urls.first, let local = copyToTemp(u), let doc = PDFDocument(url: local) {
+                let t = doc.string ?? ""
+                text = t.isEmpty ? "(PDF không có chữ trích được — có thể là bản scan ảnh)" : t
+                if !t.isEmpty {
+                    let out = ftTmp("vanban_\(ftStamp()).txt")
+                    result = (try? t.write(to: out, atomically: true, encoding: .utf8)) != nil ? out : nil
+                } else { result = nil }
+            }
+        }
+    }
+}
+
+// ============================ 10) Văn bản → PDF ============================
+struct TextToPDFTool: View {
+    @State private var text = ""
+    @State private var result: URL?
+    @State private var busy = false
+
+    var body: some View {
+        ToolScaffold(title: "Văn bản → PDF") {
+            Text("Nhập / dán văn bản rồi tạo file PDF.").font(.caption).foregroundStyle(.secondary)
+            TextEditor(text: $text).frame(height: 260)
+                .padding(6).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+            bigButton("Tạo PDF", "doc.fill", disabled: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, busy: busy) { create() }
+            if let result { ToolResultCard(url: result) }
+        }
+    }
+    private func create() {
+        busy = true
+        let content = text
+        DispatchQueue.global(qos: .userInitiated).async {
+            let url = textToPDFFile(content)
+            DispatchQueue.main.async { result = url; busy = false }
+        }
+    }
+}
+
+// Tạo PDF nhiều trang từ văn bản (Core Text — tự xuống trang)
+private func textToPDFFile(_ text: String) -> URL? {
+    let pageW: CGFloat = 595, pageH: CGFloat = 842   // A4 @72dpi
+    let margin: CGFloat = 40
+    let attrs: [NSAttributedString.Key: Any] = [
+        .font: UIFont.systemFont(ofSize: 14),
+        .foregroundColor: UIColor.black
+    ]
+    let full = NSAttributedString(string: text, attributes: attrs)
+    let framesetter = CTFramesetterCreateWithAttributedString(full)
+    let data = NSMutableData()
+    UIGraphicsBeginPDFContextToData(data, CGRect(x: 0, y: 0, width: pageW, height: pageH), nil)
+    var location = 0
+    var safety = 0
+    while location < full.length && safety < 2000 {
+        safety += 1
+        UIGraphicsBeginPDFPage()
+        guard let ctx = UIGraphicsGetCurrentContext() else { break }
+        ctx.translateBy(x: 0, y: pageH)
+        ctx.scaleBy(x: 1, y: -1)
+        let path = CGPath(rect: CGRect(x: margin, y: margin, width: pageW - margin*2, height: pageH - margin*2), transform: nil)
+        let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: location, length: 0), path, nil)
+        CTFrameDraw(frame, ctx)
+        let visible = CTFrameGetVisibleStringRange(frame)
+        if visible.length <= 0 { break }
+        location += visible.length
+    }
+    UIGraphicsEndPDFContext()
+    let url = ftTmp("vanban_\(ftStamp()).pdf")
+    return data.write(to: url, atomically: true) ? url : nil
+}
+
+// ============================ 11) Sửa thông tin PDF (metadata) ============================
+struct PDFMetaTool: View {
+    @State private var input: URL?
+    @State private var showImporter = false
+    @State private var title = ""
+    @State private var author = ""
+    @State private var subject = ""
+    @State private var result: URL?
+    @State private var busy = false
+
+    var body: some View {
+        ToolScaffold(title: "Sửa thông tin PDF") {
+            Text("Sửa Tiêu đề / Tác giả / Chủ đề của file PDF.").font(.caption).foregroundStyle(.secondary)
+            bigButton(input == nil ? "Chọn file PDF" : "Đã chọn — đổi file", "folder.fill") { showImporter = true }
+            if input != nil {
+                metaField("Tiêu đề", $title)
+                metaField("Tác giả", $author)
+                metaField("Chủ đề", $subject)
+                bigButton("Lưu thông tin", "square.and.arrow.down.fill", busy: busy) { save() }
+            }
+            if let result { ToolResultCard(url: result) }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
+            if case .success(let urls) = res, let u = urls.first, let local = copyToTemp(u) {
+                input = local; result = nil
+                if let doc = PDFDocument(url: local) {
+                    let a = doc.documentAttributes ?? [:]
+                    title = a[PDFDocumentAttribute.titleAttribute] as? String ?? ""
+                    author = a[PDFDocumentAttribute.authorAttribute] as? String ?? ""
+                    subject = a[PDFDocumentAttribute.subjectAttribute] as? String ?? ""
+                }
+            }
+        }
+    }
+    private func metaField(_ label: String, _ binding: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            TextField(label, text: binding)
+                .padding(10).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+    }
+    private func save() {
+        guard let u = input, let doc = PDFDocument(url: u) else { return }
+        busy = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            var a = doc.documentAttributes ?? [:]
+            a[PDFDocumentAttribute.titleAttribute] = title
+            a[PDFDocumentAttribute.authorAttribute] = author
+            a[PDFDocumentAttribute.subjectAttribute] = subject
+            doc.documentAttributes = a
+            let out = ftTmp("thongtin_\(ftStamp()).pdf")
+            let ok = doc.write(to: out)
+            DispatchQueue.main.async { result = ok ? out : nil; busy = false }
+        }
+    }
+}
+
+// ============================ 12) Ký tên / Vẽ lên PDF ============================
+struct SignPDFTool: View {
+    @State private var doc: PDFDocument?
+    @State private var pageImages: [UIImage] = []
+    @State private var pageIndex = 0
+    @State private var canvas = PKCanvasView()
+    @State private var showImporter = false
+    @State private var result: URL?
+    @State private var busy = false
+
+    var body: some View {
+        ToolScaffold(title: "Ký tên / Vẽ lên PDF") {
+            Text("Chọn PDF → chọn trang → vẽ chữ ký/ghi chú lên trang → lưu.").font(.caption).foregroundStyle(.secondary)
+            bigButton("Chọn file PDF", "folder.fill") { showImporter = true }
+            if !pageImages.isEmpty {
+                if pageImages.count > 1 {
+                    Stepper("Trang \(pageIndex + 1)/\(pageImages.count)", value: $pageIndex, in: 0...(pageImages.count - 1))
+                        .onChange(of: pageIndex) { _ in canvas.drawing = PKDrawing() }
+                }
+                GeometryReader { geo in
+                    let img = pageImages[pageIndex]
+                    let r = fitRect(imageSize: img.size, in: geo.size)
+                    ZStack {
+                        Image(uiImage: img).resizable().scaledToFit()
+                        DrawCanvas(canvas: $canvas)
+                            .frame(width: r.width, height: r.height)
+                            .position(x: r.midX, y: r.midY)
+                    }
+                }
+                .frame(height: 380)
+                .background(Color(.systemGray5))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                Button { canvas.drawing = PKDrawing() } label: { Label("Xoá nét vẽ", systemImage: "trash") }.buttonStyle(.bordered)
+                bigButton("Lưu PDF đã ký", "checkmark.circle.fill", busy: busy) { save() }
+            }
+            if let result { ToolResultCard(url: result) }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
+            if case .success(let urls) = res, let u = urls.first, let local = copyToTemp(u), let d = PDFDocument(url: local) {
+                doc = d; result = nil; pageIndex = 0; canvas.drawing = PKDrawing()
+                DispatchQueue.global(qos: .userInitiated).async {
+                    var arr: [UIImage] = []
+                    for i in 0..<d.pageCount {
+                        if let p = d.page(at: i) { arr.append(p.thumbnail(of: p.bounds(for: .mediaBox).size, for: .mediaBox)) }
+                    }
+                    DispatchQueue.main.async { pageImages = arr }
+                }
+            }
+        }
+    }
+    private func save() {
+        guard let doc else { return }
+        busy = true
+        let idx = pageIndex
+        let drawing = canvas.drawing
+        let canvasBounds = canvas.bounds
+        DispatchQueue.global(qos: .userInitiated).async {
+            let out = PDFDocument()
+            for i in 0..<doc.pageCount {
+                if i == idx, let page = doc.page(at: i) {
+                    let size = page.bounds(for: .mediaBox).size
+                    let pageImg = page.thumbnail(of: size, for: .mediaBox)
+                    let drawImg = drawing.image(from: canvasBounds == .zero ? CGRect(origin: .zero, size: size) : canvasBounds,
+                                                scale: UIScreen.main.scale)
+                    let renderer = UIGraphicsImageRenderer(size: size)
+                    let composed = renderer.image { _ in
+                        pageImg.draw(in: CGRect(origin: .zero, size: size))
+                        drawImg.draw(in: CGRect(origin: .zero, size: size))
+                    }
+                    if let pg = PDFPage(image: composed) { out.insert(pg, at: out.pageCount) }
+                } else if let p = doc.page(at: i) {
+                    out.insert(p, at: out.pageCount)
+                }
+            }
+            var url: URL? = nil
+            if out.pageCount > 0 { let u = ftTmp("kyten_\(ftStamp()).pdf"); if out.write(to: u) { url = u } }
+            DispatchQueue.main.async { result = url; busy = false }
+        }
+    }
+}
+
+// Canvas vẽ tay (PencilKit) nền trong suốt
+struct DrawCanvas: UIViewRepresentable {
+    @Binding var canvas: PKCanvasView
+    func makeUIView(context: Context) -> PKCanvasView {
+        canvas.drawingPolicy = .anyInput
+        canvas.backgroundColor = .clear
+        canvas.isOpaque = false
+        canvas.tool = PKInkingTool(.pen, color: .black, width: 4)
+        return canvas
+    }
+    func updateUIView(_ uiView: PKCanvasView, context: Context) {}
 }
