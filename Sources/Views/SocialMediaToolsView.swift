@@ -71,6 +71,11 @@ struct SocialMediaToolsView: View {
     @AppStorage("yt_refresh_token")     private var ytRefreshToken = ""
     @State private var ytSigningIn = false
     @State private var ytAuthError: String?
+    // Facebook dùng OAuth (cookie không tạo được live) — lưu App ID + token
+    @AppStorage("fb_app_id")       private var fbAppID = ""
+    @AppStorage("fb_access_token") private var fbAccessToken = ""
+    @State private var fbSigningIn = false
+    @State private var fbAuthError: String?
     @State private var selectedPlatforms: Set<String> = ["tiktok", "facebook", "youtube"]
     @State private var streamResults: [String: PlatformStreamResult] = [:]
     // Restream: phát màn hình 1 lần → VPS chia ra nhiều nền tảng
@@ -335,7 +340,11 @@ struct SocialMediaToolsView: View {
     @ViewBuilder
     private func platformRow(_ p: LivePlatformInfo) -> some View {
         let isYouTube = p.id == "youtube"
-        let hasCred = isYouTube ? !ytAccessToken.isEmpty : !cookie(for: p.id).isEmpty
+        let isFacebook = p.id == "facebook"
+        let isOAuth = isYouTube || isFacebook
+        let hasCred = isYouTube ? !ytAccessToken.isEmpty
+                    : isFacebook ? !fbAccessToken.isEmpty
+                    : !cookie(for: p.id).isEmpty
         let selected = selectedPlatforms.contains(p.id)
         let res = streamResults[p.id]
         VStack(alignment: .leading, spacing: 8) {
@@ -352,13 +361,14 @@ struct SocialMediaToolsView: View {
                     HStack(spacing: 4) {
                         Image(systemName: hasCred ? "checkmark.seal.fill" : "exclamationmark.triangle")
                             .font(.caption2).foregroundStyle(hasCred ? .green : .orange)
-                        Text(hasCred ? (isYouTube ? "Đã đăng nhập Google" : "Đã có cookie")
+                        Text(hasCred ? (isYouTube ? "Đã đăng nhập Google"
+                                        : isFacebook ? "Đã đăng nhập Facebook" : "Đã có cookie")
                                      : "Chưa đăng nhập")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
-                if !isYouTube {
+                if !isOAuth {
                     Button {
                         browserURL = p.loginURL
                         browserSiteName = p.id
@@ -369,6 +379,7 @@ struct SocialMediaToolsView: View {
                 }
             }
             if isYouTube { youtubeAuthBlock(hasToken: hasCred) }
+            if isFacebook { facebookAuthBlock(hasToken: hasCred) }
             if let res {
                 if res.ok {
                     VStack(alignment: .leading, spacing: 6) {
@@ -451,6 +462,65 @@ struct SocialMediaToolsView: View {
             // người dùng huỷ — không báo lỗi
         } catch {
             ytAuthError = error.localizedDescription
+        }
+    }
+
+    // Facebook: đăng nhập OAuth để lấy token — cookie không tạo được live
+    @ViewBuilder
+    private func facebookAuthBlock(hasToken: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if hasToken {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    Text("Đã đăng nhập Facebook.").font(.caption).foregroundStyle(.green)
+                    Spacer()
+                    Button(role: .destructive) { fbAccessToken = "" } label: {
+                        Text("Đăng xuất").font(.caption.bold())
+                    }.buttonStyle(.bordered)
+                }
+            } else {
+                Text("Facebook cần đăng nhập (OAuth) — cookie không tạo được live.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                TextField("Dán Facebook App ID (chỉ gồm chữ số)", text: $fbAppID)
+                    .font(.system(.caption, design: .monospaced))
+                    .keyboardType(.numberPad)
+                    .padding(9).background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                Button {
+                    Task { await signInFacebook() }
+                } label: {
+                    HStack {
+                        if fbSigningIn { ProgressView().tint(.white) }
+                        Image(systemName: "person.badge.key.fill")
+                        Text(fbSigningIn ? "Đang đăng nhập..." : "Đăng nhập Facebook")
+                    }
+                    .font(.caption.bold()).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 40)
+                    .background(fbAppID.count >= 10 && fbAppID.allSatisfy(\.isNumber) ? Color.blue : Color.gray)
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                }
+                .disabled(fbSigningIn || fbAppID.count < 10 || !fbAppID.allSatisfy(\.isNumber))
+            }
+            if let e = fbAuthError {
+                Text(e).font(.caption2).foregroundStyle(.red)
+            }
+        }
+        .padding(9)
+        .background(Color.blue.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func signInFacebook() async {
+        fbAuthError = nil
+        fbSigningIn = true
+        defer { fbSigningIn = false }
+        do {
+            let token = try await FacebookOAuth.shared.signIn(appID: fbAppID)
+            fbAccessToken = token
+        } catch FacebookOAuthError.cancelled {
+            // người dùng huỷ — không báo lỗi
+        } catch {
+            fbAuthError = error.localizedDescription
         }
     }
 
@@ -771,17 +841,28 @@ struct SocialMediaToolsView: View {
                 }
                 continue
             }
+            // Facebook cần Access Token (OAuth) — cookie không tạo được live.
+            if p == "facebook" {
+                if fbAccessToken.isEmpty {
+                    streamResults[p] = PlatformStreamResult(error: "Chưa đăng nhập Facebook — bấm 'Đăng nhập Facebook'.")
+                    continue
+                }
+                do {
+                    let res = try await store.api.getFacebookStreamKey(accessToken: fbAccessToken)
+                    streamResults[p] = PlatformStreamResult(rtmp: res.rtmpUrl, key: res.streamKey)
+                    addTargetDirect(name: platformName(p), rtmp: res.rtmpUrl, key: res.streamKey)
+                } catch {
+                    streamResults[p] = PlatformStreamResult(error: error.localizedDescription)
+                }
+                continue
+            }
             let ck = cookie(for: p)
             if ck.isEmpty {
                 streamResults[p] = PlatformStreamResult(error: "Chưa có cookie — hãy bấm Đăng nhập nền tảng này.")
                 continue
             }
             do {
-                let res: StreamKeyResponse
-                switch p {
-                case "tiktok":   res = try await store.api.getTikTokStreamKey(cookies: ck)
-                default:         res = try await store.api.getFacebookStreamKey(cookies: ck)
-                }
+                let res = try await store.api.getTikTokStreamKey(cookies: ck)
                 streamResults[p] = PlatformStreamResult(rtmp: res.rtmpUrl, key: res.streamKey)
                 addTargetDirect(name: platformName(p), rtmp: res.rtmpUrl, key: res.streamKey)
             } catch {
