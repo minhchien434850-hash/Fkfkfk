@@ -193,24 +193,38 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     
     private func playSiriTTS(_ text: String) {
         let u = AVSpeechUtterance(string: text)
-        let voices = AVSpeechSynthesisVoice.speechVoices()
-        let siriVoice = voices.first { v in
-            v.language.hasPrefix("vi") && v.identifier.lowercased().contains("siri")
-        } ?? voices.first { v in
-            v.language.hasPrefix("vi")
-        } ?? voices.first { v in
-            v.identifier.lowercased().contains("siri")
-        }
-        
-        if let v = siriVoice {
-            u.voice = v
-        }
+        if let v = bestSiriVoice() { u.voice = v }
         u.rate = rate
         u.pitchMultiplier = pitch
         u.volume = volume
         synth.speak(u)
     }
-    
+
+    // Chọn ĐÚNG giọng Siri: ưu tiên giọng Siri tiếng Việt thật, rồi tới giọng tiếng Việt
+    // CHẤT LƯỢNG CAO nhất (premium > enhanced) — KHÔNG lấy giọng "compact" thường (nghe khác hẳn Siri).
+    private func bestSiriVoice() -> AVSpeechSynthesisVoice? {
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+        func q(_ v: AVSpeechSynthesisVoice) -> Int {
+            switch v.quality {
+            case .premium:  return 3
+            case .enhanced: return 2
+            default:        return 1
+            }
+        }
+        let isSiri: (AVSpeechSynthesisVoice) -> Bool = { $0.identifier.lowercased().contains("siri") }
+        // 1) Giọng Siri tiếng Việt thật (chất lượng cao nhất).
+        if let v = voices.filter({ $0.language.hasPrefix("vi") && isSiri($0) }).max(by: { q($0) < q($1) }) {
+            return v
+        }
+        // 2) Chưa cài giọng Siri tiếng Việt → chọn giọng tiếng Việt CHẤT LƯỢNG CAO nhất (gần Siri nhất, đúng tiếng).
+        if let v = voices.filter({ $0.language.hasPrefix("vi") }).max(by: { q($0) < q($1) }) {
+            return v
+        }
+        // 3) Không có giọng tiếng Việt → bất kỳ giọng Siri thật nào.
+        if let v = voices.filter(isSiri).max(by: { q($0) < q($1) }) { return v }
+        return voices.first
+    }
+
     private func playElevenLabsTTS(_ text: String) {
         // Dùng ElevenLabs chỉ khi có cả API key VÀ Voice ID
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
