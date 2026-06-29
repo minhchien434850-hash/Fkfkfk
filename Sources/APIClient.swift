@@ -127,6 +127,11 @@ struct APIClient {
         if !phone.isEmpty { json["phone"] = phone }
         return try decode(try await send("/auth/login-otp", method: "POST", json: json, auth: false))
     }
+    /// Đăng nhập bằng tài khoản Google: gửi id_token (Google OAuth) cho server xác thực.
+    func googleLogin(idToken: String) async throws -> AuthResponse {
+        try decode(try await send("/auth/google", method: "POST",
+                                  json: ["id_token": idToken], auth: false))
+    }
     func forgot(_ username: String) async throws -> ForgotResponse {
         try decode(try await send("/auth/forgot-password", method: "POST",
                                   json: ["username": username], auth: false))

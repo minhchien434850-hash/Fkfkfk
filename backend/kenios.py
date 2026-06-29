@@ -1923,6 +1923,60 @@ def login_otp(b: LoginOtpIn, request: Request) -> dict[str, Any]:
     return {"token": make_token(uid), "user": _user_dict(row)}
 
 
+class GoogleAuthIn(BaseModel):
+    id_token: str
+
+
+@app.post("/auth/google")
+def auth_google(b: GoogleAuthIn, request: Request) -> dict[str, Any]:
+    """Đăng nhập bằng tài khoản Google. App gửi id_token (JWT) lấy từ Google OAuth,
+    server XÁC THỰC với Google rồi đăng nhập / tự tạo tài khoản theo email. An toàn,
+    không cần mật khẩu. Không trùng /auth/login."""
+    _rate_limit(request, "google_login", limit=12, window=300)
+    token = (b.id_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Thiếu id_token từ Google.")
+    # Xác thực id_token với Google (kiểm tra chữ ký/hết hạn).
+    info: dict[str, Any] = {}
+    try:
+        with httpx.Client(timeout=10) as client:
+            r = client.get("https://oauth2.googleapis.com/tokeninfo", params={"id_token": token})
+        if r.status_code == 200:
+            info = r.json()
+    except Exception as e:
+        logging.warning("Google tokeninfo lỗi: %s", e)
+    email = (info.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="Xác thực Google thất bại. Vui lòng thử lại.")
+    if str(info.get("email_verified", "")).lower() not in ("true", "1"):
+        raise HTTPException(status_code=401, detail="Email Google chưa được xác minh.")
+    # (Tuỳ chọn) Kiểm tra token đúng ứng dụng của mình nếu đã cấu hình client id.
+    want = (os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
+            or get_setting("google_login_client_id", "")).strip()
+    if want and str(info.get("aud", "")) != want:
+        raise HTTPException(status_code=401, detail="Token Google không khớp ứng dụng.")
+    # Đăng nhập nếu đã có tài khoản với email này; chưa có thì tự tạo (passwordless).
+    with db() as c:
+        row = c.execute("SELECT * FROM users WHERE lower(email)=?", (email,)).fetchone()
+        if row:
+            if row["banned"]:
+                raise HTTPException(status_code=403,
+                    detail="Tài khoản đã bị khóa. Liên hệ quản trị viên.")
+            _ensure_public_id(c, row["id"])
+            row = c.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
+            return {"token": make_token(row["id"]), "user": _user_dict(row)}
+        username = _unique_username(c, email.split("@")[0])
+        cur = c.execute(
+            "INSERT INTO users(username,email,phone,pw_hash,plan,credits,created_at) "
+            "VALUES(?,?,?,?,'free',0,?)",
+            (username, email, None, hash_pw(secrets.token_urlsafe(16)), int(time.time())),
+        )
+        uid = cur.lastrowid
+        _ensure_public_id(c, uid)
+        row = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    return {"token": make_token(uid), "user": _user_dict(row)}
+
+
 @app.post("/auth/forgot-password")
 def forgot(b: ForgotIn, request: Request) -> dict[str, Any]:
     _rate_limit(request, "forgot", limit=8, window=600)
@@ -5070,6 +5124,9 @@ def store_config() -> dict[str, Any]:
         "logo_name": get_setting("store_logo_name", "KENIOS Store"),
         "logo_url": get_setting("store_logo_url", ""),
         "logo_type": get_setting("store_logo_type", "image"),
+        # Client ID iOS để app hiện nút "Đăng nhập bằng Google" (rỗng = ẩn nút)
+        "google_client_id": (os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
+                             or get_setting("google_login_client_id", "")),
         "banner_type": get_setting("store_banner_type", "image"),
         "banner_url": get_setting("store_banner_url", ""),
         "topup_bonus_percent": _topup_bonus_percent(),

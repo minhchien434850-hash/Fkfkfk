@@ -10,6 +10,8 @@ struct LoginView: View {
     @State private var showConnections = false
     @State private var remember = false
     @State private var didAutoTry = false
+    @State private var googleClientId = ""   // lấy từ máy chủ; rỗng = ẩn nút Google
+    @State private var googleLoading = false
 
     var body: some View {
         NavigationStack {
@@ -83,6 +85,24 @@ struct LoginView: View {
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.accent.opacity(0.5)))
                     }.padding(.horizontal)
 
+                    // Đăng nhập bằng tài khoản Google (ASWebAuthenticationSession, không cần SDK).
+                    // Chỉ hiện khi máy chủ đã cấu hình Google Client ID.
+                    if !googleClientId.isEmpty {
+                        Button { Task { await doGoogleLogin() } } label: {
+                            HStack {
+                                if googleLoading { ProgressView().padding(.trailing, 4) }
+                                Image(systemName: "g.circle.fill")
+                                Text(store.t("Đăng nhập bằng Google", "Sign in with Google")).bold()
+                            }
+                            .frame(maxWidth: .infinity).padding()
+                            .background(Color(.systemBackground))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.secondary.opacity(0.4)))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        .disabled(googleLoading)
+                        .padding(.horizontal)
+                    }
+
                     NavigationLink { LegalView() } label: {
                         Text(store.t("Điều khoản & Chính sách bảo mật", "Terms & Privacy Policy"))
                             .font(.caption2).foregroundStyle(.secondary)
@@ -118,7 +138,27 @@ struct LoginView: View {
             }
             .sheet(isPresented: $showConnections) { ConnectionsView() }
             .task { await prepareLogin() }
+            .task { await loadGoogleClientId() }
         }
+    }
+
+    /// Lấy Google Client ID từ máy chủ để quyết định có hiện nút "Đăng nhập bằng Google".
+    private func loadGoogleClientId() async {
+        if let cfg = try? await store.api.storeConfig() {
+            googleClientId = cfg.googleClientId ?? ""
+        }
+    }
+
+    /// Đăng nhập bằng Google: lấy id_token rồi gửi máy chủ xác thực.
+    private func doGoogleLogin() async {
+        googleLoading = true; error = nil
+        do {
+            let idToken = try await GoogleOAuth.shared.signInIdToken(clientID: googleClientId)
+            let resp = try await store.api.googleLogin(idToken: idToken)
+            store.setAuth(resp)
+            await store.loadProviders(); await store.loadKeys()
+        } catch { self.error = error.localizedDescription }
+        googleLoading = false
     }
 
     /// Khi mở màn đăng nhập: điền sẵn tài khoản vừa đăng ký (nếu có) hoặc

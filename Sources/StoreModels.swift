@@ -14,6 +14,7 @@ struct StoreAppConfig: Decodable, Hashable {
     let bannerType: String   // image | video
     let bannerUrl: String
     let topupBonusPercent: Int?
+    var googleClientId: String? = nil   // Client ID iOS để "Đăng nhập bằng Google" (rỗng = ẩn nút)
     var logoEffect: String? = nil   // rainbow|none|glow|neon|gold
     var logoFont: String? = nil     // rounded|serif|mono|default
     var logoAnim: String? = nil     // shimmer|wave|pulse|none

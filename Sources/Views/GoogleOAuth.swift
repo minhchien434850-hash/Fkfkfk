@@ -68,6 +68,57 @@ final class GoogleOAuth: NSObject, ASWebAuthenticationPresentationContextProvidi
         return try await exchange(code: code, clientID: cid, redirectURI: redirectURI, verifier: verifier)
     }
 
+    /// Đăng nhập Google để LẤY DANH TÍNH (email) — trả về id_token (JWT) để gửi server xác thực.
+    /// Dùng cho nút "Đăng nhập bằng Google". scope openid+email+profile.
+    func signInIdToken(clientID: String) async throws -> String {
+        let cid = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cid.hasSuffix(".apps.googleusercontent.com") else { throw GoogleOAuthError.badClientID }
+
+        let reversed = Self.reversedClientID(cid)
+        let redirectURI = "\(reversed):/oauth2redirect"
+        let verifier = Self.randomURLSafe(64)
+        let challenge = Self.codeChallenge(verifier)
+
+        var comp = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
+        comp.queryItems = [
+            URLQueryItem(name: "client_id", value: cid),
+            URLQueryItem(name: "redirect_uri", value: redirectURI),
+            URLQueryItem(name: "response_type", value: "code"),
+            URLQueryItem(name: "scope", value: "openid email profile"),
+            URLQueryItem(name: "code_challenge", value: challenge),
+            URLQueryItem(name: "code_challenge_method", value: "S256"),
+            URLQueryItem(name: "prompt", value: "select_account"),
+        ]
+        let code = try await authorize(url: comp.url!, scheme: reversed)
+        return try await exchangeIdToken(code: code, clientID: cid, redirectURI: redirectURI, verifier: verifier)
+    }
+
+    private func exchangeIdToken(code: String, clientID: String, redirectURI: String, verifier: String) async throws -> String {
+        var req = URLRequest(url: URL(string: "https://oauth2.googleapis.com/token")!)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let form: [String: String] = [
+            "client_id": clientID,
+            "code": code,
+            "code_verifier": verifier,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirectURI,
+        ]
+        req.httpBody = form.map {
+            "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? $0.value)"
+        }.joined(separator: "&").data(using: .utf8)
+
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw GoogleOAuthError.tokenExchange("phản hồi không hợp lệ")
+        }
+        if let idToken = obj["id_token"] as? String, !idToken.isEmpty {
+            return idToken
+        }
+        let err = (obj["error_description"] as? String) ?? (obj["error"] as? String) ?? "không rõ"
+        throw GoogleOAuthError.tokenExchange(err)
+    }
+
     private func authorize(url: URL, scheme: String) async throws -> String {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
             let s = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) { callback, error in
