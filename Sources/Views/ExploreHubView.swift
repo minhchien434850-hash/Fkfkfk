@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, tools, github, settings, admin, mediaConverter, messenger, vpn
+    case liveNow, fileTools, library, read, fun, games, gameLauncher, tools, github, settings, admin, mediaConverter, messenger, vpn
     var id: String { rawValue }
 
     var title: String {
@@ -15,6 +15,7 @@ enum HubDest: String, Identifiable {
         case .read:           return "Đọc (TTS)"
         case .fun:            return "Giải trí"
         case .games:          return "Trò chơi"
+        case .gameLauncher:   return "Game Launcher"
         case .tools:          return "Công cụ"
         case .github:         return "GitHub"
         case .settings:       return "Cài đặt"
@@ -32,6 +33,7 @@ enum HubDest: String, Identifiable {
         case .read:           return "Đọc văn bản · giọng mới"
         case .fun:            return "Phim · nhạc · web"
         case .games:          return "Chơi game trong app"
+        case .gameLauncher:   return "Tối ưu RAM · Mở game nhanh"
         case .tools:          return "Ảnh · tin tức · tiện ích"
         case .github:         return "Tải/xoá file lên repo"
         case .settings:       return "Tài khoản · giao diện"
@@ -49,6 +51,7 @@ enum HubDest: String, Identifiable {
         case .read:           return "Read (TTS)"
         case .fun:            return "Entertainment"
         case .games:          return "Games"
+        case .gameLauncher:   return "Game Launcher"
         case .tools:          return "Tools"
         case .github:         return "GitHub"
         case .settings:       return "Settings"
@@ -66,6 +69,7 @@ enum HubDest: String, Identifiable {
         case .read:           return "Read text · new voices"
         case .fun:            return "Movies · music · web"
         case .games:          return "Play games in app"
+        case .gameLauncher:   return "Optimize RAM · Launch fast"
         case .tools:          return "Images · news · utilities"
         case .github:         return "Upload/delete repo files"
         case .settings:       return "Account · appearance"
@@ -83,6 +87,7 @@ enum HubDest: String, Identifiable {
         case .read:           return "speaker.wave.2.fill"
         case .fun:            return "play.tv.fill"
         case .games:          return "gamecontroller.fill"
+        case .gameLauncher:   return "bolt.heart.fill"
         case .tools:          return "square.grid.2x2.fill"
         case .github:         return "chevron.left.forwardslash.chevron.right"
         case .settings:       return "gearshape.fill"
@@ -100,6 +105,7 @@ enum HubDest: String, Identifiable {
         case .read:           return [Color(red: 0.0, green: 0.78, blue: 0.7), Color(red: 0.0, green: 0.55, blue: 0.7)]
         case .fun:            return [Color(red: 0.95, green: 0.3, blue: 0.5), Color(red: 0.75, green: 0.2, blue: 0.55)]
         case .games:          return [Color(red: 0.55, green: 0.4, blue: 0.95), Color(red: 0.35, green: 0.3, blue: 0.9)]
+        case .gameLauncher:   return [Color(red: 1.0, green: 0.35, blue: 0.0), Color(red: 0.9, green: 0.15, blue: 0.0)]
         case .tools:          return [Color(red: 0.95, green: 0.6, blue: 0.1), Color(red: 0.9, green: 0.4, blue: 0.1)]
         case .github:         return [Color(red: 0.2, green: 0.22, blue: 0.28), Color(red: 0.1, green: 0.11, blue: 0.15)]
         case .settings:       return [Color(red: 0.4, green: 0.45, blue: 0.55), Color(red: 0.25, green: 0.3, blue: 0.4)]
@@ -120,7 +126,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .tools, .vpn, .github, .mediaConverter, .messenger, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .gameLauncher, .tools, .vpn, .github, .mediaConverter, .messenger, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -179,6 +185,7 @@ struct ExploreHubView: View {
         case .read:           TTSView()
         case .fun:            MediaWebView(model: browserModel)
         case .games:          GameZoneView()
+        case .gameLauncher:   GameLauncherView()
         case .tools:          CreatorToolsView()
         case .github:         GitHubView()
         case .settings:       SettingsView()
