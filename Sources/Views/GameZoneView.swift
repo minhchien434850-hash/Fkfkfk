@@ -9,6 +9,7 @@ struct GameItem: Identifiable, Codable, Hashable {
 }
 
 struct GameZoneView: View {
+    @EnvironmentObject var store: AppStore
     @AppStorage("kenios_games") private var gamesRaw = "[]"
     @State private var playURL: String?
     @State private var showAdd = false
@@ -55,12 +56,13 @@ struct GameZoneView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     KHeroHeader(icon: "gamecontroller.fill",
-                                title: "Trò chơi",
-                                subtitle: "Chơi game ngay trong app · thêm game/app yêu thích")
+                                title: store.t("Trò chơi", "Games"),
+                                subtitle: store.t("Chơi game ngay trong app · thêm game/app yêu thích",
+                                                  "Play games in-app · add your favorite games/apps"))
 
                     // Game của bạn
                     if !customGames.isEmpty {
-                        Text("Game / app của bạn").font(.headline)
+                        Text(store.t("Game / app của bạn", "Your games / apps")).font(.headline)
                         LazyVGrid(columns: cols, spacing: 14) {
                             ForEach(customGames) { g in
                                 gameCard(g, custom: true)
@@ -68,7 +70,7 @@ struct GameZoneView: View {
                         }
                     }
 
-                    Text("Kho game").font(.headline)
+                    Text(store.t("Kho game", "Game library")).font(.headline)
                     LazyVGrid(columns: cols, spacing: 14) {
                         ForEach(builtin) { g in
                             gameCard(g, custom: false)
@@ -82,7 +84,7 @@ struct GameZoneView: View {
                                     .frame(width: 56, height: 56)
                                     .background(Theme.accent.opacity(0.14))
                                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                Text("Thêm").font(.caption).foregroundStyle(.secondary)
+                                Text(store.t("Thêm", "Add")).font(.caption).foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
@@ -92,22 +94,23 @@ struct GameZoneView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Trò chơi")
+            .navigationTitle(store.t("Trò chơi", "Games"))
             .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(item: Binding(
                 get: { playURL.map { IdentifiedURL(url: $0) } },
                 set: { playURL = $0?.url })) { item in
                 GamePlayerView(url: item.url)
             }
-            .alert("Thêm game / app (web)", isPresented: $showAdd) {
-                TextField("Tên (vd: Game của tôi)", text: $newName)
-                TextField("Link (vd: crazygames.com)", text: $newURL)
+            .alert(store.t("Thêm game / app (web)", "Add game / app (web)"), isPresented: $showAdd) {
+                TextField(store.t("Tên (vd: Game của tôi)", "Name (e.g. My game)"), text: $newName)
+                TextField(store.t("Link (vd: crazygames.com)", "Link (e.g. crazygames.com)"), text: $newURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                Button("Thêm") { addCustom() }
-                Button("Huỷ", role: .cancel) { }
+                Button(store.t("Thêm", "Add")) { addCustom() }
+                Button(store.t("Huỷ", "Cancel"), role: .cancel) { }
             } message: {
-                Text("Dán link game/website để thêm vào kho và chơi ngay trong app.")
+                Text(store.t("Dán link game/website để thêm vào kho và chơi ngay trong app.",
+                             "Paste a game/website link to add it and play right in the app."))
             }
         }
     }
@@ -133,7 +136,7 @@ struct GameZoneView: View {
             if custom {
                 Button(role: .destructive) {
                     saveCustom(customGames.filter { $0.id != g.id })
-                } label: { Label("Xoá", systemImage: "trash") }
+                } label: { Label(store.t("Xoá", "Delete"), systemImage: "trash") }
             }
         }
     }
@@ -147,19 +150,21 @@ private struct IdentifiedURL: Identifiable {
 
 // Trình chơi game toàn màn hình (dùng lại BrowserWebView)
 struct GamePlayerView: View {
+    @EnvironmentObject var store: AppStore
     let url: String
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = BrowserModel()
 
     var body: some View {
         NavigationStack {
-            BrowserWebView(model: model, home: url)
+            BrowserWebView(model: model)
                 .ignoresSafeArea(edges: .bottom)
-                .navigationTitle(model.pageTitle.isEmpty ? "Đang chơi" : model.pageTitle)
+                .onAppear { model.open(url) }
+                .navigationTitle(model.pageTitle.isEmpty ? store.t("Đang chơi", "Playing") : model.pageTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Đóng") { dismiss() }
+                        Button(store.t("Đóng", "Close")) { dismiss() }
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         HStack {

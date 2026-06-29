@@ -24,7 +24,7 @@ GitHub Actions — **không cần máy Mac**.
 ## Chạy backend trên VPS
 Xem file **`CHAY-VPS.sh`** (file gốc, 1 lệnh):
 ```bash
-git clone -b claude/app-issues-repo-creation-px0q60 <LINK_REPO> kenios && cd kenios
+git clone -b claude/new-session-0tfv1k <LINK_REPO> kenios && cd kenios
 chmod +x CHAY-VPS.sh
 sudo ADMIN_PASS='matkhau_cua_ban' bash CHAY-VPS.sh
 ```

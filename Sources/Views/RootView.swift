@@ -15,10 +15,13 @@ struct RootView: View {
                             MaintenanceOverlay(message: store.maintenanceMessage)
                         }
                     }
+                    // Màn giới thiệu gói PRO/Free hiện sau khi đăng nhập
+                    .sheet(isPresented: $store.showPlanIntro) { PlanIntroView() }
             }
         }
-        .tint(Theme.accent)
+        .tint(store.accentColor)
         .preferredColorScheme(store.preferredScheme)
+        .buttonStyle(PressableButtonStyle())   // hiệu ứng chạm iOS 26 toàn app
     }
 }
 
@@ -47,29 +50,42 @@ struct MaintenanceOverlay: View {
 struct MainTabView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("defaultLaunchTab") private var defaultLaunchTab = 2
+    @State private var didInitTab = false
 
     var body: some View {
         // Chỉ 5 tab chính cho gọn & rõ — các mục khác nằm trong "Khám phá"
         TabView(selection: $store.tab) {
             SocialMediaToolsView()
-                .tabItem { Label("Mạng xã hội", systemImage: "globe.badge.ellipsis") }
+                .tabItem { Label(store.t("Mạng xã hội", "Social"), systemImage: "network") }
                 .tag(2)
             VideoFeedView() // TikTok của riêng app
-                .tabItem { Label("Video", systemImage: "play.rectangle.on.rectangle.fill") }
+                .tabItem { Label(store.t("Video", "Video"), systemImage: "play.rectangle.on.rectangle.fill") }
                 .tag(14)
             StoreView() // App bán hàng (sản phẩm · key · tải game)
-                .tabItem { Label("Ứng dụng", systemImage: "bag.fill") }
+                .tabItem { Label(store.t("Cửa hàng", "Store"), systemImage: "bag.fill") }
                 .tag(15)
             FriendsView()
-                .tabItem { Label("Bạn bè", systemImage: "person.2.fill") }
+                .tabItem { Label(store.t("Bạn bè", "Friends"), systemImage: "person.2.fill") }
                 .tag(4)
             ExploreHubView() // lưới tất cả tính năng còn lại
-                .tabItem { Label("Khám phá", systemImage: "square.grid.2x2.fill") }
+                .tabItem { Label(store.t("Khám phá", "Explore"), systemImage: "square.grid.2x2.fill") }
                 .tag(16)
         }
         .onAppear {
-            if ![2, 14, 15, 4, 16].contains(store.tab) { store.tab = 2 }
-            WelcomeVoice.playOnce()   // giọng chào mừng khi vào app
+            // Lần mở app đầu: nhảy tới tab mặc định do người dùng chọn (Cài đặt)
+            if !didInitTab {
+                didInitTab = true
+                store.tab = [2, 14, 15, 4, 16].contains(defaultLaunchTab) ? defaultLaunchTab : 2
+            } else if ![2, 14, 15, 4, 16].contains(store.tab) {
+                store.tab = 2
+            }
+            if store.welcomeEnabled {
+                WelcomeVoice.shared.playOnce(
+                    text: store.welcomeText,
+                    voiceId: store.welcomeVoiceId,
+                    rate: store.welcomeRate)
+            }
         }
         .onChange(of: store.tab) { t in
             // Báo cho admin biết người dùng đang ở mục nào
@@ -106,7 +122,7 @@ struct MainTabView: View {
         case 12: return "Trò chơi"
         case 13: return "GitHub"
         case 14: return "Video"
-        case 15: return "Ứng dụng"
+        case 15: return "Cửa hàng"
         case 16: return "Khám phá"
         case 5: return "Cài đặt"
         case 6: return "Quản trị"

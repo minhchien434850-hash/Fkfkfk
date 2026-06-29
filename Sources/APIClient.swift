@@ -222,18 +222,46 @@ struct APIClient {
     }
 
     // ---- Video feed ----
-    func createPost(fileId: Int, caption: String) async throws -> PostCreateResponse {
+    func createPost(fileId: Int, caption: String, isPublic: Bool = true) async throws -> PostCreateResponse {
         try decode(try await send("/posts", method: "POST",
-                                  json: ["file_id": fileId, "caption": caption]))
+                                  json: ["file_id": fileId, "caption": caption, "is_public": isPublic]))
     }
     func getFeed() async throws -> [PostItem] {
         try decode(try await send("/feed"))
+    }
+    func getMyPosts() async throws -> [PostItem] {
+        try decode(try await send("/me/posts"))
+    }
+    func getUserPosts(_ uid: Int) async throws -> [PostItem] {
+        try decode(try await send("/users/\(uid)/posts"))
     }
     func likePost(_ pid: Int) async throws -> LikeResponse {
         try decode(try await send("/posts/\(pid)/like", method: "POST"))
     }
     func deletePost(_ pid: Int) async throws -> MessageResponse {
         try decode(try await send("/posts/\(pid)", method: "DELETE"))
+    }
+    func getComments(_ postId: Int) async throws -> [PostComment] {
+        try decode(try await send("/posts/\(postId)/comments"))
+    }
+    func addComment(postId: Int, content: String) async throws -> PostComment {
+        try decode(try await send("/posts/\(postId)/comments", method: "POST", json: ["content": content]))
+    }
+    func deleteComment(_ cid: Int) async throws -> MessageResponse {
+        try decode(try await send("/comments/\(cid)", method: "DELETE"))
+    }
+    func incrementView(_ postId: Int) async throws {
+        _ = try await send("/posts/\(postId)/view", method: "POST")
+    }
+    func myProfile() async throws -> UserProfile {
+        try decode(try await send("/me/profile"))
+    }
+    func updateProfile(publicId: String?, avatarUrl: String?, bio: String?) async throws -> MessageResponse {
+        var body: [String: Any] = [:]
+        if let v = publicId { body["public_id"] = v }
+        if let v = avatarUrl { body["avatar_url"] = v }
+        if let v = bio { body["bio"] = v }
+        return try decode(try await send("/me/profile", method: "PUT", json: body))
     }
 
     // ---- Live ----
@@ -327,6 +355,16 @@ struct APIClient {
     func storeCategories() async throws -> [StoreCategory] {
         try decode(try await send("/store/categories", auth: false))
     }
+    func storeShowcase() async throws -> StoreShowcase {
+        try decode(try await send("/store/showcase", auth: false))
+    }
+    // Tất cả sản phẩm gom theo danh mục trong 1 request (id danh mục → danh sách sản phẩm)
+    func storeAllProducts() async throws -> [Int: [StoreProduct]] {
+        let r: StoreAllProducts = try decode(try await send("/store/all-products", auth: false))
+        var out: [Int: [StoreProduct]] = [:]
+        for (k, v) in r.byCategory { if let id = Int(k) { out[id] = v } }
+        return out
+    }
     func storeFolders(categoryId: Int) async throws -> [StoreFolder] {
         try decode(try await send("/store/categories/\(categoryId)/folders", auth: false))
     }
@@ -339,10 +377,21 @@ struct APIClient {
     func storeProductMine(_ pid: Int) async throws -> StoreProductMine {
         try decode(try await send("/store/products/\(pid)/mine"))
     }
+    // Gửi đánh giá sản phẩm (để đếm "lượt đánh giá") — bỏ qua nếu lỗi
+    @discardableResult
+    func storeReview(productId: Int, stars: Int) async throws -> MessageResponse {
+        try decode(try await send("/store/products/\(productId)/review", method: "POST",
+                                  json: ["stars": stars]))
+    }
+    // Tăng lượt xem sản phẩm (mỗi lần khách bấm vào +1)
+    func storeProductView(productId: Int) async throws {
+        _ = try await send("/store/products/\(productId)/view", method: "POST")
+    }
     // Mua bằng số dư ví (giao hàng tức thì)
-    func storeBuy(productId: Int, priceId: Int?) async throws -> StoreBuyResponse {
+    func storeBuy(productId: Int, priceId: Int?, promoCode: String? = nil) async throws -> StoreBuyResponse {
         var body: [String: Any] = ["product_id": productId]
         if let priceId { body["price_id"] = priceId }
+        if let promoCode, !promoCode.isEmpty { body["promo_code"] = promoCode }
         return try decode(try await send("/store/orders", method: "POST", json: body))
     }
     func storeMyOrders() async throws -> [StoreOrder] {
@@ -383,10 +432,69 @@ struct APIClient {
 
     // -- Admin: giao diện store --
     func adminStoreSetConfig(logoName: String, logoUrl: String,
-                             bannerType: String, bannerUrl: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/config", method: "POST", json: [
+                             bannerType: String, bannerUrl: String,
+                             logoEffect: String? = nil, logoFont: String? = nil,
+                             logoAnim: String? = nil, bgType: String? = nil,
+                             bgUrl: String? = nil, slogan: String? = nil,
+                             sloganFont: String? = nil, sectionOrder: String? = nil,
+                             sectionHidden: String? = nil,
+                             cardSize: String? = nil, cardScale: Double? = nil,
+                             flashEnabled: Bool? = nil, flashProductId: Int? = nil,
+                             flashEnd: Int? = nil, flashDiscount: Int? = nil,
+                             flashTitle: String? = nil,
+                             heroTitle: String? = nil, heroSubtitle: String? = nil,
+                             heroEffect: String? = nil, heroFont: String? = nil,
+                             heroAnim: String? = nil,
+                             sloganEffect: String? = nil,
+                             sloganAnim: String? = nil,
+                             promoImageUrl: String? = nil,
+                             promoProductId: Int? = nil,
+                             statUsersBase: Int? = nil, statSoldBase: Int? = nil,
+                             statReviewsBase: Int? = nil,
+                             announceEnabled: Bool? = nil, announceText: String? = nil,
+                             announceColor: String? = nil, gamecatLimit: Int? = nil) async throws -> MessageResponse {
+        var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
-            "banner_type": bannerType, "banner_url": bannerUrl]))
+            "banner_type": bannerType, "banner_url": bannerUrl]
+        if let flashEnabled { body["flash_enabled"] = flashEnabled }
+        if let flashProductId { body["flash_product_id"] = flashProductId }
+        if let flashEnd { body["flash_end"] = flashEnd }
+        if let flashDiscount { body["flash_discount"] = flashDiscount }
+        if let flashTitle { body["flash_title"] = flashTitle }
+        if let logoEffect { body["logo_effect"] = logoEffect }
+        if let logoFont { body["logo_font"] = logoFont }
+        if let logoAnim { body["logo_anim"] = logoAnim }
+        if let bgType { body["bg_type"] = bgType }
+        if let bgUrl { body["bg_url"] = bgUrl }
+        if let slogan { body["slogan"] = slogan }
+        if let sloganFont { body["slogan_font"] = sloganFont }
+        if let sectionOrder { body["section_order"] = sectionOrder }
+        if let sectionHidden { body["section_hidden"] = sectionHidden }
+        if let cardSize { body["card_size"] = cardSize }
+        if let cardScale { body["card_scale"] = cardScale }
+        body["hero_title"] = heroTitle ?? ""
+        body["hero_subtitle"] = heroSubtitle ?? ""
+        if let heroEffect { body["hero_effect"] = heroEffect }
+        if let heroFont { body["hero_font"] = heroFont }
+        if let heroAnim { body["hero_anim"] = heroAnim }
+        if let sloganEffect { body["slogan_effect"] = sloganEffect }
+        if let sloganAnim { body["slogan_anim"] = sloganAnim }
+        body["promo_image_url"] = promoImageUrl ?? ""
+        if let promoProductId { body["promo_product_id"] = promoProductId }
+        if let statUsersBase { body["stat_users_base"] = statUsersBase }
+        if let statSoldBase { body["stat_sold_base"] = statSoldBase }
+        if let statReviewsBase { body["stat_reviews_base"] = statReviewsBase }
+        if let announceEnabled { body["announce_enabled"] = announceEnabled }
+        if let announceText { body["announce_text"] = announceText }
+        if let announceColor { body["announce_color"] = announceColor }
+        if let gamecatLimit { body["gamecat_limit"] = gamecatLimit }
+        return try decode(try await send("/admin/store/config", method: "POST", json: body))
+    }
+    // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)
+    func mediaUpload(dataBase64: String, mime: String, name: String) async throws -> String {
+        let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",
+            json: ["data_base64": dataBase64, "mime": mime, "name": name]))
+        return root + r.path
     }
     // -- Admin: danh mục / thư mục / sản phẩm --
     func adminStoreSaveCategory(id: Int?, name: String, media: [[String: String]]) async throws -> IdResponse {
@@ -428,9 +536,11 @@ struct APIClient {
     func adminStoreListKeys(productId: Int) async throws -> StoreKeysInfo {
         try decode(try await send("/admin/store/products/\(productId)/keys"))
     }
-    func adminStoreAddKeys(productId: Int, text: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/products/\(productId)/keys",
-                                  method: "POST", json: ["text": text]))
+    func adminStoreAddKeys(productId: Int, text: String, priceId: Int? = nil) async throws -> MessageResponse {
+        var body: [String: Any] = ["text": text]
+        if let priceId { body["price_id"] = priceId }
+        return try decode(try await send("/admin/store/products/\(productId)/keys",
+                                  method: "POST", json: body))
     }
     func adminStoreDeleteKey(_ keyId: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/store/keys/\(keyId)", method: "DELETE"))
@@ -441,11 +551,22 @@ struct APIClient {
     func adminStoreOrders() async throws -> [StoreAdminOrder] {
         try decode(try await send("/admin/store/orders"))
     }
-    func adminStoreKeysBackup() async throws -> StoreKeysBackup {
-        try decode(try await send("/admin/store/keys-backup"))
-    }
     func adminStoreInventory() async throws -> StoreInventory {
         try decode(try await send("/admin/store/inventory"))
+    }
+
+    // Nạp/trừ ví cửa hàng thủ công cho người dùng (theo publicId hoặc username)
+    func adminAdjustStoreWallet(userIdentifier: String, delta: Int, note: String) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/wallet/adjust", method: "POST", json: [
+            "user": userIdentifier,
+            "delta": delta,
+            "note": note.isEmpty ? (delta >= 0 ? "Admin nạp ví" : "Admin trừ ví") : note
+        ]))
+    }
+
+    // Lấy danh sách người dùng của cửa hàng để admin điều chỉnh ví
+    func adminStoreUsers() async throws -> [AdminUser] {
+        try decode(try await send("/admin/users"))
     }
 
     // ---- Admin API keys (server-side) ----
@@ -463,6 +584,41 @@ struct APIClient {
     // ---- Admin thống kê ----
     func adminStats() async throws -> AdminStats {
         try decode(try await send("/admin/stats"))
+    }
+
+    // ---- Mã khuyến mãi ----
+    func storeValidatePromo(code: String, amount: Int) async throws -> PromoValidateResult {
+        try decode(try await send("/store/promo/validate", method: "POST",
+                                  json: ["code": code, "amount": amount]))
+    }
+    func adminListPromoCodes() async throws -> [PromoCode] {
+        try decode(try await send("/admin/store/promo-codes"))
+    }
+    func adminCreatePromoCode(code: String, discountType: String, discountValue: Int,
+                              minAmount: Int, maxUses: Int, expiresAt: Int) async throws -> IdResponse {
+        try decode(try await send("/admin/store/promo-codes", method: "POST", json: [
+            "code": code, "discount_type": discountType, "discount_value": discountValue,
+            "min_amount": minAmount, "max_uses": maxUses, "expires_at": expiresAt
+        ]))
+    }
+    func adminDeletePromoCode(_ id: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/store/promo-codes/\(id)", method: "DELETE"))
+    }
+
+    // ---- Push Notification ----
+    func registerDeviceToken(_ token: String) async throws -> MessageResponse {
+        try decode(try await send("/device-token", method: "POST",
+                                  json: ["token": token, "platform": "ios"]))
+    }
+    func unregisterDeviceToken(_ token: String) async throws -> MessageResponse {
+        try decode(try await send("/device-token", method: "DELETE", json: ["token": token]))
+    }
+    func adminSendPushNotification(title: String, body: String, target: String = "all") async throws -> PushSendResult {
+        try decode(try await send("/admin/push-notification", method: "POST",
+                                  json: ["title": title, "body": body, "target": target]))
+    }
+    func adminPushDeviceStats() async throws -> PushDeviceStats {
+        try decode(try await send("/admin/push-notification/devices"))
     }
 
     // ---- File ----
@@ -619,6 +775,9 @@ struct APIClient {
     func paymentHistory() async throws -> [PaymentRecord] {
         try decode(try await send("/payment/history"))
     }
+    func cancelPayment(id: Int) async throws -> MessageResponse {
+        try decode(try await send("/payment/cancel", method: "POST", json: ["id": id]))
+    }
 
     // ---- Prompt mẫu ----
     func listPrompts() async throws -> [PromptTemplate] {
@@ -646,7 +805,7 @@ struct APIClient {
     // ---- Tìm kiếm tin nhắn ----
     func searchMessages(query: String) async throws -> [SearchResult] {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        return try decode(try await send("/messages/search?q=\(encoded)"))
+        return try decode(try await send("/search?q=\(encoded)"))
     }
 
     // ---- Tin nhắn yêu thích ----

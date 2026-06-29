@@ -18,8 +18,8 @@ cho người khác gọi AI của bạn.
 ## 2. Cài đặt (chạy trong Termius)
 ```bash
 sudo -i
-# nếu chưa có mã nguồn:
-cd /opt/kenios-src 2>/dev/null || true
+# vào thư mục chứa mã nguồn (nơi có thư mục kenios-ai/)
+cd /root/kenios 2>/dev/null || cd /opt/kenios-src 2>/dev/null || true
 MODEL=llama3.1 bash kenios-ai/install-ai.sh
 ```
 Script sẽ: cài Ollama → tải model → ghi `KENIOS_AI_*` vào `.env` của backend → restart kenios.

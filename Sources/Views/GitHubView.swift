@@ -185,10 +185,10 @@ struct GitHubView: View {
             .sheet(isPresented: $showTokenBrowser) {
                 NavigationStack {
                     TokenBrowser()
-                        .navigationTitle("Tạo Token GitHub")
+                        .navigationTitle(store.t("Tạo Token GitHub", "Create GitHub Token"))
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                            Button("Xong") { showTokenBrowser = false }
+                            Button(store.t("Xong", "Done")) { showTokenBrowser = false }
                         } }
                 }
             }
@@ -201,13 +201,14 @@ struct GitHubView: View {
             VStack(alignment: .leading, spacing: 18) {
                 KHeroHeader(icon: "chevron.left.forwardslash.chevron.right",
                             title: "GitHub",
-                            subtitle: "Đăng nhập để tải file / mã nguồn lên repo của bạn")
+                            subtitle: store.t("Đăng nhập để tải file / mã nguồn lên repo của bạn",
+                                              "Sign in to upload files / source code to your repo"))
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Cách đăng nhập").font(.headline)
-                    Label("Bấm \"Mở GitHub & tạo token\" — đăng nhập tài khoản GitHub ngay trong app.", systemImage: "1.circle.fill")
-                    Label("Ở trang token, chọn quyền \"repo\" rồi bấm Generate, copy token.", systemImage: "2.circle.fill")
-                    Label("Quay lại đây, dán token vào ô dưới và bấm Đăng nhập.", systemImage: "3.circle.fill")
+                    Text(store.t("Cách đăng nhập", "How to sign in")).font(.headline)
+                    Label(store.t("Bấm \"Mở GitHub & tạo token\" — đăng nhập tài khoản GitHub ngay trong app.", "Tap \"Open GitHub & create token\" — sign in to GitHub right in the app."), systemImage: "1.circle.fill")
+                    Label(store.t("Ở trang token, chọn quyền \"repo\" rồi bấm Generate, copy token.", "On the token page, pick the \"repo\" scope, tap Generate, copy the token."), systemImage: "2.circle.fill")
+                    Label(store.t("Quay lại đây, dán token vào ô dưới và bấm Đăng nhập.", "Return here, paste the token below and tap Login."), systemImage: "3.circle.fill")
                 }
                 .font(.subheadline)
                 .padding()
@@ -217,7 +218,7 @@ struct GitHubView: View {
                 Button {
                     showTokenBrowser = true
                 } label: {
-                    Label("Mở GitHub & tạo token", systemImage: "safari.fill")
+                    Label(store.t("Mở GitHub & tạo token", "Open GitHub & create token"), systemImage: "safari.fill")
                         .frame(maxWidth: .infinity).frame(height: 48)
                         .background(Theme.accent).foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -267,7 +268,7 @@ struct GitHubView: View {
                         Text("@\(user?.login ?? "")").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button("Đăng xuất", role: .destructive) { logout() }
+                    Button(store.t("Đăng xuất", "Logout"), role: .destructive) { logout() }
                         .font(.caption)
                 }
             }
@@ -276,11 +277,11 @@ struct GitHubView: View {
                 Button {
                     newRepoName = ""; newRepoPrivate = true; showCreate = true
                 } label: {
-                    Label("Tạo repo mới", systemImage: "plus.circle.fill")
+                    Label(store.t("Tạo repo mới", "Create new repo"), systemImage: "plus.circle.fill")
                 }
             }
 
-            Section("Repo của bạn (\(repos.count))") {
+            Section(store.t("Repo của bạn", "Your repos") + " (\(repos.count))") {
                 if loading && repos.isEmpty {
                     HStack { Spacer(); ProgressView(); Spacer() }
                 }
@@ -304,12 +305,13 @@ struct GitHubView: View {
         }
         .refreshable { await loadRepos() }
         .alert("Tạo repo mới", isPresented: $showCreate) {
-            TextField("Tên repo (vd: my-app)", text: $newRepoName)
+            TextField(store.t("Tên repo (vd: my-app)", "Repo name (e.g. my-app)"), text: $newRepoName)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
-            Button("Tạo") { Task { await createRepo() } }
-            Button("Huỷ", role: .cancel) { }
+            Button(store.t("Tạo", "Create")) { Task { await createRepo() } }
+            Button(store.t("Huỷ", "Cancel"), role: .cancel) { }
         } message: {
-            Text("Repo sẽ ở chế độ riêng tư. Bạn có thể tải file lên ngay sau khi tạo.")
+            Text(store.t("Repo sẽ ở chế độ riêng tư. Bạn có thể tải file lên ngay sau khi tạo.",
+                         "The repo will be private. You can upload files right after creating it."))
         }
     }
 
@@ -368,6 +370,7 @@ struct GitHubView: View {
 
 // MARK: - Màn hình repo: tải file lên
 struct GitHubRepoView: View {
+    @EnvironmentObject var store: AppStore
     let api: GitHubAPI
     let repo: GHRepo
 
@@ -392,10 +395,10 @@ struct GitHubRepoView: View {
 
     var body: some View {
         Form {
-            Section("Đích tải lên") {
+            Section(store.t("Đích tải lên", "Upload destination")) {
                 LabeledContent("Repo", value: repo.full_name)
-                LabeledContent("Nhánh", value: branch)
-                TextField("Thư mục (để trống = gốc repo)", text: $folder)
+                LabeledContent(store.t("Nhánh", "Branch"), value: branch)
+                TextField(store.t("Thư mục (để trống = gốc repo)", "Folder (empty = repo root)"), text: $folder)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
 
@@ -405,17 +408,18 @@ struct GitHubRepoView: View {
                 } label: {
                     HStack {
                         if uploading { ProgressView().padding(.trailing, 4) }
-                        Label(uploading ? "Đang tải lên..." : "Chọn file để tải lên",
+                        Label(uploading ? store.t("Đang tải lên...", "Uploading...") : store.t("Chọn file để tải lên", "Choose files to upload"),
                               systemImage: "arrow.up.doc.fill")
                     }
                 }
                 .disabled(uploading)
             } footer: {
-                Text("Chọn 1 hoặc nhiều file (ảnh, mã nguồn, tài liệu...). File sẽ được commit thẳng vào repo qua GitHub API.")
+                Text(store.t("Chọn 1 hoặc nhiều file (ảnh, mã nguồn, tài liệu...). File sẽ được commit thẳng vào repo qua GitHub API.",
+                             "Pick one or more files (images, source, documents...). They commit straight to the repo via GitHub API."))
             }
 
             if !log.isEmpty {
-                Section("Kết quả") {
+                Section(store.t("Kết quả", "Result")) {
                     ForEach(log, id: \.self) { line in
                         Text(line).font(.caption).foregroundStyle(line.contains("✓") ? .green : .red)
                     }
@@ -504,9 +508,11 @@ struct GitHubRepoView: View {
         .navigationTitle(repo.name)
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadRuns(); await loadRelease() }
-        .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result { Task { await upload(urls) } }
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(allowsMultipleSelection: true) { urls in
+                Task { await upload(urls) }
+            }
+            .ignoresSafeArea()
         }
     }
 
@@ -517,6 +523,12 @@ struct GitHubRepoView: View {
             buildMsg = "Đã gửi lệnh build. Đợi vài phút rồi bấm 'Làm mới trạng thái'."
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             await loadRuns()
+        } catch let e as GitHubError {
+            if case .http(404, _) = e {
+                buildMsg = "Lỗi 404: Repo này chưa có file .github/workflows/build-app.yml hoặc token thiếu quyền 'workflow'. Hãy copy file workflow từ repo KENIOS gốc sang repo này rồi thử lại."
+            } else {
+                buildMsg = "Không gửi được lệnh build: \(e.localizedDescription)"
+            }
         } catch {
             buildMsg = "Không gửi được lệnh build: \(error.localizedDescription)"
         }
@@ -568,12 +580,19 @@ struct GitHubRepoView: View {
         uploading = true; error = nil; log = []
         let dir = folder.trimmingCharacters(in: CharacterSet(charactersIn: " /"))
         for url in urls {
+            // Bắt buộc gọi startAccessingSecurityScopedResource trước khi đọc file
             let access = url.startAccessingSecurityScopedResource()
-            defer { if access { url.stopAccessingSecurityScopedResource() } }
             let name = url.lastPathComponent
             let path = dir.isEmpty ? name : "\(dir)/\(name)"
             do {
-                let data = try Data(contentsOf: url)
+                // Copy sang temp trước (tránh mất quyền trong async context)
+                let tmp = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(name)
+                try? FileManager.default.removeItem(at: tmp)
+                try FileManager.default.copyItem(at: url, to: tmp)
+                if access { url.stopAccessingSecurityScopedResource() }
+
+                let data = try Data(contentsOf: tmp)
                 let b64 = data.base64EncodedString()
                 let sha = await api.existingSha(fullName: repo.full_name, path: path, branch: branch)
                 try await api.uploadFile(fullName: repo.full_name, path: path,
@@ -581,7 +600,9 @@ struct GitHubRepoView: View {
                                          message: "Tải lên \(name) từ KENIOS",
                                          branch: branch, sha: sha)
                 log.append("✓ \(path) (\(humanSize(data.count)))")
+                try? FileManager.default.removeItem(at: tmp)
             } catch {
+                if access { url.stopAccessingSecurityScopedResource() }
                 log.append("✗ \(name): \(error.localizedDescription)")
             }
         }
@@ -593,8 +614,8 @@ struct GitHubRepoView: View {
 struct TokenBrowser: View {
     @StateObject private var model = BrowserModel()
     var body: some View {
-        BrowserWebView(model: model,
-                       home: "https://github.com/settings/tokens/new?scopes=repo&description=KENIOS")
+        BrowserWebView(model: model)
             .ignoresSafeArea(edges: .bottom)
+            .onAppear { model.open("https://github.com/settings/tokens/new?scopes=repo&description=KENIOS") }
     }
 }

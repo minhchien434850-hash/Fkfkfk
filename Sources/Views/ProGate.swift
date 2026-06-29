@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Thẻ khoá tính năng nâng cao cho người dùng gói Free.
 struct ProLockCard: View {
+    @EnvironmentObject var store: AppStore
     let feature: String
     @State private var showPay = false
 
@@ -10,12 +11,13 @@ struct ProLockCard: View {
             VStack(spacing: 16) {
                 Image(systemName: "crown.fill")
                     .font(.system(size: 48)).foregroundStyle(Theme.gold)
-                Text("Tính năng Pro").font(.title3.bold())
-                Text("“\(feature)” chỉ dành cho gói Pro. Gói Free dùng được các tính năng cơ bản; nâng cấp Pro để mở khoá đầy đủ tính năng nâng cao.")
+                Text(store.t("Tính năng Pro", "Pro feature")).font(.title3.bold())
+                Text("“\(feature)” " + store.t("chỉ dành cho gói Pro. Gói Free dùng được các tính năng cơ bản; nâng cấp Pro để mở khoá đầy đủ tính năng nâng cao.",
+                    "is for Pro only. Free covers the basics; upgrade to Pro to unlock all advanced features."))
                     .font(.subheadline).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal, 24)
                 Button { showPay = true } label: {
-                    Label("Nâng cấp Pro", systemImage: "crown")
+                    Label(store.t("Nâng cấp Pro", "Upgrade to Pro"), systemImage: "crown")
                         .font(.headline).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 50)
                         .background(Theme.buttonGradient)
