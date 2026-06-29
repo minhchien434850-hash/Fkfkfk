@@ -3160,10 +3160,14 @@ async def _fb_token_from_cookies(cookie_dict: dict[str, str]) -> Optional[str]:
     probe_urls = [
         "https://business.facebook.com/content_management",
         "https://business.facebook.com/creatorstudio/",
+        "https://business.facebook.com/latest/home",
         "https://www.facebook.com/adsmanager/manage/campaigns",
         "https://m.facebook.com/composer/ocelot/async_loader/?publisher=feed",
     ]
-    pattern = re.compile(r'(EAAB[\w-]+|EAAG[\w-]+|EAA[A-Za-z0-9]{20,})')
+    # Token Facebook thật khá dài; lấy NHIỀU ứng viên rồi kiểm chứng từng cái,
+    # chỉ trả về token gọi được Graph API (tránh nhặt trúng chuỗi cụt -> "Malformed").
+    pattern = re.compile(r'EAA[A-Za-z0-9]{40,}')
+    candidates: list[str] = []
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
             for u in probe_urls:
@@ -3171,9 +3175,19 @@ async def _fb_token_from_cookies(cookie_dict: dict[str, str]) -> Optional[str]:
                     r = await client.get(u, headers=headers)
                 except Exception:
                     continue
-                m = pattern.search(r.text or "")
-                if m:
-                    return m.group(1)
+                for m in pattern.finditer(r.text or ""):
+                    tok = m.group(0)
+                    if tok not in candidates:
+                        candidates.append(tok)
+            # Kiểm chứng: chỉ nhận token gọi được /me
+            for tok in candidates:
+                try:
+                    vr = await client.get("https://graph.facebook.com/v19.0/me",
+                                          params={"access_token": tok, "fields": "id"})
+                    if vr.status_code == 200 and (vr.json() or {}).get("id"):
+                        return tok
+                except Exception:
+                    continue
     except Exception:
         return None
     return None
@@ -3230,8 +3244,12 @@ async def facebook_stream(b: FBStreamIn, user=Depends(get_user)) -> dict[str, An
                 "stream_key": f"FB-{int(time.time())}-mock-stream-key",
                 "title": f"Live Stream {int(time.time())}"
             }
-        err_msg = r.json().get("error", {}).get("message", "Lỗi tạo Live Video trên Facebook.")
-        raise HTTPException(status_code=400, detail=err_msg)
+        err_msg = (r.json().get("error", {}) or {}).get("message", "Lỗi tạo Live Video trên Facebook.")
+        raise HTTPException(
+            status_code=400,
+            detail=(err_msg + " — Facebook hạn chế API Live. Cách chắc chắn: mở "
+                    "facebook.com/live/producer, tạo buổi live để lấy Server URL + Stream Key, "
+                    "rồi dán vào mục 'Lưu điểm phát' trong app."))
         
     res_data = r.json()
     rtmp_url = res_data.get("secure_stream_url") or res_data.get("stream_url")
