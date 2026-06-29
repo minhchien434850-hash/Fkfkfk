@@ -1402,7 +1402,8 @@ struct StoreView: View {
         .frame(maxWidth: .infinity).padding(.top, 40)
     }
 
-    // Icon liên hệ nhanh: hiện tối đa 3 icon preview + badge số còn lại, bấm mở sheet danh sách
+    // Liên hệ: CHỈ 1 icon duy nhất (bấm để mở danh sách đầy đủ trong sheet),
+    // dù admin thêm bao nhiêu mạng xã hội cũng chỉ hiện 1 nút cho gọn.
     @ViewBuilder private var headerContactIcons: some View {
         let enabled = (contacts?.contact ?? []).filter {
             $0.enabled && !$0.url.trimmingCharacters(in: .whitespaces).isEmpty
@@ -1537,14 +1538,14 @@ struct StoreView: View {
                 .padding(.vertical, 8)
             }
 
-            // ===== Hero gộp chung trong header: tiêu đề lớn + dòng phụ + nút Mua ngay (1 khối duy nhất) =====
+            // ===== Hero: banner gradient gọn đẹp ngay trong header (1 khối duy nhất) =====
             VStack(alignment: .leading, spacing: 10) {
                 // Tiêu đề Hero lớn (kèm hiệu ứng/font) — chỉ hiện khi admin đặt riêng, tránh trùng slogan
                 if let t = config?.heroTitle, !t.trimmingCharacters(in: .whitespaces).isEmpty {
                     AnimatedStoreText(
                         text: t,
                         effect: config?.heroEffect ?? "gradient",
-                        font: keniosFont(config?.heroFont ?? "rounded-bold", size: 20),
+                        font: keniosFont(config?.heroFont ?? "rounded-bold", size: 22),
                         anim: config?.heroAnim ?? "none")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .lineLimit(3)
@@ -1553,7 +1554,7 @@ struct StoreView: View {
                     if let s = config?.heroSubtitle, !s.trimmingCharacters(in: .whitespaces).isEmpty { return s }
                     return store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty")
                 }())
-                .font(.subheadline).foregroundStyle(.secondary)
+                .font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.92))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Button {
                     // Luôn cuộn tới mục "Tất cả sản phẩm" (key "products") dù admin sắp xếp ở đâu.
@@ -1561,16 +1562,24 @@ struct StoreView: View {
                     scrollTarget = orderedSections.contains("products") ? "products" : "gamecat"
                 } label: {
                     HStack(spacing: 6) {
+                        Image(systemName: "bag.fill").font(.subheadline)
                         Text(store.t("Mua ngay", "Shop now")).font(.headline.bold())
-                        Image(systemName: "arrow.right")
+                        Image(systemName: "arrow.right").font(.subheadline)
                     }
-                    .padding(.horizontal, 24).padding(.vertical, 12)
-                    .background(Theme.accent).foregroundStyle(.white)
+                    .padding(.horizontal, 22).padding(.vertical, 12)
+                    .background(Color.white).foregroundStyle(.black)
                     .clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 3)
                 }
+                .padding(.top, 2)
             }
-            .padding(.top, 10)
-            .padding(.horizontal, effectiveConfig?.bannerUrl.isEmpty == false ? 14 : 0)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.heroGradient)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            .shadow(color: Theme.accent.opacity(0.3), radius: 10, x: 0, y: 5)
+            .padding(.top, 12)
         }
     }
 
