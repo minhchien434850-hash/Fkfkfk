@@ -276,21 +276,31 @@ final class AppStore: ObservableObject {
     /// Ghi cấu hình âm thanh thông báo (JSON từ máy chủ) vào UserDefaults để TTS dùng.
     func applyNotifSounds(_ json: String) {
         guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return }
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         for ev in ["gift", "follow", "share"] {
-            guard let s = obj[ev] else { continue }
+            guard let s = obj[ev] as? [String: String] else { continue }
             if let id = s["id"], !id.isEmpty { d.set(id, forKey: "tts_sound_\(ev)") }
             if let url = s["url"] { d.set(url, forKey: "tts_sound_url_\(ev)") }
         }
+        // Khôi phục KHO âm tùy chỉnh (không giới hạn)
+        if let lib = obj["library"] as? [[String: String]],
+           let ld = try? JSONSerialization.data(withJSONObject: lib),
+           let ls = String(data: ld, encoding: .utf8) {
+            d.set(ls, forKey: "tts_custom_sounds")
+        }
     }
 
-    /// Đẩy cấu hình âm thanh thông báo hiện tại (3 sự kiện) lên máy chủ để lưu lâu dài.
+    /// Đẩy cấu hình âm thanh thông báo (3 sự kiện + kho tùy chỉnh) lên máy chủ để lưu lâu dài.
     func saveNotifSounds() async {
-        var dict: [String: [String: String]] = [:]
+        var dict: [String: Any] = [:]
         for ev in ["gift", "follow", "share"] {
-            let id = d.string(forKey: "tts_sound_\(ev)") ?? ""
-            let url = d.string(forKey: "tts_sound_url_\(ev)") ?? ""
-            dict[ev] = ["id": id, "url": url]
+            dict[ev] = ["id": d.string(forKey: "tts_sound_\(ev)") ?? "",
+                        "url": d.string(forKey: "tts_sound_url_\(ev)") ?? ""]
+        }
+        if let raw = d.string(forKey: "tts_custom_sounds"),
+           let data = raw.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+            dict["library"] = arr
         }
         try? await api.saveNotifSounds(dict)
     }

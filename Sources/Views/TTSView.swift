@@ -17,10 +17,12 @@ struct TTSView: View {
     @State private var search = ""
     private let previewSynth = AVSpeechSynthesizer()
 
-    // ----- Tải file âm thanh lên máy chủ → lấy link cho âm thông báo -----
+    // ----- Tải file âm thanh / trích video → lấy link cho âm thông báo -----
     @State private var showAudioImporter = false
-    @State private var audioImportType = "gift"
+    @State private var showVideoImporter = false
+    @State private var audioImportType = "gift"   // "__lib" = thêm vào kho; còn lại = gán cho sự kiện
     @State private var audioUploading = false
+    @State private var newCustomLink = ""         // ô dán link liên tiếp để thêm vào kho
 
     // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
     @State private var translateToVi = true
@@ -440,10 +442,12 @@ struct TTSView: View {
 
     @ViewBuilder private var notifSoundSection: some View {
         section("Âm thanh thông báo (như TikFinity) · phát TRƯỚC khi đọc") {
-            Text("Hơn 50 âm thanh + ô \"Tùy chỉnh\": dán link .mp3 HOẶC tải file âm thanh từ máy lên (ra link riêng). Lưu trên máy chủ → cài lại app/build lại VẪN CÒN. CHẠM 1 âm để NGHE THỬ; âm đang chọn có dấu ✓.")
+            Text("Hơn 50 âm + KHO âm tùy chỉnh KHÔNG GIỚI HẠN: dán link .mp3 liên tiếp, tải file, hoặc trích âm thanh từ video. Mỗi âm dùng được cho cả Tặng quà/Follow/Chia sẻ. Lưu trên máy chủ → cài lại app/build lại VẪN CÒN.")
                 .font(.caption2).foregroundStyle(.secondary)
-            Text("Nguồn âm meme miễn phí: myinstants.com · freesound.org · pixabay.com/sound-effects (tải file .mp3 rồi bấm \"Tải file âm thanh\", hoặc copy link .mp3 dán vào ô).")
+            Text("Nguồn âm meme miễn phí: myinstants.com · freesound.org · pixabay.com/sound-effects.")
                 .font(.caption2).foregroundStyle(.secondary)
+            customLibraryControls
+            Divider()
             ForEach(notifEventLabels, id: \.id) { ev in
                 soundChipRow(ev.id, label: ev.label, icon: ev.icon)
             }
@@ -455,9 +459,66 @@ struct TTSView: View {
                 Task { await uploadAudio(fileURL, for: t) }
             }
         }
+        .fileImporter(isPresented: $showVideoImporter, allowedContentTypes: [.movie, .video, .mpeg4Movie],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let v = urls.first {
+                Task { await extractAudioAndAdd(v) }
+            }
+        }
     }
 
-    /// Đọc file âm thanh đã chọn → tải lên máy chủ → lấy link, gán làm âm tùy chỉnh + lưu lâu dài.
+    // Khu vực thêm âm vào KHO tùy chỉnh (dán link / tải file / trích video) + danh sách kho.
+    @ViewBuilder private var customLibraryControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Kho âm tùy chỉnh — dán link liên tiếp để thêm (không giới hạn):")
+                .font(.caption).bold()
+            HStack {
+                TextField("Dán link .mp3 rồi bấm +", text: $newCustomLink)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .keyboardType(.URL).font(.caption)
+                    .padding(8).background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                Button {
+                    tts.addCustomSound(url: newCustomLink)
+                    newCustomLink = ""
+                    Task { await store.saveNotifSounds() }
+                } label: { Image(systemName: "plus.circle.fill").font(.title3) }
+                    .disabled(newCustomLink.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            HStack {
+                Button { audioImportType = "__lib"; showAudioImporter = true } label: {
+                    Label("Tải file âm thanh", systemImage: "square.and.arrow.up").font(.caption)
+                }.buttonStyle(.bordered).disabled(audioUploading)
+                Button { showVideoImporter = true } label: {
+                    Label("Trích từ video", systemImage: "film.fill").font(.caption)
+                }.buttonStyle(.bordered).disabled(audioUploading)
+                if audioUploading { ProgressView().scaleEffect(0.7) }
+            }
+            let lib = tts.customSounds()
+            if !lib.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(lib.indices, id: \.self) { i in
+                            let url = lib[i]["url"] ?? ""
+                            HStack(spacing: 5) {
+                                Button { tts.previewCustomUrl(url) } label: {
+                                    Image(systemName: "play.circle.fill")
+                                }.buttonStyle(.plain).foregroundStyle(.green)
+                                Text(lib[i]["name"] ?? "Âm").font(.caption2).lineLimit(1)
+                                Button { tts.removeCustomSound(url: url); Task { await store.saveNotifSounds() } } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                }.buttonStyle(.plain).foregroundStyle(.red)
+                            }
+                            .padding(.horizontal, 8).padding(.vertical, 6)
+                            .background(Color(.secondarySystemBackground)).clipShape(Capsule())
+                        }
+                    }.padding(.vertical, 2)
+                }
+            }
+        }
+    }
+
+    /// Đọc file âm thanh → tải lên máy chủ → lấy link. type=="__lib" thêm vào kho; còn lại gán cho sự kiện.
     private func uploadAudio(_ fileURL: URL, for type: String) async {
         audioUploading = true
         let access = fileURL.startAccessingSecurityScopedResource()
@@ -467,8 +528,38 @@ struct TTSView: View {
         let mime = name.lowercased().hasSuffix(".wav") ? "audio/wav"
                  : name.lowercased().hasSuffix(".m4a") ? "audio/mp4" : "audio/mpeg"
         if let url = try? await store.api.mediaUpload(dataBase64: data.base64EncodedString(), mime: mime, name: name) {
-            tts.setNotifSound("custom", for: type)
-            tts.setNotifSoundUrl(url, for: type)
+            if type == "__lib" {
+                tts.addCustomSound(url: url, name: name)
+            } else {
+                tts.setNotifSound("custom", for: type)
+                tts.setNotifSoundUrl(url, for: type)
+            }
+            await store.saveNotifSounds()
+        }
+        audioUploading = false
+    }
+
+    /// Trích âm thanh từ video đã chọn (xuất .m4a) → tải lên → thêm vào kho dưới dạng link.
+    private func extractAudioAndAdd(_ videoURL: URL) async {
+        audioUploading = true
+        let access = videoURL.startAccessingSecurityScopedResource()
+        defer { if access { videoURL.stopAccessingSecurityScopedResource() } }
+        let asset = AVAsset(url: videoURL)
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("audio_\(Int(Date().timeIntervalSince1970)).m4a")
+        try? FileManager.default.removeItem(at: out)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            audioUploading = false; return
+        }
+        export.outputURL = out
+        export.outputFileType = .m4a
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously { cont.resume() }
+        }
+        if export.status == .completed, let data = try? Data(contentsOf: out),
+           let link = try? await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                                                       mime: "audio/mp4", name: out.lastPathComponent) {
+            tts.addCustomSound(url: link, name: "Video→Âm")
             await store.saveNotifSounds()
         }
         audioUploading = false
@@ -503,6 +594,36 @@ struct TTSView: View {
                             VStack(spacing: 3) {
                                 Image(systemName: s.icon).font(.body)
                                 Text(s.label).font(.caption2).lineLimit(1)
+                            }
+                            .frame(width: 72, height: 56)
+                            .background(on ? Theme.accent.opacity(0.28) : Color(.secondarySystemBackground))
+                            .foregroundStyle(on ? Theme.accent : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? Theme.accent : .clear, lineWidth: 1.5))
+                            .overlay(alignment: .topTrailing) {
+                                if on {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.caption2).foregroundStyle(.green)
+                                        .background(Circle().fill(.white).frame(width: 12, height: 12))
+                                        .offset(x: -3, y: 3)
+                                }
+                            }
+                        }.buttonStyle(.plain)
+                    }
+                    // Âm từ KHO tùy chỉnh — gán nhanh cho sự kiện này
+                    ForEach(tts.customSounds().indices, id: \.self) { i in
+                        let url = tts.customSounds()[i]["url"] ?? ""
+                        let nm = tts.customSounds()[i]["name"] ?? "Âm"
+                        let on = tts.notifSoundId(for: type) == "custom" && tts.notifSoundUrl(for: type) == url
+                        Button {
+                            tts.setNotifSound("custom", for: type)
+                            tts.setNotifSoundUrl(url, for: type)
+                            tts.previewCustomUrl(url)
+                            Task { await store.saveNotifSounds() }
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: "music.note").font(.body)
+                                Text(nm).font(.caption2).lineLimit(1)
                             }
                             .frame(width: 72, height: 56)
                             .background(on ? Theme.accent.opacity(0.28) : Color(.secondarySystemBackground))

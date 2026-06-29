@@ -132,8 +132,8 @@ struct APIClient {
         try decode(try await send("/auth/google", method: "POST",
                                   json: ["id_token": idToken], auth: false))
     }
-    /// Lưu âm thanh thông báo theo user lên máy chủ (cài lại app/build lại vẫn còn).
-    func saveNotifSounds(_ sounds: [String: [String: String]]) async throws {
+    /// Lưu âm thanh thông báo + kho tùy chỉnh theo user lên máy chủ (cài lại app/build lại vẫn còn).
+    func saveNotifSounds(_ sounds: [String: Any]) async throws {
         _ = try await send("/me/notif-sounds", method: "POST", json: ["sounds": sounds])
     }
     func forgot(_ username: String) async throws -> ForgotResponse {

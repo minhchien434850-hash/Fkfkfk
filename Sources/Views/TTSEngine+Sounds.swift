@@ -113,6 +113,43 @@ extension TTSEngine {
         }
     }
 
+    // ===== Kho âm tùy chỉnh (KHÔNG giới hạn số lượng) =====
+    func customSounds() -> [[String: String]] {
+        guard let raw = UserDefaults.standard.string(forKey: "tts_custom_sounds"),
+              let data = raw.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else { return [] }
+        return arr
+    }
+    func saveCustomSounds(_ list: [[String: String]]) {
+        if let data = try? JSONSerialization.data(withJSONObject: list),
+           let s = String(data: data, encoding: .utf8) {
+            UserDefaults.standard.set(s, forKey: "tts_custom_sounds")
+            objectWillChange.send()
+        }
+    }
+    func addCustomSound(url: String, name: String = "") {
+        let u = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !u.isEmpty else { return }
+        var list = customSounds()
+        if list.contains(where: { $0["url"] == u }) { return }   // bỏ trùng
+        let nm = name.isEmpty ? ((URL(string: u)?.lastPathComponent).map { String($0.prefix(18)) } ?? "Âm") : name
+        list.append(["url": u, "name": nm])
+        saveCustomSounds(list)
+    }
+    func removeCustomSound(url: String) {
+        var list = customSounds()
+        list.removeAll { $0["url"] == url }
+        saveCustomSounds(list)
+    }
+    // Nghe thử 1 link bất kỳ (kho tùy chỉnh).
+    func previewCustomUrl(_ s: String) {
+        guard let url = URL(string: s), !s.isEmpty else { return }
+        fetchNotifData(url) { [weak self] data in
+            guard let self, let data else { return }
+            self.playNotifData(data, then: nil)
+        }
+    }
+
     /// Thông báo 1 sự kiện: phát âm thanh (nếu là gift/follow/share) TRƯỚC rồi mới đọc.
     func announce(_ text: String, eventType: String) {
         activateSession()
