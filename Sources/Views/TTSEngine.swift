@@ -28,6 +28,10 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     private var googleQueue: [String] = []
     private var googlePlayer: AVPlayer?
     private var isPlayingGoogle = false
+    private var googleItemToken = 0   // chống "kẹt" 1 đoạn: watchdog so khớp token
+
+    // Tốc độ phát cho Google (map thanh rate → bội số 0.5x…2.0x; mặc định rate 0.5 = 1.0x)
+    private var googleSpeed: Float { max(0.5, min(2.0, rate * 2.0)) }
 
     // ElevenLabs (đa ngôn ngữ — đọc tiếng Việt)
     // Key lưu trong Keychain (mã hoá iOS) — KHÔNG dùng UserDefaults cho secret.
@@ -89,7 +93,11 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
 
     @Published var voiceId: String = ""          // identifier của AVSpeechSynthesisVoice
     @Published var rate: Float = UserDefaults.standard.object(forKey: "tts_rate") as? Float ?? AVSpeechUtteranceDefaultSpeechRate {
-        didSet { UserDefaults.standard.set(rate, forKey: "tts_rate") }
+        didSet {
+            UserDefaults.standard.set(rate, forKey: "tts_rate")
+            // Đổi tốc độ NGAY cho Google đang phát (không cần đợi đoạn mới)
+            if isPlayingGoogle, !isPaused { googlePlayer?.rate = googleSpeed }
+        }
     }
     @Published var pitch: Float = UserDefaults.standard.object(forKey: "tts_pitch") as? Float ?? 1.0 {
         didSet { UserDefaults.standard.set(pitch, forKey: "tts_pitch") }
@@ -248,36 +256,45 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         }
     }
     
+    // Chia đoạn THÔNG MINH: GIỮ trọn câu (tách theo . ? ! ; xuống dòng) rồi GỘP các câu
+    // lại tới gần maxLen. Ít đoạn hơn → ít khoảng lặng giữa các đoạn → đọc mượt, rõ hơn.
     private func splitTextIntoChunks(_ text: String, maxLen: Int) -> [String] {
-        var chunks: [String] = []
-        let sentences = text.components(separatedBy: CharacterSet(charactersIn: ".?!,;:\n"))
-        
-        for sentence in sentences {
-            let trimmed = sentence.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            
-            if trimmed.count <= maxLen {
-                chunks.append(trimmed)
-            } else {
-                let words = trimmed.components(separatedBy: .whitespacesAndNewlines)
-                var currentChunk = ""
-                
-                for word in words {
-                    let candidate = currentChunk.isEmpty ? word : "\(currentChunk) \(word)"
-                    if candidate.count <= maxLen {
-                        currentChunk = candidate
-                    } else {
-                        if !currentChunk.isEmpty {
-                            chunks.append(currentChunk)
-                        }
-                        currentChunk = word
-                    }
-                }
-                if !currentChunk.isEmpty {
-                    chunks.append(currentChunk)
-                }
+        let flat = text.replacingOccurrences(of: "\n", with: " ")
+        // Tách thành các câu trọn vẹn (giữ lại dấu kết câu).
+        var sentences: [String] = []
+        var cur = ""
+        for ch in flat {
+            cur.append(ch)
+            if ".?!;".contains(ch) {
+                let s = cur.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !s.isEmpty { sentences.append(s) }
+                cur = ""
             }
         }
+        let tail = cur.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { sentences.append(tail) }
+
+        // Gộp câu tới maxLen; câu nào quá dài thì cắt theo từ.
+        var chunks: [String] = []
+        var buf = ""
+        func flush() { if !buf.isEmpty { chunks.append(buf); buf = "" } }
+        for s in sentences {
+            if s.count > maxLen {
+                flush()
+                var line = ""
+                for word in s.components(separatedBy: .whitespaces) where !word.isEmpty {
+                    let cand = line.isEmpty ? word : line + " " + word
+                    if cand.count <= maxLen { line = cand }
+                    else { if !line.isEmpty { chunks.append(line) }; line = word }
+                }
+                if !line.isEmpty { chunks.append(line) }
+            } else if (buf.count + 1 + s.count) <= maxLen {
+                buf = buf.isEmpty ? s : buf + " " + s
+            } else {
+                flush(); buf = s
+            }
+        }
+        flush()
         return chunks
     }
     
@@ -291,9 +308,11 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         
         isPlayingGoogle = true
         isSpeaking = true
+        googleItemToken += 1
+        let token = googleItemToken
         let text = googleQueue.removeFirst()
         pendingCount = googleQueue.count + elevenQueue.count
-        
+
         guard let encodedText = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             playNextGoogleItem()
             return
@@ -313,29 +332,37 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
             ]
         ])
         let playerItem = AVPlayerItem(asset: asset)
-        
+        // Giữ cao độ giọng khi đổi tốc độ (timeDomain hợp với giọng nói) → nghe rõ, không méo.
+        playerItem.audioTimePitchAlgorithm = .timeDomain
+
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(googleItemDidPlayToEndTime), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemFailedToPlayToEndTime, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(googleItemFailedToPlay), name: .AVPlayerItemFailedToPlayToEndTime, object: playerItem)
-        
+
         if googlePlayer == nil {
             googlePlayer = AVPlayer(playerItem: playerItem)
         } else {
             googlePlayer?.replaceCurrentItem(with: playerItem)
         }
-        
+
         googlePlayer?.volume = volume
-        googlePlayer?.play()
-        
-        // Timeout 5 giây: nếu Google không trả về audio → fallback offline
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-            guard let self, self.isPlayingGoogle else { return }
-            if let status = self.googlePlayer?.currentItem?.status, status == .failed {
-                // Google fail → dùng giọng offline nếu đang ở ElevenLabs mode
-                if self.engineType == .elevenlabs {
-                    self.playElevenLabsOfflineFallback(text)
-                }
+        // Phát ngay ở ĐÚNG tốc độ đã chọn (giữ cao độ).
+        googlePlayer?.playImmediately(atRate: googleSpeed)
+
+        // Watchdog chống "đứng im": nếu đoạn này không xong sau (ước lượng + đệm) → bỏ qua, đọc tiếp.
+        let estimate = max(4.0, Double(text.count) / 11.0) / Double(googleSpeed)
+        DispatchQueue.main.asyncAfter(deadline: .now() + estimate + 7.0) { [weak self] in
+            guard let self, self.isPlayingGoogle, self.googleItemToken == token, !self.isPaused else { return }
+            // Vẫn kẹt ở đúng đoạn này quá lâu → chuyển đoạn kế (không để im lặng mãi).
+            self.googlePlayer?.pause()
+            self.playNextGoogleItem()
+        }
+
+        // Kiểm tra sớm 4.5s: nếu Google chặn (status .failed) → bỏ đoạn, đọc tiếp ngay.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
+            guard let self, self.isPlayingGoogle, self.googleItemToken == token else { return }
+            if self.googlePlayer?.currentItem?.status == .failed {
                 self.playNextGoogleItem()
             }
         }
@@ -485,7 +512,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
             else if isSpeaking { elevenPlayer?.pause(); isPaused = true }
         } else if engineType == .google {
             if isPaused {
-                googlePlayer?.play()
+                googlePlayer?.playImmediately(atRate: googleSpeed)
                 isPaused = false
             } else if isSpeaking {
                 googlePlayer?.pause()
