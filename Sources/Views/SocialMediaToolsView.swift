@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import QuickLook
 import WebKit
 import Photos
+import ReplayKit
 
 // Điểm phát Live (RTMP + stream key) lưu lại để phát đa nền tảng
 struct LiveTarget: Identifiable, Codable {
@@ -83,6 +84,8 @@ struct SocialMediaToolsView: View {
     @State private var restreamBusy = false
     @State private var restreamRes = "source"   // source | 1080 | 720 | 480
     @State private var restreamFps = "source"   // source | 60 | 30
+    // Quay màn hình + RTMP trực tiếp
+    @ObservedObject private var screenRecorder = ScreenRecorder.shared
     @State private var showBrowser = false
     @State private var browserURL = ""
     @State private var streamError: String?
@@ -305,6 +308,9 @@ struct SocialMediaToolsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .kCard(16)
 
+                // Quay màn hình + phát RTMP trực tiếp từ điện thoại
+                screenRecordPane
+
                 // Phát MÀN HÌNH → cả 3 nền tảng (VPS chia luồng)
                 restreamPane
 
@@ -522,6 +528,115 @@ struct SocialMediaToolsView: View {
         } catch {
             fbAuthError = error.localizedDescription
         }
+    }
+
+    // MARK: - Quay màn hình + RTMP trực tiếp
+    private var screenRecordPane: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "record.circle").foregroundStyle(.red)
+                Text(store.t("Quay màn hình + Phát trực tiếp", "Screen Record + Live Stream")).font(.headline)
+            }
+            Text(store.t("Quay màn hình ReplayKit rồi đẩy RTMP trực tiếp tới các nền tảng đã lấy key — KHÔNG cần VPS.",
+                         "ReplayKit screen capture → push RTMP directly to platforms — no VPS needed."))
+                .font(.caption).foregroundStyle(.secondary)
+
+            if screenRecorder.isRecording {
+                // Live preview
+                if let frame = screenRecorder.latestFrame {
+                    Image(decorative: frame, scale: 1.0)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.red.opacity(0.6), lineWidth: 2)
+                        )
+                }
+
+                HStack(spacing: 12) {
+                    Circle().fill(.red).frame(width: 10, height: 10)
+                        .opacity(Int(screenRecorder.duration) % 2 == 0 ? 1 : 0.3)
+                    Text(store.t("Đang phát trực tiếp", "Streaming Live")).font(.subheadline.bold()).foregroundStyle(.red)
+                    Spacer()
+                    Text(formatDuration(screenRecorder.duration))
+                        .font(.system(.caption, design: .monospaced).bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.red.opacity(0.8))
+                        .clipShape(Capsule())
+                }
+
+                let activeCount = streamResults.values.filter { $0.ok }.count
+                Text(store.t("Đang đẩy tới \(activeCount) nền tảng", "Streaming to \(activeCount) platforms"))
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Button {
+                    screenRecorder.stopCapture()
+                } label: {
+                    HStack {
+                        Image(systemName: "stop.circle.fill")
+                        Text(store.t("Dừng phát", "Stop Streaming"))
+                    }
+                    .font(.headline.bold()).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 50)
+                    .background(Color.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            } else {
+                if !screenRecorder.isAvailable {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                        Text(store.t("Quay màn hình không khả dụng trên thiết bị này.",
+                                     "Screen recording not available on this device."))
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
+
+                Button {
+                    startScreenStream()
+                } label: {
+                    HStack {
+                        Image(systemName: "record.circle")
+                        Text(store.t("Bắt đầu quay + phát trực tiếp (\(okStreamCount) đích)",
+                                     "Start recording + stream (\(okStreamCount) targets)"))
+                    }
+                    .font(.headline.bold()).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 50)
+                    .background(!screenRecorder.isAvailable || okStreamCount == 0 ? Color.gray : Color.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(!screenRecorder.isAvailable || okStreamCount == 0)
+
+                Text(store.t("⚠️ Cần 'Tạo Live' ở trên trước để có RTMP key. ReplayKit sẽ quay màn hình + mic rồi mã hoá H.264/AAC đẩy thẳng RTMP.",
+                             "⚠️ Create Live above first to get RTMP keys. ReplayKit captures screen + mic, encodes H.264/AAC and pushes RTMP directly."))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            if let err = screenRecorder.error {
+                Text("✗ \(err)").font(.caption2).foregroundStyle(.red)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .kCard(16)
+    }
+
+    private func startScreenStream() {
+        let targets: [(rtmp: String, key: String)] = ["tiktok", "facebook", "youtube"].compactMap { p in
+            guard let v = streamResults[p], v.ok else { return nil }
+            return (rtmp: v.rtmp, key: v.key)
+        }
+        guard !targets.isEmpty else { return }
+        screenRecorder.startCapture(targets: targets)
+    }
+
+    private func formatDuration(_ t: TimeInterval) -> String {
+        let h = Int(t) / 3600
+        let m = (Int(t) % 3600) / 60
+        let s = Int(t) % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
     }
 
     // MARK: - Phát màn hình → cả 3 nền tảng (VPS restream)
