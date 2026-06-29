@@ -338,7 +338,7 @@ struct PagesPDFTool: View {
             if let result { ToolResultCard(url: result) }
         }
         .sheet(isPresented: $showImporter) {
-            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: false) { urls in
+            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: true) { urls in
                 if let u = urls.first, let local = copyToTemp(u) {
                     input = local; loadThumbs(local)
                 }
@@ -395,7 +395,7 @@ struct PasswordPDFTool: View {
             if let result { ToolResultCard(url: result) }
         }
         .sheet(isPresented: $showImporter) {
-            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: false) { urls in
+            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: true) { urls in
                 if let u = urls.first { input = copyToTemp(u); result = nil }
                 showImporter = false
             }
@@ -447,7 +447,7 @@ struct CompressPDFTool: View {
             }
         }
         .sheet(isPresented: $showImporter) {
-            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: false) { urls in
+            DocumentPicker(contentTypes: [.pdf], allowsMultipleSelection: true) { urls in
                 if let u = urls.first {
                     input = copyToTemp(u); result = nil; newSize = 0
                     origSize = (try? FileManager.default.attributesOfItem(atPath: input?.path ?? ""))?[.size] as? Int ?? 0
@@ -519,7 +519,7 @@ struct TrimAudioTool: View {
             if let result { ToolResultCard(url: result) }
         }
         .sheet(isPresented: $showImporter) {
-            DocumentPicker(contentTypes: [.audio, .mp3, .mpeg4Audio], allowsMultipleSelection: false) { urls in
+            DocumentPicker(contentTypes: [.audio, .mp3, .mpeg4Audio], allowsMultipleSelection: true) { urls in
                 if let u = urls.first, let local = copyToTemp(u) {
                     input = local; result = nil
                     Task {
@@ -753,7 +753,7 @@ struct PDFToTextTool: View {
                 if let result { ToolResultCard(url: result) }
             }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { res in
             if case .success(let urls) = res, let u = urls.first, let local = copyToTemp(u), let doc = PDFDocument(url: local) {
                 let t = doc.string ?? ""
                 text = t.isEmpty ? "(PDF không có chữ trích được — có thể là bản scan ảnh)" : t
@@ -845,7 +845,7 @@ struct PDFMetaTool: View {
             }
             if let result { ToolResultCard(url: result) }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { res in
             if case .success(let urls) = res, let u = urls.first, let local = copyToTemp(u) {
                 input = local; result = nil
                 if let doc = PDFDocument(url: local) {
@@ -917,7 +917,7 @@ struct SignPDFTool: View {
             }
             if let result { ToolResultCard(url: result) }
         }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { res in
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { res in
             if case .success(let urls) = res, let u = urls.first, let local = copyToTemp(u), let d = PDFDocument(url: local) {
                 doc = d; result = nil; pageIndex = 0; canvas.drawing = PKDrawing()
                 DispatchQueue.global(qos: .userInitiated).async {
