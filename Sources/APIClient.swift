@@ -120,6 +120,13 @@ struct APIClient {
         try decode(try await send("/auth/login", method: "POST",
                                   json: ["username": username, "password": password], auth: false))
     }
+    /// Đăng nhập KHÔNG MẬT KHẨU bằng mã OTP gửi Gmail/SĐT (có tài khoản → vào; chưa có → tự tạo).
+    func loginOtp(email: String = "", phone: String = "", code: String) async throws -> AuthResponse {
+        var json: [String: Any] = ["code": code]
+        if !email.isEmpty { json["email"] = email }
+        if !phone.isEmpty { json["phone"] = phone }
+        return try decode(try await send("/auth/login-otp", method: "POST", json: json, auth: false))
+    }
     func forgot(_ username: String) async throws -> ForgotResponse {
         try decode(try await send("/auth/forgot-password", method: "POST",
                                   json: ["username": username], auth: false))

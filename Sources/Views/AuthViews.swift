@@ -75,6 +75,14 @@ struct LoginView: View {
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(.secondary.opacity(0.4)))
                     }.padding(.horizontal)
 
+                    // Đăng nhập KHÔNG MẬT KHẨU bằng mã gửi Gmail/SĐT (dùng OTP sẵn có — không trùng login thường)
+                    NavigationLink { OtpLoginView() } label: {
+                        Label(store.t("Đăng nhập bằng mã Gmail (không mật khẩu)", "Login with Gmail code (passwordless)"),
+                              systemImage: "envelope.badge.fill")
+                            .font(.subheadline).frame(maxWidth: .infinity).padding()
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.accent.opacity(0.5)))
+                    }.padding(.horizontal)
+
                     NavigationLink { LegalView() } label: {
                         Text(store.t("Điều khoản & Chính sách bảo mật", "Terms & Privacy Policy"))
                             .font(.caption2).foregroundStyle(.secondary)
@@ -323,5 +331,115 @@ struct ForgotPasswordView: View {
         error = nil; info = nil
         do { let r = try await store.api.reset(token, newPassword); info = r.message }
         catch { self.error = error.localizedDescription }
+    }
+}
+
+// ===== Đăng nhập KHÔNG MẬT KHẨU bằng mã OTP (Gmail/SĐT) — tái dùng hệ thống OTP có sẵn =====
+struct OtpLoginView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var method = "email"   // "email" | "phone"
+    @State private var email = ""
+    @State private var phone = ""
+    @State private var code = ""
+    @State private var codeSent = false
+    @State private var sendingCode = false
+    @State private var loading = false
+    @State private var otpInfo: String?
+    @State private var error: String?
+
+    private var isEmail: Bool { method == "email" }
+    private var emailValid: Bool { email.contains("@") && email.contains(".") }
+    private var phoneValid: Bool { phone.filter(\.isNumber).count >= 8 }
+    private var identValid: Bool { isEmail ? emailValid : phoneValid }
+    private var canLogin: Bool { identValid && codeSent && code.count >= 4 }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("", selection: $method) {
+                    Text("Gmail").tag("email")
+                    Text(store.t("Số điện thoại", "Phone")).tag("phone")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: method) { _ in codeSent = false; code = ""; otpInfo = nil; error = nil }
+
+                if isEmail {
+                    TextField(store.t("Nhập Gmail của bạn", "Enter your Gmail"), text: $email)
+                        .textInputAutocapitalization(.never).keyboardType(.emailAddress)
+                        .autocorrectionDisabled().textContentType(.emailAddress)
+                } else {
+                    TextField(store.t("Nhập số điện thoại", "Enter phone number"), text: $phone)
+                        .keyboardType(.phonePad).textContentType(.telephoneNumber)
+                }
+
+                Button {
+                    Task { await sendCode() }
+                } label: {
+                    HStack {
+                        if sendingCode { ProgressView().padding(.trailing, 6) }
+                        Image(systemName: "paperplane.fill")
+                        Text(codeSent ? store.t("Gửi lại mã", "Resend code")
+                                      : store.t("Gửi mã đăng nhập", "Send login code"))
+                    }
+                }
+                .disabled(sendingCode || !identValid)
+
+                if codeSent {
+                    TextField(store.t("Nhập mã 6 số", "Enter 6-digit code"), text: $code)
+                        .keyboardType(.numberPad).textContentType(.oneTimeCode)
+                }
+                if let otpInfo { Text(otpInfo).font(.caption2).foregroundStyle(.secondary) }
+            } header: {
+                Text(store.t("Đăng nhập bằng mã (không cần mật khẩu)", "Login with code (passwordless)"))
+            } footer: {
+                Text(store.t("Nhập Gmail/SĐT → nhận mã → đăng nhập. Chưa có tài khoản sẽ tự tạo.",
+                             "Enter Gmail/phone → get code → log in. A new account is created if none exists."))
+            }
+
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+
+            Section {
+                Button { Task { await doOtpLogin() } } label: {
+                    HStack {
+                        if loading { ProgressView().padding(.trailing, 6) }
+                        Text(store.t("Đăng nhập", "Login")).bold()
+                    }
+                }
+                .disabled(loading || !canLogin)
+            }
+        }
+        .navigationTitle(store.t("Đăng nhập bằng mã", "Login with code"))
+    }
+
+    private func sendCode() async {
+        sendingCode = true; error = nil; otpInfo = nil
+        do {
+            let r = isEmail ? try await store.api.sendOtp(email: email, purpose: "login")
+                            : try await store.api.sendOtp(phone: phone, purpose: "login")
+            codeSent = true
+            let dest = isEmail ? email : phone
+            switch r.channel {
+            case "external":
+                otpInfo = store.t("Đã gửi mã tới \(dest). Kiểm tra hộp thư (cả Spam).", "Code sent to \(dest). Check inbox/Spam.")
+            case "internal":
+                otpInfo = store.t("Đã gửi mã vào hộp thư \(dest).", "Code sent to \(dest).")
+            default:
+                otpInfo = r.hint ?? store.t("Chưa gửi được mã. Kiểm tra cấu hình máy chủ.", "Couldn't send code. Check server config.")
+            }
+            if let dbg = r.debugCode { otpInfo = store.t("Mã (chế độ thử): \(dbg)", "Code (debug): \(dbg)") }
+        } catch { self.error = error.localizedDescription }
+        sendingCode = false
+    }
+
+    private func doOtpLogin() async {
+        loading = true; error = nil
+        do {
+            let em = isEmail ? email : ""
+            let ph = isEmail ? "" : phone
+            let resp = try await store.api.loginOtp(email: em, phone: ph, code: code)
+            store.setAuth(resp)
+            await store.loadProviders(); await store.loadKeys()
+        } catch { self.error = error.localizedDescription }
+        loading = false
     }
 }

@@ -1862,6 +1862,67 @@ def login(b: LoginIn, request: Request) -> dict[str, Any]:
     return {"token": make_token(row["id"]), "user": _user_dict(row)}
 
 
+class LoginOtpIn(BaseModel):
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    code: str
+
+
+def _unique_username(c, base: str) -> str:
+    """Tạo username hợp lệ & duy nhất từ phần trước @ của email (hoặc số ĐT)."""
+    s = re.sub(r"[^a-zA-Z0-9_]", "", (base or "").lower()) or "user"
+    if len(s) < 3:
+        s = (s + "user")[:8]
+    s = s[:20]
+    cand = s
+    i = 0
+    while c.execute("SELECT 1 FROM users WHERE username=?", (cand,)).fetchone():
+        i += 1
+        cand = f"{s}{i}"
+    return cand
+
+
+@app.post("/auth/login-otp")
+def login_otp(b: LoginOtpIn, request: Request) -> dict[str, Any]:
+    """Đăng nhập KHÔNG MẬT KHẨU bằng mã OTP gửi Gmail/SĐT.
+    Có tài khoản → đăng nhập; chưa có → tự tạo tài khoản passwordless. Không trùng /auth/login."""
+    _rate_limit(request, "login_otp", limit=12, window=300)
+    email = (b.email or "").strip().lower()
+    phone_raw = (b.phone or "").strip()
+    if not email and not phone_raw:
+        raise HTTPException(status_code=400, detail="Hãy nhập Gmail hoặc số điện thoại.")
+    ident = email if email else _normalize_phone(phone_raw)
+    code = (b.code or "").strip()
+    if not code or not _otp_check(ident, code):
+        raise HTTPException(status_code=400,
+            detail="Mã xác nhận sai hoặc đã hết hạn. Vui lòng lấy mã mới.")
+    phone = _normalize_phone(phone_raw) if phone_raw else None
+    with db() as c:
+        if email:
+            row = c.execute("SELECT * FROM users WHERE lower(email)=?", (email,)).fetchone()
+        else:
+            row = c.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
+        if row:
+            if row["banned"]:
+                raise HTTPException(status_code=403,
+                    detail="Tài khoản đã bị khóa. Liên hệ quản trị viên.")
+            _ensure_public_id(c, row["id"])
+            row = c.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
+            return {"token": make_token(row["id"]), "user": _user_dict(row)}
+        # Chưa có tài khoản → tự tạo (passwordless). Mật khẩu ngẫu nhiên (khách dùng OTP để vào).
+        base = email.split("@")[0] if email else ("user" + (phone or "")[-4:])
+        username = _unique_username(c, base)
+        cur = c.execute(
+            "INSERT INTO users(username,email,phone,pw_hash,plan,credits,created_at) "
+            "VALUES(?,?,?,?,'free',0,?)",
+            (username, email or None, phone, hash_pw(secrets.token_urlsafe(16)), int(time.time())),
+        )
+        uid = cur.lastrowid
+        _ensure_public_id(c, uid)
+        row = c.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    return {"token": make_token(uid), "user": _user_dict(row)}
+
+
 @app.post("/auth/forgot-password")
 def forgot(b: ForgotIn, request: Request) -> dict[str, Any]:
     _rate_limit(request, "forgot", limit=8, window=600)
