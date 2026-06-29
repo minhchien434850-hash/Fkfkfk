@@ -331,10 +331,28 @@ struct StoreConfigEditor: View {
 
     var body: some View {
         Form {
-            Section(store.t("Logo cửa hàng", "Store logo")) {
+            Section {
                 TextField(store.t("Tên cửa hàng / logo", "Store name / logo"), text: $logoName)
-                TextField(store.t("Link ảnh logo (PNG / GIF / JPEG / WEBP)", "Logo image link (PNG / GIF / JPEG / WEBP)"), text: $logoUrl)
+                TextField(store.t("Link logo: VIDEO (MP4) hoặc PNG / GIF / JPEG / WEBP",
+                                  "Logo link: VIDEO (MP4) or PNG / GIF / JPEG / WEBP"), text: $logoUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
+                if !logoUrl.isEmpty {
+                    HStack {
+                        Spacer()
+                        StoreThumb(media: [StoreMedia(type: isVideoLink(logoUrl) ? "video" : "image", url: logoUrl)],
+                                   height: 60)
+                            .frame(width: 60, height: 60)
+                            .background(Color.black)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        Spacer()
+                    }
+                }
+            } header: {
+                Text(store.t("Logo cửa hàng", "Store logo"))
+            } footer: {
+                Text(store.t("Logo có thể là VIDEO (dán link .mp4) hoặc ảnh PNG / GIF / JPEG / WEBP — giống các mục khác.",
+                             "The logo can be a VIDEO (paste an .mp4 link) or a PNG / GIF / JPEG / WEBP image — like the other sections."))
+                    .font(.caption2)
             }
 
             // Ảnh / Video bìa hiển thị to ở đầu cửa hàng (phía sau tên & slogan)

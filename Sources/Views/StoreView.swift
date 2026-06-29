@@ -1217,7 +1217,9 @@ struct StoreView: View {
                         HStack(spacing: 10) {
                             if !c.logoUrl.isEmpty, let lurl = URL(string: c.logoUrl) {
                                 Group {
-                                    if isAnimatedImage(c.logoUrl) {
+                                    if isVideoLink(c.logoUrl) {
+                                        LoopingVideoBackground(url: lurl)
+                                    } else if isAnimatedImage(c.logoUrl) {
                                         GIFWebView(url: lurl, contentMode: "cover")
                                     } else {
                                         CachedAsyncImage(url: lurl) { img in img.resizable().scaledToFill() }
@@ -1225,6 +1227,7 @@ struct StoreView: View {
                                     }
                                 }
                                 .frame(width: 48, height: 48)
+                                .background(Color.black)
                                 .clipShape(RoundedRectangle(cornerRadius: 11))
                                 .overlay(RoundedRectangle(cornerRadius: 11).stroke(.white.opacity(0.25), lineWidth: 1))
                             } else {
@@ -1264,7 +1267,9 @@ struct StoreView: View {
                 HStack(alignment: .top, spacing: 12) {
                     if let c = effectiveConfig, !c.logoUrl.isEmpty, let url = URL(string: c.logoUrl) {
                         Group {
-                            if isAnimatedImage(c.logoUrl) {
+                            if isVideoLink(c.logoUrl) {
+                                LoopingVideoBackground(url: url)
+                            } else if isAnimatedImage(c.logoUrl) {
                                 GIFWebView(url: url, contentMode: "cover")
                             } else {
                                 CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
@@ -1272,6 +1277,7 @@ struct StoreView: View {
                             }
                         }
                         .frame(width: 50, height: 50)
+                        .background(Color.black)
                         .clipShape(RoundedRectangle(cornerRadius: 11))
                     } else {
                         Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)

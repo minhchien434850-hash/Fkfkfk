@@ -72,6 +72,13 @@ func isAnimatedImage(_ s: String) -> Bool {
     return l.contains(".gif") || l.contains(".webp")
 }
 
+/// True nếu link là video (MP4/MOV/M3U8/WEBM...) → render bằng trình phát video lặp.
+func isVideoLink(_ s: String) -> Bool {
+    let l = s.lowercased()
+    return l.contains(".mp4") || l.contains(".mov") || l.contains(".m3u8")
+        || l.contains(".webm") || l.contains(".m4v")
+}
+
 // ============================ Tiện ích chung ============================
 func kFormatVND(_ amount: Int) -> String {
     let f = NumberFormatter()
