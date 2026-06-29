@@ -38,21 +38,28 @@ struct RainbowText: View {
     }
 }
 
-/// Logo chữ **KENIOS** — dùng ở toolbar mọi màn hình, animation theo store.logoAnimated.
+/// Logo chữ **KENIOS** — dùng ở toolbar mọi màn hình.
+/// Áp ĐÚNG hiệu ứng màu / font / chuyển động người dùng chọn trong Cài đặt (Logo & Hiệu ứng app).
 struct ThreeDLogoText: View {
     var size: CGFloat = 22
-    @EnvironmentObject var store: AppStore
+    @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
+    @AppStorage("appLogoFont") private var appLogoFont = "rounded"
+    @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
     var body: some View {
-        RainbowText(text: "KENIOS", size: size, animated: store.logoAnimated)
+        AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
+                          fontStyle: appLogoFont, anim: appLogoAnim, size: size)
     }
 }
 
-/// Phiên bản lớn cho màn hình đăng nhập
+/// Phiên bản lớn cho màn hình đăng nhập — cũng theo cài đặt hiệu ứng logo app.
 struct ThreeDLogoLarge: View {
-    @EnvironmentObject var store: AppStore
+    @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
+    @AppStorage("appLogoFont") private var appLogoFont = "rounded"
+    @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
     var body: some View {
         VStack(spacing: 6) {
-            RainbowText(text: "KENIOS", size: 40, animated: store.logoAnimated)
+            AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
+                              fontStyle: appLogoFont, anim: appLogoAnim, size: 40)
             Text("Mạng xã hội · Video · Giải trí · Công cụ")
                 .font(.caption)
                 .foregroundStyle(.secondary)
