@@ -845,6 +845,11 @@ def _migrate() -> None:
         ("posts", "views", "INTEGER DEFAULT 0"),
         # Sản phẩm cửa hàng: lượt xem (mỗi lần khách bấm vào +1)
         ("store_products", "views", "INTEGER DEFAULT 0"),
+        # Gói PRO có thời hạn: ngày hết hạn (unix giây; 0 = vĩnh viễn/không có) + cờ báo hết hạn 1 lần
+        ("users", "plan_expires",        "INTEGER DEFAULT 0"),
+        ("users", "plan_expired_notice", "INTEGER DEFAULT 0"),
+        # Đơn thanh toán: số ngày gói (để khi xác nhận biết cộng hạn bao lâu)
+        ("payments", "plan_days", "INTEGER DEFAULT 0"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -948,6 +953,14 @@ def get_user(authorization: Optional[str] = Header(default=None)) -> sqlite3.Row
             raise HTTPException(status_code=403, detail=f"Tài khoản đang bị tạm ngưng đến {t}.")
         else:
             raise HTTPException(status_code=403, detail="Tài khoản đang bị tạm ngưng. Liên hệ quản trị viên.")
+    # Hết hạn gói PRO → tự hạ về Free + đánh dấu để báo khách 1 lần
+    if not row["is_admin"] and (row["plan"] or "free") != "free":
+        pe = row["plan_expires"] or 0
+        if pe and pe <= int(time.time()):
+            with db() as c:
+                c.execute("UPDATE users SET plan='free', plan_expires=0, plan_expired_notice=1 WHERE id=?",
+                          (row["id"],))
+                row = c.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
     return row
 
 
@@ -988,6 +1001,7 @@ def _user_dict(row) -> dict[str, Any]:
         "public_id": row["public_id"],
         "is_admin": bool(row["is_admin"]),
         "plan": "pro" if row["is_admin"] else (row["plan"] or "free"),
+        "plan_expires": 0 if row["is_admin"] else (row["plan_expires"] or 0),
         "credits": row["credits"], "lang": row["lang"] or "vi",
         "status": row["status"] or "active",
     }
@@ -4276,46 +4290,57 @@ async def translate_text(b: TranslateIn) -> dict[str, Any]:
 
 
 # ======================== Thanh toán / Nâng cấp PRO ========================
-# Chỉ còn DUY NHẤT 1 gói nâng cấp PRO. Admin tự chỉnh giá (VND) trong trang Quản trị.
-# Không dùng credits — thanh toán xong là tài khoản được nâng lên PRO.
-PRO_PRICE_DEFAULT = 199000
+# 3 gói PRO có thời hạn: tháng / 6 tháng / 1 năm. Admin tự chỉnh giá (VND).
+# Không dùng credits — thanh toán xong tài khoản lên PRO tới ngày hết hạn.
+PRO_PACKAGES = [
+    {"id": "month",  "days": 30,  "name": "Gói 1 tháng",  "default_price": 199000},
+    {"id": "6month", "days": 180, "name": "Gói 6 tháng",  "default_price": 999000},
+    {"id": "year",   "days": 365, "name": "Gói 1 năm",    "default_price": 1799000},
+]
 PRO_LABEL_DEFAULT = "Nâng cấp PRO"
 
 
-def _pro_package() -> dict[str, Any]:
-    try:
-        price = int(get_setting("pro_price", str(PRO_PRICE_DEFAULT)) or PRO_PRICE_DEFAULT)
-    except (TypeError, ValueError):
-        price = PRO_PRICE_DEFAULT
-    if price < 0:
-        price = PRO_PRICE_DEFAULT
-    label = get_setting("pro_label", PRO_LABEL_DEFAULT) or PRO_LABEL_DEFAULT
-    return {
-        "id": "pro",
-        "credits": 0,                      # không cộng credits, chỉ nâng cấp gói
-        "amount": price,
-        "label": f"{label} — {price:,}đ".replace(",", "."),
-    }
+def _pro_packages() -> list[dict[str, Any]]:
+    out = []
+    for p in PRO_PACKAGES:
+        try:
+            price = int(get_setting(f"pro_price_{p['id']}", str(p["default_price"])) or p["default_price"])
+        except (TypeError, ValueError):
+            price = p["default_price"]
+        if price < 0:
+            price = p["default_price"]
+        out.append({
+            "id": p["id"], "days": p["days"], "name": p["name"],
+            "credits": 0, "amount": price,
+            "label": f"{p['name']} — {price:,}đ".replace(",", "."),
+        })
+    return out
+
+
+def _pro_package_by_id(pid: str) -> dict[str, Any]:
+    pkgs = _pro_packages()
+    for p in pkgs:
+        if p["id"] == pid:
+            return p
+    return pkgs[0]
 
 
 @app.get("/payment/packages")
 def payment_packages() -> list[dict[str, Any]]:
-    # Trả về dạng danh sách (1 phần tử) để tương thích với app.
-    return [_pro_package()]
+    return _pro_packages()
 
 
 @app.post("/payment/create")
 def payment_create(b: PaymentIn, user=Depends(get_user)) -> dict[str, Any]:
-    # Mọi đơn đều là nâng cấp PRO (bỏ qua tên gói client gửi lên).
-    pkg = _pro_package()
+    pkg = _pro_package_by_id((b.package or "").strip())
     ref = secrets.token_urlsafe(12)
     with db() as c:
         # Nội dung chuyển khoản = ID khách hàng → hệ thống tự dò ID để xác nhận.
         cid = _ensure_public_id(c, user["id"])
         cur = c.execute(
-            "INSERT INTO payments(user_id,amount,credits,status,ref,created_at) "
-            "VALUES(?,?,?,'pending',?,?)",
-            (user["id"], pkg["amount"], pkg["credits"], ref, int(time.time())),
+            "INSERT INTO payments(user_id,amount,credits,plan_days,status,ref,created_at) "
+            "VALUES(?,?,?,?,'pending',?,?)",
+            (user["id"], pkg["amount"], 0, pkg["days"], ref, int(time.time())),
         )
         pid = cur.lastrowid
     bank = bank_info(amount=pkg["amount"], note=cid)
@@ -4323,7 +4348,7 @@ def payment_create(b: PaymentIn, user=Depends(get_user)) -> dict[str, Any]:
         "payment_id": pid,
         "ref": cid,
         "amount": pkg["amount"],
-        "credits": pkg["credits"],
+        "credits": 0,
         "label": pkg["label"],
         "message": f"Chuyển khoản với nội dung là ID của bạn: {cid}. Hệ thống tự xác nhận sau khi nhận tiền.",
         "bank_info": bank,
@@ -4381,16 +4406,19 @@ def admin_set_bank(b: BankSettingsIn, admin=Depends(get_admin)) -> dict[str, Any
     return {"message": "Đã cập nhật thông tin ngân hàng."}
 
 
-# -------- Giá gói nâng cấp PRO (admin tự chỉnh, VND) --------
+# -------- Giá 3 gói nâng cấp PRO (admin tự chỉnh, VND) --------
 class ProPriceIn(BaseModel):
+    package: Optional[str] = None      # "month" | "6month" | "year"
     price: Optional[int] = None
     label: Optional[str] = None
 
 
 @app.get("/admin/payment/pro")
 def admin_get_pro(admin=Depends(get_admin)) -> dict[str, Any]:
-    pkg = _pro_package()
-    return {"price": pkg["amount"], "label": get_setting("pro_label", PRO_LABEL_DEFAULT) or PRO_LABEL_DEFAULT}
+    # Trả về cả 3 gói; "price" giữ lại cho tương thích app cũ (lấy gói tháng).
+    pkgs = _pro_packages()
+    return {"packages": pkgs, "price": pkgs[0]["amount"],
+            "label": get_setting("pro_label", PRO_LABEL_DEFAULT) or PRO_LABEL_DEFAULT}
 
 
 @app.post("/admin/payment/pro")
@@ -4398,12 +4426,13 @@ def admin_set_pro(b: ProPriceIn, admin=Depends(get_admin)) -> dict[str, Any]:
     if b.price is not None:
         if b.price < 0:
             raise HTTPException(status_code=400, detail="Giá phải là số tiền VND ≥ 0.")
-        set_setting("pro_price", str(int(b.price)))
+        pid = (b.package or "month").strip()
+        if pid not in {p["id"] for p in PRO_PACKAGES}:
+            pid = "month"
+        set_setting(f"pro_price_{pid}", str(int(b.price)))
     if b.label is not None and b.label.strip():
         set_setting("pro_label", b.label.strip()[:60])
-    pkg = _pro_package()
-    return {"message": "Đã cập nhật giá gói PRO.", "price": pkg["amount"],
-            "label": get_setting("pro_label", PRO_LABEL_DEFAULT) or PRO_LABEL_DEFAULT}
+    return {"message": "Đã cập nhật giá gói.", "packages": _pro_packages()}
 
 
 def _determine_plan_from_credits(credits: int) -> str:
@@ -4422,14 +4451,27 @@ def _finalize_payment_row(c, pay) -> bool:
                         (pay["id"],))
     if claimed.rowcount != 1:
         return False
+    # Đơn cũ có credits → giữ logic cũ (tương thích).
     if pay["credits"] and pay["credits"] > 0:
         c.execute("UPDATE users SET credits=credits+? WHERE id=?", (pay["credits"], pay["user_id"]))
         new_plan = _determine_plan_from_credits(pay["credits"])
         if new_plan != "free":
             c.execute("UPDATE users SET plan=? WHERE id=? AND plan IN ('free','pro','ultra')",
                       (new_plan, pay["user_id"]))
-    else:
-        c.execute("UPDATE users SET plan='pro' WHERE id=?", (pay["user_id"],))
+        return True
+    # Đơn gói PRO có thời hạn: lên PRO + cộng hạn (gia hạn nếu còn hạn).
+    try:
+        days = int(pay["plan_days"] or 0)
+    except (TypeError, ValueError, IndexError):
+        days = 0
+    if days <= 0:
+        days = 30
+    now = int(time.time())
+    cur = c.execute("SELECT plan_expires FROM users WHERE id=?", (pay["user_id"],)).fetchone()
+    base = max(now, (cur["plan_expires"] or 0) if cur else 0)
+    new_exp = base + days * 86400
+    c.execute("UPDATE users SET plan='pro', plan_expires=?, plan_expired_notice=0 WHERE id=?",
+              (new_exp, pay["user_id"]))
     return True
 
 
@@ -6288,7 +6330,9 @@ def search_messages(q: str, user=Depends(get_user)) -> list[dict[str, Any]]:
 # ======================== Admin ========================
 class BanIn(BaseModel):   banned: bool
 class AdminPwIn(BaseModel): new_password: str
-class PlanIn(BaseModel):   plan: str
+class PlanIn(BaseModel):
+    plan: str
+    days: Optional[int] = None      # số ngày gói PRO (0/None = vĩnh viễn)
 
 @app.get("/admin/users")
 def admin_users(admin=Depends(get_admin)) -> list[dict[str, Any]]:
@@ -6329,11 +6373,24 @@ def admin_set_pw(uid: int, b: AdminPwIn, admin=Depends(get_admin)) -> dict[str, 
 
 @app.post("/admin/users/{uid}/plan")
 def admin_set_plan(uid: int, b: PlanIn, admin=Depends(get_admin)) -> dict[str, Any]:
-    # Chỉ còn 2 gói: free / pro
-    plan = "pro" if b.plan == "pro" else "free"
+    # Admin tặng gói PRO theo thời hạn (nửa tháng=15, tháng=30, 1 năm=365; 0=vĩnh viễn) hoặc hạ Free.
+    if b.plan == "pro":
+        try:
+            days = int(b.days) if b.days is not None else 30
+        except (TypeError, ValueError):
+            days = 30
+        now = int(time.time())
+        exp = (now + days * 86400) if days > 0 else 0   # 0 = vĩnh viễn
+        with db() as c:
+            c.execute("UPDATE users SET plan='pro', plan_expires=?, plan_expired_notice=0 WHERE id=?",
+                      (exp, uid))
+        if days > 0:
+            until = time.strftime("%d/%m/%Y", time.localtime(exp))
+            return {"message": f"Đã tặng gói PRO {days} ngày (hết hạn {until})."}
+        return {"message": "Đã đặt gói PRO vĩnh viễn."}
     with db() as c:
-        c.execute("UPDATE users SET plan=? WHERE id=?", (plan, uid))
-    return {"message": f"Đã đặt gói '{plan}'."}
+        c.execute("UPDATE users SET plan='free', plan_expires=0 WHERE id=?", (uid,))
+    return {"message": "Đã đặt gói Free."}
 
 
 class SuspendIn(BaseModel):
@@ -6360,7 +6417,16 @@ def admin_unsuspend(uid: int, admin=Depends(get_admin)) -> dict[str, Any]:
 # ---- Người dùng: lấy hồ sơ mới nhất + nhịp hoạt động ----
 @app.get("/me")
 def get_me(user=Depends(get_user)) -> dict[str, Any]:
-    return _user_dict(user)
+    d = _user_dict(user)
+    # Báo 1 lần khi gói PRO vừa hết hạn (rồi xoá cờ để không báo lại).
+    try:
+        if not user["is_admin"] and (user["plan_expired_notice"] or 0):
+            d["plan_expired"] = True
+            with db() as c:
+                c.execute("UPDATE users SET plan_expired_notice=0 WHERE id=?", (user["id"],))
+    except (KeyError, IndexError):
+        pass
+    return d
 
 
 class ActivityIn(BaseModel):
