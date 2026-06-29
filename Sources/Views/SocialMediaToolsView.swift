@@ -65,6 +65,12 @@ struct SocialMediaToolsView: View {
     @AppStorage("live_cookie_tiktok")   private var ckTikTok = ""
     @AppStorage("live_cookie_facebook") private var ckFacebook = ""
     @AppStorage("live_cookie_youtube")  private var ckYouTube = ""
+    // YouTube dùng OAuth (cookie không tạo được live) — lưu Client ID + token
+    @AppStorage("yt_google_client_id")  private var ytClientID = ""
+    @AppStorage("yt_access_token")      private var ytAccessToken = ""
+    @AppStorage("yt_refresh_token")     private var ytRefreshToken = ""
+    @State private var ytSigningIn = false
+    @State private var ytAuthError: String?
     @State private var selectedPlatforms: Set<String> = ["tiktok", "facebook", "youtube"]
     @State private var streamResults: [String: PlatformStreamResult] = [:]
     // Restream: phát màn hình 1 lần → VPS chia ra nhiều nền tảng
@@ -328,7 +334,8 @@ struct SocialMediaToolsView: View {
     // Một dòng nền tảng: tích chọn + trạng thái cookie + nút đăng nhập + kết quả
     @ViewBuilder
     private func platformRow(_ p: LivePlatformInfo) -> some View {
-        let hasCookie = !cookie(for: p.id).isEmpty
+        let isYouTube = p.id == "youtube"
+        let hasCred = isYouTube ? !ytAccessToken.isEmpty : !cookie(for: p.id).isEmpty
         let selected = selectedPlatforms.contains(p.id)
         let res = streamResults[p.id]
         VStack(alignment: .leading, spacing: 8) {
@@ -343,21 +350,25 @@ struct SocialMediaToolsView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(p.name).font(.subheadline.bold())
                     HStack(spacing: 4) {
-                        Image(systemName: hasCookie ? "checkmark.seal.fill" : "exclamationmark.triangle")
-                            .font(.caption2).foregroundStyle(hasCookie ? .green : .orange)
-                        Text(hasCookie ? "Đã có cookie" : "Chưa đăng nhập")
+                        Image(systemName: hasCred ? "checkmark.seal.fill" : "exclamationmark.triangle")
+                            .font(.caption2).foregroundStyle(hasCred ? .green : .orange)
+                        Text(hasCred ? (isYouTube ? "Đã đăng nhập Google" : "Đã có cookie")
+                                     : "Chưa đăng nhập")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
-                Button {
-                    browserURL = p.loginURL
-                    browserSiteName = p.id
-                    showBrowser = true
-                } label: {
-                    Text(hasCookie ? "Đăng nhập lại" : "Đăng nhập").font(.caption.bold())
-                }.buttonStyle(.bordered)
+                if !isYouTube {
+                    Button {
+                        browserURL = p.loginURL
+                        browserSiteName = p.id
+                        showBrowser = true
+                    } label: {
+                        Text(hasCred ? "Đăng nhập lại" : "Đăng nhập").font(.caption.bold())
+                    }.buttonStyle(.bordered)
+                }
             }
+            if isYouTube { youtubeAuthBlock(hasToken: hasCred) }
             if let res {
                 if res.ok {
                     VStack(alignment: .leading, spacing: 6) {
@@ -380,6 +391,67 @@ struct SocialMediaToolsView: View {
         .padding(10)
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // YouTube: đăng nhập Google (OAuth) để lấy token — cookie không tạo được live
+    @ViewBuilder
+    private func youtubeAuthBlock(hasToken: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if hasToken {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    Text("Đã đăng nhập YouTube (Google).").font(.caption).foregroundStyle(.green)
+                    Spacer()
+                    Button(role: .destructive) {
+                        ytAccessToken = ""; ytRefreshToken = ""
+                    } label: { Text("Đăng xuất").font(.caption.bold()) }
+                        .buttonStyle(.bordered)
+                }
+            } else {
+                Text("YouTube cần đăng nhập Google (OAuth) — cookie không tạo được live.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                TextField("Dán Google Client ID (…apps.googleusercontent.com)", text: $ytClientID)
+                    .font(.system(.caption, design: .monospaced))
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    .padding(9).background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                Button {
+                    Task { await signInYouTube() }
+                } label: {
+                    HStack {
+                        if ytSigningIn { ProgressView().tint(.white) }
+                        Image(systemName: "person.badge.key.fill")
+                        Text(ytSigningIn ? "Đang đăng nhập..." : "Đăng nhập YouTube (Google)")
+                    }
+                    .font(.caption.bold()).foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 40)
+                    .background(ytClientID.hasSuffix("apps.googleusercontent.com") ? Color.red : Color.gray)
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                }
+                .disabled(ytSigningIn || !ytClientID.hasSuffix("apps.googleusercontent.com"))
+            }
+            if let e = ytAuthError {
+                Text(e).font(.caption2).foregroundStyle(.red)
+            }
+        }
+        .padding(9)
+        .background(Color.red.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func signInYouTube() async {
+        ytAuthError = nil
+        ytSigningIn = true
+        defer { ytSigningIn = false }
+        do {
+            let t = try await GoogleOAuth.shared.signIn(clientID: ytClientID)
+            ytAccessToken = t.accessToken
+            if let r = t.refreshToken { ytRefreshToken = r }
+        } catch GoogleOAuthError.cancelled {
+            // người dùng huỷ — không báo lỗi
+        } catch {
+            ytAuthError = error.localizedDescription
+        }
     }
 
     // MARK: - Phát màn hình → cả 3 nền tảng (VPS restream)
@@ -674,6 +746,31 @@ struct SocialMediaToolsView: View {
         fetchingStream = true
         streamError = nil
         for p in ["tiktok", "facebook", "youtube"] where selectedPlatforms.contains(p) {
+            // YouTube cần Access Token (OAuth) — cookie không tạo được live.
+            if p == "youtube" {
+                if ytAccessToken.isEmpty {
+                    streamResults[p] = PlatformStreamResult(error: "Chưa đăng nhập YouTube — bấm 'Đăng nhập YouTube (Google)'.")
+                    continue
+                }
+                do {
+                    let res = try await store.api.getYouTubeStreamKey(accessToken: ytAccessToken)
+                    streamResults[p] = PlatformStreamResult(rtmp: res.rtmpUrl, key: res.streamKey)
+                    addTargetDirect(name: platformName(p), rtmp: res.rtmpUrl, key: res.streamKey)
+                } catch {
+                    // Token hết hạn → thử làm mới rồi tạo lại
+                    if !ytRefreshToken.isEmpty, !ytClientID.isEmpty,
+                       let t = try? await GoogleOAuth.shared.refresh(clientID: ytClientID, refreshToken: ytRefreshToken) {
+                        ytAccessToken = t.accessToken
+                        if let res = try? await store.api.getYouTubeStreamKey(accessToken: t.accessToken) {
+                            streamResults[p] = PlatformStreamResult(rtmp: res.rtmpUrl, key: res.streamKey)
+                            addTargetDirect(name: platformName(p), rtmp: res.rtmpUrl, key: res.streamKey)
+                            continue
+                        }
+                    }
+                    streamResults[p] = PlatformStreamResult(error: error.localizedDescription)
+                }
+                continue
+            }
             let ck = cookie(for: p)
             if ck.isEmpty {
                 streamResults[p] = PlatformStreamResult(error: "Chưa có cookie — hãy bấm Đăng nhập nền tảng này.")
@@ -683,8 +780,7 @@ struct SocialMediaToolsView: View {
                 let res: StreamKeyResponse
                 switch p {
                 case "tiktok":   res = try await store.api.getTikTokStreamKey(cookies: ck)
-                case "facebook": res = try await store.api.getFacebookStreamKey(cookies: ck)
-                default:         res = try await store.api.getYouTubeStreamKey(cookies: ck)
+                default:         res = try await store.api.getFacebookStreamKey(cookies: ck)
                 }
                 streamResults[p] = PlatformStreamResult(rtmp: res.rtmpUrl, key: res.streamKey)
                 addTargetDirect(name: platformName(p), rtmp: res.rtmpUrl, key: res.streamKey)
