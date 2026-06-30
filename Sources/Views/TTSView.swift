@@ -21,6 +21,7 @@ struct TTSView: View {
     @State private var showAudioImporter = false
     @State private var audioImportType = "gift"   // "__lib" = thêm vào kho; còn lại = gán cho sự kiện
     @State private var audioUploading = false
+    @State private var audioError: String?        // báo lỗi tải file âm thanh (thay vì im lặng)
     @State private var newCustomLink = ""         // ô dán link liên tiếp để thêm vào kho
 
     // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
@@ -488,7 +489,11 @@ struct TTSView: View {
                 } label: {
                     Label("Tải file âm thanh", systemImage: "square.and.arrow.up").font(.caption)
                 }.buttonStyle(.bordered).disabled(audioUploading)
-                if audioUploading { ProgressView().scaleEffect(0.7) }
+                if audioUploading { ProgressView().scaleEffect(0.7); Text("Đang tải…").font(.caption2).foregroundStyle(.secondary) }
+            }
+            if let audioError {
+                Text("⚠️ " + audioError).font(.caption2).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text("Muốn trích âm thanh TỪ VIDEO → vào Khám phá › Chuyển đổi › tab \"Trích âm thanh → mp3\", lấy link rồi dán vào ô trên.")
                 .font(.caption2).foregroundStyle(.secondary)
@@ -519,13 +524,28 @@ struct TTSView: View {
     /// Đọc file âm thanh → tải lên máy chủ → lấy link. type=="__lib" thêm vào kho; còn lại gán cho sự kiện.
     private func uploadAudio(_ fileURL: URL, for type: String) async {
         audioUploading = true
+        audioError = nil
+        // Với asCopy:true, URL là bản tạm app sở hữu — đọc thẳng. Vẫn xin quyền cho chắc.
         let access = fileURL.startAccessingSecurityScopedResource()
         defer { if access { fileURL.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: fileURL) else { audioUploading = false; return }
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            audioUploading = false
+            audioError = "Không đọc được file: \(error.localizedDescription)"
+            return
+        }
+        if data.isEmpty {
+            audioUploading = false
+            audioError = "File rỗng (0 byte)."
+            return
+        }
         let name = fileURL.lastPathComponent
         let mime = name.lowercased().hasSuffix(".wav") ? "audio/wav"
                  : name.lowercased().hasSuffix(".m4a") ? "audio/mp4" : "audio/mpeg"
-        if let url = try? await store.api.mediaUpload(dataBase64: data.base64EncodedString(), mime: mime, name: name) {
+        do {
+            let url = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(), mime: mime, name: name)
             if type == "__lib" {
                 tts.addCustomSound(url: url, name: name)
             } else {
@@ -533,6 +553,9 @@ struct TTSView: View {
                 tts.setNotifSoundUrl(url, for: type)
             }
             await store.saveNotifSounds()
+            audioError = nil
+        } catch {
+            audioError = "Tải lên máy chủ thất bại: \(error.localizedDescription). Kiểm tra đã kết nối máy chủ/đăng nhập chưa."
         }
         audioUploading = false
     }
