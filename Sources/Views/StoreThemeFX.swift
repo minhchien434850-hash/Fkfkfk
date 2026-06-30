@@ -24,6 +24,8 @@ struct AnimatedStoreLogo: View {
                 .modifier(LogoAnimModifier(anim: anim, phase: p))
                 .overlay { if anim == "shimmer" { ShimmerSweep(text: text, font: font, phase: p) } }
         }
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)   // hiện ĐỦ chữ (vd "KENIOS"), không bị cắt thành "K…"
         .frame(height: size + 10)
     }
 }
