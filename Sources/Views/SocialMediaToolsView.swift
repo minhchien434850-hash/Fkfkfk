@@ -95,7 +95,7 @@ struct SocialMediaToolsView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 // Banner sang trọng
-                KHeroHeader(icon: "globe.badge.ellipsis",
+                KHeroHeader(icon: "globe.asia.australia.fill",
                             title: store.t("Mạng xã hội", "Social"),
                             subtitle: store.t("Sáng tạo nội dung · Tải video · Live đa nền tảng",
                                               "Create content · Download video · Multi-platform live"))
