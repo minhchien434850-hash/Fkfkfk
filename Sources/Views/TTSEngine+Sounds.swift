@@ -37,6 +37,12 @@ extension TTSEngine {
     func fetchNotifData(_ url: URL, completion: @escaping (Data?) -> Void) {
         let key = url.absoluteString
         if let cached = notifDataCache[key] { completion(cached); return }
+        // Âm lưu ngay trên máy (file://) — đọc thẳng, không cần mạng.
+        if url.isFileURL {
+            let data = try? Data(contentsOf: url)
+            if let data { notifDataCache[key] = data }
+            completion(data); return
+        }
         var req = URLRequest(url: url)
         req.timeoutInterval = 10
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",

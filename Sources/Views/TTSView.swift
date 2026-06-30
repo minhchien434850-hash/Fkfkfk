@@ -555,9 +555,33 @@ struct TTSView: View {
             await store.saveNotifSounds()
             audioError = nil
         } catch {
-            audioError = "Tải lên máy chủ thất bại: \(error.localizedDescription). Kiểm tra đã kết nối máy chủ/đăng nhập chưa."
+            // DỰ PHÒNG: server lỗi/chưa kết nối → lưu file NGAY TRÊN MÁY để dùng được liền.
+            if let localURL = saveAudioLocally(data, name: name) {
+                if type == "__lib" {
+                    tts.addCustomSound(url: localURL, name: name)
+                } else {
+                    tts.setNotifSound("custom", for: type)
+                    tts.setNotifSoundUrl(localURL, for: type)
+                }
+                // Vẫn thử đồng bộ kho lên server (nếu được) để máy khác cũng thấy.
+                await store.saveNotifSounds()
+                audioError = "Đã lưu âm trên máy & dùng được ngay ✅ (chưa đồng bộ lên máy chủ nên máy khác chưa thấy). Lý do: \(error.localizedDescription)"
+            } else {
+                audioError = "Không lưu được file: \(error.localizedDescription)"
+            }
         }
         audioUploading = false
+    }
+
+    /// Lưu dữ liệu âm thanh vào thư mục app (dùng được offline, còn sau khi tắt app).
+    private func saveAudioLocally(_ data: Data, name: String) -> String? {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent("notif_sounds", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let safe = name.isEmpty ? "audio.mp3" : name
+        let dest = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))_\(safe)")
+        do { try data.write(to: dest); return dest.absoluteString }
+        catch { return nil }
     }
 
     // Binding 2 chiều cho link âm thanh tùy chỉnh của 1 sự kiện.
