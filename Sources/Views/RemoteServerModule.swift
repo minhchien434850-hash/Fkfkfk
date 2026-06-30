@@ -521,21 +521,46 @@ struct SFTPBrowserView: View {
                 .padding()
             }
 
-            if selectMode && !selected.isEmpty {
-                Button {
-                    let items = engine.files.filter { selected.contains($0.id) }
-                    selected.removeAll()
-                    Task { await engine.deleteFiles(items) }
-                } label: {
-                    Label("Delete \(selected.count) file(s)", systemImage: "trash.fill")
-                        .font(.subheadline.bold()).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity).frame(height: 46)
-                        .background(Color.red).clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .padding(.horizontal)
-            }
         }
         .padding(.top, 8)
+        // Material Bottom Action Bar — kính mờ, trượt lên khi chọn > 0 mục.
+        .overlay(alignment: .bottom) {
+            if selectMode && !selected.isEmpty {
+                bottomActionBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: selected.count)
+        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: selectMode)
+    }
+
+    private var bottomActionBar: some View {
+        HStack(spacing: 14) {
+            Button { selected.removeAll() } label: {
+                Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
+            }
+            Text("\(selected.count) selected").font(.subheadline.bold())
+            Spacer()
+            Button {
+                let items = engine.files.filter { selected.contains($0.id) }
+                selected.removeAll()
+                Task { await engine.deleteFiles(items) }
+            } label: {
+                Label("Delete", systemImage: "trash.fill")
+                    .font(.subheadline.bold()).foregroundStyle(.white)
+                    .padding(.horizontal, 18).frame(height: 40)
+                    .background(Color.red).clipShape(Capsule())
+            }
+        }
+        .padding(.horizontal, 18).padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.22), radius: 12, y: 4)
+        .padding(.horizontal, 14).padding(.bottom, 12)
     }
 
     private func fileCell(_ item: SFTPFileItem) -> some View {
