@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // ============================ Tool nhắn tin tự động (ẩn trong Settings) ============================
 // Sử dụng API chính thức của từng nền tảng để gửi tin nhắn tự động
@@ -78,6 +79,7 @@ struct AutoMessengerView: View {
     @State private var results: [SendResult] = []
     @State private var runTask: Task<Void, Never>?
     @State private var showSetup   = false
+    @State private var bgTaskID: UIBackgroundTaskIdentifier = .invalid
 
     private var platform: AutoPlatform { AutoPlatform(rawValue: platformRaw) ?? .telegram }
 
@@ -332,12 +334,31 @@ struct AutoMessengerView: View {
         results = messages.enumerated().map { SendResult(index: $0.offset, text: $0.element) }
         currentIdx = 0
         isRunning = true
+        beginBackground()
         scheduleNext(sendNow: true)
     }
 
     private func stopSession() {
         runTask?.cancel(); runTask = nil
         isRunning = false; countdown = 0
+        endBackground()
+    }
+
+    // Xin thêm thời gian chạy ngầm để vòng lặp gửi (qua API) không bị iOS đóng băng
+    // ngay khi ẩn app / khoá màn hình. iOS chỉ cho thêm vài chục giây — không phải 24/7.
+    private func beginBackground() {
+        endBackground()
+        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "KeniosAutoMessaging") {
+            // Hết thời gian ngầm cho phép → dừng an toàn để khỏi bị hệ thống kill.
+            stopSession()
+        }
+    }
+
+    private func endBackground() {
+        if bgTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(bgTaskID)
+            bgTaskID = .invalid
+        }
     }
 
     private func scheduleNext(sendNow: Bool) {
@@ -349,7 +370,7 @@ struct AutoMessengerView: View {
             }
             // countdown to next
             guard currentIdx + 1 < messages.count else {
-                await MainActor.run { isRunning = false; countdown = 0 }
+                await MainActor.run { isRunning = false; countdown = 0; endBackground() }
                 return
             }
             for i in stride(from: delaySec, through: 0, by: -1) {
