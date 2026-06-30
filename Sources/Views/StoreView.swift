@@ -1227,12 +1227,23 @@ struct StoreView: View {
                                     fontStyle: c.logoFont ?? "rounded",
                                     anim: c.logoAnim ?? "shimmer",
                                     size: 20)
-                                Text({
+                                let sloganText: String = {
                                     let s = (config?.slogan ?? "").trimmingCharacters(in: .whitespaces)
                                     return s.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : s
-                                }())
-                                .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
-                                .foregroundStyle(.white.opacity(0.9))
+                                }()
+                                // Áp ĐÚNG hiệu ứng/màu/font/chuyển động slogan (giống footer) — chỉnh 1 chỗ hiện cả 2.
+                                if let eff = config?.sloganEffect, eff != "none" {
+                                    AnimatedStoreText(
+                                        text: sloganText,
+                                        effect: eff,
+                                        font: keniosFont(config?.sloganFont ?? "rounded", size: 12),
+                                        anim: config?.sloganAnim ?? "none",
+                                        solidColor: Color(hexString: config?.sloganColor))
+                                } else {
+                                    Text(sloganText)
+                                        .font(keniosFont(config?.sloganFont ?? "rounded", size: 12))
+                                        .foregroundStyle(.white.opacity(0.9))
+                                }
                             }
                         }
                         .padding(.horizontal, 14).padding(.top, 14)
