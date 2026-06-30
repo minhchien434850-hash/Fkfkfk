@@ -5,7 +5,7 @@ import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, gameLauncher, tools, github, settings, admin, mediaConverter, messenger
+    case liveNow, fileTools, library, read, fun, games, gameLauncher, tools, github, settings, admin, mediaConverter, messenger, remoteServer
     var id: String { rawValue }
 
     var title: String {
@@ -23,6 +23,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "Quản trị"
         case .mediaConverter: return "Chuyển đổi"
         case .messenger:      return "Nhắn tin"
+        case .remoteServer:   return "Remote Server"
         }
     }
     var subtitle: String {
@@ -40,6 +41,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "Quản lý người dùng"
         case .mediaConverter: return "Ảnh/Video → GIF · PNG"
         case .messenger:      return "Thủ công · Tự động Web"
+        case .remoteServer:   return "SSH · SFTP · Chạy script VPS"
         }
     }
     var titleEN: String {
@@ -57,6 +59,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "Admin"
         case .mediaConverter: return "Convert"
         case .messenger:      return "Messaging"
+        case .remoteServer:   return "Remote Server"
         }
     }
     var subtitleEN: String {
@@ -74,6 +77,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "Manage users"
         case .mediaConverter: return "Image/Video → GIF · PNG"
         case .messenger:      return "Manual · Auto Web"
+        case .remoteServer:   return "SSH · SFTP · Run VPS scripts"
         }
     }
     var icon: String {
@@ -91,6 +95,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return "person.2.badge.gearshape.fill"
         case .mediaConverter: return "wand.and.stars"
         case .messenger:      return "bubble.left.and.bubble.right.fill"
+        case .remoteServer:   return "terminal.fill"
         }
     }
     var colors: [Color] {
@@ -108,6 +113,7 @@ enum HubDest: String, Identifiable {
         case .admin:          return [Color(red: 1.0, green: 0.78, blue: 0.0), Color(red: 0.9, green: 0.55, blue: 0.0)]
         case .mediaConverter: return [Color(red: 0.6, green: 0.1, blue: 0.9), Color(red: 0.9, green: 0.2, blue: 0.6)]
         case .messenger:      return [Color(red: 0.05, green: 0.7, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.75)]
+        case .remoteServer:   return [Color(red: 0.1, green: 0.5, blue: 0.3), Color(red: 0.05, green: 0.3, blue: 0.5)]
         }
     }
     var gradient: LinearGradient {
@@ -121,7 +127,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .gameLauncher, .tools, .github, .mediaConverter, .messenger, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .gameLauncher, .tools, .github, .mediaConverter, .messenger, .remoteServer, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -189,6 +195,8 @@ struct ExploreHubView: View {
         case .messenger:
             if store.isPro { MessengerHubView().environmentObject(store) }
             else { ProLockCard(feature: store.t("Nhắn tin", "Messaging")) }
+        case .remoteServer:
+            RemoteServerRootView(baseURL: store.baseURL, token: store.token ?? "")
         }
     }
 }

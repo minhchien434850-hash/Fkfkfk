@@ -74,7 +74,8 @@ pip install \
     "TikTokLive>=6.0" \
     "aiosmtpd>=1.4" \
     "yt-dlp" \
-    "PyJWT>=2.8"
+    "PyJWT>=2.8" \
+    "asyncssh>=2.14"
 
 # 5. Tạo file .env
 echo "▸ [5/7] Tạo file cấu hình..."

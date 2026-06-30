@@ -16,3 +16,5 @@ aiosmtpd>=1.4
 yt-dlp
 # Push notification APNs (tạo JWT token) + xác thực
 PyJWT>=2.8
+# SSH/SFTP proxy cho tính năng Remote Server (chạy lệnh trên VPS từ app)
+asyncssh>=2.14

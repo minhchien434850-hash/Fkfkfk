@@ -21,6 +21,16 @@ echo "    Commit mới nhất: $NEW_COMMIT"
 echo "==> Chép backend mới đè lên..."
 cp kenios-new/backend/kenios.py "$WORK/kenios.py"
 
+# Cài thư viện SSH (asyncssh) cho tính năng Remote Server — nếu thiếu thì cài, có rồi thì bỏ qua.
+echo "==> Đảm bảo thư viện asyncssh (cho SSH/Remote Server)..."
+if [ -x "$WORK/venv/bin/pip" ]; then
+  "$WORK/venv/bin/pip" install -q "asyncssh>=2.14" 2>/dev/null \
+    && echo "    ✓ asyncssh sẵn sàng." \
+    || echo "    ⚠️ Cài asyncssh chưa được (tính năng SSH sẽ báo lỗi cho tới khi cài)."
+else
+  pip install -q "asyncssh>=2.14" 2>/dev/null || true
+fi
+
 # Xoá cache bytecode cũ (lý do hay gặp: restart nhưng vẫn chạy code cũ)
 echo "==> Xoá cache Python cũ..."
 rm -rf "$WORK/__pycache__" 2>/dev/null || true

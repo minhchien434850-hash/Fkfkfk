@@ -2083,6 +2083,127 @@ def get_notif_sounds(user=Depends(get_user)) -> dict[str, Any]:
     return {"json": get_setting("notif_sounds_global", "")}
 
 
+# ===================== SSH / SFTP proxy (Remote Server Tool) =====================
+# App gửi Host/User/Password + lệnh → backend dùng asyncssh kết nối tới VPS đích,
+# chạy lệnh và truyền log về theo thời gian thực. KHÔNG lưu thông tin đăng nhập.
+
+class SSHExecIn(BaseModel):
+    host: str
+    port: Optional[int] = 22
+    username: str
+    password: str
+    command: str
+
+class SSHPathIn(BaseModel):
+    host: str
+    port: Optional[int] = 22
+    username: str
+    password: str
+    path: Optional[str] = "."
+
+
+def _require_asyncssh():
+    try:
+        import asyncssh  # type: ignore
+        return asyncssh
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail=("Máy chủ chưa cài asyncssh. SSH vào VPS chạy: "
+                    "'pip install asyncssh' rồi khởi động lại dịch vụ kenios."))
+
+
+@app.post("/ssh/exec")
+async def ssh_exec(b: SSHExecIn, user=Depends(get_user)):
+    """Chạy 1 lệnh trên VPS đích, truyền stdout+stderr về theo dòng (real-time)."""
+    asyncssh = _require_asyncssh()
+    host = (b.host or "").strip()
+    username = (b.username or "").strip()
+    command = b.command or ""
+    if not host or not username:
+        raise HTTPException(status_code=400, detail="Thiếu Host hoặc Username.")
+
+    async def gen():
+        try:
+            async with asyncssh.connect(
+                host, port=int(b.port or 22), username=username,
+                password=b.password, known_hosts=None,
+                connect_timeout=20,
+            ) as conn:
+                async with conn.create_process(command, stderr=asyncssh.STDOUT) as proc:
+                    async for line in proc.stdout:
+                        yield line if line.endswith("\n") else line + "\n"
+                    await proc.wait_closed()
+                    rc = proc.exit_status
+                    if rc not in (0, None):
+                        yield f"\n[exit code: {rc}]\n"
+        except Exception as e:  # noqa: BLE001
+            yield f"\nExecution Error: {e}\n"
+
+    return StreamingResponse(gen(), media_type="text/plain")
+
+
+@app.post("/ssh/list")
+async def ssh_list(b: SSHPathIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Liệt kê thư mục trên VPS đích qua SFTP."""
+    asyncssh = _require_asyncssh()
+    import stat as _stat
+    host = (b.host or "").strip()
+    username = (b.username or "").strip()
+    path = (b.path or ".").strip() or "."
+    if not host or not username:
+        raise HTTPException(status_code=400, detail="Thiếu Host hoặc Username.")
+    try:
+        async with asyncssh.connect(
+            host, port=int(b.port or 22), username=username,
+            password=b.password, known_hosts=None, connect_timeout=20,
+        ) as conn:
+            async with conn.start_sftp_client() as sftp:
+                real = await sftp.realpath(path)
+                names = await sftp.readdir(real)
+                items: list[dict[str, Any]] = []
+                for entry in names:
+                    fn = entry.filename
+                    if fn in (".", ".."):
+                        continue
+                    attrs = entry.attrs
+                    perms = attrs.permissions or 0
+                    is_dir = _stat.S_ISDIR(perms)
+                    items.append({
+                        "name": fn,
+                        "type": "dir" if is_dir else "file",
+                        "size": int(attrs.size or 0),
+                    })
+                return {"path": str(real), "items": items}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"SSH/SFTP lỗi: {e}")
+
+
+@app.post("/ssh/delete")
+async def ssh_delete(b: SSHPathIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Xoá 1 file trên VPS đích qua SFTP (chỉ file, không xoá thư mục để an toàn)."""
+    asyncssh = _require_asyncssh()
+    host = (b.host or "").strip()
+    username = (b.username or "").strip()
+    path = (b.path or "").strip()
+    if not host or not username or not path:
+        raise HTTPException(status_code=400, detail="Thiếu thông tin.")
+    try:
+        async with asyncssh.connect(
+            host, port=int(b.port or 22), username=username,
+            password=b.password, known_hosts=None, connect_timeout=20,
+        ) as conn:
+            async with conn.start_sftp_client() as sftp:
+                await sftp.remove(path)
+                return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Xoá thất bại: {e}")
+
+
 # ======================== API Keys (User) ========================
 @app.post("/keys")
 def save_key(b: KeyIn, user=Depends(get_user)) -> dict[str, Any]:
