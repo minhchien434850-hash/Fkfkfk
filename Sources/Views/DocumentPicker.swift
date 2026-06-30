@@ -71,15 +71,14 @@ struct DocumentPicker: UIViewControllerRepresentable {
                 return
             }
 
-            // Không phải asCopy → URL là security-scoped, phải xin quyền trước khi đọc
-            var accessed: [URL] = []
+            // Không phải asCopy → URL là security-scoped. Xin quyền truy cập (best-effort).
+            // QUAN TRỌNG: vẫn trả về MỌI URL kể cả khi startAccessingSecurityScopedResource()
+            // trả về false — nhiều file (iCloud, file lớn, file vừa tải về) trả false nhưng vẫn
+            // đọc/copy được. Trước đây lọc bỏ các URL này → bấm "Mở" như KHÔNG có gì xảy ra.
             for url in urls {
-                let granted = url.startAccessingSecurityScopedResource()
-                if granted {
-                    accessed.append(url)
-                }
+                _ = url.startAccessingSecurityScopedResource()
             }
-            onPick(accessed)
+            onPick(urls)
             // Lưu ý: caller phải gọi stopAccessingSecurityScopedResource sau khi dùng xong,
             // hoặc copy file ra thư mục tạm rồi stop ngay (xem copyToTemp trong FileToolsView).
         }
