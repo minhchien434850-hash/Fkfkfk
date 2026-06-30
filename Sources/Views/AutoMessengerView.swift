@@ -80,12 +80,22 @@ struct AutoMessengerView: View {
     @State private var runTask: Task<Void, Never>?
     @State private var showSetup   = false
     @State private var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+    @State private var fetchingFollowers = false
+    @State private var fetchMsg: String?
 
     private var platform: AutoPlatform { AutoPlatform(rawValue: platformRaw) ?? .telegram }
 
     private var messages: [String] {
         rawText.components(separatedBy: ":")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    // Nhiều người nhận: cách nhau bằng xuống dòng, dấu phẩy hoặc chấm phẩy.
+    private var recipientsList: [String] {
+        recipient
+            .split(whereSeparator: { $0 == "\n" || $0 == "," || $0 == ";" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
     }
 
@@ -142,10 +152,29 @@ struct AutoMessengerView: View {
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                         }
-                        TextField(recipientHint, text: $recipient)
+                        TextField(recipientHint, text: $recipient, axis: .vertical)
+                            .lineLimit(1...4)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .keyboardType(platform == .telegram ? .default : .phonePad)
+                        if platform == .zalo {
+                            Button {
+                                Task { await fetchZaloFollowers() }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if fetchingFollowers { ProgressView().scaleEffect(0.8) }
+                                    Label("Lấy hết User ID người theo dõi OA", systemImage: "person.2.badge.gearshape")
+                                        .font(.caption)
+                                }
+                            }
+                            .disabled(fetchingFollowers || token.isEmpty)
+                        }
+                        if let fetchMsg {
+                            Text(fetchMsg).font(.caption2)
+                                .foregroundStyle(fetchMsg.contains("✅") ? .green : .red)
+                        }
+                        Text("Gửi nhiều người: mỗi User ID cách nhau bằng dấu phẩy hoặc xuống dòng.")
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
                 .disabled(isRunning)
@@ -389,28 +418,34 @@ struct AutoMessengerView: View {
         guard idx < messages.count else { return }
         let text = messages[idx]
         await MainActor.run { results[idx].status = .sending }
-        do {
-            try await sendMessage(text: text)
-            await MainActor.run { results[idx].status = .ok }
-        } catch {
-            await MainActor.run {
+        // Gửi tới TẤT CẢ người nhận (mỗi dòng / dấu phẩy = 1 người). Webhook không bắt buộc người nhận.
+        let targets = recipientsList.isEmpty ? [""] : recipientsList
+        var firstError: Error?
+        for to in targets {
+            do { try await sendMessage(text: text, to: to) }
+            catch { if firstError == nil { firstError = error } }
+        }
+        await MainActor.run {
+            if let firstError {
                 results[idx].status = .fail
-                results[idx].error = error.localizedDescription
+                results[idx].error = firstError.localizedDescription
+            } else {
+                results[idx].status = .ok
             }
         }
     }
 
-    private func sendMessage(text: String) async throws {
+    private func sendMessage(text: String, to recipient: String) async throws {
         switch platform {
-        case .telegram:  try await sendTelegram(text: text)
-        case .whatsapp:  try await sendWhatsApp(text: text)
-        case .zalo:      try await sendZalo(text: text)
-        case .webhook:   try await sendWebhook(text: text)
+        case .telegram:  try await sendTelegram(text: text, to: recipient)
+        case .whatsapp:  try await sendWhatsApp(text: text, to: recipient)
+        case .zalo:      try await sendZalo(text: text, to: recipient)
+        case .webhook:   try await sendWebhook(text: text, to: recipient)
         }
     }
 
     // MARK: - Webhook / API riêng (Discord, Slack, n8n, backend VPS...)
-    private func sendWebhook(text: String) async throws {
+    private func sendWebhook(text: String, to recipient: String) async throws {
         let urlStr = webhookURL.trimmingCharacters(in: .whitespaces)
         guard let url = URL(string: urlStr) else {
             throw NSError(domain: "Webhook", code: -1,
@@ -452,7 +487,7 @@ struct AutoMessengerView: View {
     }
 
     // MARK: - Telegram Bot API
-    private func sendTelegram(text: String) async throws {
+    private func sendTelegram(text: String, to recipient: String) async throws {
         let url = URL(string: "https://api.telegram.org/bot\(token)/sendMessage")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -467,7 +502,7 @@ struct AutoMessengerView: View {
     }
 
     // MARK: - WhatsApp Business Cloud API
-    private func sendWhatsApp(text: String) async throws {
+    private func sendWhatsApp(text: String, to recipient: String) async throws {
         let phone = recipient.filter { $0.isNumber }
         let url = URL(string: "https://graph.facebook.com/v18.0/\(phoneNumId)/messages")!
         var req = URLRequest(url: url)
@@ -489,7 +524,7 @@ struct AutoMessengerView: View {
     }
 
     // MARK: - Zalo OA API
-    private func sendZalo(text: String) async throws {
+    private func sendZalo(text: String, to recipient: String) async throws {
         let url = URL(string: "https://openapi.zalo.me/v3.0/oa/message/cs")!
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -505,6 +540,62 @@ struct AutoMessengerView: View {
             let raw = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
             throw NSError(domain: "Zalo", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: raw])
         }
+    }
+
+    // MARK: - Lấy danh sách User ID người theo dõi OA (API chính thức Zalo, hợp lệ)
+    private func fetchZaloFollowers() async {
+        guard !token.isEmpty else { fetchMsg = "Nhập Access Token OA trước."; return }
+        fetchingFollowers = true; fetchMsg = nil
+        var ids: [String] = []
+        var offset = 0
+        let count = 50
+        do {
+            while true {
+                let dataParam = "{\"offset\":\(offset),\"count\":\(count)}"
+                let encoded = dataParam.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? dataParam
+                guard let url = URL(string: "https://openapi.zalo.me/v3.0/oa/user/getlist?data=\(encoded)") else { break }
+                var req = URLRequest(url: url)
+                req.setValue(token, forHTTPHeaderField: "access_token")
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    throw NSError(domain: "Zalo", code: http.statusCode,
+                                  userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"])
+                }
+                let parsed = try JSONDecoder().decode(ZaloFollowerList.self, from: data)
+                if parsed.error != 0 {
+                    throw NSError(domain: "Zalo", code: parsed.error,
+                                  userInfo: [NSLocalizedDescriptionKey: parsed.message ?? "Lỗi Zalo \(parsed.error)"])
+                }
+                let batch = parsed.data?.users?.compactMap { $0.user_id } ?? []
+                ids.append(contentsOf: batch)
+                if batch.count < count { break }     // hết trang
+                offset += count
+                if offset > 5000 { break }            // chặn an toàn
+            }
+            let unique = Array(Set(ids))
+            if unique.isEmpty {
+                fetchMsg = "Không lấy được User ID nào (OA chưa có người theo dõi, hoặc token/quyền chưa đủ)."
+            } else {
+                recipient = unique.joined(separator: ", ")
+                fetchMsg = "Đã lấy \(unique.count) User ID người theo dõi OA ✅"
+            }
+        } catch {
+            fetchMsg = "Lỗi lấy danh sách: \(error.localizedDescription)"
+        }
+        fetchingFollowers = false
+    }
+}
+
+private struct ZaloFollowerList: Decodable {
+    let error: Int
+    let message: String?
+    let data: DataBlock?
+    struct DataBlock: Decodable {
+        let total: Int?
+        let users: [User]?
+    }
+    struct User: Decodable {
+        let user_id: String?
     }
 }
 
