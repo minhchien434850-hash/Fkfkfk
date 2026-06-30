@@ -10,12 +10,14 @@ private enum AutoPlatform: String, CaseIterable {
     case telegram  = "telegram"
     case whatsapp  = "whatsapp"
     case zalo      = "zalo"
+    case webhook   = "webhook"
 
     var label: String {
         switch self {
         case .telegram:  return "Telegram Bot"
         case .whatsapp:  return "WhatsApp Business"
         case .zalo:      return "Zalo OA"
+        case .webhook:   return "Webhook / API riêng"
         }
     }
     var icon: String {
@@ -23,6 +25,7 @@ private enum AutoPlatform: String, CaseIterable {
         case .telegram:  return "paperplane.fill"
         case .whatsapp:  return "phone.circle.fill"
         case .zalo:      return "message.fill"
+        case .webhook:   return "link"
         }
     }
     var color: Color {
@@ -30,6 +33,7 @@ private enum AutoPlatform: String, CaseIterable {
         case .telegram:  return .blue
         case .whatsapp:  return .green
         case .zalo:      return .cyan
+        case .webhook:   return .orange
         }
     }
     var setupHint: String {
@@ -40,6 +44,8 @@ private enum AutoPlatform: String, CaseIterable {
             return "1. Tạo tài khoản tại developers.facebook.com\n2. Tạo app → WhatsApp → lấy Access Token & Phone Number ID\n3. Recipient là số điện thoại quốc tế (vd +84901234567)"
         case .zalo:
             return "1. Tạo Zalo Official Account tại oa.zalo.me\n2. Vào Cài đặt → API → lấy Access Token\n3. Recipient là user_id (lấy từ API get_profile)"
+        case .webhook:
+            return "Gửi tin tới BẤT KỲ dịch vụ nào có webhook/API HTTP (Discord, Slack, n8n, hoặc API backend riêng trên VPS của bạn).\n1. Dán URL webhook vào ô \"Webhook URL\".\n2. Mẫu JSON: dùng {text} cho nội dung tin, {recipient} cho người nhận.\nVí dụ Discord: {\"content\":\"{text}\"}\nVí dụ riêng: {\"to\":\"{recipient}\",\"message\":\"{text}\"}"
         }
     }
 }
@@ -63,6 +69,8 @@ struct AutoMessengerView: View {
     @AppStorage("amDelaySec")     private var delaySec = 10
     @AppStorage("amToken")        private var token = ""
     @AppStorage("amPhoneNumId")   private var phoneNumId = ""  // WhatsApp only
+    @AppStorage("amWebhookURL")   private var webhookURL = ""  // Webhook only
+    @AppStorage("amWebhookBody")  private var webhookBody = "{\"content\":\"{text}\"}"  // Webhook JSON mẫu
 
     @State private var isRunning   = false
     @State private var currentIdx  = 0
@@ -96,6 +104,7 @@ struct AutoMessengerView: View {
                             Label(p.label, systemImage: p.icon).tag(p.rawValue)
                         }
                     }
+                    .disabled(isRunning)
                     Button {
                         showSetup = true
                     } label: {
@@ -106,19 +115,38 @@ struct AutoMessengerView: View {
 
                 // Credentials
                 Section("Thông tin API") {
-                    SecureField(platform == .telegram ? "Bot Token (vd 123456:ABC...)" : "Access Token", text: $token)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    if platform == .whatsapp {
-                        TextField("Phone Number ID (từ Meta dashboard)", text: $phoneNumId)
+                    if platform == .webhook {
+                        TextField("Webhook URL (https://...)", text: $webhookURL)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Mẫu JSON gửi đi (dùng {text} và {recipient})").font(.caption2).foregroundStyle(.secondary)
+                            TextEditor(text: $webhookBody)
+                                .frame(minHeight: 60)
+                                .font(.system(.caption, design: .monospaced))
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                        TextField("Người nhận (tuỳ chọn — cho {recipient})", text: $recipient)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } else {
+                        SecureField(platform == .telegram ? "Bot Token (vd 123456:ABC...)" : "Access Token", text: $token)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if platform == .whatsapp {
+                            TextField("Phone Number ID (từ Meta dashboard)", text: $phoneNumId)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                        TextField(recipientHint, text: $recipient)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(platform == .telegram ? .default : .phonePad)
                     }
-                    TextField(recipientHint, text: $recipient)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(platform == .telegram ? .default : .phonePad)
                 }
+                .disabled(isRunning)
 
                 // Delay
                 Section {
@@ -142,6 +170,7 @@ struct AutoMessengerView: View {
                         .frame(minHeight: 110)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .disabled(isRunning)
                 } header: {
                     HStack {
                         Text("Danh sách tin (dùng : để phân cách)")
@@ -246,19 +275,25 @@ struct AutoMessengerView: View {
     }
 
     private var canStart: Bool {
-        !messages.isEmpty && !token.isEmpty && !recipient.isEmpty &&
-        (platform != .whatsapp || !phoneNumId.isEmpty)
+        if messages.isEmpty { return false }
+        if platform == .webhook {
+            return !webhookURL.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        return !token.isEmpty && !recipient.isEmpty &&
+            (platform != .whatsapp || !phoneNumId.isEmpty)
     }
 
     @ViewBuilder
     private var validationNote: some View {
         if messages.isEmpty {
             Text("Nhập ít nhất 1 tin nhắn.").font(.caption2).foregroundStyle(.red)
-        } else if token.isEmpty {
+        } else if platform == .webhook && webhookURL.trimmingCharacters(in: .whitespaces).isEmpty {
+            Text("Nhập Webhook URL.").font(.caption2).foregroundStyle(.red)
+        } else if platform != .webhook && token.isEmpty {
             Text("Nhập Token API.").font(.caption2).foregroundStyle(.red)
         } else if platform == .whatsapp && phoneNumId.isEmpty {
             Text("Nhập Phone Number ID.").font(.caption2).foregroundStyle(.red)
-        } else if recipient.isEmpty {
+        } else if platform != .webhook && recipient.isEmpty {
             Text("Nhập người nhận.").font(.caption2).foregroundStyle(.red)
         }
     }
@@ -268,6 +303,7 @@ struct AutoMessengerView: View {
         case .telegram:  return "Chat ID hoặc @username người nhận"
         case .whatsapp:  return "SĐT quốc tế (vd +84901234567)"
         case .zalo:      return "User ID Zalo (lấy từ API)"
+        case .webhook:   return "Người nhận (tuỳ chọn)"
         }
     }
 
@@ -348,7 +384,50 @@ struct AutoMessengerView: View {
         case .telegram:  try await sendTelegram(text: text)
         case .whatsapp:  try await sendWhatsApp(text: text)
         case .zalo:      try await sendZalo(text: text)
+        case .webhook:   try await sendWebhook(text: text)
         }
+    }
+
+    // MARK: - Webhook / API riêng (Discord, Slack, n8n, backend VPS...)
+    private func sendWebhook(text: String) async throws {
+        let urlStr = webhookURL.trimmingCharacters(in: .whitespaces)
+        guard let url = URL(string: urlStr) else {
+            throw NSError(domain: "Webhook", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Webhook URL không hợp lệ."])
+        }
+        // Chèn nội dung vào mẫu JSON một cách an toàn (escape ký tự đặc biệt của JSON).
+        let safeText = jsonEscaped(text)
+        let safeRecipient = jsonEscaped(recipient.trimmingCharacters(in: .whitespaces))
+        var payload = webhookBody.isEmpty ? "{\"text\":\"{text}\"}" : webhookBody
+        payload = payload
+            .replacingOccurrences(of: "{text}", with: safeText)
+            .replacingOccurrences(of: "{recipient}", with: safeRecipient)
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = payload.data(using: .utf8)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        if let http = resp as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            let raw = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw NSError(domain: "Webhook", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode): \(raw.prefix(160))"])
+        }
+    }
+
+    /// Escape chuỗi để nhúng an toàn vào giá trị JSON (giữ dấu ", \\, xuống dòng…).
+    private func jsonEscaped(_ s: String) -> String {
+        var out = ""
+        for ch in s {
+            switch ch {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            default:   out.append(ch)
+            }
+        }
+        return out
     }
 
     // MARK: - Telegram Bot API

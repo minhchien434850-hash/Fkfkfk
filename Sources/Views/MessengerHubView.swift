@@ -355,6 +355,7 @@ struct MessengerHubView: View {
     @State private var autoStatuses: [HubSendState] = []
     @State private var autoTask: Task<Void, Never>?
     @State private var showWebLogin = false
+    @State private var showApiSender = false   // gửi THẬT qua API (Telegram Bot/Webhook…)
     // Trạng thái kết nối web + danh sách bạn bè/cuộc trò chuyện đọc từ phiên web
     @State private var autoConnected = false
     @State private var autoFriends: [String] = []
@@ -648,6 +649,30 @@ struct MessengerHubView: View {
 
                 // ─────────────────── TAB: Tự động ───────────────────
                 if activeTab == 1 {
+                    // GỬI THẬT 100% qua API (không cần mở app, không kẹt sandbox)
+                    Section {
+                        Button { showApiSender = true } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "bolt.badge.automatic.fill")
+                                    .font(.title3).foregroundStyle(.white)
+                                    .frame(width: 38, height: 38)
+                                    .background(LinearGradient(colors: [.blue, .purple],
+                                                               startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Gửi THẬT qua API (khuyên dùng)").font(.subheadline.bold())
+                                    Text("Telegram Bot · WhatsApp · Zalo OA · Webhook — gửi thẳng, KHÔNG cần mở app")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.buttonStyle(.plain)
+                    } footer: {
+                        Text("Cách Web bên dưới chỉ chạy khi bạn đăng nhập web & giữ app mở. Muốn gửi tự động ổn định 100% → dùng “Gửi THẬT qua API”.")
+                            .font(.caption2)
+                    }
+
                     Section("Ứng dụng") {
                         Picker("Nền tảng", selection: $autoPlatformRaw) {
                             ForEach(AutoWebPlatform.allCases, id: \.rawValue) { p in
@@ -899,6 +924,9 @@ struct MessengerHubView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
             .onAppear { activeTab = initialTab }
             .onDisappear { stopManual(); stopAuto(); stopBlast(); stopTool() }
+            .sheet(isPresented: $showApiSender) {
+                AutoMessengerView().environmentObject(store)
+            }
             .sheet(isPresented: $showWebLogin, onDismiss: {
                 Task {
                     if activeTab == 2 { await loadToolFriends() }
