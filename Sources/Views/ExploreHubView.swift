@@ -212,6 +212,7 @@ struct LiveNowHubView: View {
                 Text(store.t("Phòng Live", "Live Rooms")).tag(0)
                 Text(store.t("Phát đa nền tảng", "Go Live")).tag(1)
                 Text(store.t("Lớp phủ", "Overlay")).tag(2)
+                Text(store.t("Máy chủ", "Server Engine")).tag(3)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal)
@@ -223,8 +224,11 @@ struct LiveNowHubView: View {
                 LiveView()
             } else if seg == 1 {
                 SocialMediaToolsView(initialSegment: 2)   // mở thẳng Live Tools
-            } else {
+            } else if seg == 2 {
                 OverlayDesignerView()
+            } else {
+                // Live Now System Engine — điều khiển FFmpeg/RTMP trên VPS qua SSH
+                LiveNowRootView(baseURL: store.baseURL, token: store.token ?? "")
             }
         }
     }
