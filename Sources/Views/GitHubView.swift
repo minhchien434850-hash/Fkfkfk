@@ -362,7 +362,7 @@ struct GitHubRepoView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadRuns(); await loadRelease() }
         .sheet(isPresented: $showImporter) {
-            DocumentPicker(allowsMultipleSelection: true) { urls in
+            DocumentPicker(allowsMultipleSelection: true, asCopy: true) { urls in
                 Task { await upload(urls) }
             }
             .ignoresSafeArea()

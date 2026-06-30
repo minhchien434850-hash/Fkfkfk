@@ -311,7 +311,7 @@ struct StoreProductEditor: View {
             }
             .sheet(isPresented: $showImporter) {
                 // allowsMultipleSelection: true → hiện ô TÍCH (✓) + nút "Mở"; nhận MỌI loại file (game/app/zip…).
-                DocumentPicker(allowsMultipleSelection: true) { urls in
+                DocumentPicker(allowsMultipleSelection: true, asCopy: true) { urls in
                     if let url = urls.first { Task { await uploadFile(url) } }
                 }
                 .ignoresSafeArea()

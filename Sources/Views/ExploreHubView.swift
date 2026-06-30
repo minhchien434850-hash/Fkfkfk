@@ -289,7 +289,7 @@ struct MediaConverterView: View {
             }
             .sheet(isPresented: $showAudioPicker) {
                 // Nhận video HOẶC file âm thanh, hiện ô tích (✓) + nút "Mở".
-                DocumentPicker(contentTypes: [.movie, .video, .audio], allowsMultipleSelection: true) { urls in
+                DocumentPicker(contentTypes: [.movie, .video, .audio], allowsMultipleSelection: true, asCopy: true) { urls in
                     if let url = urls.first { Task { await extractAudioToLink(url) } }
                 }.ignoresSafeArea()
             }

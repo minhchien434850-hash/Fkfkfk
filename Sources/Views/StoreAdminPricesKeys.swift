@@ -198,7 +198,7 @@ struct StoreKeysManager: View {
         .task { await reload() }
         .refreshable { await reload() }
         .sheet(isPresented: $showFileImporter) {
-            DocumentPicker(allowsMultipleSelection: true) { urls in
+            DocumentPicker(allowsMultipleSelection: true, asCopy: true) { urls in
                 if let url = urls.first { Task { await importFromFile(url) } }
             }
             .ignoresSafeArea()

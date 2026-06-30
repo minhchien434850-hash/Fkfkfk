@@ -455,7 +455,7 @@ struct TTSView: View {
         }
         .sheet(isPresented: $showAudioImporter) {
             // Bộ chọn file có ô TÍCH (✓) + nút "Mở"; nhận mọi file âm thanh.
-            DocumentPicker(contentTypes: [.audio, .mpeg4Audio, .mp3, .wav], allowsMultipleSelection: true) { urls in
+            DocumentPicker(contentTypes: [.audio, .mpeg4Audio, .mp3, .wav], allowsMultipleSelection: true, asCopy: true) { urls in
                 if let fileURL = urls.first {
                     let t = audioImportType
                     Task { await uploadAudio(fileURL, for: t) }

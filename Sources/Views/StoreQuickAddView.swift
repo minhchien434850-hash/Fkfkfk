@@ -544,7 +544,7 @@ struct StoreQuickAddView: View {
             .task { await loadCategories() }
             .sheet(isPresented: $showImporter) {
                 // allowsMultipleSelection: true → iOS hiện ô TÍCH (✓) + nút "Mở" (Open); nhận MỌI loại file.
-                DocumentPicker(allowsMultipleSelection: true) { urls in
+                DocumentPicker(allowsMultipleSelection: true, asCopy: true) { urls in
                     if let url = urls.first { Task { await uploadFile(url) } }
                 }
                 .ignoresSafeArea()
@@ -554,7 +554,7 @@ struct StoreQuickAddView: View {
                 set: { if !$0 { showDownloadPickerFor = nil } }
             )) {
                 if let pid = showDownloadPickerFor {
-                    DocumentPicker(allowsMultipleSelection: true) { urls in
+                    DocumentPicker(allowsMultipleSelection: true, asCopy: true) { urls in
                         showDownloadPickerFor = nil
                         if let url = urls.first { Task { await uploadDownloadFile(url, productId: pid) } }
                     }
