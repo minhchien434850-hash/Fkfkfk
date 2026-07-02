@@ -617,6 +617,16 @@ struct DirectMessageItem: Identifiable, Decodable, Hashable {
     let isRead: Int
 }
 
+// Tin nhắn ĐẾN gần đây (để bật thông báo khi bạn bè nhắn)
+struct IncomingDM: Identifiable, Decodable, Hashable {
+    let id: Int
+    let senderId: Int
+    let content: String
+    let createdAt: Int?
+    let isRead: Int?
+    let senderName: String?
+}
+
 // §1.1 — Thông báo phát cho MỌI người dùng (đọc trong app, không cần APNs)
 struct AppNotification: Identifiable, Decodable, Hashable {
     let id: Int

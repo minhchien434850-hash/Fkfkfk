@@ -521,4 +521,9 @@ extension APIClient {
     func sendDirectMessage(receiverId: Int, content: String) async throws -> MessageResponse {
         try decode(try await send("/direct_messages", method: "POST", json: ["receiver_id": receiverId, "content": content]))
     }
+
+    // Tin nhắn ĐẾN gần đây (id > afterId) — để bật thông báo khi bạn bè nhắn
+    func recentIncomingMessages(afterId: Int) async throws -> [IncomingDM] {
+        try decode(try await send("/direct_messages_recent?after_id=\(afterId)"))
+    }
 }

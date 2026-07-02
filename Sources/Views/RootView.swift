@@ -109,6 +109,8 @@ struct MainTabView: View {
     @State private var showNotif = false
     @State private var notifTitle = ""
     @State private var notifBody = ""
+    // Thông báo tin nhắn mới từ bạn bè
+    @AppStorage("lastSeenDMId") private var lastSeenDMId = 0
 
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
@@ -207,6 +209,7 @@ struct MainTabView: View {
             }
             // §1.1 — Kiểm tra thông báo phát (sản phẩm mới…) ngay khi mở app
             await checkNotifications()
+            await checkNewMessages()   // tin nhắn mới từ bạn bè
             // Theo dõi bảo trì + gói theo chu kỳ
             try? await store.api.sendActivity(tabName(store.tab))
             // Đồng bộ bảo trì + gói với máy chủ VPS mỗi 10 giây
@@ -214,6 +217,7 @@ struct MainTabView: View {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 await store.refreshMe()
                 await checkNotifications()   // §1.1 — có sản phẩm mới thì hiện ngay (kể cả khi đang mở app)
+                await checkNewMessages()     // tin nhắn mới từ bạn bè → hiện thông báo text
             }
         }
         .onChange(of: scenePhase) { phase in
@@ -288,6 +292,40 @@ struct MainTabView: View {
         if !showUpdate && !showWelcomePopup {
             withAnimation(.spring(response: 0.4)) { showNotif = true }
         }
+    }
+
+    // Thông báo tin nhắn mới từ bạn bè (chỉ tin CHƯA đọc → không báo lại tin đã xem trong chat).
+    private func checkNewMessages() async {
+        guard let msgs = try? await store.api.recentIncomingMessages(afterId: lastSeenDMId),
+              !msgs.isEmpty else { return }
+        let maxId = msgs.map(\.id).max() ?? lastSeenDMId
+        let firstRun = (lastSeenDMId == 0)
+        lastSeenDMId = maxId
+        if firstRun { return }   // lần đầu chỉ ghi mốc, tránh bung tất cả tin cũ
+        let fresh = msgs.filter { ($0.isRead ?? 0) == 0 }.sorted { $0.id < $1.id }
+        guard !fresh.isEmpty else { return }
+        if fresh.count > 3 {
+            store.postLocalNotification(title: "💬 Tin nhắn mới",
+                                        body: "Bạn có \(fresh.count) tin nhắn mới từ bạn bè.")
+        } else {
+            for m in fresh {
+                let who = (m.senderName?.isEmpty == false) ? m.senderName! : "Bạn bè"
+                store.postLocalNotification(title: "💬 \(who)", body: dmPreview(m.content))
+            }
+        }
+    }
+
+    // Rút gọn nội dung để hiện trong thông báo (tin media → nhãn thân thiện).
+    private func dmPreview(_ content: String) -> String {
+        if let media = ChatMedia.parse(content) {
+            switch media.kind {
+            case "img":   return "📷 Đã gửi một ảnh"
+            case "video": return "🎥 Đã gửi một video"
+            case "audio": return "🎤 Đã gửi tin nhắn thoại"
+            default:      return "📎 Đã gửi một tệp"
+            }
+        }
+        return content
     }
 
     private func tabName(_ t: Int) -> String {

@@ -7074,6 +7074,21 @@ def send_direct_message(b: DirectMessageIn, user=Depends(get_user)) -> dict[str,
     return {"id": msg_id, "message": "Đã gửi tin nhắn thành công."}
 
 
+@app.get("/direct_messages_recent")
+def recent_incoming_dms(after_id: int = 0, user=Depends(get_user)) -> list[dict[str, Any]]:
+    """Tin nhắn ĐẾN gần đây (id > after_id) kèm tên người gửi — để app poll & bật thông báo."""
+    with db() as c:
+        rows = c.execute(
+            "SELECT dm.id, dm.sender_id, dm.content, dm.created_at, dm.is_read, "
+            "       u.username AS sender_name "
+            "FROM direct_messages dm JOIN users u ON u.id=dm.sender_id "
+            "WHERE dm.receiver_id=? AND dm.id>? "
+            "ORDER BY dm.id DESC LIMIT 20",
+            (user["id"], after_id)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 
 # ======================== Search ========================
 @app.get("/search")
