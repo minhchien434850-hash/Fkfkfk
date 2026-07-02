@@ -74,10 +74,11 @@ struct VendorStorefrontView: View {
                         .frame(width: 54, height: 54).clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 VStack(alignment: .leading, spacing: 3) {
+                    let ne = s.nameEffect ?? "gradient"
                     LogoEffectText(text: s.name,
-                                   effect: s.nameEffect ?? "gradient",
+                                   effect: ne == "none" ? "solid" : ne,
                                    font: .title3.bold(),
-                                   solidColor: hexColor(s.nameColor))
+                                   solidColor: hexColor(s.nameColor) ?? .white)
                         .lineLimit(1)
                     if let sl = s.slogan, !sl.isEmpty {
                         let se = s.sloganEffect ?? "none"

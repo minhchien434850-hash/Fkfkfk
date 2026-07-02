@@ -332,9 +332,9 @@ struct MyStoreView: View {
             // Xem trước trực tiếp trên nền tối như hero storefront
             VStack(alignment: .leading, spacing: 4) {
                 LogoEffectText(text: name.isEmpty ? store.t("Tên cửa hàng", "Store name") : name,
-                               effect: nameEffect,
+                               effect: nameEffect == "none" ? "solid" : nameEffect,
                                font: .title3.bold(),
-                               solidColor: hexColor(nameColor))
+                               solidColor: hexColor(nameColor) ?? .white)
                     .lineLimit(1)
                 if !slogan.isEmpty {
                     LogoEffectText(text: slogan,
