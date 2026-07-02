@@ -889,6 +889,9 @@ def _migrate() -> None:
         ("users", "notif_sounds", "TEXT"),
         # §1.1 — Ảnh đính kèm thông báo (rich notification có hình sản phẩm)
         ("notifications", "image", "TEXT DEFAULT ''"),
+        # §7 Đợt 1 — Giao diện + hồ sơ cửa hàng cá nhân (ảnh bìa + slogan riêng)
+        ("user_stores", "banner_url", "TEXT DEFAULT ''"),
+        ("user_stores", "slogan",     "TEXT DEFAULT ''"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -5655,6 +5658,8 @@ class MyStoreIn(BaseModel):
     name: str
     description: Optional[str] = None
     logo_url: Optional[str] = None
+    banner_url: Optional[str] = None
+    slogan: Optional[str] = None
 
 class MyProductIn(BaseModel):
     id: Optional[int] = None
@@ -5665,8 +5670,12 @@ class MyProductIn(BaseModel):
     download_url: Optional[str] = None
 
 def _store_dict(row) -> dict[str, Any]:
+    # .keys() an toàn cho cột mới (banner_url/slogan) khi row cũ chưa có
+    keys = row.keys()
     return {"id": row["id"], "owner_id": row["owner_id"], "name": row["name"],
             "description": row["description"] or "", "logo_url": row["logo_url"] or "",
+            "banner_url": (row["banner_url"] if "banner_url" in keys else "") or "",
+            "slogan": (row["slogan"] if "slogan" in keys else "") or "",
             "created_at": row["created_at"] or 0}
 
 def _uproduct_dict(row) -> dict[str, Any]:
@@ -5698,15 +5707,17 @@ def my_store_save(b: MyStoreIn, user=Depends(get_user)) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Tên cửa hàng không được trống.")
     desc = (b.description or "").strip()[:500]
     logo = (b.logo_url or "").strip()[:400]
+    banner = (b.banner_url or "").strip()[:400]
+    slogan = (b.slogan or "").strip()[:200]
     with db() as c:
         row = c.execute("SELECT * FROM user_stores WHERE owner_id=?", (user["id"],)).fetchone()
         if row:
-            c.execute("UPDATE user_stores SET name=?, description=?, logo_url=? WHERE owner_id=?",
-                      (name, desc, logo, user["id"]))
+            c.execute("UPDATE user_stores SET name=?, description=?, logo_url=?, banner_url=?, slogan=? WHERE owner_id=?",
+                      (name, desc, logo, banner, slogan, user["id"]))
             sid = row["id"]
         else:
-            cur = c.execute("INSERT INTO user_stores(owner_id,name,description,logo_url,created_at) "
-                            "VALUES(?,?,?,?,?)", (user["id"], name, desc, logo, int(time.time())))
+            cur = c.execute("INSERT INTO user_stores(owner_id,name,description,logo_url,banner_url,slogan,created_at) "
+                            "VALUES(?,?,?,?,?,?,?)", (user["id"], name, desc, logo, banner, slogan, int(time.time())))
             sid = cur.lastrowid
         row = c.execute("SELECT * FROM user_stores WHERE id=?", (sid,)).fetchone()
     return {"store": _store_dict(row)}

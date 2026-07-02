@@ -565,10 +565,13 @@ struct APIClient {
     func getMyStore() async throws -> MyStoreResponse {
         try decode(try await send("/my-store"))
     }
-    func saveMyStore(name: String, description: String?, logoUrl: String?) async throws -> MyStore {
+    func saveMyStore(name: String, description: String?, logoUrl: String?,
+                     bannerUrl: String? = nil, slogan: String? = nil) async throws -> MyStore {
         var body: [String: Any] = ["name": name]
         if let description { body["description"] = description }
         if let logoUrl { body["logo_url"] = logoUrl }
+        if let bannerUrl { body["banner_url"] = bannerUrl }
+        if let slogan { body["slogan"] = slogan }
         struct R: Decodable { let store: MyStore }
         let r: R = try decode(try await send("/my-store", method: "POST", json: body))
         return r.store

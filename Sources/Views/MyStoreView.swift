@@ -14,9 +14,18 @@ struct MyStoreView: View {
     @State private var loading = false
     @State private var name = ""
     @State private var desc = ""
+    @State private var slogan = ""
+    @State private var logoUrl = ""
+    @State private var bannerUrl = ""
     @State private var saving = false
     @State private var message: String?
     @State private var errorMessage: String?
+
+    // Đợt 1 — giao diện: chọn logo / ảnh bìa từ máy
+    @State private var logoItem: PhotosPickerItem?
+    @State private var bannerItem: PhotosPickerItem?
+    @State private var uploadingLogo = false
+    @State private var uploadingBanner = false
 
     @State private var showAddProduct = false
 
@@ -47,6 +56,14 @@ struct MyStoreView: View {
             .navigationTitle(store.t("Cửa hàng", "Store"))
             .navigationBarTitleDisplayMode(.inline)
             .task { await loadMine() }
+            .onChange(of: logoItem) { item in
+                guard let item else { return }
+                Task { await uploadImage(item, isBanner: false) }
+            }
+            .onChange(of: bannerItem) { item in
+                guard let item else { return }
+                Task { await uploadImage(item, isBanner: true) }
+            }
             .sheet(isPresented: $showAddProduct) {
                 AddMyProductView { await loadMine() }.environmentObject(store)
             }
@@ -59,14 +76,38 @@ struct MyStoreView: View {
             VStack(alignment: .leading, spacing: 14) {
                 if loading { ProgressView().frame(maxWidth: .infinity) }
 
+                // Xem trước giao diện cửa hàng (ảnh bìa + logo + tên + slogan)
+                storefrontPreview
+
                 // Thông tin store (tạo mới hoặc sửa)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(store.t("Thông tin cửa hàng", "Store info")).font(.subheadline.bold())
                     TextField(store.t("Tên cửa hàng", "Store name"), text: $name)
                         .padding(10).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+                    TextField(store.t("Slogan (dòng giới thiệu ngắn)", "Slogan (short tagline)"), text: $slogan)
+                        .padding(10).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
                     TextField(store.t("Mô tả (tuỳ chọn)", "Description (optional)"), text: $desc, axis: .vertical)
                         .lineLimit(1...3)
                         .padding(10).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+
+                    // Chọn logo + ảnh bìa từ máy (tự upload → điền link)
+                    HStack(spacing: 10) {
+                        PhotosPicker(selection: $logoItem, matching: .images) {
+                            Label(uploadingLogo ? store.t("Đang tải...", "Uploading...")
+                                                : (logoUrl.isEmpty ? store.t("Chọn logo", "Pick logo")
+                                                                   : store.t("Đổi logo", "Change logo")),
+                                  systemImage: "photo.circle").font(.caption.bold())
+                        }.disabled(uploadingLogo)
+                        Spacer()
+                        PhotosPicker(selection: $bannerItem, matching: .images) {
+                            Label(uploadingBanner ? store.t("Đang tải...", "Uploading...")
+                                                  : (bannerUrl.isEmpty ? store.t("Chọn ảnh bìa", "Pick banner")
+                                                                       : store.t("Đổi ảnh bìa", "Change banner")),
+                                  systemImage: "photo.badge.plus").font(.caption.bold())
+                        }.disabled(uploadingBanner)
+                    }
+                    .padding(.vertical, 2)
+
                     Button {
                         Task { await saveStore() }
                     } label: {
@@ -146,17 +187,99 @@ struct MyStoreView: View {
                 if searching { ProgressView() }
                 if let e = searchError { Text(e).font(.caption).foregroundStyle(.red) }
                 if let s = foundStore {
+                    foundStorefront(s)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(s.name).font(.title3.bold())
                         if let d = s.description, !d.isEmpty { Text(d).font(.caption).foregroundStyle(.secondary) }
                         Text("Store ID #\(s.id)").font(.caption2).foregroundStyle(Theme.accent)
-                    }.padding().kCard(16)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding().kCard(16)
                     Text(store.t("Sản phẩm (\(foundProducts.count))", "Products (\(foundProducts.count))")).font(.subheadline.bold())
                     ForEach(foundProducts) { p in productRow(p, canDelete: false) }
                 }
             }
             .padding()
         }
+    }
+
+    // Xem trước dáng cửa hàng: ảnh bìa + logo + tên + slogan (như storefront thật)
+    @ViewBuilder private var storefrontPreview: some View {
+        ZStack(alignment: .bottomLeading) {
+            // Ảnh bìa
+            Group {
+                if !bannerUrl.isEmpty, let url = URL(string: bannerUrl) {
+                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                        placeholder: { Color(.tertiarySystemBackground) }
+                } else {
+                    LinearGradient(colors: [Theme.accent.opacity(0.55), Theme.purple.opacity(0.55)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
+            }
+            .frame(height: 130).frame(maxWidth: .infinity).clipped()
+            LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+
+            HStack(spacing: 10) {
+                // Logo
+                Group {
+                    if !logoUrl.isEmpty, let url = URL(string: logoUrl) {
+                        CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                            placeholder: { Color.black.opacity(0.3) }
+                    } else {
+                        ZStack { Color.black.opacity(0.3); Image(systemName: "storefront.fill").foregroundStyle(.white) }
+                    }
+                }
+                .frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.6), lineWidth: 1))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name.isEmpty ? store.t("Tên cửa hàng", "Store name") : name)
+                        .font(.headline).foregroundStyle(.white).lineLimit(1)
+                    if !slogan.isEmpty {
+                        Text(slogan).font(.caption2).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+        }
+        .frame(height: 130)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    // Dáng cửa hàng của người khác khi xem theo Store ID (ảnh bìa + logo + tên + slogan)
+    private func foundStorefront(_ s: MyStore) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if let bu = s.bannerUrl, !bu.isEmpty, let url = URL(string: bu) {
+                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                        placeholder: { Color(.tertiarySystemBackground) }
+                } else {
+                    LinearGradient(colors: [Theme.accent.opacity(0.55), Theme.purple.opacity(0.55)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                }
+            }
+            .frame(height: 130).frame(maxWidth: .infinity).clipped()
+            LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+            HStack(spacing: 10) {
+                Group {
+                    if let lu = s.logoUrl, !lu.isEmpty, let url = URL(string: lu) {
+                        CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                            placeholder: { Color.black.opacity(0.3) }
+                    } else {
+                        ZStack { Color.black.opacity(0.3); Image(systemName: "storefront.fill").foregroundStyle(.white) }
+                    }
+                }
+                .frame(width: 46, height: 46).clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.6), lineWidth: 1))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(s.name).font(.headline).foregroundStyle(.white).lineLimit(1)
+                    if let sl = s.slogan, !sl.isEmpty {
+                        Text(sl).font(.caption2).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+        }
+        .frame(height: 130).clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func productRow(_ p: MyStoreProduct, canDelete: Bool) -> some View {
@@ -190,7 +313,25 @@ struct MyStoreView: View {
         if let r = try? await store.api.getMyStore() {
             myStore = r.store
             products = r.products ?? []
-            if let s = r.store { name = s.name; desc = s.description ?? "" }
+            if let s = r.store {
+                name = s.name; desc = s.description ?? ""
+                slogan = s.slogan ?? ""
+                logoUrl = s.logoUrl ?? ""
+                bannerUrl = s.bannerUrl ?? ""
+            }
+        }
+    }
+
+    // Upload logo hoặc ảnh bìa lên máy chủ → điền link
+    private func uploadImage(_ item: PhotosPickerItem, isBanner: Bool) async {
+        if isBanner { uploadingBanner = true } else { uploadingLogo = true }
+        defer { if isBanner { uploadingBanner = false; bannerItem = nil }
+                else { uploadingLogo = false; logoItem = nil } }
+        guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty else { return }
+        if let url = try? await store.api.mediaUpload(
+            dataBase64: data.base64EncodedString(), mime: "image/jpeg",
+            name: "\(isBanner ? "banner" : "logo")_\(Int(Date().timeIntervalSince1970)).jpg") {
+            if isBanner { bannerUrl = url } else { logoUrl = url }
         }
     }
 
@@ -200,7 +341,10 @@ struct MyStoreView: View {
         do {
             let s = try await store.api.saveMyStore(
                 name: name.trimmingCharacters(in: .whitespaces),
-                description: desc, logoUrl: nil)
+                description: desc,
+                logoUrl: logoUrl.isEmpty ? nil : logoUrl,
+                bannerUrl: bannerUrl.isEmpty ? nil : bannerUrl,
+                slogan: slogan)
             myStore = s
             message = store.t("Đã lưu cửa hàng ✅", "Store saved ✅")
         } catch {
