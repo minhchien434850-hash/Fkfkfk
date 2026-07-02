@@ -6,6 +6,7 @@ import UIKit
 // và "Tìm cửa hàng" theo Store_ID để xem shop người khác. Dữ liệu cô lập, RBAC ở backend.
 struct MyStoreView: View {
     @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
     @State private var seg = 0
 
     // Cửa hàng của tôi
@@ -628,6 +629,7 @@ struct MyStoreView: View {
     private func saveStore() async {
         saving = true; defer { saving = false }
         message = nil; errorMessage = nil
+        let wasNew = (myStore == nil)
         do {
             let s = try await store.api.saveMyStore(
                 name: name.trimmingCharacters(in: .whitespaces),
@@ -636,7 +638,13 @@ struct MyStoreView: View {
                 bannerUrl: bannerUrl.isEmpty ? nil : bannerUrl,
                 slogan: slogan)
             myStore = s
+            store.myStoreId = s.id
             message = store.t("Đã lưu cửa hàng ✅", "Store saved ✅")
+            // §7 — Tạo shop MỚI xong → nhảy sang tab "Shop của tôi" (storefront).
+            if wasNew {
+                store.tab = 20
+                dismiss()
+            }
         } catch {
             errorMessage = friendlyError(error)
         }

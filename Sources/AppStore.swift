@@ -88,6 +88,12 @@ final class AppStore: ObservableObject {
     @Published var friendRequests: [FriendRequestItem] = []
     @Published var directMessages: [Int: [DirectMessageItem]] = [:]
 
+    // §7 — Store ID của cửa hàng cá nhân (nếu đã tạo) → hiện tab "Shop của tôi"
+    @Published var myStoreId: Int? = nil
+    func refreshMyStore() async {
+        if let r = try? await api.getMyStore() { myStoreId = r.store?.id }
+    }
+
     private let d = UserDefaults.standard
 
     /// Màu accent hiện tại của app (phụ thuộc vào accentColorName)

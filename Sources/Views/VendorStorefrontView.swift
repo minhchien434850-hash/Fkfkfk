@@ -6,6 +6,7 @@ import SwiftUI
 //  • Khách mở cửa hàng bất kỳ theo Store ID / link
 struct VendorStorefrontView: View {
     let sid: Int
+    var isOwner: Bool = false   // chủ shop → hiện nút quản lý (bút vẽ/bánh răng)
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
@@ -13,6 +14,7 @@ struct VendorStorefrontView: View {
     @State private var loading = true
     @State private var selectedCat: Int? = nil
     @State private var buyProduct: MyStoreProduct?
+    @State private var showManage = false
 
     private let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
@@ -40,22 +42,29 @@ struct VendorStorefrontView: View {
         }
         .navigationTitle(data?.store?.name ?? "Cửa hàng")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if isOwner {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showManage = true } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                }
+            }
+        }
         .task { await load() }
+        .refreshable { await load() }
         .sheet(item: $buyProduct) { p in
             BuyProductView(product: p, storeId: sid).environmentObject(store)
         }
+        .sheet(isPresented: $showManage, onDismiss: { Task { await load() } }) {
+            MyStoreView().environmentObject(store)
+        }
     }
 
-    // Hero: banner + logo + tên + slogan
+    // Hero: banner (ẢNH · VIDEO · GIF — như storefront admin) + logo + tên + slogan
     @ViewBuilder private func hero(_ s: MyStore) -> some View {
         ZStack(alignment: .bottomLeading) {
-            if let b = s.bannerUrl, !b.isEmpty, let u = URL(string: b) {
-                CachedAsyncImage(url: u) { img in img.resizable().scaledToFill() }
-                    placeholder: { Theme.heroGradient }
-                    .frame(height: 190).clipped()
-            } else {
-                Theme.heroGradient.frame(height: 190)
-            }
+            bannerMedia(s.bannerUrl).frame(height: 190).frame(maxWidth: .infinity).clipped()
             LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
                 .frame(height: 190)
             HStack(alignment: .bottom, spacing: 12) {
@@ -75,6 +84,24 @@ struct VendorStorefrontView: View {
             .padding(14)
         }
         .clipShape(RoundedRectangle(cornerRadius: 18))
+    }
+
+    // Render media theo LINK: video → phát lặp; GIF/WEBP → động; còn lại → ảnh (như admin).
+    @ViewBuilder private func bannerMedia(_ urlStr: String?) -> some View {
+        if let s = urlStr, !s.isEmpty {
+            if isVideoLink(s), let u = URL(string: s) {
+                LoopingVideoBackground(url: u, fit: false)
+            } else if isAnimatedImage(s), let u = URL(string: s) {
+                GIFWebView(url: u, contentMode: "cover")
+            } else if let u = URL(string: s) {
+                CachedAsyncImage(url: u) { img in img.resizable().scaledToFill() }
+                    placeholder: { Theme.heroGradient }
+            } else {
+                Theme.heroGradient
+            }
+        } else {
+            Theme.heroGradient
+        }
     }
 
     // 4 badge uy tín (như storefront admin)
@@ -138,10 +165,8 @@ struct VendorStorefrontView: View {
         let inStock = (p.stock ?? 1) > 0
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topLeading) {
-                if let m = p.media?.first, let u = URL(string: m.url) {
-                    CachedAsyncImage(url: u) { img in img.resizable().scaledToFill() }
-                        placeholder: { Color(.tertiarySystemFill) }
-                        .frame(height: 110).frame(maxWidth: .infinity).clipped()
+                if let m = p.media?.first, !m.url.isEmpty {
+                    bannerMedia(m.url).frame(height: 110).frame(maxWidth: .infinity).clipped()
                 } else {
                     ZStack { Color(.tertiarySystemFill); Image(systemName: "photo").foregroundStyle(.secondary) }
                         .frame(height: 110).frame(maxWidth: .infinity)
