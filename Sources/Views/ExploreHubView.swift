@@ -5,7 +5,7 @@ import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, remoteServer, remoteDesktop, certImport, ipaLibrary, myStore
+    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, remoteServer, remoteDesktop, certImport, ipaLibrary, myStore, pcRemote
     var id: String { rawValue }
 
     var title: String {
@@ -28,6 +28,7 @@ enum HubDest: String, Identifiable {
         case .certImport:     return "Chứng chỉ ký"
         case .ipaLibrary:     return "Kho IPA"
         case .myStore:        return "Cửa hàng của tôi"
+        case .pcRemote:       return "PC Remote"
         }
     }
     var subtitle: String {
@@ -50,6 +51,7 @@ enum HubDest: String, Identifiable {
         case .certImport:     return "Nhập .p12 · .mobileprovision"
         case .ipaLibrary:     return "Gom IPA · Ký & cài qua ESign"
         case .myStore:        return "Mở shop riêng · bán hàng"
+        case .pcRemote:       return "Trackpad · Phím · Xem màn hình"
         }
     }
     var titleEN: String {
@@ -72,6 +74,7 @@ enum HubDest: String, Identifiable {
         case .certImport:     return "Signing Cert"
         case .ipaLibrary:     return "IPA Library"
         case .myStore:        return "My Store"
+        case .pcRemote:       return "PC Remote"
         }
     }
     var subtitleEN: String {
@@ -94,6 +97,7 @@ enum HubDest: String, Identifiable {
         case .certImport:     return "Import .p12 · .mobileprovision"
         case .ipaLibrary:     return "Collect IPAs · Sign via ESign"
         case .myStore:        return "Your own shop · sell"
+        case .pcRemote:       return "Trackpad · Keys · Screen"
         }
     }
     var icon: String {
@@ -116,6 +120,7 @@ enum HubDest: String, Identifiable {
         case .certImport:     return "checkmark.seal.fill"
         case .ipaLibrary:     return "shippingbox.fill"
         case .myStore:        return "storefront.fill"
+        case .pcRemote:       return "desktopcomputer"
         }
     }
     var colors: [Color] {
@@ -138,6 +143,7 @@ enum HubDest: String, Identifiable {
         case .certImport:     return [Color(red: 0.2, green: 0.7, blue: 0.4), Color(red: 0.1, green: 0.5, blue: 0.35)]
         case .ipaLibrary:     return [Color(red: 0.55, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.3, blue: 0.85)]
         case .myStore:        return [Color(red: 0.0, green: 0.72, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.7)]
+        case .pcRemote:       return [Color(red: 0.0, green: 0.55, blue: 0.9), Color(red: 0.3, green: 0.2, blue: 0.85)]
         }
     }
     var gradient: LinearGradient {
@@ -151,7 +157,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .myStore, .remoteServer, .remoteDesktop, .certImport, .ipaLibrary, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .myStore, .remoteServer, .remoteDesktop, .certImport, .ipaLibrary, .pcRemote, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -229,6 +235,8 @@ struct ExploreHubView: View {
             IPALibraryView()
         case .myStore:
             MyStoreView()
+        case .pcRemote:
+            PCRemoteView()
         }
     }
 }
