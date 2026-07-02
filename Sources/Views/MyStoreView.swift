@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import UniformTypeIdentifiers
 
 // §7 — Đa người bán: "Cửa hàng của tôi" (tạo store · thêm sản phẩm · chia sẻ Store_ID)
 // và "Tìm cửa hàng" theo Store_ID để xem shop người khác. Dữ liệu cô lập, RBAC ở backend.
@@ -694,6 +695,8 @@ struct AddMyProductView: View {
     @State private var downloadUrl = ""
     @State private var imageItem: PhotosPickerItem?
     @State private var imageUrl = ""
+    @State private var mediaType = "image"   // image | video (như admin)
+    @State private var pasteLink = ""
     @State private var categoryId = 0
     @State private var kind = "app"   // app | acc
     @State private var uploading = false
@@ -720,17 +723,32 @@ struct AddMyProductView: View {
                         }
                     }
                 }
-                Section(store.t("Ảnh sản phẩm", "Product image")) {
-                    if !imageUrl.isEmpty, let url = URL(string: imageUrl) {
-                        CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
-                            placeholder: { Color(.tertiarySystemBackground) }
-                            .frame(height: 140).frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: 10))
+                Section(store.t("Ảnh / Video sản phẩm", "Product image / video")) {
+                    if !imageUrl.isEmpty {
+                        // Xem trước ẢNH · VIDEO · GIF theo link (như admin).
+                        Group {
+                            if isVideoLink(imageUrl), let u = URL(string: imageUrl) {
+                                LoopingVideoBackground(url: u, fit: true)
+                            } else if let url = URL(string: imageUrl) {
+                                CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                    placeholder: { Color(.tertiarySystemBackground) }
+                            }
+                        }
+                        .frame(height: 140).frame(maxWidth: .infinity).clipShape(RoundedRectangle(cornerRadius: 10))
                     }
-                    PhotosPicker(selection: $imageItem, matching: .images) {
-                        Label(uploading ? store.t("Đang tải ảnh…", "Uploading…")
-                                        : store.t("Chọn ảnh", "Choose image"),
-                              systemImage: "photo").font(.subheadline)
+                    PhotosPicker(selection: $imageItem, matching: .any(of: [.images, .videos])) {
+                        Label(uploading ? store.t("Đang tải lên…", "Uploading…")
+                                        : store.t("Chọn ảnh / video từ máy", "Choose image / video"),
+                              systemImage: "photo.on.rectangle").font(.subheadline)
                     }.disabled(uploading)
+                    HStack {
+                        TextField(store.t("Hoặc dán link ảnh/video", "Or paste image/video link"), text: $pasteLink)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Button(store.t("Dán", "Set")) {
+                            let u = pasteLink.trimmingCharacters(in: .whitespaces)
+                            if !u.isEmpty { imageUrl = u; mediaType = isVideoLink(u) ? "video" : "image"; pasteLink = "" }
+                        }.font(.caption.bold()).disabled(pasteLink.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
                 }
                 if let error { Text(error).foregroundStyle(.red).font(.caption) }
             }
@@ -753,17 +771,21 @@ struct AddMyProductView: View {
     private func uploadImage(_ item: PhotosPickerItem) async {
         uploading = true; defer { uploading = false }
         guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty else { return }
+        let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
+        let mime = isVideo ? "video/mp4" : "image/jpeg"
+        let ext = isVideo ? "mp4" : "jpg"
         if let url = try? await store.api.mediaUpload(
-            dataBase64: data.base64EncodedString(), mime: "image/jpeg",
-            name: "prod_\(Int(Date().timeIntervalSince1970)).jpg") {
+            dataBase64: data.base64EncodedString(), mime: mime,
+            name: "prod_\(Int(Date().timeIntervalSince1970)).\(ext)") {
             imageUrl = url
+            mediaType = isVideo ? "video" : "image"
         }
     }
 
     private func save() async {
         saving = true; defer { saving = false }
         error = nil
-        let media: [[String: String]] = imageUrl.isEmpty ? [] : [["type": "image", "url": imageUrl]]
+        let media: [[String: String]] = imageUrl.isEmpty ? [] : [["type": mediaType, "url": imageUrl]]
         do {
             try await store.api.saveMyProduct(
                 id: nil, name: name.trimmingCharacters(in: .whitespaces),
