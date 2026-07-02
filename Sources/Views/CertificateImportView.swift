@@ -279,13 +279,12 @@ struct CertificateImportView: View {
                 password = certs.savedPassword
                 if certs.hasP12 && !password.isEmpty { certs.validatePassword() }
             }
-            .fileImporter(isPresented: $showImporter,
-                          allowedContentTypes: allowedTypes,
-                          allowsMultipleSelection: true) { result in
-                switch result {
-                case .success(let urls): certs.importFiles(urls)
-                case .failure(let err):  certs.message = err.localizedDescription
-                }
+            // Dùng DocumentPicker (UIKit) thay .fileImporter: .fileImporter hay làm nút "Mở"
+            // mờ với .p12/.mobileprovision → chọn được mà bấm Mở không lên.
+            .sheet(isPresented: $showImporter) {
+                DocumentPicker(contentTypes: allowedTypes, allowsMultipleSelection: true, asCopy: true) { urls in
+                    certs.importFiles(urls)
+                }.ignoresSafeArea()
             }
             .alert(store.t("Xoá chứng chỉ?", "Remove certificate?"), isPresented: $showClearConfirm) {
                 Button(store.t("Xoá", "Remove"), role: .destructive) {

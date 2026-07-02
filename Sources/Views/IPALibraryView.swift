@@ -207,13 +207,12 @@ struct IPALibraryView: View {
             .navigationTitle(store.t("Kho IPA", "IPA Library"))
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { ipa.refresh() }
-            .fileImporter(isPresented: $showImporter,
-                          allowedContentTypes: allowedTypes,
-                          allowsMultipleSelection: true) { result in
-                switch result {
-                case .success(let urls): ipa.importFiles(urls)
-                case .failure(let err):  ipa.message = err.localizedDescription
-                }
+            // Dùng DocumentPicker (UIKit) thay .fileImporter: .fileImporter hay bị "Mở" mờ,
+            // chọn được file nhưng bấm Mở không lên. DocumentPicker asCopy hiện nút Mở dùng được.
+            .sheet(isPresented: $showImporter) {
+                DocumentPicker(contentTypes: allowedTypes, allowsMultipleSelection: true, asCopy: true) { urls in
+                    ipa.importFiles(urls)
+                }.ignoresSafeArea()
             }
         }
     }
