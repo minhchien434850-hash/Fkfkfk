@@ -6282,6 +6282,9 @@ def admin_store_save_product(b: StoreProductIn, admin=Depends(get_admin)) -> dic
                             (b.folder_id, name, b.description or "", media, b.download_url or "",
                              b.download_file_id, kind, int(time.time())))
             pid = cur.lastrowid
+    # §1.1 — Sản phẩm MỚI: đẩy thông báo cho TẤT CẢ người dùng (không chỉ admin).
+    if not b.id:
+        _notify_all_users("🆕 Sản phẩm mới", f"{name} vừa lên kệ! Mở KENIOS xem ngay.")
     return {"message": "Đã lưu sản phẩm.", "id": pid}
 
 @app.delete("/admin/store/products/{pid}")
@@ -6548,6 +6551,20 @@ def _notify_admins(title: str, body: str) -> None:
                          daemon=True, name="notify-admin").start()
     except Exception as e:
         log.warning("notify_admins lỗi: %s", e)
+
+
+def _notify_all_users(title: str, body: str) -> None:
+    """§1.1 — Gửi push cho MỌI thiết bị người dùng (không chỉ admin), chạy nền."""
+    try:
+        with db() as c:
+            tokens = [r["token"] for r in c.execute("SELECT token FROM device_tokens").fetchall()]
+        if not tokens or not _apns_configured():
+            return
+        import threading
+        threading.Thread(target=_apns_send, args=(tokens, title, body),
+                         daemon=True, name="notify-all").start()
+    except Exception as e:
+        log.warning("notify_all lỗi: %s", e)
 
 
 @app.post("/admin/push-notification")
