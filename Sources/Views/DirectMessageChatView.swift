@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import AVFoundation
+import AVKit
 import UIKit
 import UniformTypeIdentifiers
 
@@ -17,6 +18,7 @@ struct DirectMessageChatView: View {
     @State private var showFilePicker = false
     @State private var uploading = false
     @State private var fullscreenImageURL: String? = nil
+    @State private var fullscreenVideoURL: String? = nil
     @StateObject private var recorder = ChatVoiceRecorder()
 
     var body: some View {
@@ -98,6 +100,12 @@ struct DirectMessageChatView: View {
         )) { item in
             FullscreenImageViewer(urlString: item.url)
         }
+        .fullScreenCover(item: Binding(
+            get: { fullscreenVideoURL.map { ChatImageURL(url: $0) } },
+            set: { fullscreenVideoURL = $0?.url }
+        )) { item in
+            ChatVideoPlayerView(urlString: item.url)
+        }
     }
 
     // MARK: - Bong bóng tin nhắn (văn bản / ảnh / video / âm thanh / tệp)
@@ -118,7 +126,7 @@ struct DirectMessageChatView: View {
                     }
                     .buttonStyle(.plain)
                 case "video":
-                    Link(destination: URL(string: media.url) ?? URL(string: "https://")!) {
+                    Button { fullscreenVideoURL = media.url } label: {
                         ZStack {
                             RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.85))
                                 .frame(width: 200, height: 130)
@@ -127,6 +135,7 @@ struct DirectMessageChatView: View {
                                 .frame(width: 200, height: 130, alignment: .bottomLeading)
                         }
                     }
+                    .buttonStyle(.plain)
                 case "audio":
                     ChatAudioBubble(url: media.url, isMe: isMe)
                 default: // tệp
@@ -524,5 +533,42 @@ struct FullscreenImageViewer: View {
                 await MainActor.run { savedMsg = "Lưu thất bại" }
             }
         }
+    }
+}
+
+// MARK: - Phát video trong app (toàn màn hình, không mở trình duyệt)
+struct ChatVideoPlayerView: View {
+    let urlString: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+                    .onAppear { player.play() }
+            } else {
+                ProgressView().tint(.white)
+            }
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white.opacity(0.9))
+                    }
+                    Spacer()
+                }
+                .padding()
+                Spacer()
+            }
+        }
+        .onAppear {
+            if let url = URL(string: urlString) {
+                try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+                player = AVPlayer(url: url)
+            }
+        }
+        .onDisappear { player?.pause(); player = nil }
     }
 }
