@@ -1,8 +1,14 @@
 import SwiftUI
+import PhotosUI
 
 struct FriendsView: View {
     @EnvironmentObject var store: AppStore
-    
+
+    // §4.2 — Đổi ảnh đại diện ngay trong khu nhắn tin
+    @State private var myAvatar = ""
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var uploadingAvatar = false
+
     @State private var selectedSegment = 0 // 0: Bạn bè, 1: Lời mời, 2: Tìm kiếm
     @State private var searchQuery = ""
     @State private var searchResults: [UserSearchResult] = []
@@ -30,8 +36,11 @@ struct FriendsView: View {
                     Text(store.t("Tìm kiếm", "Search")).tag(2)
                 }
                 .pickerStyle(.segmented)
-                .padding()
-                
+                .padding(.horizontal)
+                .padding(.top)
+
+                myAvatarRow
+
                 Group {
                     if selectedSegment == 0 {
                         friendsPane
@@ -62,10 +71,78 @@ struct FriendsView: View {
             }
             .task {
                 await refreshData()
+                await loadMyAvatar()
+            }
+            .onChange(of: avatarItem) { item in
+                guard let item else { return }
+                Task { await uploadAvatar(item) }
             }
         }
     }
-    
+
+    // MARK: - §4.2 Đổi ảnh đại diện trong khu nhắn tin
+    private var myAvatarRow: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                if let url = URL(string: myAvatar), !myAvatar.isEmpty {
+                    CachedAsyncImage(url: url) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: {
+                        Color(.tertiarySystemBackground)
+                    }
+                    .frame(width: 52, height: 52).clipShape(Circle())
+                } else {
+                    Circle().fill(Theme.accent.opacity(0.15)).frame(width: 52, height: 52)
+                        .overlay(Image(systemName: "person.fill").foregroundStyle(Theme.accent))
+                }
+                if uploadingAvatar {
+                    Circle().fill(.black.opacity(0.4)).frame(width: 52, height: 52)
+                    ProgressView().tint(.white)
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.t("Ảnh đại diện của bạn", "Your avatar")).font(.subheadline.bold())
+                Text(store.t("Bạn bè sẽ thấy ảnh mới khi làm mới trò chuyện.",
+                             "Friends see the new photo when the chat refreshes."))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            PhotosPicker(selection: $avatarItem, matching: .images) {
+                Label(store.t("Đổi ảnh", "Change"), systemImage: "camera.fill")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Theme.accent.opacity(0.15)).clipShape(Capsule())
+            }
+            .disabled(uploadingAvatar)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal)
+        .padding(.bottom, 6)
+    }
+
+    private func loadMyAvatar() async {
+        if let p = try? await store.api.myProfile() {
+            myAvatar = p.avatarUrl ?? ""
+        }
+    }
+
+    private func uploadAvatar(_ item: PhotosPickerItem) async {
+        uploadingAvatar = true
+        defer { uploadingAvatar = false; avatarItem = nil }
+        guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty else { return }
+        do {
+            let url = try await store.api.mediaUpload(
+                dataBase64: data.base64EncodedString(), mime: "image/jpeg",
+                name: "avatar_\(Int(Date().timeIntervalSince1970)).jpg")
+            _ = try await store.api.updateProfile(publicId: nil, avatarUrl: url, bio: nil)
+            myAvatar = url
+        } catch {
+            // Lỗi mạng/tải lên — giữ ảnh cũ, người dùng thử lại.
+        }
+    }
+
     // MARK: - Friends Pane
     private var friendsPane: some View {
         ScrollView {
