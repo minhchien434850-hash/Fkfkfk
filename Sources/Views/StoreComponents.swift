@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import WebKit
+import ImageIO
 
 // ============================ GIF động (dùng WKWebView, không cần thư viện ngoài) ============================
 struct GIFWebView: UIViewRepresentable {
@@ -32,7 +33,32 @@ struct GIFWebView: UIViewRepresentable {
 // ============================ Bộ nhớ đệm ảnh (chống nhấp nháy khi quay lại trang) ============================
 /// Giữ ảnh đã tải trong RAM để khi rời trang rồi vào lại KHÔNG phải tải lại (đứng yên 100%).
 enum StoreImageCache {
-    nonisolated(unsafe) static let memory = NSCache<NSURL, UIImage>()
+    nonisolated(unsafe) static let memory: NSCache<NSURL, UIImage> = {
+        let c = NSCache<NSURL, UIImage>()
+        c.countLimit = 100                      // giữ tối đa 100 ảnh
+        c.totalCostLimit = 60 * 1024 * 1024     // ~60MB bitmap → tự xoá bớt khi vượt, tránh tràn RAM
+        return c
+    }()
+}
+
+/// Giảm kích thước ảnh khi giải mã (ImageIO) — CHỐNG VĂNG APP: ảnh gốc 4K/8K nếu giải mã
+/// nguyên cỡ sẽ ngốn RAM khổng lồ, nhiều ảnh cùng lúc → tràn bộ nhớ → văng. Thu về tối đa
+/// `maxPixel` px giúp nhẹ RAM hàng chục lần mà nhìn vẫn nét trên màn hình điện thoại.
+func kDownsampledImage(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+    let srcOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+    guard let src = CGImageSourceCreateWithData(data as CFData, srcOpts) else {
+        return UIImage(data: data)
+    }
+    let opts: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixel
+    ]
+    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else {
+        return UIImage(data: data)
+    }
+    return UIImage(cgImage: cg)
 }
 
 /// Ảnh tải từ link có CACHE — thay cho AsyncImage để không nhấp nháy/nạp lại.
@@ -59,9 +85,14 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
         }
         var req = URLRequest(url: url)
         req.cachePolicy = .returnCacheDataElseLoad   // tận dụng URLCache trên đĩa giữa các lần mở app
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
-              let img = UIImage(data: data) else { return }
-        StoreImageCache.memory.setObject(img, forKey: url as NSURL)
+        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return }
+        // Giải mã + thu nhỏ ở LUỒNG NỀN (tránh nghẽn giao diện và tràn RAM khi ảnh gốc quá lớn).
+        let img = await Task.detached(priority: .utility) {
+            kDownsampledImage(data, maxPixel: 1200)
+        }.value
+        guard let img else { return }
+        let cost = Int(img.size.width * img.size.height * img.scale * img.scale) * 4
+        StoreImageCache.memory.setObject(img, forKey: url as NSURL, cost: cost)
         uiImage = img
     }
 }
