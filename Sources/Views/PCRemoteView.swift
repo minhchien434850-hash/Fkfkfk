@@ -12,13 +12,15 @@ import SwiftUI
 //   POST /key    {name}       → phím đặc biệt (enter/backspace/space...)
 //   POST /media  {action}     → playpause/next/prev/mute/volup/voldown
 //   POST /system {action}     → desktop / lock
-//  Bảo mật: mọi request kèm header X-Token (mật khẩu chung với Agent).
+//  Bảo mật: mọi request kèm header X-User + X-Pass (khớp với Agent trên PC).
 // ============================================================================
 
 @MainActor
 final class PCRemoteEngine: ObservableObject {
-    @Published var baseURL: String = ""
-    @Published var token: String = ""
+    @Published var ip: String = ""
+    @Published var port: String = "8765"
+    @Published var username: String = ""
+    @Published var password: String = ""
     @Published var connected = false
     @Published var connecting = false
     @Published var error: String?
@@ -27,25 +29,33 @@ final class PCRemoteEngine: ObservableObject {
 
     var speed: Double = 2.5
 
-    private let kBase = "pc_base_url", kToken = "pc_token"
+    private let kIP = "pc_ip", kPort = "pc_port", kUser = "pc_user", kPass = "pc_pass"
     private var moveDX = 0.0, moveDY = 0.0
     private var moveTimer: Timer?
     private var previewTask: Task<Void, Never>?
 
     init() {
         let d = UserDefaults.standard
-        baseURL = d.string(forKey: kBase) ?? ""
-        token = Keychain.load(kToken) ?? ""
+        ip = d.string(forKey: kIP) ?? ""
+        port = d.string(forKey: kPort) ?? "8765"
+        username = d.string(forKey: kUser) ?? ""
+        password = Keychain.load(kPass) ?? ""
     }
 
-    var hasSavedLogin: Bool { !normalizedBase.isEmpty }
+    var hasSavedLogin: Bool {
+        !ip.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
+    }
 
+    // Ghép base URL từ IP + cổng (chấp nhận cả khi dán sẵn http://... hoặc link ngrok)
     private var normalizedBase: String {
-        var s = baseURL.trimmingCharacters(in: .whitespaces)
+        var s = ip.trimmingCharacters(in: .whitespaces)
         if s.isEmpty { return "" }
-        if !s.hasPrefix("http") { s = "https://" + s }
-        if s.hasSuffix("/") { s = String(s.dropLast()) }
-        return s
+        if s.contains("://") {
+            if s.hasSuffix("/") { s = String(s.dropLast()) }
+            return s
+        }
+        let p = port.trimmingCharacters(in: .whitespaces)
+        return "http://\(s):\(p.isEmpty ? "8765" : p)"
     }
 
     private func request(_ path: String, method: String = "POST", json: [String: Any]? = nil) -> URLRequest? {
@@ -53,7 +63,8 @@ final class PCRemoteEngine: ObservableObject {
         var r = URLRequest(url: url)
         r.httpMethod = method
         r.timeoutInterval = 8
-        r.setValue(token, forHTTPHeaderField: "X-Token")
+        r.setValue(username, forHTTPHeaderField: "X-User")
+        r.setValue(password, forHTTPHeaderField: "X-Pass")
         r.setValue("true", forHTTPHeaderField: "ngrok-skip-browser-warning")
         if let json {
             r.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -65,7 +76,9 @@ final class PCRemoteEngine: ObservableObject {
     // MARK: Kết nối
 
     func connect() async {
-        guard !normalizedBase.isEmpty else { error = "Nhập địa chỉ Agent (link ngrok)."; return }
+        guard !ip.trimmingCharacters(in: .whitespaces).isEmpty else {
+            error = "Nhập IP máy tính."; return
+        }
         connecting = true; error = nil
         defer { connecting = false }
         guard let req = request("/ping", method: "GET") else { error = "Địa chỉ không hợp lệ."; return }
@@ -73,16 +86,17 @@ final class PCRemoteEngine: ObservableObject {
             let (data, resp) = try await URLSession.shared.data(for: req)
             if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
                 connected = true
-                UserDefaults.standard.set(baseURL, forKey: kBase)
-                Keychain.save(kToken, token)
+                let d = UserDefaults.standard
+                d.set(ip, forKey: kIP); d.set(port, forKey: kPort); d.set(username, forKey: kUser)
+                Keychain.save(kPass, password)
                 startPreview()
             } else {
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                error = code == 401 ? "Sai mật khẩu (Token)." : "Agent không phản hồi (mã \(code)). Kiểm tra PC đã chạy Agent + ngrok chưa."
+                error = code == 401 ? "Sai tài khoản hoặc mật khẩu." : "PC không phản hồi (mã \(code)). Kiểm tra PC đã chạy Agent + cùng mạng Wi-Fi chưa."
                 _ = data
             }
         } catch {
-            self.error = "Không kết nối được: \(error.localizedDescription)"
+            self.error = "Không kết nối được — kiểm tra IP + cùng Wi-Fi với PC. (\(error.localizedDescription))"
         }
     }
 
@@ -93,9 +107,10 @@ final class PCRemoteEngine: ObservableObject {
 
     func forget() {
         disconnect()
-        UserDefaults.standard.removeObject(forKey: kBase)
-        Keychain.delete(kToken)
-        baseURL = ""; token = ""
+        let d = UserDefaults.standard
+        [kIP, kPort, kUser].forEach { d.removeObject(forKey: $0) }
+        Keychain.delete(kPass)
+        ip = ""; port = "8765"; username = ""; password = ""
     }
 
     // MARK: Xem màn hình (poll ảnh JPEG)
@@ -202,13 +217,20 @@ struct PCRemoteView: View {
                 .padding(.top, 20)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    field("Địa chỉ Agent (link ngrok)") {
-                        TextField("https://xxxx.ngrok-free.dev", text: $pc.baseURL)
+                    field("IP máy tính") {
+                        TextField("vd: 192.168.1.10", text: $pc.ip)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .keyboardType(.URL)
+                            .keyboardType(.numbersAndPunctuation)
                     }
-                    field("Mật khẩu (Token) — trùng với Agent trên PC") {
-                        SecureField("Token bảo mật", text: $pc.token)
+                    field("Cổng (Port)") {
+                        TextField("8765", text: $pc.port).keyboardType(.numberPad)
+                    }
+                    field("Tài khoản") {
+                        TextField("vd: admin", text: $pc.username)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                    field("Mật khẩu") {
+                        SecureField("Mật khẩu (trùng với Agent trên PC)", text: $pc.password)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                     }
                 }

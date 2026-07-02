@@ -39,7 +39,8 @@ from PIL import Image
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
 
-TOKEN = os.environ.get("TOKEN", "kenios")
+USERNAME = os.environ.get("USERNAME_", os.environ.get("PC_USER", "admin"))
+PASSWORD = os.environ.get("PASSWORD", "kenios")
 PORT = int(os.environ.get("PORT", "8765"))
 OS_NAME = platform.system()   # 'Windows' | 'Darwin' | 'Linux'
 
@@ -50,8 +51,10 @@ app.add_middleware(
 
 
 def check(request: Request):
-    if request.headers.get("X-Token", "") != TOKEN:
-        raise HTTPException(status_code=401, detail="Sai token")
+    u = request.headers.get("X-User", "")
+    p = request.headers.get("X-Pass", "")
+    if u != USERNAME or p != PASSWORD:
+        raise HTTPException(status_code=401, detail="Sai tài khoản hoặc mật khẩu")
 
 
 # ----- Models -----
@@ -197,10 +200,11 @@ def system(body: System, request: Request):
 
 
 if __name__ == "__main__":
-    print("=" * 56)
+    print("=" * 60)
     print("  KENIOS PC Remote Agent")
-    print(f"  OS: {OS_NAME}  |  Cổng: {PORT}  |  Token: {TOKEN}")
-    print("  Mở ra ngoài:  ngrok http", PORT)
-    print("  Rồi dán link ngrok + token vào app KENIOS (PC Remote).")
-    print("=" * 56)
+    print(f"  OS: {OS_NAME}  |  Cổng: {PORT}")
+    print(f"  Tài khoản: {USERNAME}   Mật khẩu: {PASSWORD}")
+    print("  Kết nối cùng Wi-Fi:  dùng IP nội bộ (vd 192.168.1.x)")
+    print("  Kết nối qua Internet: cần forward cổng trên router HOẶC dùng tunnel")
+    print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=PORT)
