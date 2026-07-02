@@ -5,6 +5,7 @@ import Photos
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import UniformTypeIdentifiers
+import Vision
 
 // Bọc video chọn từ thư viện thành Transferable (chép ra file tạm để xử lý)
 struct EditMovie: Transferable {
@@ -43,6 +44,7 @@ struct VideoEditorView: View {
     @State private var sharpen = 0.0       // 0 ... 2 (0 = không làm nét)
     @State private var denoise = 0.0       // 0 ... 1 (0 = không giảm nhiễu)
     @State private var speed = 1.0         // 0.25 ... 4 (tốc độ phát; 1 = giữ nguyên)
+    @State private var removeBg = false    // Xoá nền/tách người → làm mờ phông (Vision)
     @State private var loading = false
     @State private var exporting = false
     @State private var outputURL: URL?
@@ -133,6 +135,14 @@ struct VideoEditorView: View {
                             }
                         }
                         Slider(value: $speed, in: 0.25...4)
+
+                        Toggle(isOn: $removeBg) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Xoá nền / tách người").font(.caption)
+                                Text("Không cần phông xanh — tự làm mờ phông sau lưng người")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
                         Text("Kéo 'Làm nét' để video mờ nét hơn; 'Giảm nhiễu' làm mịn hạt nhiễu; 'Tốc độ' làm nhanh/chậm clip. Áp dụng khi xuất video.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
@@ -228,9 +238,31 @@ struct VideoEditorView: View {
         let sh = shadows
         let shp = sharpen
         let dns = denoise
+        let rmBg = removeBg
         return AVVideoComposition(asset: asset) { request in
             let src = request.sourceImage
             var img = src.clampedToExtent()
+
+            // Xoá nền / tách người: Vision tách người → làm mờ phông sau lưng (chân dung).
+            if rmBg {
+                let req = VNGeneratePersonSegmentationRequest()
+                req.qualityLevel = .balanced
+                req.outputPixelFormat = kCVPixelFormatType_OneComponent8
+                let handler = VNImageRequestHandler(ciImage: img, options: [:])
+                if (try? handler.perform([req])) != nil,
+                   let maskBuf = req.results?.first?.pixelBuffer {
+                    var mask = CIImage(cvPixelBuffer: maskBuf)
+                    let sx = img.extent.width / max(1, mask.extent.width)
+                    let sy = img.extent.height / max(1, mask.extent.height)
+                    mask = mask.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+                    let bg = img.applyingGaussianBlur(sigma: 14).cropped(to: img.extent)
+                    let blend = CIFilter.blendWithMask()
+                    blend.inputImage = img          // người (giữ rõ)
+                    blend.backgroundImage = bg       // phông (làm mờ)
+                    blend.maskImage = mask
+                    img = (blend.outputImage ?? img).cropped(to: src.extent).clampedToExtent()
+                }
+            }
 
             let cc = CIFilter.colorControls()
             cc.inputImage = img
