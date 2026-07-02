@@ -16,6 +16,7 @@ struct MyStoreView: View {
     @State private var desc = ""
     @State private var saving = false
     @State private var message: String?
+    @State private var errorMessage: String?
 
     @State private var showAddProduct = false
 
@@ -80,6 +81,9 @@ struct MyStoreView: View {
                     }
                     .disabled(saving || name.trimmingCharacters(in: .whitespaces).isEmpty)
                     if let message { Text(message).font(.caption).foregroundStyle(.green) }
+                    if let errorMessage {
+                        Text(errorMessage).font(.caption).foregroundStyle(.red)
+                    }
                 }
                 .padding().kCard(16)
 
@@ -192,7 +196,7 @@ struct MyStoreView: View {
 
     private func saveStore() async {
         saving = true; defer { saving = false }
-        message = nil
+        message = nil; errorMessage = nil
         do {
             let s = try await store.api.saveMyStore(
                 name: name.trimmingCharacters(in: .whitespaces),
@@ -200,8 +204,24 @@ struct MyStoreView: View {
             myStore = s
             message = store.t("Đã lưu cửa hàng ✅", "Store saved ✅")
         } catch {
-            message = error.localizedDescription
+            errorMessage = friendlyError(error)
         }
+    }
+
+    /// Đổi lỗi thô (vd "Not Found") thành thông báo dễ hiểu bằng tiếng Việt.
+    private func friendlyError(_ error: Error) -> String {
+        let raw = error.localizedDescription.lowercased()
+        if raw.contains("not found") || raw.contains("404") {
+            return store.t("Máy chủ chưa bật tính năng Cửa hàng của tôi. Vui lòng cập nhật máy chủ (chạy capnhat-vps.sh) rồi thử lại.",
+                           "The server hasn't enabled My Store yet. Update the server (run capnhat-vps.sh) and try again.")
+        }
+        if raw.contains("unauthor") || raw.contains("401") || raw.contains("403") {
+            return store.t("Bạn cần đăng nhập lại để tạo cửa hàng.", "Please sign in again to create a store.")
+        }
+        if raw.contains("could not connect") || raw.contains("offline") || raw.contains("network") || raw.contains("timed out") {
+            return store.t("Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.", "Can't reach the server. Check your connection and retry.")
+        }
+        return store.t("Tạo cửa hàng thất bại: ", "Failed to create store: ") + error.localizedDescription
     }
 
     private func findStore() async {
@@ -296,7 +316,13 @@ struct AddMyProductView: View {
             await onDone()
             dismiss()
         } catch {
-            self.error = error.localizedDescription
+            let raw = error.localizedDescription.lowercased()
+            if raw.contains("not found") || raw.contains("404") {
+                self.error = store.t("Máy chủ chưa bật tính năng Cửa hàng của tôi. Cập nhật máy chủ (capnhat-vps.sh) rồi thử lại.",
+                                     "Server hasn't enabled My Store yet. Update the server (capnhat-vps.sh) and retry.")
+            } else {
+                self.error = error.localizedDescription
+            }
         }
     }
 }
