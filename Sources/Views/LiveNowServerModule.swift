@@ -91,9 +91,37 @@ final class LiveNowEngine: ObservableObject {
     private var monitorTask: Task<Void, Never>?
     private let logPath = "/root/kenios_live.log"
 
+    // Khoá lưu đăng nhập (host/port/user ở UserDefaults, mật khẩu ở Keychain)
+    private let kHost = "live_host", kPort = "live_port", kUser = "live_user", kPass = "live_password"
+
     init(baseURL: String, token: String) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.token = token
+        let d = UserDefaults.standard
+        if let h = d.string(forKey: kHost), !h.isEmpty { host = h }
+        if let p = d.string(forKey: kPort), !p.isEmpty { port = p }
+        if let u = d.string(forKey: kUser), !u.isEmpty { username = u }
+        if let pw = Keychain.load(kPass), !pw.isEmpty { password = pw }
+    }
+
+    var hasSavedLogin: Bool {
+        !host.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
+    }
+
+    private func persistLogin() {
+        let d = UserDefaults.standard
+        d.set(host, forKey: kHost)
+        d.set(port, forKey: kPort)
+        d.set(username, forKey: kUser)
+        Keychain.save(kPass, password)
+    }
+
+    func forgetLogin() {
+        let d = UserDefaults.standard
+        [kHost, kPort, kUser].forEach { d.removeObject(forKey: $0) }
+        Keychain.delete(kPass)
+        host = ""; port = "22"; username = "root"; password = ""
+        connection = .idle; connectError = nil
     }
 
     private func request() -> URLRequest? {
@@ -131,6 +159,7 @@ final class LiveNowEngine: ObservableObject {
             let out = try await runCollect("echo LIVE_ENGINE_OK")
             if out.contains("LIVE_ENGINE_OK") {
                 connection = .connected
+                persistLogin()   // lưu để lần sau tự kết nối
                 consoleLogs = "Engine connected to \(host).\n"
                 await refreshStatus()
             } else {
@@ -149,12 +178,12 @@ final class LiveNowEngine: ObservableObject {
         connection = .idle
         streamStatus = .offline
         consoleLogs = ""
-        password = ""
         connectError = nil
         startedAt = nil
         bitrateKbps = nil
         fps = nil
         speed = nil
+        // Giữ lại đăng nhập để lần sau tự kết nối
     }
 
     // MARK: Live control
@@ -310,6 +339,7 @@ final class LiveNowEngine: ObservableObject {
 
 struct LiveNowRootView: View {
     @StateObject private var engine: LiveNowEngine
+    @State private var autoTried = false
 
     init(baseURL: String, token: String) {
         _engine = StateObject(wrappedValue: LiveNowEngine(baseURL: baseURL, token: token))
@@ -323,6 +353,12 @@ struct LiveNowRootView: View {
                 } else {
                     LiveQuickConnectView(engine: engine)
                 }
+            }
+        }
+        .onAppear {
+            if !autoTried, engine.connection == .idle, engine.hasSavedLogin {
+                autoTried = true
+                Task { await engine.connect() }
             }
         }
     }
@@ -388,7 +424,16 @@ struct LiveQuickConnectView: View {
                 }
                 .disabled(engine.connection == .connecting)
 
-                Text("Credentials are sent over HTTPS to your Kenios server, which controls the target VPS. They are not stored.")
+                if engine.hasSavedLogin {
+                    Button(role: .destructive) { engine.forgetLogin() } label: {
+                        Text("Xoá đăng nhập đã lưu")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity).frame(height: 44)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Text("Đăng nhập được lưu an toàn trong Keychain — lần sau mở là tự kết nối. Chỉ mất khi xoá app hoặc bấm 'Xoá đăng nhập đã lưu'.")
                     .font(.caption2).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }

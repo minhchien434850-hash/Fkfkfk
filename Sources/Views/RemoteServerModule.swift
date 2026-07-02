@@ -91,9 +91,40 @@ final class RemoteServerEngine: ObservableObject {
     private let baseURL: String
     private let token: String
 
+    // Khoá lưu thông tin đăng nhập (host/port/user ở UserDefaults, mật khẩu ở Keychain)
+    private let kHost = "rs_host", kPort = "rs_port", kUser = "rs_user", kPass = "rs_password"
+
     init(baseURL: String, token: String) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.token = token
+        // Nạp lại thông tin đăng nhập đã lưu lần trước
+        let d = UserDefaults.standard
+        if let h = d.string(forKey: kHost), !h.isEmpty { host = h }
+        if let p = d.string(forKey: kPort), !p.isEmpty { port = p }
+        if let u = d.string(forKey: kUser), !u.isEmpty { username = u }
+        if let pw = Keychain.load(kPass), !pw.isEmpty { password = pw }
+    }
+
+    // Có thông tin đăng nhập đã lưu để tự kết nối không
+    var hasSavedLogin: Bool {
+        !host.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
+    }
+
+    private func persistLogin() {
+        let d = UserDefaults.standard
+        d.set(host, forKey: kHost)
+        d.set(port, forKey: kPort)
+        d.set(username, forKey: kUser)
+        Keychain.save(kPass, password)   // mật khẩu mã hoá trong Keychain
+    }
+
+    /// Xoá thông tin đăng nhập đã lưu (dùng khi muốn đổi máy chủ).
+    func forgetLogin() {
+        let d = UserDefaults.standard
+        [kHost, kPort, kUser].forEach { d.removeObject(forKey: $0) }
+        Keychain.delete(kPass)
+        host = ""; port = "22"; username = "root"; password = ""
+        state = .idle; errorMessage = nil
     }
 
     private func request(_ path: String) -> URLRequest? {
@@ -127,6 +158,7 @@ final class RemoteServerEngine: ObservableObject {
             let out = try await runCommandCollect("echo KENIOS_SSH_OK")
             if out.contains("KENIOS_SSH_OK") {
                 state = .connected
+                persistLogin()   // đăng nhập thành công → lưu để lần sau tự vào
                 consoleLogs = "Connected to \(host).\n"
                 await listDirectory(currentPath)
             } else {
@@ -143,9 +175,9 @@ final class RemoteServerEngine: ObservableObject {
         state = .idle
         consoleLogs = ""
         files = []
-        password = ""
         errorMessage = nil
         sftpError = nil
+        // Giữ lại thông tin đăng nhập để lần sau tự kết nối (dùng "Xoá đăng nhập" nếu muốn quên)
     }
 
     // MARK: Execute one-liner with REAL-TIME streaming output
@@ -261,6 +293,7 @@ final class RemoteServerEngine: ObservableObject {
 
 struct RemoteServerRootView: View {
     @StateObject private var engine: RemoteServerEngine
+    @State private var autoTried = false
 
     init(baseURL: String, token: String) {
         _engine = StateObject(wrappedValue: RemoteServerEngine(baseURL: baseURL, token: token))
@@ -272,6 +305,13 @@ struct RemoteServerRootView: View {
                 RemoteWorkspaceView(engine: engine)
             } else {
                 NavigationStack { QuickConnectView(engine: engine) }
+            }
+        }
+        .onAppear {
+            // Đã lưu đăng nhập lần trước → tự kết nối luôn, khỏi nhập lại
+            if !autoTried, engine.state == .idle, engine.hasSavedLogin {
+                autoTried = true
+                Task { await engine.connect() }
             }
         }
     }
@@ -398,7 +438,16 @@ struct QuickConnectView: View {
             .buttonStyle(.plain)
             .disabled(!canSubmit)
 
-            Text("Credentials are sent over HTTPS to your Kenios server, which connects to the target VPS on your behalf. They are not stored.")
+            if engine.hasSavedLogin {
+                Button(role: .destructive) { engine.forgetLogin() } label: {
+                    Text("Xoá đăng nhập đã lưu")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Text("Đăng nhập được lưu an toàn trong Keychain của máy — lần sau mở là tự kết nối. Chỉ mất khi anh xoá app hoặc bấm 'Xoá đăng nhập đã lưu'.")
                 .font(.caption2).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
