@@ -56,6 +56,12 @@ struct VideoEditorView: View {
     @State private var speed = 1.0         // 0.25 ... 4 (tốc độ phát; 1 = giữ nguyên)
     @State private var removeBg = false    // Xoá nền/tách người → làm mờ phông (Vision)
     @State private var fadeInOut = false   // Chuyển cảnh: mờ dần vào/ra (fade in/out)
+    // Nhạc nền
+    @State private var musicURL: URL?
+    @State private var musicName = ""
+    @State private var musicVolume = 0.6
+    @State private var originalVolume = 1.0
+    @State private var showMusicPicker = false
     // Phụ đề tự động (Auto Captions)
     @State private var captions: [CaptionSeg] = []
     @State private var burnCaptions = true
@@ -195,6 +201,26 @@ struct VideoEditorView: View {
                     }
                     .padding().kCard(16)
 
+                    // Nhạc nền (Background music)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Nhạc nền").font(.subheadline.bold())
+                        Button { showMusicPicker = true } label: {
+                            Label(musicURL == nil ? "Chọn nhạc nền" : "Đổi nhạc: \(musicName)",
+                                  systemImage: "music.note.list")
+                        }
+                        if musicURL != nil {
+                            HStack { Text("Âm lượng nhạc"); Spacer(); Text("\(Int(musicVolume*100))%") }.font(.caption)
+                            Slider(value: $musicVolume, in: 0...1)
+                            HStack { Text("Âm lượng gốc (video)"); Spacer(); Text("\(Int(originalVolume*100))%") }.font(.caption)
+                            Slider(value: $originalVolume, in: 0...1)
+                            Button("Bỏ nhạc nền") { musicURL = nil; musicName = "" }
+                                .font(.caption).foregroundStyle(.red)
+                        }
+                        Text("Nhạc tự lặp cho vừa độ dài video. Kéo âm lượng gốc về 0 nếu chỉ muốn nghe nhạc.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding().kCard(16)
+
                     // Xuất
                     Button { Task { await export() } } label: {
                         HStack {
@@ -245,6 +271,11 @@ struct VideoEditorView: View {
         }
         .navigationTitle("Sửa video")
         .onChange(of: picker) { _ in loadPicked() }
+        .sheet(isPresented: $showMusicPicker) {
+            DocumentPicker(contentTypes: [.audio, .mp3, .mpeg4Audio], allowsMultipleSelection: false, asCopy: true) { urls in
+                if let u = urls.first { musicURL = u; musicName = u.lastPathComponent }
+            }.ignoresSafeArea()
+        }
     }
 
     // MARK: - Helpers
@@ -504,11 +535,15 @@ struct VideoEditorView: View {
         let end = CMTime(seconds: trimEnd, preferredTimescale: 600)
         let range = CMTimeRange(start: start, end: end)
 
-        // Nguồn xuất: nếu đổi TỐC ĐỘ → dựng composition rồi scaleTimeRange; nếu không → dùng asset gốc.
+        // Nguồn xuất: dựng composition nếu đổi TỐC ĐỘ hoặc có NHẠC NỀN; nếu không → dùng asset gốc.
+        let speedChanged = abs(speed - 1.0) > 0.01
+        let needComp = speedChanged || musicURL != nil
         let exportAsset: AVAsset
         let exportRange: CMTimeRange
-        if abs(speed - 1.0) > 0.01 {
+        var mixToUse: AVMutableAudioMix?
+        if needComp {
             let comp = AVMutableComposition()
+            var origAudio: AVMutableCompositionTrack?
             do {
                 if let vTrack = try await asset.loadTracks(withMediaType: .video).first {
                     let cv = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
@@ -518,14 +553,51 @@ struct VideoEditorView: View {
                 if let aTrack = try await asset.loadTracks(withMediaType: .audio).first {
                     let ca = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
                     try? ca?.insertTimeRange(range, of: aTrack, at: .zero)
+                    origAudio = ca
                 }
             } catch {
                 self.error = "Lỗi dựng video: \(error.localizedDescription)"; exporting = false; return
             }
-            let scaled = CMTime(seconds: max(0.1, (trimEnd - trimStart) / speed), preferredTimescale: 600)
-            comp.scaleTimeRange(CMTimeRange(start: .zero, duration: comp.duration), toDuration: scaled)
+            // Đổi tốc độ (scale trước khi thêm nhạc để nhạc không bị nhanh/chậm theo).
+            if speedChanged {
+                let scaled = CMTime(seconds: max(0.1, (trimEnd - trimStart) / speed), preferredTimescale: 600)
+                comp.scaleTimeRange(CMTimeRange(start: .zero, duration: comp.duration), toDuration: scaled)
+            }
+            let finalDur = comp.duration
+            // Thêm nhạc nền (tự lặp cho vừa độ dài video).
+            var musicTrack: AVMutableCompositionTrack?
+            if let musicURL {
+                let musicAsset = AVURLAsset(url: musicURL)
+                if let mTrack = try? await musicAsset.loadTracks(withMediaType: .audio).first {
+                    let cm = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                    let mDur = (try? await musicAsset.load(.duration)) ?? finalDur
+                    if mDur.seconds > 0.1 {
+                        var t = CMTime.zero
+                        while t < finalDur {
+                            let seg = CMTimeMinimum(mDur, finalDur - t)
+                            try? cm?.insertTimeRange(CMTimeRange(start: .zero, duration: seg), of: mTrack, at: t)
+                            t = t + seg
+                        }
+                    }
+                    musicTrack = cm
+                }
+            }
+            // Trộn âm lượng nhạc & âm gốc.
+            let mix = AVMutableAudioMix()
+            var params: [AVMutableAudioMixInputParameters] = []
+            if let origAudio {
+                let p = AVMutableAudioMixInputParameters(track: origAudio)
+                p.setVolume(Float(originalVolume), at: .zero)
+                params.append(p)
+            }
+            if let musicTrack {
+                let p = AVMutableAudioMixInputParameters(track: musicTrack)
+                p.setVolume(Float(musicVolume), at: .zero)
+                params.append(p)
+            }
+            if !params.isEmpty { mix.inputParameters = params; mixToUse = mix }
             exportAsset = comp
-            exportRange = CMTimeRange(start: .zero, duration: scaled)
+            exportRange = CMTimeRange(start: .zero, duration: finalDur)
         } else {
             exportAsset = asset
             exportRange = range
@@ -536,6 +608,7 @@ struct VideoEditorView: View {
             error = "Không tạo được phiên xuất."; exporting = false; return
         }
         session.videoComposition = makeComposition(exportAsset)
+        session.audioMix = mixToUse
         let out = FileManager.default.temporaryDirectory
             .appendingPathComponent("kenios_edit_\(Int(Date().timeIntervalSince1970)).mp4")
         try? FileManager.default.removeItem(at: out)
