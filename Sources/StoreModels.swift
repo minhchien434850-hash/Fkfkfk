@@ -88,6 +88,10 @@ struct MyStore: Decodable, Hashable {
     let logoUrl: String?
     var bannerUrl: String? = nil
     var slogan: String? = nil
+    var nameEffect: String? = nil
+    var sloganEffect: String? = nil
+    var nameColor: String? = nil
+    var sloganColor: String? = nil
 }
 struct MyStorePrice: Decodable, Hashable, Identifiable {
     let id: Int

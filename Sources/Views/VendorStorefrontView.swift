@@ -74,9 +74,18 @@ struct VendorStorefrontView: View {
                         .frame(width: 54, height: 54).clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(s.name).font(.title3.bold()).foregroundStyle(.white).lineLimit(1)
+                    LogoEffectText(text: s.name,
+                                   effect: s.nameEffect ?? "gradient",
+                                   font: .title3.bold(),
+                                   solidColor: hexColor(s.nameColor))
+                        .lineLimit(1)
                     if let sl = s.slogan, !sl.isEmpty {
-                        Text(sl).font(.caption).foregroundStyle(.white.opacity(0.9)).lineLimit(2)
+                        let se = s.sloganEffect ?? "none"
+                        LogoEffectText(text: sl,
+                                       effect: (se == "none") ? "solid" : se,
+                                       font: .caption.bold(),
+                                       solidColor: hexColor(s.sloganColor) ?? .white.opacity(0.92))
+                            .lineLimit(2)
                     }
                 }
                 Spacer()
@@ -205,4 +214,15 @@ struct VendorStorefrontView: View {
         data = try? await store.api.getUserStore(sid)
         loading = false
     }
+}
+
+// Chuyển "#RRGGBB" (hoặc "RRGGBB") → Color. Rỗng/không hợp lệ → nil.
+func hexColor(_ hex: String?) -> Color? {
+    guard var h = hex?.trimmingCharacters(in: .whitespaces), !h.isEmpty else { return nil }
+    if h.hasPrefix("#") { h.removeFirst() }
+    guard h.count == 6, let v = UInt32(h, radix: 16) else { return nil }
+    let r = Double((v >> 16) & 0xFF) / 255.0
+    let g = Double((v >> 8) & 0xFF) / 255.0
+    let b = Double(v & 0xFF) / 255.0
+    return Color(red: r, green: g, blue: b)
 }

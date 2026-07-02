@@ -1003,6 +1003,11 @@ def _migrate() -> None:
         # §7 Đợt 2 — Danh mục: gắn sản phẩm cửa hàng cá nhân vào danh mục
         ("user_store_products", "category_id", "INTEGER DEFAULT 0"),
         ("user_store_products", "kind", "TEXT DEFAULT 'app'"),
+        # §7 — Hiệu ứng chữ cho cửa hàng cá nhân (giống admin)
+        ("user_stores", "name_effect",   "TEXT DEFAULT 'gradient'"),
+        ("user_stores", "slogan_effect", "TEXT DEFAULT 'none'"),
+        ("user_stores", "name_color",    "TEXT DEFAULT ''"),
+        ("user_stores", "slogan_color",  "TEXT DEFAULT ''"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -5779,6 +5784,10 @@ class MyStoreIn(BaseModel):
     logo_url: Optional[str] = None
     banner_url: Optional[str] = None
     slogan: Optional[str] = None
+    name_effect: Optional[str] = None
+    slogan_effect: Optional[str] = None
+    name_color: Optional[str] = None
+    slogan_color: Optional[str] = None
 
 class MyProductIn(BaseModel):
     id: Optional[int] = None
@@ -5800,6 +5809,10 @@ def _store_dict(row) -> dict[str, Any]:
             "description": row["description"] or "", "logo_url": row["logo_url"] or "",
             "banner_url": (row["banner_url"] if "banner_url" in keys else "") or "",
             "slogan": (row["slogan"] if "slogan" in keys else "") or "",
+            "name_effect": (row["name_effect"] if "name_effect" in keys else "gradient") or "gradient",
+            "slogan_effect": (row["slogan_effect"] if "slogan_effect" in keys else "none") or "none",
+            "name_color": (row["name_color"] if "name_color" in keys else "") or "",
+            "slogan_color": (row["slogan_color"] if "slogan_color" in keys else "") or "",
             "created_at": row["created_at"] or 0}
 
 def _uproduct_dict(row) -> dict[str, Any]:
@@ -5887,6 +5900,9 @@ def my_store_save(b: MyStoreIn, user=Depends(get_user)) -> dict[str, Any]:
     logo = (b.logo_url or "").strip()[:400]
     banner = (b.banner_url or "").strip()[:400]
     slogan = (b.slogan or "").strip()[:200]
+    # Hiệu ứng chữ: chỉ cập nhật cột nào được gửi (None = giữ nguyên).
+    effs = [("name_effect", b.name_effect), ("slogan_effect", b.slogan_effect),
+            ("name_color", b.name_color), ("slogan_color", b.slogan_color)]
     with db() as c:
         row = c.execute("SELECT * FROM user_stores WHERE owner_id=?", (user["id"],)).fetchone()
         if row:
@@ -5897,6 +5913,9 @@ def my_store_save(b: MyStoreIn, user=Depends(get_user)) -> dict[str, Any]:
             cur = c.execute("INSERT INTO user_stores(owner_id,name,description,logo_url,banner_url,slogan,created_at) "
                             "VALUES(?,?,?,?,?,?,?)", (user["id"], name, desc, logo, banner, slogan, int(time.time())))
             sid = cur.lastrowid
+        for col, val in effs:
+            if val is not None:
+                c.execute(f"UPDATE user_stores SET {col}=? WHERE id=?", (val.strip()[:20], sid))
         row = c.execute("SELECT * FROM user_stores WHERE id=?", (sid,)).fetchone()
     return {"store": _store_dict(row)}
 
