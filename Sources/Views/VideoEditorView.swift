@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import AVKit
 import PhotosUI
 import Photos
 import CoreImage
@@ -40,6 +41,9 @@ struct VideoEditorView: View {
     @State private var picker: PhotosPickerItem?
     @State private var inputURL: URL?
     @State private var duration: Double = 0
+    // Timeline UI: trình phát xem trước + dải thumbnail
+    @State private var player: AVPlayer?
+    @State private var thumbnails: [UIImage] = []
     @State private var trimStart: Double = 0
     @State private var trimEnd: Double = 0
     @State private var filter = 0          // 0 gốc,1 rực rỡ,2 đen trắng,3 ấm,4 lạnh,5 cổ điển
@@ -91,6 +95,35 @@ struct VideoEditorView: View {
                 if loading { ProgressView("Đang nạp video...").frame(maxWidth: .infinity) }
 
                 if inputURL != nil {
+                    // Trình phát xem trước (Preview)
+                    if let player {
+                        VideoPlayer(player: player)
+                            .frame(height: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+
+                    // Dải Timeline có thumbnail (kiểu CapCut)
+                    if !thumbnails.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Timeline").font(.subheadline.bold())
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 2) {
+                                    ForEach(Array(thumbnails.enumerated()), id: \.offset) { _, im in
+                                        Image(uiImage: im).resizable().scaledToFill()
+                                            .frame(width: 48, height: 56).clipped()
+                                    }
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8).stroke(Theme.accent, lineWidth: 2)
+                                )
+                            }
+                            Text("Kéo thanh 'Bắt đầu/Kết thúc' bên dưới để cắt đoạn trên timeline.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .padding().kCard(16)
+                    }
+
                     // Cắt video
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Cắt video").font(.subheadline.bold())
@@ -298,12 +331,31 @@ struct VideoEditorView: View {
                     inputURL = movie.url
                     duration = max(0.1, d.seconds)
                     trimStart = 0; trimEnd = duration
+                    player = AVPlayer(url: movie.url)
+                    thumbnails = []
+                    await generateThumbnails(asset, duration: duration)
                 } else {
                     error = "Không đọc được video."
                 }
             } catch { self.error = error.localizedDescription }
             loading = false
         }
+    }
+
+    // Sinh ~12 thumbnail dọc theo video cho dải timeline.
+    private func generateThumbnails(_ asset: AVAsset, duration: Double) async {
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 160, height: 160)
+        let count = 12
+        var imgs: [UIImage] = []
+        for i in 0..<count {
+            let t = CMTime(seconds: duration * Double(i) / Double(count), preferredTimescale: 600)
+            if let cg = try? await gen.image(at: t).image {
+                imgs.append(UIImage(cgImage: cg))
+            }
+        }
+        thumbnails = imgs
     }
 
     private func makeComposition(_ asset: AVAsset) -> AVVideoComposition {
