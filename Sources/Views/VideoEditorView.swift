@@ -66,6 +66,9 @@ struct VideoEditorView: View {
     @State private var musicVolume = 0.6
     @State private var originalVolume = 1.0
     @State private var showMusicPicker = false
+    // Lớp chữ/tiêu đề trên video (Text overlay)
+    @State private var overlayText = ""
+    @State private var overlayPosY = 0.82   // 0 = đáy, 1 = đỉnh
     // Phụ đề tự động (Auto Captions)
     @State private var captions: [CaptionSeg] = []
     @State private var burnCaptions = true
@@ -243,6 +246,22 @@ struct VideoEditorView: View {
                     }
                     .padding().kCard(16)
 
+                    // Lớp chữ / tiêu đề trên video (Text overlay)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Chữ trên video").font(.subheadline.bold())
+                        TextField("Nhập tiêu đề / chữ hiện trên video...", text: $overlayText, axis: .vertical)
+                            .lineLimit(1...3)
+                            .padding(10).background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        if !overlayText.trimmingCharacters(in: .whitespaces).isEmpty {
+                            HStack { Text("Vị trí dọc"); Spacer(); Text("\(Int(overlayPosY*100))%") }.font(.caption)
+                            Slider(value: $overlayPosY, in: 0...1)
+                        }
+                        Text("Chữ hiện suốt video (khắc khi xuất). Kéo 'Vị trí dọc' để đặt trên/dưới.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding().kCard(16)
+
                     // Xuất
                     Button { Task { await export() } } label: {
                         HStack {
@@ -414,6 +433,12 @@ struct VideoEditorView: View {
         let speedChanged = abs(speed - 1.0) > 0.01
         let capOffset = speedChanged ? trimStart : 0.0
         let capSpeed = speedChanged ? speed : 1.0
+        // Lớp chữ trên video (render 1 lần).
+        let overlayImg: CIImage? = {
+            let t = overlayText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.isEmpty ? nil : renderCaption(t)
+        }()
+        let overlayY = overlayPosY
         // Fade in/out: mốc thời gian đầu/cuối trong hệ toạ độ khung xuất.
         let fadeOn = fadeInOut
         let outStart = speedChanged ? 0.0 : trimStart
@@ -515,6 +540,17 @@ struct VideoEditorView: View {
                     cap = cap.transformed(by: CGAffineTransform(translationX: tx, y: ty))
                     img = cap.composited(over: img)
                 }
+            }
+
+            // Lớp chữ / tiêu đề: khắc lên video ở vị trí dọc đã chọn (hiện suốt clip).
+            if let ov = overlayImg {
+                let targetW = src.extent.width * 0.9
+                let scale = targetW / max(1, ov.extent.width)
+                var o = ov.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                let tx = src.extent.minX + (src.extent.width - o.extent.width) / 2 - o.extent.minX
+                let ty = src.extent.minY + CGFloat(overlayY) * max(0, src.extent.height - o.extent.height) - o.extent.minY
+                o = o.transformed(by: CGAffineTransform(translationX: tx, y: ty))
+                img = o.composited(over: img)
             }
 
             // Chuyển cảnh mờ dần vào/ra: 0.6s đầu và 0.6s cuối làm tối dần về đen.
