@@ -93,6 +93,19 @@ struct MyStoreView: View {
                 // Xem trước giao diện cửa hàng (ảnh bìa + logo + tên + slogan)
                 storefrontPreview
 
+                // Xem MẶT TIỀN đầy đủ như khách nhìn thấy (giống storefront admin)
+                if let s = myStore {
+                    NavigationLink {
+                        VendorStorefrontView(sid: s.id).environmentObject(store)
+                    } label: {
+                        Label(store.t("Xem cửa hàng của tôi (như khách thấy)", "View my storefront (as customers see)"),
+                              systemImage: "eye.fill")
+                            .font(.subheadline.bold()).frame(maxWidth: .infinity).frame(height: 44)
+                            .background(Theme.accent).foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+
                 // Thông tin store (tạo mới hoặc sửa)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(store.t("Thông tin cửa hàng", "Store info")).font(.subheadline.bold())
@@ -245,6 +258,15 @@ struct MyStoreView: View {
                 if let e = searchError { Text(e).font(.caption).foregroundStyle(.red) }
                 if let s = foundStore {
                     foundStorefront(s)
+                    // Mở MẶT TIỀN đầy đủ của cửa hàng này (giống storefront admin)
+                    NavigationLink {
+                        VendorStorefrontView(sid: s.id).environmentObject(store)
+                    } label: {
+                        Label(store.t("Vào cửa hàng này", "Enter this store"), systemImage: "storefront.fill")
+                            .font(.subheadline.bold()).frame(maxWidth: .infinity).frame(height: 44)
+                            .background(Theme.accent).foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
                     // Thông báo chạy của cửa hàng (nếu bật)
                     if let st = foundSettings, st.announceEnabled, !st.announceText.isEmpty {
                         HStack(spacing: 8) {
