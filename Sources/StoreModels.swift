@@ -58,6 +58,10 @@ struct StoreAppConfig: Decodable, Hashable {
     var statUsersReal: Int? = nil
     var statSoldReal: Int? = nil
     var statReviewsReal: Int? = nil
+    // §1.2 — Thông báo cập nhật phiên bản mới (admin đặt)
+    var latestVersion: String? = nil
+    var updateUrl: String? = nil
+    var updateMessage: String? = nil
     // Lời chào toàn cục (popup) — admin đặt, mọi người dùng đều thấy khi mở app
     var welcomePopupEnabled: Bool? = nil
     var welcomePopupTitle: String? = nil

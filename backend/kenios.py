@@ -5431,6 +5431,10 @@ def store_config() -> dict[str, Any]:
         "welcome_popup_enabled": get_setting("store_welcome_popup_enabled", "0") == "1",
         "welcome_popup_title": get_setting("store_welcome_popup_title", ""),
         "welcome_popup_text": get_setting("store_welcome_popup_text", ""),
+        # §1.2 — Thông báo cập nhật phiên bản mới (admin đặt)
+        "latest_version": get_setting("store_latest_version", ""),
+        "update_url": get_setting("store_update_url", ""),
+        "update_message": get_setting("store_update_message", ""),
         # Số sản phẩm hiển thị tối đa mỗi danh mục ở lưới "Danh mục Game"
         "gamecat_limit": _int_setting("store_gamecat_limit", 6),
     }
@@ -5983,6 +5987,9 @@ class StoreConfigIn(BaseModel):
     stat_sold_base: Optional[int] = None
     stat_reviews_base: Optional[int] = None
     # Lời chào toàn cục (popup) cho mọi người dùng
+    latest_version: Optional[str] = None
+    update_url: Optional[str] = None
+    update_message: Optional[str] = None
     welcome_popup_enabled: Optional[bool] = None
     welcome_popup_title: Optional[str] = None
     welcome_popup_text: Optional[str] = None
@@ -6049,6 +6056,9 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.announce_enabled is not None: set_setting("store_announce_enabled", "1" if b.announce_enabled else "0")
     if b.announce_text is not None: set_setting("store_announce_text", b.announce_text.strip()[:200])
     if b.announce_color is not None: set_setting("store_announce_color", b.announce_color.strip()[:20])
+    if b.latest_version is not None: set_setting("store_latest_version", b.latest_version.strip()[:20])
+    if b.update_url is not None: set_setting("store_update_url", b.update_url.strip()[:300])
+    if b.update_message is not None: set_setting("store_update_message", b.update_message.strip()[:300])
     if b.welcome_popup_enabled is not None: set_setting("store_welcome_popup_enabled", "1" if b.welcome_popup_enabled else "0")
     if b.welcome_popup_title is not None: set_setting("store_welcome_popup_title", b.welcome_popup_title.strip()[:80])
     if b.welcome_popup_text is not None: set_setting("store_welcome_popup_text", b.welcome_popup_text.strip()[:500])

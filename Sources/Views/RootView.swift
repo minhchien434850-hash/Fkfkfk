@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @EnvironmentObject var store: AppStore
@@ -98,6 +99,26 @@ struct MainTabView: View {
     @State private var welcomeText = ""
     @State private var showWelcomePopup = false
     @State private var welcomeChecked = false
+    // §1.2 — Thông báo cập nhật phiên bản mới
+    @State private var showUpdate = false
+    @State private var updateMsg = ""
+    @State private var updateLink = ""
+    @State private var updateVersion = ""
+
+    static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    }
+    // So sánh phiên bản dạng "3.1.2" — trả true nếu `a` mới hơn `b`.
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        let pa = a.split(separator: ".").map { Int($0) ?? 0 }
+        let pb = b.split(separator: ".").map { Int($0) ?? 0 }
+        for i in 0..<max(pa.count, pb.count) {
+            let x = i < pa.count ? pa[i] : 0
+            let y = i < pb.count ? pb[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
 
     var body: some View {
         // Chỉ 5 tab chính cho gọn & rõ — các mục khác nằm trong "Khám phá"
@@ -143,15 +164,28 @@ struct MainTabView: View {
             await store.loadProviders()
             await store.refreshCredits()
             await store.refreshMe()
-            // §1.3 — Lấy lời chào toàn cục từ server, hiện popup 1 lần cho MỌI người
+            // §1.3 + §1.2 — Lấy config server 1 lần: lời chào toàn cục + kiểm tra phiên bản mới
             if !welcomeChecked {
                 welcomeChecked = true
-                if let cfg = try? await store.api.storeConfig(), cfg.welcomePopupEnabled == true {
-                    let t = (cfg.welcomePopupText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !t.isEmpty {
-                        welcomeTitle = (cfg.welcomePopupTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                        welcomeText = t
-                        withAnimation(.spring(response: 0.4)) { showWelcomePopup = true }
+                if let cfg = try? await store.api.storeConfig() {
+                    // §1.2 — Có phiên bản mới hơn bản đang cài → hiện thông báo cập nhật
+                    let latest = (cfg.latestVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let link = (cfg.updateUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !latest.isEmpty, !link.isEmpty, Self.isNewer(latest, than: Self.appVersion) {
+                        updateLink = link
+                        updateMsg = (cfg.updateMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        updateVersion = latest
+                        showUpdate = true
+                    }
+                    // §1.3 — Lời chào toàn cục cho MỌI người
+                    if cfg.welcomePopupEnabled == true {
+                        let t = (cfg.welcomePopupText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !t.isEmpty {
+                            welcomeTitle = (cfg.welcomePopupTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                            welcomeText = t
+                            // Ưu tiên popup cập nhật trước; lời chào hiện nếu không có cập nhật.
+                            if !showUpdate { withAnimation(.spring(response: 0.4)) { showWelcomePopup = true } }
+                        }
                     }
                 }
             }
@@ -185,6 +219,22 @@ struct MainTabView: View {
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
+        }
+        // §1.2 — Thông báo có phiên bản mới, bấm để mở link tải/cập nhật
+        .alert(store.t("Có phiên bản mới \(updateVersion)", "New version \(updateVersion) available"),
+               isPresented: $showUpdate) {
+            Button(store.t("Cập nhật ngay", "Update now")) {
+                if let url = URL(string: updateLink) { UIApplication.shared.open(url) }
+            }
+            Button(store.t("Để sau", "Later"), role: .cancel) {
+                // Sau khi tắt cập nhật, mới hiện lời chào (nếu có)
+                if !welcomeText.isEmpty { withAnimation(.spring(response: 0.4)) { showWelcomePopup = true } }
+            }
+        } message: {
+            Text(updateMsg.isEmpty
+                 ? store.t("Đã có phiên bản mới hơn. Cập nhật để dùng tính năng mới nhất.",
+                           "A newer version is available. Update for the latest features.")
+                 : updateMsg)
         }
     }
 

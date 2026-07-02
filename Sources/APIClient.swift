@@ -499,7 +499,9 @@ struct APIClient {
                              announceEnabled: Bool? = nil, announceText: String? = nil,
                              announceColor: String? = nil, gamecatLimit: Int? = nil,
                              welcomePopupEnabled: Bool? = nil, welcomePopupTitle: String? = nil,
-                             welcomePopupText: String? = nil) async throws -> MessageResponse {
+                             welcomePopupText: String? = nil,
+                             latestVersion: String? = nil, updateUrl: String? = nil,
+                             updateMessage: String? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
@@ -545,6 +547,9 @@ struct APIClient {
         if let welcomePopupEnabled { body["welcome_popup_enabled"] = welcomePopupEnabled }
         if let welcomePopupTitle { body["welcome_popup_title"] = welcomePopupTitle }
         if let welcomePopupText { body["welcome_popup_text"] = welcomePopupText }
+        if let latestVersion { body["latest_version"] = latestVersion }
+        if let updateUrl { body["update_url"] = updateUrl }
+        if let updateMessage { body["update_message"] = updateMessage }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
     // §9.1 — Cảnh báo xâm nhập qua Telegram (admin)
