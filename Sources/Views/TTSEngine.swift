@@ -173,7 +173,8 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     /// Bật phiên audio dạng playback để tiếp tục đọc khi khoá màn hình / chuyển app khác.
     func activateSession() {
         let s = AVAudioSession.sharedInstance()
-        try? s.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .mixWithOthers])
+        // KHÔNG dùng .duckOthers → không hạ/tắt âm lượng nhạc app khác (Spotify/YouTube...).
+        try? s.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
         try? s.setActive(true, options: [])
     }
 

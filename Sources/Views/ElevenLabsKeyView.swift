@@ -280,7 +280,8 @@ struct ElevenLabsKeyView: View {
                     testStatus = .failure("Không nhận được audio."); return
                 }
                 do {
-                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+                    // .mixWithOthers → phát cùng nhạc app khác, không cắt/không đè âm lượng.
+                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
                     try AVAudioSession.sharedInstance().setActive(true)
                     let player = try AVAudioPlayer(data: data)
                     player.prepareToPlay(); player.play()

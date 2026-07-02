@@ -1,0 +1,87 @@
+import SwiftUI
+
+// §5 — "Thông tin ứng dụng": màn công khai (tách khỏi trang quản trị) thể hiện
+// rõ Ngày sản xuất và Nhà phát hành để tăng tính minh bạch, chuyên nghiệp.
+struct AppInfoView: View {
+    @EnvironmentObject var store: AppStore
+
+    private var appName: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? "KENIOS"
+    }
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+    private var build: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+    private let publisher = "KENIOS"
+
+    // Ngày sản xuất ≈ ngày build (lấy theo thời điểm sửa Info.plist trong gói app).
+    private var productionDate: Date {
+        if let url = Bundle.main.url(forResource: "Info", withExtension: "plist"),
+           let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let d = attrs[.modificationDate] as? Date {
+            return d
+        }
+        if let exe = Bundle.main.executableURL,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: exe.path),
+           let d = attrs[.modificationDate] as? Date {
+            return d
+        }
+        return Date()
+    }
+
+    private var productionDateString: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: store.language == "en" ? "en_US" : "vi_VN")
+        f.dateFormat = "dd/MM/yyyy"
+        return f.string(from: productionDate)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                VStack(spacing: 10) {
+                    AnimatedStoreLogo(text: "KENIOS", effect: "gradient", fontStyle: "rounded", anim: "shimmer", size: 40)
+                    Text(store.t("Ứng dụng chính thức KENIOS", "Official KENIOS application"))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.top, 16)
+
+                VStack(spacing: 0) {
+                    infoRow(store.t("Tên ứng dụng", "App name"), appName)
+                    Divider()
+                    infoRow(store.t("Phiên bản", "Version"), "\(version) (build \(build))")
+                    Divider()
+                    infoRow(store.t("Ngày sản xuất", "Production date"), productionDateString)
+                    Divider()
+                    infoRow(store.t("Nhà phát hành", "Publisher"), publisher)
+                }
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal)
+
+                Text("© \(String(Calendar.current.component(.year, from: Date()))) \(publisher). "
+                     + store.t("Bảo lưu mọi quyền.", "All rights reserved."))
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .padding(.top, 4)
+
+                Spacer(minLength: 20)
+            }
+        }
+        .navigationTitle(store.t("Thông tin ứng dụng", "App Information"))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).foregroundStyle(.secondary)
+            Spacer()
+            Text(value).font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 13)
+    }
+}

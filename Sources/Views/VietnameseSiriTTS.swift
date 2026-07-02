@@ -168,7 +168,7 @@ final class VietnameseSiriSpeaker: NSObject, ObservableObject, AVSpeechSynthesiz
     func speak(_ raw: String) {
         let text = VietnameseTextNormalizer.normalize(raw)
         guard !text.isEmpty else { return }
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .mixWithOthers])
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
         let u = AVSpeechUtterance(string: text)
         u.voice = lockedVietnameseVoice()   // KHÓA vi-VN, không cho ngôn ngữ khác

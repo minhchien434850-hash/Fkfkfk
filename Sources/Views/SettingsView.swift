@@ -254,6 +254,15 @@ struct SettingsView: View {
                     }
                 }
 
+                // §5 — Thông tin ứng dụng (công khai, tách khỏi trang quản trị)
+                Section(store.t("Thông tin ứng dụng", "App Information")) {
+                    NavigationLink {
+                        AppInfoView()
+                    } label: {
+                        Label(store.t("Thông tin ứng dụng", "App Information"), systemImage: "info.circle")
+                    }
+                }
+
                 Section {
                     Button(store.t("Đăng xuất", "Logout"), role: .destructive) {
                         dismiss()                 // đóng màn Cài đặt (sheet) ngay
