@@ -6490,9 +6490,11 @@ def admin_store_save_product(b: StoreProductIn, admin=Depends(get_admin)) -> dic
                             (b.folder_id, name, b.description or "", media, b.download_url or "",
                              b.download_file_id, kind, int(time.time())))
             pid = cur.lastrowid
-    # §1.1 — Sản phẩm MỚI: đẩy thông báo cho TẤT CẢ người dùng (không chỉ admin).
+    # §1.1 — Sản phẩm MỚI: phát thông báo cho TẤT CẢ người dùng (không chỉ admin).
     if not b.id:
-        _notify_all_users("🆕 Sản phẩm mới", f"{name} vừa lên kệ! Mở KENIOS xem ngay.")
+        _notify_all_users("🛒 KENIOS Cửa hàng",
+                          f"Sản phẩm mới vừa được thêm vào cửa hàng: {name}",
+                          kind="product")
     return {"message": "Đã lưu sản phẩm.", "id": pid}
 
 @app.delete("/admin/store/products/{pid}")
