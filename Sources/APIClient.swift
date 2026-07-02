@@ -662,6 +662,20 @@ struct APIClient {
         _ = try await send("/my-store/withdraw", method: "POST",
                            json: ["amount": amount, "bank_info": bankInfo])
     }
+    // §7 Đợt 4 — Cài đặt thanh toán riêng của cửa hàng (giống admin)
+    func getMyStorePayment() async throws -> BankSettings {
+        try decode(try await send("/my-store/payment"))
+    }
+    func saveMyStorePayment(_ s: BankSettings) async throws {
+        _ = try await send("/my-store/payment", method: "POST", json: [
+            "bank_code": s.bankCode, "bank_short": s.bankShort,
+            "bank_account": s.bankAccount, "bank_name": s.bankName,
+            "bank_webhook": s.bankWebhook, "bank_apikey": s.bankApikey,
+            "acb_api_token": s.acbApiToken])
+    }
+    func userStorePaymentInfo(sid: Int, amount: Int = 0, note: String = "KENIOS") async throws -> StorePaymentInfo {
+        try decode(try await send("/u-store/\(sid)/payment-info?amount=\(amount)&note=\(note)"))
+    }
     // Admin — duyệt rút tiền
     func adminUStoreWithdrawals() async throws -> [AdminWithdrawal] {
         try decode(try await send("/admin/u-store/withdrawals"))

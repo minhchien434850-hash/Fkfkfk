@@ -716,6 +716,18 @@ def init_db() -> None:
                 created_at INTEGER,
                 handled_at INTEGER
             );
+            -- §7 Đợt 4 — Cài đặt thanh toán RIÊNG từng cửa hàng (giống admin: ngân hàng + API key tự động)
+            CREATE TABLE IF NOT EXISTS user_store_payment(
+                store_id INTEGER PRIMARY KEY,
+                bank_code TEXT DEFAULT '',
+                bank_short TEXT DEFAULT '',
+                bank_account TEXT DEFAULT '',
+                bank_name TEXT DEFAULT '',
+                bank_webhook TEXT DEFAULT '',
+                bank_apikey TEXT DEFAULT '',      -- mã hoá (Casso/Sepay)
+                acb_api_token TEXT DEFAULT '',     -- mã hoá (thueapibank.vn)
+                updated_at INTEGER
+            );
 
             -- Nạp tiền vào VÍ cửa hàng (tách biệt thanh toán app chính)
             CREATE TABLE IF NOT EXISTS store_topups(
@@ -6310,6 +6322,95 @@ def my_store_withdraw(b: MyWithdrawIn, user=Depends(get_user)) -> dict[str, Any]
         new_bal = _wallet_balance(c, user["id"])
     _notify_admins("💸 Yêu cầu rút tiền", f"{user['username']} yêu cầu rút {amount:,}đ".replace(",", "."))
     return {"id": cur.lastrowid, "balance": new_bal, "message": "Đã gửi yêu cầu rút tiền, chờ duyệt."}
+
+
+# ===== §7 Đợt 4 — Cài đặt thanh toán RIÊNG của cửa hàng (giống hệt admin: ngân hàng + API tự động) =====
+def _dec_safe(v: str) -> str:
+    if not v:
+        return ""
+    try:
+        return dec(v)
+    except Exception:
+        return ""
+
+def _ustore_payment_row(c, sid: int):
+    return c.execute("SELECT * FROM user_store_payment WHERE store_id=?", (sid,)).fetchone()
+
+def _ustore_bank_info(c, sid: int, amount: int = 0, note: str = "KENIOS") -> dict[str, Any]:
+    """QR VietQR theo ngân hàng RIÊNG của cửa hàng; nếu shop chưa cấu hình thì dùng ngân hàng nền tảng."""
+    from urllib.parse import quote
+    row = _ustore_payment_row(c, sid)
+    code = (row["bank_code"] if row else "") or ""
+    short = (row["bank_short"] if row else "") or ""
+    account = (row["bank_account"] if row else "") or ""
+    name = (row["bank_name"] if row else "") or ""
+    if not (code and account and name):
+        # fallback: ngân hàng nền tảng
+        code = get_setting("bank_code", "970416"); short = get_setting("bank_short", "ACB")
+        account = get_setting("bank_account", "23252921"); name = get_setting("bank_name", "TRAN MINH CHIEN")
+    qr = (f"https://img.vietqr.io/image/{code}-{account}-compact2.png"
+          f"?accountName={quote(name)}&addInfo={quote(note)}")
+    if amount > 0:
+        qr += f"&amount={amount}"
+    return {"bank": short, "bank_code": code, "account": account,
+            "name": name, "content": note, "qr_url": qr}
+
+class MyPaymentIn(BaseModel):
+    bank_code: Optional[str] = None
+    bank_short: Optional[str] = None
+    bank_account: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_webhook: Optional[str] = None
+    bank_apikey: Optional[str] = None
+    acb_api_token: Optional[str] = None
+
+@app.get("/my-store/payment")
+def my_store_get_payment(user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        row = _ustore_payment_row(c, store["id"])
+    if not row:
+        return {"bank_code": "", "bank_short": "", "bank_account": "", "bank_name": "",
+                "bank_webhook": "", "bank_apikey": "", "acb_api_token": ""}
+    return {"bank_code": row["bank_code"] or "", "bank_short": row["bank_short"] or "",
+            "bank_account": row["bank_account"] or "", "bank_name": row["bank_name"] or "",
+            "bank_webhook": row["bank_webhook"] or "",
+            "bank_apikey": _dec_safe(row["bank_apikey"] or ""),
+            "acb_api_token": _dec_safe(row["acb_api_token"] or "")}
+
+@app.post("/my-store/payment")
+def my_store_set_payment(b: MyPaymentIn, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        sid = store["id"]
+        row = _ustore_payment_row(c, sid)
+        if not row:
+            c.execute("INSERT INTO user_store_payment(store_id,updated_at) VALUES(?,?)", (sid, int(time.time())))
+            row = _ustore_payment_row(c, sid)
+        # MERGE: chỉ cập nhật field gửi lên (giống admin). Secret mã hoá trước khi lưu.
+        plain_fields = ["bank_code", "bank_short", "bank_account", "bank_name", "bank_webhook"]
+        secret_fields = ["bank_apikey", "acb_api_token"]
+        for f in plain_fields:
+            v = getattr(b, f)
+            if v is not None:
+                c.execute(f"UPDATE user_store_payment SET {f}=? WHERE store_id=?", (v.strip()[:200], sid))
+        for f in secret_fields:
+            v = getattr(b, f)
+            if v is not None:
+                stored = enc(v.strip()) if v.strip() else ""
+                c.execute(f"UPDATE user_store_payment SET {f}=? WHERE store_id=?", (stored, sid))
+        c.execute("UPDATE user_store_payment SET updated_at=? WHERE store_id=?", (int(time.time()), sid))
+    return {"message": "Đã cập nhật thông tin thanh toán cửa hàng."}
+
+@app.get("/u-store/{sid}/payment-info")
+def u_store_payment_info(sid: int, amount: int = 0, note: str = "KENIOS", user=Depends(get_user)) -> dict[str, Any]:
+    """QR nhận tiền của cửa hàng (dùng ngân hàng riêng của người bán nếu đã cấu hình)."""
+    with db() as c:
+        store = c.execute("SELECT id FROM user_stores WHERE id=?", (sid,)).fetchone()
+        if not store:
+            raise HTTPException(status_code=404, detail="Không tìm thấy cửa hàng.")
+        return _ustore_bank_info(c, sid, amount=amount, note=note)
+
 
 # ---- Admin duyệt chi (tài chính nền tảng — KHÔNG sửa nội dung cửa hàng người bán) ----
 @app.get("/admin/u-store/withdrawals")

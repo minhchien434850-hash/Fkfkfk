@@ -170,7 +170,7 @@ struct MyStoreView: View {
                     // Đợt 4 — Ví & Mã giảm giá
                     HStack(spacing: 10) {
                         NavigationLink {
-                            SellerWalletView().environmentObject(store)
+                            SellerWalletView(storeId: s.id).environmentObject(store)
                         } label: {
                             Label(store.t("Ví & Rút tiền", "Wallet"), systemImage: "creditcard")
                                 .font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 14)
@@ -1055,9 +1055,10 @@ struct MyPurchasesView: View {
     }
 }
 
-// §7 Đợt 4 — Ví người bán: xem số dư + rút tiền + lịch sử
+// §7 Đợt 4 — Ví người bán: xem số dư + rút tiền + lịch sử + cài đặt thanh toán
 struct SellerWalletView: View {
     @EnvironmentObject var store: AppStore
+    let storeId: Int
     @State private var wallet: MyStoreWallet?
     @State private var amountText = ""
     @State private var bankInfo = ""
@@ -1081,6 +1082,19 @@ struct SellerWalletView: View {
                         Text(kFormatVND(p)).font(.caption).foregroundStyle(.orange)
                     }
                 }
+            }
+            // Cài đặt thanh toán riêng (giống hệt admin: ngân hàng + API tự động)
+            Section {
+                NavigationLink {
+                    StorePaymentSettingsView(storeId: storeId).environmentObject(store)
+                } label: {
+                    Label(store.t("Thông tin ngân hàng & API tự động", "Bank info & auto API"),
+                          systemImage: "building.columns")
+                }
+            } footer: {
+                Text(store.t("Đặt ngân hàng nhận tiền và liên kết API giao dịch tự động (ACB thueapibank / Casso / Sepay) — riêng cho cửa hàng của bạn.",
+                             "Set your receiving bank and link an auto-transaction API (ACB thueapibank / Casso / Sepay) — just for your store."))
+                    .font(.caption2)
             }
             Section(store.t("Yêu cầu rút tiền", "Withdraw")) {
                 TextField(store.t("Số tiền (tối thiểu 50.000đ)", "Amount (min 50,000đ)"), text: $amountText)
@@ -1144,6 +1158,90 @@ struct SellerWalletView: View {
             amountText = ""; bankInfo = ""
             await reload()
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+// §7 Đợt 4 — Cài đặt thanh toán RIÊNG của cửa hàng (giống hệt admin: ngân hàng + API tự động + QR)
+struct StorePaymentSettingsView: View {
+    @EnvironmentObject var store: AppStore
+    let storeId: Int
+    @State private var s = BankSettings(bankCode: "", bankShort: "", bankAccount: "", bankName: "",
+                                        bankWebhook: "", bankApikey: "", acbApiToken: "")
+    @State private var qr: StorePaymentInfo?
+    @State private var message: String?
+    @State private var isError = false
+    @State private var saving = false
+
+    var body: some View {
+        Form {
+            Section(store.t("Ngân hàng nhận tiền (hiện QR cho khách khi mua)", "Receiving bank (buyer QR)")) {
+                TextField(store.t("Mã ngân hàng VietQR (vd ACB = 970416)", "VietQR bank code (ACB = 970416)"), text: $s.bankCode)
+                    .keyboardType(.numberPad)
+                TextField(store.t("Tên ngân hàng ngắn (vd ACB)", "Short bank name (e.g. ACB)"), text: $s.bankShort)
+                    .textInputAutocapitalization(.characters)
+                TextField(store.t("Số tài khoản", "Account number"), text: $s.bankAccount).keyboardType(.numberPad)
+                TextField(store.t("Chủ tài khoản (IN HOA, không dấu)", "Account holder (UPPERCASE, no accents)"), text: $s.bankName)
+                    .textInputAutocapitalization(.characters)
+                TextField(store.t("Webhook (tuỳ chọn)", "Webhook (optional)"), text: $s.bankWebhook)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+            }
+            Section(store.t("Nạp/thu tiền tự động — ACB (thueapibank.vn)", "Auto payment — ACB (thueapibank.vn)")) {
+                TextField(store.t("API token ACB (thueapibank.vn)", "ACB API token (thueapibank.vn)"), text: $s.acbApiToken)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Text(store.t("Dán API token ACB từ thueapibank.vn. Hệ thống đọc lịch sử giao dịch, khớp nội dung + số tiền để tự xác nhận đơn cho cửa hàng bạn. Để trống thì xác nhận tay.",
+                             "Paste your ACB API token from thueapibank.vn. The system reads transactions and auto-confirms orders for your store. Leave empty for manual confirm."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section(store.t("Tự động xác nhận giao dịch (tuỳ chọn khác)", "Auto-confirm (other option)")) {
+                TextField(store.t("API key giao dịch (Casso / Sepay...)", "Transaction API key (Casso / Sepay...)"), text: $s.bankApikey)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Text(store.t("Dùng webhook của Casso/Sepay nếu muốn. Để trống nếu đã dùng token ACB ở trên.",
+                             "Use Casso/Sepay webhook if you like. Leave empty if you already use the ACB token above."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Button {
+                    Task { await save() }
+                } label: { Text(saving ? store.t("Đang lưu…", "Saving…") : store.t("Lưu", "Save")).font(.subheadline.bold()) }
+                    .disabled(saving)
+                if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
+            }
+            // Xem trước QR nhận tiền của chính cửa hàng
+            if let q = qr, let url = URL(string: q.qrUrl) {
+                Section(store.t("QR nhận tiền của cửa hàng", "Your store QR")) {
+                    HStack {
+                        Spacer()
+                        CachedAsyncImage(url: url) { img in img.resizable().scaledToFit() }
+                            placeholder: { ProgressView() }
+                            .frame(width: 200, height: 200)
+                        Spacer()
+                    }
+                    Text("\(q.bank) · \(q.account) · \(q.name)").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                Text(store.t("Mã VietQR (Napas): ACB 970416 · Vietcombank 970436 · Techcombank 970407 · MB 970422 · BIDV 970418 · VPBank 970432.",
+                             "VietQR (Napas) codes: ACB 970416 · Vietcombank 970436 · Techcombank 970407 · MB 970422 · BIDV 970418 · VPBank 970432."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle(store.t("Thông tin ngân hàng", "Bank info"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    private func load() async {
+        if let r = try? await store.api.getMyStorePayment() { s = r }
+        qr = try? await store.api.userStorePaymentInfo(sid: storeId)
+    }
+    private func save() async {
+        saving = true; defer { saving = false }
+        message = nil
+        do {
+            try await store.api.saveMyStorePayment(s)
+            isError = false; message = store.t("Đã lưu thông tin thanh toán.", "Payment info saved.")
+            qr = try? await store.api.userStorePaymentInfo(sid: storeId)
+        } catch { isError = true; message = error.localizedDescription }
     }
 }
 

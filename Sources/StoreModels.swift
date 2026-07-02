@@ -184,6 +184,15 @@ struct MyStoreWallet: Decodable {
     let withdrawals: [MyWithdrawal]
 }
 struct UStorePromoResult: Decodable { let valid: Bool; let discount: Int }
+// §7 Đợt 4 — QR nhận tiền của cửa hàng (ngân hàng riêng người bán)
+struct StorePaymentInfo: Decodable {
+    let bank: String
+    let bankCode: String
+    let account: String
+    let name: String
+    let content: String
+    let qrUrl: String
+}
 // Admin — duyệt rút tiền người bán
 struct AdminWithdrawal: Decodable, Hashable, Identifiable {
     let id: Int
