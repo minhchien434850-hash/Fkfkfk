@@ -34,6 +34,11 @@ struct VideoEditorView: View {
     @State private var filter = 0          // 0 gốc,1 rực rỡ,2 đen trắng,3 ấm,4 lạnh,5 cổ điển
     @State private var brightness = 0.0    // -0.3 ... 0.3
     @State private var saturation = 1.0    // 0 ... 2
+    // §3.2 — Color grading đầy đủ
+    @State private var contrast = 1.0      // 0.5 ... 1.5
+    @State private var hue = 0.0           // -3.14 ... 3.14 (radian)
+    @State private var highlights = 1.0    // 0 ... 1 (1 = giữ nguyên)
+    @State private var shadows = 0.0       // -1 ... 1 (0 = giữ nguyên)
     @State private var loading = false
     @State private var exporting = false
     @State private var outputURL: URL?
@@ -79,12 +84,27 @@ struct VideoEditorView: View {
                             }
                         }.pickerStyle(.segmented)
 
-                        HStack { Text("Độ sáng"); Spacer(); Text(String(format: "%.0f%%", brightness*100)) }
+                        HStack { Text("Độ sáng (Brightness)"); Spacer(); Text(String(format: "%.0f%%", brightness*100)) }
                             .font(.caption)
                         Slider(value: $brightness, in: -0.3...0.3)
-                        HStack { Text("Độ rực màu"); Spacer(); Text(String(format: "%.1f", saturation)) }
+                        HStack { Text("Độ tương phản (Contrast)"); Spacer(); Text(String(format: "%.2f", contrast)) }
+                            .font(.caption)
+                        Slider(value: $contrast, in: 0.5...1.5)
+                        HStack { Text("Độ bão hòa (Saturation)"); Spacer(); Text(String(format: "%.1f", saturation)) }
                             .font(.caption)
                         Slider(value: $saturation, in: 0...2)
+                        HStack { Text("Tông màu (Hue)"); Spacer(); Text(String(format: "%.0f°", hue*180/Double.pi)) }
+                            .font(.caption)
+                        Slider(value: $hue, in: -Double.pi...Double.pi)
+                        HStack { Text("Vùng sáng (Highlights)"); Spacer(); Text(String(format: "%.2f", highlights)) }
+                            .font(.caption)
+                        Slider(value: $highlights, in: 0...1)
+                        HStack { Text("Vùng tối (Shadows)"); Spacer(); Text(String(format: "%.2f", shadows)) }
+                            .font(.caption)
+                        Slider(value: $shadows, in: -1...1)
+                        Button("Đặt lại màu") {
+                            brightness = 0; contrast = 1; saturation = 1; hue = 0; highlights = 1; shadows = 0
+                        }.font(.caption).buttonStyle(.bordered)
                     }
                     .padding().kCard(16)
 
@@ -172,6 +192,10 @@ struct VideoEditorView: View {
         let f = filter
         let bright = brightness
         let sat = saturation
+        let con = contrast
+        let hueAngle = hue
+        let hi = highlights
+        let sh = shadows
         return AVVideoComposition(asset: asset) { request in
             let src = request.sourceImage
             var img = src.clampedToExtent()
@@ -180,8 +204,22 @@ struct VideoEditorView: View {
             cc.inputImage = img
             cc.brightness = Float(bright)
             cc.saturation = Float(sat)
-            cc.contrast = 1.0
+            cc.contrast = Float(con)
             img = cc.outputImage ?? img
+
+            // Tông màu (Hue)
+            if abs(hueAngle) > 0.001 {
+                let h = CIFilter.hueAdjust(); h.inputImage = img; h.angle = Float(hueAngle)
+                img = h.outputImage ?? img
+            }
+            // Vùng sáng / Vùng tối (Highlights / Shadows)
+            if abs(hi - 1.0) > 0.001 || abs(sh) > 0.001 {
+                let hs = CIFilter.highlightShadowAdjust()
+                hs.inputImage = img
+                hs.highlightAmount = Float(hi)
+                hs.shadowAmount = Float(sh)
+                img = hs.outputImage ?? img
+            }
 
             switch f {
             case 1:
