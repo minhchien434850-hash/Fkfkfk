@@ -41,26 +41,53 @@ final class AppLauncher {
         "globe", "paperplane.fill", "envelope.fill", "folder.fill",
     ]
 
-    // Danh sách app phổ biến — bấm 1 phát là thêm ngay (URL scheme đã điền sẵn).
+    // Danh mục app phổ biến — anh gõ tên tìm rồi bấm 1 phát là thêm ngay
+    // (URL scheme đã điền sẵn, khỏi cần biết scheme).
     static let presets: [CustomApp] = [
-        CustomApp(name: "YouTube",   urlScheme: "youtube",     icon: "play.rectangle.fill", colorIndex: 0, appStoreID: "544007664"),
-        CustomApp(name: "TikTok",    urlScheme: "snssdk1233",  icon: "music.note",          colorIndex: 7, appStoreID: "835599320"),
-        CustomApp(name: "Facebook",  urlScheme: "fb",          icon: "person.2.fill",       colorIndex: 2, appStoreID: "284882215"),
-        CustomApp(name: "Messenger", urlScheme: "fb-messenger", icon: "message.fill",       colorIndex: 4, appStoreID: "454638411"),
-        CustomApp(name: "Instagram", urlScheme: "instagram",   icon: "camera.fill",         colorIndex: 7, appStoreID: "389801252"),
-        CustomApp(name: "Zalo",      urlScheme: "zalo",        icon: "message.fill",        colorIndex: 2, appStoreID: "579523206"),
-        CustomApp(name: "Telegram",  urlScheme: "tg",          icon: "paperplane.fill",     colorIndex: 2, appStoreID: "686449807"),
-        CustomApp(name: "WhatsApp",  urlScheme: "whatsapp",    icon: "phone.fill",          colorIndex: 3, appStoreID: "310633997"),
-        CustomApp(name: "Shopee",    urlScheme: "shopeeVN",    icon: "cart.fill",           colorIndex: 1, appStoreID: "959841113"),
-        CustomApp(name: "Lazada",    urlScheme: "lazada",      icon: "cart.fill",           colorIndex: 2, appStoreID: "785385147"),
-        CustomApp(name: "Grab",      urlScheme: "grab",        icon: "car.fill",            colorIndex: 3, appStoreID: "647268330"),
-        CustomApp(name: "MoMo",      urlScheme: "momo",        icon: "creditcard.fill",     colorIndex: 7, appStoreID: "918751511"),
-        CustomApp(name: "Spotify",   urlScheme: "spotify",     icon: "music.note",          colorIndex: 3, appStoreID: "324684580"),
-        CustomApp(name: "Netflix",   urlScheme: "nflx",        icon: "film.fill",           colorIndex: 0, appStoreID: "363590051"),
-        CustomApp(name: "Gmail",     urlScheme: "googlegmail", icon: "envelope.fill",       colorIndex: 0, appStoreID: "422689480"),
-        CustomApp(name: "Chrome",    urlScheme: "googlechrome", icon: "globe",              colorIndex: 2, appStoreID: "535886823"),
-        CustomApp(name: "Discord",   urlScheme: "discord",     icon: "bubble.left.and.bubble.right.fill", colorIndex: 4, appStoreID: "985746746"),
-        CustomApp(name: "X",         urlScheme: "twitter",     icon: "at",                  colorIndex: 2, appStoreID: "333903271"),
+        // Mạng xã hội / nhắn tin
+        CustomApp(name: "YouTube",     urlScheme: "youtube",      icon: "play.rectangle.fill", colorIndex: 0, appStoreID: "544007664"),
+        CustomApp(name: "TikTok",      urlScheme: "snssdk1233",   icon: "music.note",          colorIndex: 7, appStoreID: "835599320"),
+        CustomApp(name: "Facebook",   urlScheme: "fb",           icon: "person.2.fill",       colorIndex: 2, appStoreID: "284882215"),
+        CustomApp(name: "Messenger",  urlScheme: "fb-messenger", icon: "message.fill",        colorIndex: 4, appStoreID: "454638411"),
+        CustomApp(name: "Instagram",  urlScheme: "instagram",    icon: "camera.fill",         colorIndex: 7, appStoreID: "389801252"),
+        CustomApp(name: "Zalo",       urlScheme: "zalo",         icon: "message.fill",        colorIndex: 2, appStoreID: "579523206"),
+        CustomApp(name: "Telegram",   urlScheme: "tg",           icon: "paperplane.fill",     colorIndex: 2, appStoreID: "686449807"),
+        CustomApp(name: "WhatsApp",   urlScheme: "whatsapp",     icon: "phone.fill",          colorIndex: 3, appStoreID: "310633997"),
+        CustomApp(name: "Viber",      urlScheme: "viber",        icon: "phone.fill",          colorIndex: 4, appStoreID: "382617920"),
+        CustomApp(name: "Discord",    urlScheme: "discord",      icon: "bubble.left.and.bubble.right.fill", colorIndex: 4, appStoreID: "985746746"),
+        CustomApp(name: "X",          urlScheme: "twitter",      icon: "at",                  colorIndex: 2, appStoreID: "333903271"),
+        CustomApp(name: "Threads",    urlScheme: "barcelona",    icon: "at",                  colorIndex: 2, appStoreID: "6446901002"),
+        CustomApp(name: "Snapchat",   urlScheme: "snapchat",     icon: "camera.fill",         colorIndex: 5, appStoreID: "447188370"),
+        CustomApp(name: "LINE",       urlScheme: "line",         icon: "message.fill",        colorIndex: 3, appStoreID: "443904275"),
+        CustomApp(name: "Reddit",     urlScheme: "reddit",       icon: "bubble.left.fill",    colorIndex: 1, appStoreID: "1064216828"),
+        CustomApp(name: "Pinterest",  urlScheme: "pinterest",    icon: "photo.fill",          colorIndex: 0, appStoreID: "429047995"),
+
+        // Mua sắm / ngân hàng / ví
+        CustomApp(name: "Shopee",     urlScheme: "shopeeVN",     icon: "cart.fill",           colorIndex: 1, appStoreID: "959841113"),
+        CustomApp(name: "Lazada",     urlScheme: "lazada",       icon: "cart.fill",           colorIndex: 2, appStoreID: "785385147"),
+        CustomApp(name: "TikTok Shop", urlScheme: "snssdk1233",  icon: "cart.fill",           colorIndex: 7, appStoreID: "835599320"),
+        CustomApp(name: "MoMo",       urlScheme: "momo",         icon: "creditcard.fill",     colorIndex: 7, appStoreID: "918751511"),
+
+        // Di chuyển / bản đồ
+        CustomApp(name: "Grab",       urlScheme: "grab",         icon: "car.fill",            colorIndex: 3, appStoreID: "647268330"),
+        CustomApp(name: "Be",         urlScheme: "be",           icon: "car.fill",            colorIndex: 6, appStoreID: "1234298509"),
+        CustomApp(name: "Google Maps", urlScheme: "comgooglemaps", icon: "map.fill",          colorIndex: 3, appStoreID: "585027354"),
+
+        // Giải trí / nhạc / phim
+        CustomApp(name: "Spotify",    urlScheme: "spotify",      icon: "music.note",          colorIndex: 3, appStoreID: "324684580"),
+        CustomApp(name: "Netflix",    urlScheme: "nflx",         icon: "film.fill",           colorIndex: 0, appStoreID: "363590051"),
+        CustomApp(name: "SoundCloud", urlScheme: "soundcloud",   icon: "music.note",          colorIndex: 1, appStoreID: "336353151"),
+
+        // Google / công cụ
+        CustomApp(name: "Gmail",      urlScheme: "googlegmail",  icon: "envelope.fill",       colorIndex: 0, appStoreID: "422689480"),
+        CustomApp(name: "Chrome",     urlScheme: "googlechrome", icon: "globe",               colorIndex: 2, appStoreID: "535886823"),
+        CustomApp(name: "Google",     urlScheme: "googleapp",    icon: "magnifyingglass",     colorIndex: 2, appStoreID: "284815942"),
+        CustomApp(name: "Google Drive", urlScheme: "googledrive", icon: "folder.fill",        colorIndex: 3, appStoreID: "507874739"),
+        CustomApp(name: "Maps (Apple)", urlScheme: "maps",       icon: "map.fill",            colorIndex: 3, appStoreID: ""),
+
+        // Game (nếu game có mở bằng scheme)
+        CustomApp(name: "Roblox",     urlScheme: "roblox",       icon: "gamecontroller.fill", colorIndex: 4, appStoreID: "431946152"),
+        CustomApp(name: "Minecraft",  urlScheme: "minecraft",    icon: "gamecontroller.fill", colorIndex: 3, appStoreID: "479516143"),
     ]
 
     // MARK: - Lưu / đọc danh sách app của người dùng

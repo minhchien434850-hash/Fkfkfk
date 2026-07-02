@@ -413,6 +413,7 @@ struct AppFormView: View {
     let onSave: (CustomApp) -> Void
 
     @State private var app: CustomApp
+    @State private var search = ""
     private let isEditing: Bool
 
     init(app: CustomApp?, onSave: @escaping (CustomApp) -> Void) {
@@ -426,44 +427,65 @@ struct AppFormView: View {
     }
 
     private let iconCols = [GridItem(.adaptive(minimum: 44), spacing: 10)]
+    private let pickCols = [GridItem(.flexible()), GridItem(.flexible()),
+                            GridItem(.flexible()), GridItem(.flexible())]
+
+    private var filteredPresets: [CustomApp] {
+        let q = search.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return AppLauncher.presets }
+        return AppLauncher.presets.filter { $0.name.localizedCaseInsensitiveContains(q) }
+    }
+
+    // Thêm ngay 1 app từ danh mục (cấp id mới để không trùng khi thêm nhiều app)
+    private func addPreset(_ preset: CustomApp) {
+        var p = preset
+        p.id = UUID()
+        onSave(p)
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 if !isEditing {
-                    Section(store.t("Chọn nhanh app phổ biến", "Quick pick popular apps")) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(AppLauncher.presets) { p in
-                                    Button {
-                                        app.name = p.name
-                                        app.urlScheme = p.urlScheme
-                                        app.icon = p.icon
-                                        app.colorIndex = p.colorIndex
-                                        app.appStoreID = p.appStoreID
-                                    } label: {
+                    Section {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField(store.t("Tìm app theo tên (vd: YouTube)...", "Search app by name..."), text: $search)
+                                .autocorrectionDisabled()
+                        }
+                        let items = filteredPresets
+                        if items.isEmpty {
+                            Text(store.t("Không thấy app này — anh tự nhập bên dưới nhé.",
+                                         "App not found — enter it manually below."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            LazyVGrid(columns: pickCols, spacing: 12) {
+                                ForEach(items) { p in
+                                    Button { addPreset(p) } label: {
                                         VStack(spacing: 6) {
                                             ZStack {
                                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                                                     .fill(LinearGradient(colors: AppLauncherView.colors(p.colorIndex),
                                                                          startPoint: .topLeading, endPoint: .bottomTrailing))
-                                                    .frame(width: 52, height: 52)
+                                                    .frame(width: 54, height: 54)
                                                 Image(systemName: p.icon).font(.title3.weight(.semibold)).foregroundStyle(.white)
                                             }
-                                            Text(p.name).font(.caption2).lineLimit(1)
-                                                .foregroundStyle(.primary)
+                                            Text(p.name).font(.caption2).lineLimit(1).foregroundStyle(.primary)
                                         }
-                                        .frame(width: 60)
+                                        .frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(.plain)
                                 }
                             }
                             .padding(.vertical, 4)
                         }
-                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                        Text(store.t("Bấm 1 app để tự điền sẵn, rồi bấm Lưu. Hoặc tự nhập app khác bên dưới.",
-                                     "Tap an app to auto-fill, then Save. Or enter another app below."))
-                            .font(.caption2).foregroundStyle(.secondary)
+                    } header: {
+                        Text(store.t("Chọn nhanh — bấm 1 phát là thêm", "Quick pick — one tap to add"))
+                    } footer: {
+                        Text(store.t("Gõ tên để tìm, bấm là thêm ngay (khỏi cần URL). Không thấy thì tự nhập bên dưới.",
+                                     "Type to search, tap to add instantly (no URL needed). Not listed? Enter it below."))
+                            .font(.caption2)
                     }
                 }
 
