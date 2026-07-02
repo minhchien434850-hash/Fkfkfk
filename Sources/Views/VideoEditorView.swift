@@ -6,6 +6,16 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import UniformTypeIdentifiers
 import Vision
+import Speech
+
+// Một dòng phụ đề: thời điểm bắt đầu/kết thúc + ảnh chữ đã render sẵn (nền pill mờ).
+struct CaptionSeg: Identifiable {
+    let id = UUID()
+    let start: Double
+    let end: Double
+    let text: String
+    let image: CIImage
+}
 
 // Bọc video chọn từ thư viện thành Transferable (chép ra file tạm để xử lý)
 struct EditMovie: Transferable {
@@ -45,6 +55,11 @@ struct VideoEditorView: View {
     @State private var denoise = 0.0       // 0 ... 1 (0 = không giảm nhiễu)
     @State private var speed = 1.0         // 0.25 ... 4 (tốc độ phát; 1 = giữ nguyên)
     @State private var removeBg = false    // Xoá nền/tách người → làm mờ phông (Vision)
+    // Phụ đề tự động (Auto Captions)
+    @State private var captions: [CaptionSeg] = []
+    @State private var burnCaptions = true
+    @State private var generatingCaptions = false
+    @State private var captionMsg: String?
     @State private var loading = false
     @State private var exporting = false
     @State private var outputURL: URL?
@@ -148,6 +163,30 @@ struct VideoEditorView: View {
                     }
                     .padding().kCard(16)
 
+                    // Phụ đề tự động (Auto Captions)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Phụ đề tự động").font(.subheadline.bold())
+                        Button { Task { await generateCaptions() } } label: {
+                            HStack {
+                                if generatingCaptions { ProgressView().padding(.trailing, 4) }
+                                Label(generatingCaptions ? "Đang nhận diện lời thoại..." : "Tạo phụ đề từ giọng nói",
+                                      systemImage: "captions.bubble")
+                            }
+                        }.disabled(generatingCaptions)
+                        if !captions.isEmpty {
+                            Toggle("Khắc phụ đề lên video khi xuất", isOn: $burnCaptions)
+                                .font(.caption)
+                            Text("Đã có \(captions.count) dòng phụ đề.").font(.caption2).foregroundStyle(.green)
+                        }
+                        if let captionMsg {
+                            Text(captionMsg).font(.caption2)
+                                .foregroundStyle(captionMsg.contains("Đã") ? .green : .orange)
+                        }
+                        Text("Nhận diện lời thoại tiếng Việt trong video → tạo phụ đề. Độ chính xác phụ thuộc chất lượng âm thanh & giọng đọc.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding().kCard(16)
+
                     // Xuất
                     Button { Task { await export() } } label: {
                         HStack {
@@ -239,6 +278,11 @@ struct VideoEditorView: View {
         let shp = sharpen
         let dns = denoise
         let rmBg = removeBg
+        // Phụ đề: nếu đổi tốc độ, thời gian khung tính theo composition đã scale → quy về thời gian gốc.
+        let caps = burnCaptions ? captions : []
+        let speedChanged = abs(speed - 1.0) > 0.01
+        let capOffset = speedChanged ? trimStart : 0.0
+        let capSpeed = speedChanged ? speed : 1.0
         return AVVideoComposition(asset: asset) { request in
             let src = request.sourceImage
             var img = src.clampedToExtent()
@@ -323,8 +367,104 @@ struct VideoEditorView: View {
             default: break
             }
 
+            // Phụ đề: khắc dòng đang hoạt động vào KHUNG (đặt gần đáy, giữa).
+            if !caps.isEmpty {
+                let t = capOffset + request.compositionTime.seconds * capSpeed
+                if let seg = caps.first(where: { t >= $0.start && t <= $0.end }) {
+                    let targetW = src.extent.width * 0.92
+                    let capW = max(1, seg.image.extent.width)
+                    let scale = targetW / capW
+                    var cap = seg.image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+                    let tx = src.extent.minX + (src.extent.width - cap.extent.width) / 2 - cap.extent.minX
+                    let ty = src.extent.minY + src.extent.height * 0.06 - cap.extent.minY
+                    cap = cap.transformed(by: CGAffineTransform(translationX: tx, y: ty))
+                    img = cap.composited(over: img)
+                }
+            }
+
             request.finish(with: img.cropped(to: src.extent), context: Self.ciCtx)
         }
+    }
+
+    // MARK: - Phụ đề tự động
+    private func generateCaptions() async {
+        guard let inputURL else { return }
+        generatingCaptions = true; captionMsg = nil
+        defer { generatingCaptions = false }
+        let auth = await withCheckedContinuation { (c: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+            SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) }
+        }
+        guard auth == .authorized else { captionMsg = "Chưa được cấp quyền nhận diện giọng nói."; return }
+        let rec = SFSpeechRecognizer(locale: Locale(identifier: "vi-VN")) ?? SFSpeechRecognizer()
+        guard let rec, rec.isAvailable else {
+            captionMsg = "Thiết bị chưa hỗ trợ nhận diện giọng nói tiếng Việt."; return
+        }
+        let req = SFSpeechURLRecognitionRequest(url: inputURL)
+        req.shouldReportPartialResults = false
+        if #available(iOS 16.0, *) { req.addsPunctuation = true }
+        do {
+            let transcription: SFTranscription = try await withCheckedThrowingContinuation { cont in
+                var done = false
+                rec.recognitionTask(with: req) { res, err in
+                    if done { return }
+                    if let err { done = true; cont.resume(throwing: err); return }
+                    if let res, res.isFinal { done = true; cont.resume(returning: res.bestTranscription) }
+                }
+            }
+            let segs = buildCaptions(from: transcription)
+            captions = segs
+            captionMsg = segs.isEmpty ? "Không nhận được lời thoại rõ ràng." : "Đã tạo \(segs.count) dòng phụ đề."
+        } catch {
+            captionMsg = "Nhận diện thất bại: \(error.localizedDescription)"
+        }
+    }
+
+    private func buildCaptions(from t: SFTranscription) -> [CaptionSeg] {
+        var out: [CaptionSeg] = []
+        var chunk: [SFTranscriptionSegment] = []
+        func flush() {
+            guard let first = chunk.first, let last = chunk.last else { return }
+            let text = chunk.map { $0.substring }.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            guard !text.isEmpty else { chunk = []; return }
+            let start = first.timestamp
+            let end = max(last.timestamp + last.duration, start + 0.8)
+            if let img = renderCaption(text) {
+                out.append(CaptionSeg(start: start, end: end, text: text, image: img))
+            }
+            chunk = []
+        }
+        for s in t.segments {
+            chunk.append(s)
+            let dur = (chunk.last!.timestamp + chunk.last!.duration) - chunk.first!.timestamp
+            if chunk.count >= 8 || dur >= 3.0 { flush() }
+        }
+        flush()
+        return out
+    }
+
+    private func renderCaption(_ text: String) -> CIImage? {
+        let refWidth: CGFloat = 900
+        let font = UIFont.systemFont(ofSize: 44, weight: .bold)
+        let para = NSMutableParagraphStyle(); para.alignment = .center
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font, .foregroundColor: UIColor.white, .paragraphStyle: para,
+            .strokeColor: UIColor.black, .strokeWidth: -3.0
+        ]
+        let maxTextWidth = refWidth - 80
+        let bounding = (text as NSString).boundingRect(
+            with: CGSize(width: maxTextWidth, height: 600),
+            options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil)
+        let textH = ceil(bounding.height)
+        let size = CGSize(width: refWidth, height: textH + 34)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let uiImg = renderer.image { _ in
+            UIColor.black.withAlphaComponent(0.45).setFill()
+            UIBezierPath(roundedRect: CGRect(x: 16, y: 0, width: refWidth - 32, height: size.height), cornerRadius: 14).fill()
+            (text as NSString).draw(with: CGRect(x: 40, y: 17, width: maxTextWidth, height: textH),
+                                    options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attrs, context: nil)
+        }
+        guard let cg = uiImg.cgImage else { return nil }
+        return CIImage(cgImage: cg)
     }
 
     private func export() async {
