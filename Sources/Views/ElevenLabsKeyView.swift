@@ -18,9 +18,10 @@ struct ElevenLabsKeyView: View {
     private let testSentence = "Xin chào, đây là giọng ElevenLabs đang được dùng trong ứng dụng."
 
     let availableModels: [(id: String, label: String, desc: String)] = [
-        ("eleven_multilingual_v2", "Multilingual v2 ✦ Tốt nhất", "Đọc tiếng Việt chuẩn nhất, hỗ trợ 29 ngôn ngữ."),
-        ("eleven_flash_v2_5",      "Flash v2.5 ⚡ Nhanh & rẻ",   "Tốc độ cao, tốn ít credit hơn ~3×. Tiếng Việt khá tốt."),
-        ("eleven_turbo_v2_5",      "Turbo v2.5",                  "Cân bằng giữa tốc độ và chất lượng."),
+        ("eleven_v3",              "Eleven v3 ✦ Biểu cảm nhất (mới)", "Model mới nhất — ngữ điệu & cảm xúc tự nhiên nhất, gần giống giọng gốc. Cần key/gói hỗ trợ v3."),
+        ("eleven_multilingual_v2", "Multilingual v2 ✦ Ổn định",       "Đọc tiếng Việt chuẩn, hỗ trợ 29 ngôn ngữ. Hoạt động với mọi key."),
+        ("eleven_flash_v2_5",      "Flash v2.5 ⚡ Nhanh & rẻ",        "Tốc độ cao, tốn ít credit hơn ~3×. Tiếng Việt khá tốt."),
+        ("eleven_turbo_v2_5",      "Turbo v2.5",                       "Cân bằng giữa tốc độ và chất lượng."),
     ]
 
     enum TestStatus: Equatable {

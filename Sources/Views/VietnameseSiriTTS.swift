@@ -77,7 +77,9 @@ struct VietnameseTextNormalizer {
     ]
 
     /// Chuẩn hóa văn bản thô tiếng Việt trước khi đọc.
-    static func normalize(_ text: String) -> String {
+    /// `slang=false` → BỎ bộ lọc tiếng lóng (đọc nguyên văn hơn) nhưng vẫn dọn
+    /// emoji/ký hiệu/số tiền. Dùng cho giọng iOS theo yêu cầu.
+    static func normalize(_ text: String, slang: Bool = true) -> String {
         var s = text
 
         // 1) Đổi ký hiệu thành chữ.
@@ -92,8 +94,8 @@ struct VietnameseTextNormalizer {
             isAllowedScalar(sc) ? sc : Unicode.Scalar(32) // space
         }))
 
-        // 3) Thay từng "từ" theo từ điển (không phá chữ bên trong từ khác).
-        s = replaceWords(s)
+        // 3) Thay từng "từ" theo từ điển tiếng lóng (chỉ khi bật bộ lọc).
+        if slang { s = replaceWords(s) }
 
         // 4) Gom khoảng trắng, gọn dấu câu lặp (… , !!! , ??? ).
         s = collapse(s)
@@ -197,7 +199,8 @@ final class VietnameseSiriSpeaker: NSObject, ObservableObject, AVSpeechSynthesiz
 
     /// Đọc: chuẩn hóa văn bản -> tạo utterance -> phát bằng giọng vi-VN.
     func speak(_ raw: String) {
-        let text = VietnameseTextNormalizer.normalize(raw)
+        // Giọng iOS: bỏ bộ lọc tiếng lóng, chỉ giữ chuẩn hóa số tiền/ký hiệu/emoji
+        let text = VietnameseTextNormalizer.normalize(raw, slang: false)
         guard !text.isEmpty else { return }
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
@@ -221,9 +224,9 @@ final class VietnameseSiriSpeaker: NSObject, ObservableObject, AVSpeechSynthesiz
 // MARK: - Giao diện độc lập
 struct VietnameseSiriTTSView: View {
     @StateObject private var speaker = VietnameseSiriSpeaker()
-    @State private var input = "Vd: ko bít vn mk ns gì lun, vl =))"
+    @State private var input = "Vd: Sản phẩm giá 250k, ưu đãi còn 199k 🎉"
 
-    private var preview: String { VietnameseTextNormalizer.normalize(input) }
+    private var preview: String { VietnameseTextNormalizer.normalize(input, slang: false) }
 
     var body: some View {
         ScrollView {

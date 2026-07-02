@@ -179,11 +179,18 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     }
 
     func speak(_ text: String) {
-        // Lọc & chuẩn hóa văn bản tiếng Việt (mở rộng viết tắt/tiếng lóng, làm sạch ký tự)
-        // cho giọng iOS mặc định · Siri · Chị Google.
-        // ElevenLabs GIỮ NGUYÊN văn bản gốc (không lọc) theo yêu cầu.
+        // Chuẩn hóa văn bản:
+        // · ElevenLabs: GIỮ NGUYÊN văn bản gốc (model tự xử lý ngữ điệu/cảm xúc).
+        // · Chị Google: chuẩn hóa đầy đủ (kèm mở rộng tiếng lóng).
+        // · Giọng iOS (mặc định · Siri · Siri Anh-Việt): BỎ bộ lọc tiếng lóng,
+        //   chỉ giữ chuẩn hóa số tiền/ký hiệu/emoji để đọc tự nhiên, mượt hơn.
         let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let t = engineType == .elevenlabs ? raw : VietnameseTextNormalizer.normalize(raw)
+        let t: String
+        switch engineType {
+        case .elevenlabs: t = raw
+        case .google:     t = VietnameseTextNormalizer.normalize(raw)
+        default:          t = VietnameseTextNormalizer.normalize(raw, slang: false)
+        }
         guard !t.isEmpty else { return }
         activateSession()
         // Tự bật chế độ nền (giữ audio sống khi chuyển app / khoá màn hình)

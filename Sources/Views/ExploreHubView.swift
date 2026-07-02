@@ -560,11 +560,11 @@ struct MediaConverterView: View {
                 errorMsg = "Không đọc được file đã chọn."; return
             }
             let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
-            // Giới hạn kích thước: ảnh 30MB, video 300MB
-            let maxBytes = isVideo ? 300 * 1024 * 1024 : 30 * 1024 * 1024
+            // Giới hạn kích thước: ảnh 30MB, video 700MB
+            let maxBytes = isVideo ? 700 * 1024 * 1024 : 30 * 1024 * 1024
             if data.count > maxBytes {
                 let mb = data.count / (1024 * 1024)
-                let limit = isVideo ? "300MB" : "30MB"
+                let limit = isVideo ? "700MB" : "30MB"
                 errorMsg = "File quá lớn (\(mb)MB). Giới hạn tối đa \(limit) cho \(isVideo ? "video" : "ảnh")."; return
             }
             let mime = isVideo ? "video/mp4" : "image/jpeg"
