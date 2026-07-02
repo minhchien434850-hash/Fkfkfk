@@ -82,8 +82,18 @@ struct RemoteDesktopView: View {
                                           "Numeric ID + random password, quick phone ↔ PC via RustDesk."))
                 }
 
-                // Hướng dẫn cài phía máy tính
-                Section(store.t("Cách lấy màn hình PC (cài 1 lần trên máy tính)", "How to get your PC screen (set up once)")) {
+                // Trường hợp THUÊ PC qua web (nhà cung cấp cloud PC/máy game)
+                Section(store.t("Thuê PC qua web (đăng nhập nhà cung cấp)", "Rented cloud PC (provider login)")) {
+                    Text(store.t("Nếu anh THUÊ máy qua một trang web (phải đăng nhập trang đó mới vào được PC): bấm ➕ ở trên → chọn 'RDP (cổng web)' → dán ĐÚNG LINK trang điều khiển/đăng nhập của nhà cung cấp → Lưu.",
+                                 "If you rent a PC via a website (you must log in there to reach the PC): tap ➕ → pick 'RDP (web)' → paste the provider's control/login URL → Save."))
+                        .font(.caption)
+                    Text(store.t("Mở kết nối → đăng nhập NGAY TRONG APP. App GIỮ đăng nhập: lần sau bấm vào là vào thẳng màn hình PC, khỏi đăng nhập lại (trừ khi anh xoá app).",
+                                 "Open it → log in inside the app. Login is remembered: next time you go straight in without logging in again."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
+                // Hướng dẫn cài phía máy tính (tự dựng cổng)
+                Section(store.t("Hoặc tự dựng cổng điều khiển (cài 1 lần trên máy tính)", "Or set up your own gateway (once)")) {
                     guideRow("1", store.t("RustDesk (khuyên dùng, giống UltraViewer): cài RustDesk trên PC → bật 'Web client' hoặc self-host, dán link vào đây.",
                                           "RustDesk (recommended, like UltraViewer): install on PC → enable Web client / self-host, paste link here."),
                              link: "https://rustdesk.com")
@@ -231,6 +241,30 @@ struct RemoteDesktopSession: View {
     }
 }
 
+// Giữ WKWebView sống theo từng kết nối → ĐĂNG NHẬP 1 LẦN, lần sau vào thẳng
+// (cookie + phiên đăng nhập của trang thuê PC không bị mất khi đóng/mở lại).
+final class RDWebViews {
+    static let shared = RDWebViews()
+    private var cache: [String: WKWebView] = [:]
+
+    func view(for key: String, desktopUA: Bool) -> (WKWebView, Bool) {
+        if let v = cache[key] { return (v, false) }   // đã có → không cần nạp lại
+        let cfg = WKWebViewConfiguration()
+        cfg.allowsInlineMediaPlayback = true
+        cfg.mediaTypesRequiringUserActionForPlayback = []
+        cfg.websiteDataStore = WKWebsiteDataStore.default()   // cookie lưu xuống đĩa
+        let wv = WKWebView(frame: .zero, configuration: cfg)
+        wv.scrollView.minimumZoomScale = 1
+        wv.scrollView.maximumZoomScale = 6
+        wv.isOpaque = false
+        wv.backgroundColor = .black
+        cache[key] = wv
+        return (wv, true)
+    }
+
+    func drop(_ key: String) { cache[key] = nil }
+}
+
 struct RemoteDesktopWebView: UIViewRepresentable {
     let urlString: String
     let desktopUA: Bool
@@ -241,23 +275,19 @@ struct RemoteDesktopWebView: UIViewRepresentable {
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
     func makeUIView(context: Context) -> WKWebView {
-        let cfg = WKWebViewConfiguration()
-        cfg.allowsInlineMediaPlayback = true
-        cfg.mediaTypesRequiringUserActionForPlayback = []
-        cfg.websiteDataStore = .default()
-        let wv = WKWebView(frame: .zero, configuration: cfg)
+        let (wv, isNew) = RDWebViews.shared.view(for: urlString, desktopUA: desktopUA)
         wv.navigationDelegate = context.coordinator
         wv.customUserAgent = desktopUA ? Self.desktopAgent : nil
-        wv.scrollView.minimumZoomScale = 1
-        wv.scrollView.maximumZoomScale = 6      // cho phép phóng to xem màn hình PC rõ hơn
-        wv.isOpaque = false
-        wv.backgroundColor = .black
-        context.coordinator.load(wv, urlString)
+        if isNew || wv.url == nil {
+            context.coordinator.load(wv, urlString)   // chỉ nạp lần đầu; sau đó giữ nguyên phiên
+        } else {
+            DispatchQueue.main.async { self.loading = false }
+        }
         return wv
     }
 
     func updateUIView(_ wv: WKWebView, context: Context) {
-        // Đổi UA hoặc bấm tải lại → nạp lại trang.
+        // Chỉ nạp lại khi người dùng CHỦ ĐỘNG bấm tải lại hoặc đổi User-Agent.
         if context.coordinator.lastToken != reloadToken || context.coordinator.lastUA != desktopUA {
             context.coordinator.lastToken = reloadToken
             context.coordinator.lastUA = desktopUA
