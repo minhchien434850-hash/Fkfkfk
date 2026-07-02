@@ -673,6 +673,22 @@ def init_db() -> None:
                 sold_at INTEGER,
                 created_at INTEGER
             );
+            -- §7 Đợt 3 — Đơn hàng của cửa hàng cá nhân (buyer mua từ shop người bán)
+            CREATE TABLE IF NOT EXISTS user_store_orders(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id INTEGER NOT NULL,
+                seller_id INTEGER NOT NULL,
+                buyer_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                product_name TEXT DEFAULT '',
+                price_id INTEGER,
+                price_label TEXT DEFAULT '',
+                key_text TEXT DEFAULT '',
+                download_url TEXT DEFAULT '',
+                amount INTEGER NOT NULL,
+                status TEXT DEFAULT 'completed',
+                created_at INTEGER
+            );
 
             -- Nạp tiền vào VÍ cửa hàng (tách biệt thanh toán app chính)
             CREATE TABLE IF NOT EXISTS store_topups(
@@ -969,6 +985,8 @@ def _create_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_store_prices_prod ON store_prices(product_id)",
         "CREATE INDEX IF NOT EXISTS idx_ustore_prices_prod ON user_store_prices(product_id)",
         "CREATE INDEX IF NOT EXISTS idx_ustore_keys_prod_status ON user_store_keys(product_id,status)",
+        "CREATE INDEX IF NOT EXISTS idx_ustore_orders_store ON user_store_orders(store_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ustore_orders_buyer ON user_store_orders(buyer_id)",
         "CREATE INDEX IF NOT EXISTS idx_store_products_folder ON store_products(folder_id)",
         "CREATE INDEX IF NOT EXISTS idx_store_folders_cat ON store_folders(category_id)",
         "CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)",
@@ -5968,6 +5986,151 @@ def my_store_delete_available_keys(pid: int, user=Depends(get_user)) -> dict[str
         _require_my_product(c, store, pid)
         cur = c.execute("DELETE FROM user_store_keys WHERE product_id=? AND status='available'", (pid,))
     return {"message": f"Đã xoá {cur.rowcount} key khả dụng."}
+
+
+# §7 Đợt 3 — Mua hàng từ cửa hàng cá nhân (buyer trả bằng ví, người bán nhận tiền)
+class UStoreBuyIn(BaseModel):
+    product_id: int
+    price_id: Optional[int] = None
+
+@app.post("/u-store/{sid}/buy")
+def u_store_buy(sid: int, b: UStoreBuyIn, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = c.execute("SELECT * FROM user_stores WHERE id=?", (sid,)).fetchone()
+        if not store:
+            raise HTTPException(status_code=404, detail="Không tìm thấy cửa hàng.")
+        if store["owner_id"] == user["id"]:
+            raise HTTPException(status_code=400, detail="Không thể mua từ cửa hàng của chính bạn.")
+        prod = c.execute("SELECT * FROM user_store_products WHERE id=? AND store_id=?",
+                         (b.product_id, sid)).fetchone()
+        if not prod:
+            raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+        # Xác định giá: nếu có bảng giá nhiều mốc thì phải chọn 1 mốc hợp lệ
+        tiers = _uproduct_prices(c, b.product_id)
+        price_id = None
+        price_label = ""
+        if tiers:
+            tier = None
+            if b.price_id is not None:
+                tier = next((t for t in tiers if t["id"] == b.price_id), None)
+            if tier is None:
+                raise HTTPException(status_code=400, detail="Vui lòng chọn mốc giá.")
+            amount = tier["amount"]; price_id = tier["id"]; price_label = tier["label"]
+        else:
+            amount = prod["price"] or 0
+        # Số dư ví
+        balance = _wallet_balance(c, user["id"])
+        if balance < amount:
+            raise HTTPException(status_code=400,
+                detail=f"Số dư ví không đủ (cần {amount:,}đ, còn {balance:,}đ). Vui lòng nạp thêm."
+                       .replace(",", "."))
+        # Giành 1 key khả dụng (ưu tiên đúng mốc, rồi key dùng chung, rồi bất kỳ)
+        key = None
+        for cond, args in (
+            ("AND price_id=?", (b.product_id, price_id)) if price_id else (None, None),
+            ("AND price_id IS NULL", (b.product_id,)),
+            ("", (b.product_id,)),
+        ):
+            if cond is None:
+                continue
+            for _ in range(50):
+                cand = c.execute(
+                    f"SELECT id,key_text FROM user_store_keys WHERE product_id=? AND status='available' "
+                    f"{cond} ORDER BY id ASC LIMIT 1", args).fetchone()
+                if not cand:
+                    break
+                got = c.execute("UPDATE user_store_keys SET status='sold',sold_at=? WHERE id=? AND status='available'",
+                                (int(time.time()), cand["id"]))
+                if got.rowcount == 1:
+                    key = cand; break
+            if key:
+                break
+        dl = (prod["download_url"] or "").strip()
+        if not key and not dl:
+            raise HTTPException(status_code=400, detail="Sản phẩm đã hết hàng.")
+        key_text = key["key_text"] if key else ""
+        # Trừ ví người mua (atomic, chống âm)
+        ded = c.execute("UPDATE users SET wallet=wallet-? WHERE id=? AND wallet>=?",
+                        (amount, user["id"], amount))
+        if ded.rowcount != 1:
+            if key:
+                c.execute("UPDATE user_store_keys SET status='available',sold_at=NULL WHERE id=?", (key["id"],))
+            raise HTTPException(status_code=400, detail="Số dư ví không đủ. Vui lòng nạp thêm.")
+        # Cộng tiền cho người bán
+        _wallet_add(c, store["owner_id"], amount, "sale", f"Bán {prod['name']}")
+        c.execute("INSERT INTO store_wallet_tx(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",
+                  (user["id"], "purchase", -amount, f"Mua {prod['name']}", int(time.time())))
+        if key:
+            c.execute("DELETE FROM user_store_keys WHERE id=?", (key["id"],))  # đã giao → xoá khỏi kho
+        cur = c.execute(
+            "INSERT INTO user_store_orders(store_id,seller_id,buyer_id,product_id,product_name,price_id,"
+            "price_label,key_text,download_url,amount,status,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,'completed',?)",
+            (sid, store["owner_id"], user["id"], b.product_id, prod["name"], price_id, price_label,
+             key_text, dl, amount, int(time.time())))
+        oid = cur.lastrowid
+        new_balance = _wallet_balance(c, user["id"])
+    return {"ok": True, "order_id": oid, "key": key_text, "download_url": dl,
+            "product_name": prod["name"], "balance": new_balance,
+            "message": "Mua thành công!"}
+
+@app.get("/my-orders/u-store")
+def u_store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
+    """Đơn buyer đã mua từ các cửa hàng cá nhân (để lấy lại key)."""
+    with db() as c:
+        rows = c.execute(
+            "SELECT o.id,o.product_name,o.price_label,o.key_text,o.download_url,o.amount,o.created_at,"
+            "s.name AS store_name FROM user_store_orders o "
+            "LEFT JOIN user_stores s ON s.id=o.store_id "
+            "WHERE o.buyer_id=? ORDER BY o.id DESC LIMIT 200", (user["id"],)).fetchall()
+    return [{"id": r["id"], "product_name": r["product_name"], "price_label": r["price_label"] or "",
+             "key_text": r["key_text"] or "", "download_url": r["download_url"] or "",
+             "amount": r["amount"], "created_at": r["created_at"], "store_name": r["store_name"] or "-"}
+            for r in rows]
+
+# §7 Đợt 3 — Người bán: đơn hàng + thống kê (CÔ LẬP theo store của chính chủ)
+@app.get("/my-store/orders")
+def my_store_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        rows = c.execute(
+            "SELECT o.id,o.product_name,o.price_label,o.amount,o.status,o.created_at,u.username AS buyer "
+            "FROM user_store_orders o LEFT JOIN users u ON u.id=o.buyer_id "
+            "WHERE o.store_id=? ORDER BY o.id DESC LIMIT 200", (store["id"],)).fetchall()
+    return [{"id": r["id"], "product_name": r["product_name"], "price_label": r["price_label"] or "",
+             "amount": r["amount"], "status": r["status"], "created_at": r["created_at"],
+             "buyer": r["buyer"] or "-"} for r in rows]
+
+@app.get("/my-store/stats")
+def my_store_stats(user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        sid = store["id"]
+        now = int(time.time())
+        day = now - 86400
+        agg = c.execute(
+            "SELECT COUNT(*) n, COALESCE(SUM(amount),0) rev FROM user_store_orders "
+            "WHERE store_id=? AND status='completed'", (sid,)).fetchone()
+        today = c.execute(
+            "SELECT COUNT(*) n, COALESCE(SUM(amount),0) rev FROM user_store_orders "
+            "WHERE store_id=? AND status='completed' AND created_at>=?", (sid, day)).fetchone()
+        top = c.execute(
+            "SELECT product_name, COUNT(*) sold, COALESCE(SUM(amount),0) rev FROM user_store_orders "
+            "WHERE store_id=? AND status='completed' GROUP BY product_id ORDER BY sold DESC LIMIT 5",
+            (sid,)).fetchall()
+        low = c.execute(
+            "SELECT p.name, (SELECT COUNT(*) FROM user_store_keys k WHERE k.product_id=p.id AND k.status='available') stock "
+            "FROM user_store_products p WHERE p.store_id=? ORDER BY stock ASC LIMIT 5", (sid,)).fetchall()
+        prod_count = c.execute("SELECT COUNT(*) n FROM user_store_products WHERE store_id=?", (sid,)).fetchone()["n"]
+        key_count = c.execute("SELECT COUNT(*) n FROM user_store_keys WHERE store_id=? AND status='available'",
+                              (sid,)).fetchone()["n"]
+    return {
+        "orders_total": agg["n"], "revenue_total": agg["rev"],
+        "orders_today": today["n"], "revenue_today": today["rev"],
+        "product_count": prod_count, "keys_available": key_count,
+        "top_products": [{"name": r["product_name"], "sold": r["sold"], "revenue": r["rev"]} for r in top],
+        "low_stock": [{"name": r["name"], "stock": r["stock"]} for r in low],
+    }
 
 
 class MediaUploadIn(BaseModel):

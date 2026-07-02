@@ -618,6 +618,21 @@ struct APIClient {
     func getUserStore(_ sid: Int) async throws -> MyStoreResponse {
         try decode(try await send("/u-store/\(sid)"))
     }
+    // §7 Đợt 3 — mua hàng + đơn + thống kê
+    func buyUserStore(sid: Int, productId: Int, priceId: Int?) async throws -> UStoreBuyResult {
+        var body: [String: Any] = ["product_id": productId]
+        if let priceId { body["price_id"] = priceId }
+        return try decode(try await send("/u-store/\(sid)/buy", method: "POST", json: body))
+    }
+    func myStoreOrders() async throws -> [MyStoreOrder] {
+        try decode(try await send("/my-store/orders"))
+    }
+    func myStoreStats() async throws -> MyStoreStats {
+        try decode(try await send("/my-store/stats"))
+    }
+    func myUserStoreOrders() async throws -> [UStoreMyOrder] {
+        try decode(try await send("/my-orders/u-store"))
+    }
 
     // §9.1 — Cảnh báo xâm nhập qua Telegram (admin)
     func getSecurityAlert() async throws -> SecurityAlertConfig {

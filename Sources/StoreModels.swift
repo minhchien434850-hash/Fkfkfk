@@ -116,6 +116,47 @@ struct MyStoreKeysResponse: Decodable {
     let total: Int
     let keys: [MyStoreKey]
 }
+// §7 Đợt 3 — đơn hàng + thống kê + mua hàng
+struct MyStoreOrder: Decodable, Hashable, Identifiable {
+    let id: Int
+    let productName: String
+    let priceLabel: String
+    let amount: Int
+    let status: String
+    let createdAt: Int
+    let buyer: String
+}
+struct MyStoreStatTop: Decodable, Hashable { let name: String; let sold: Int; let revenue: Int }
+struct MyStoreStatLow: Decodable, Hashable { let name: String; let stock: Int }
+struct MyStoreStats: Decodable {
+    let ordersTotal: Int
+    let revenueTotal: Int
+    let ordersToday: Int
+    let revenueToday: Int
+    let productCount: Int
+    let keysAvailable: Int
+    let topProducts: [MyStoreStatTop]
+    let lowStock: [MyStoreStatLow]
+}
+struct UStoreBuyResult: Decodable {
+    let ok: Bool
+    let orderId: Int
+    let key: String
+    let downloadUrl: String
+    let productName: String
+    let balance: Int
+    let message: String
+}
+struct UStoreMyOrder: Decodable, Hashable, Identifiable {
+    let id: Int
+    let productName: String
+    let priceLabel: String
+    let keyText: String
+    let downloadUrl: String
+    let amount: Int
+    let createdAt: Int
+    let storeName: String
+}
 struct MyStoreCategory: Decodable, Hashable, Identifiable {
     let id: Int
     let name: String
