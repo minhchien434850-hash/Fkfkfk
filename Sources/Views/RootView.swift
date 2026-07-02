@@ -279,8 +279,9 @@ struct MainTabView: View {
             let age = Int(Date().timeIntervalSince1970) - (latest.createdAt ?? 0)
             if age > 86_400 { return }
         }
-        // Hiện BANNER hệ thống giống hệt admin thấy — cho MỌI người dùng (kể cả khi thu nhỏ app).
-        store.postProductNotification(body: latest.body.isEmpty ? latest.title : latest.body)
+        // Hiện BANNER hệ thống (kèm ẢNH sản phẩm nếu có) cho MỌI người dùng — kể cả khi thu nhỏ app.
+        store.postProductNotification(body: latest.body.isEmpty ? latest.title : latest.body,
+                                      imageURL: latest.image)
         // + popup ngay trong app khi đang mở.
         notifTitle = latest.title
         notifBody = latest.body

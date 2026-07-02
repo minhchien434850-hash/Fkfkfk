@@ -206,16 +206,40 @@ final class AppStore: ObservableObject {
         UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
     }
 
-    /// Thông báo sản phẩm mới — hiện banner + đọc giọng nói khi app đang mở
-    func postProductNotification(title: String = "🛒 KENIOS Cửa hàng", body: String) {
+    /// Thông báo sản phẩm mới — hiện banner (kèm ẢNH sản phẩm nếu có) + đọc giọng khi app đang mở
+    func postProductNotification(title: String = "🛒 KENIOS Cửa hàng", body: String, imageURL: String? = nil) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
         content.categoryIdentifier = "KENIOS_PRODUCT"
-        let req = UNNotificationRequest(identifier: "prod-\(UUID().uuidString)",
-                                        content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+
+        func submit(_ attachments: [UNNotificationAttachment]) {
+            content.attachments = attachments
+            let req = UNNotificationRequest(identifier: "prod-\(UUID().uuidString)",
+                                            content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+        }
+
+        // Có ảnh → tải về tệp tạm rồi đính kèm (rich notification có hình như kênh cửa hàng).
+        if let s = imageURL?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty,
+           let url = URL(string: s) {
+            Task {
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    let ext = url.pathExtension.isEmpty ? "jpg" : url.pathExtension
+                    let tmp = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("notif_\(UUID().uuidString).\(ext)")
+                    try data.write(to: tmp)
+                    let att = try UNNotificationAttachment(identifier: "img", url: tmp, options: nil)
+                    await MainActor.run { submit([att]) }
+                } catch {
+                    await MainActor.run { submit([]) }   // lỗi tải ảnh → vẫn hiện thông báo chữ
+                }
+            }
+        } else {
+            submit([])
+        }
     }
 
     /// Thông báo bảo trì — hiện banner + đọc giọng nói khi app đang mở

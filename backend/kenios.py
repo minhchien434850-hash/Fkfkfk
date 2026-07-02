@@ -887,6 +887,8 @@ def _migrate() -> None:
         ("payments", "plan_days", "INTEGER DEFAULT 0"),
         # Âm thanh thông báo (quà/follow/share) lưu theo user → cài lại app/build lại vẫn còn
         ("users", "notif_sounds", "TEXT"),
+        # §1.1 — Ảnh đính kèm thông báo (rich notification có hình sản phẩm)
+        ("notifications", "image", "TEXT DEFAULT ''"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -6501,11 +6503,17 @@ def admin_store_save_product(b: StoreProductIn, admin=Depends(get_admin)) -> dic
                             (b.folder_id, name, b.description or "", media, b.download_url or "",
                              b.download_file_id, kind, int(time.time())))
             pid = cur.lastrowid
-    # §1.1 — Sản phẩm MỚI: phát thông báo cho TẤT CẢ người dùng (không chỉ admin).
+    # §1.1 — Sản phẩm MỚI: phát thông báo (kèm ẢNH sản phẩm) cho TẤT CẢ người dùng.
     if not b.id:
+        img = ""
+        for m in (b.media or []):
+            u = (m.url if isinstance(m, MediaItem) else (m.get("url", "") if isinstance(m, dict) else "")) or ""
+            if u:
+                img = u
+                break
         _notify_all_users("🛒 KENIOS Cửa hàng",
                           f"Sản phẩm mới vừa được thêm vào cửa hàng: {name}",
-                          kind="product")
+                          kind="product", image=img)
     return {"message": "Đã lưu sản phẩm.", "id": pid}
 
 @app.delete("/admin/store/products/{pid}")
@@ -6774,13 +6782,13 @@ def _notify_admins(title: str, body: str) -> None:
         log.warning("notify_admins lỗi: %s", e)
 
 
-def _broadcast_notification(title: str, body: str, kind: str = "general", link: str = "") -> None:
+def _broadcast_notification(title: str, body: str, kind: str = "general", link: str = "", image: str = "") -> None:
     """§1.1 — Lưu thông báo PHÁT cho tất cả người dùng để app đọc (không phụ thuộc APNs).
     Đây là kênh tin cậy: mọi user mở app đều thấy, kể cả bản cài qua eSign."""
     try:
         with db() as c:
-            c.execute("INSERT INTO notifications(title,body,kind,link,created_at) VALUES(?,?,?,?,?)",
-                      (title, body, kind, link, int(time.time())))
+            c.execute("INSERT INTO notifications(title,body,kind,link,image,created_at) VALUES(?,?,?,?,?,?)",
+                      (title, body, kind, link, image, int(time.time())))
             # Giữ gọn: chỉ lưu 200 thông báo gần nhất
             c.execute("DELETE FROM notifications WHERE id NOT IN "
                       "(SELECT id FROM notifications ORDER BY id DESC LIMIT 200)")
@@ -6788,10 +6796,10 @@ def _broadcast_notification(title: str, body: str, kind: str = "general", link: 
         log.warning("broadcast_notification lỗi: %s", e)
 
 
-def _notify_all_users(title: str, body: str, kind: str = "general", link: str = "") -> None:
+def _notify_all_users(title: str, body: str, kind: str = "general", link: str = "", image: str = "") -> None:
     """§1.1 — Thông báo cho MỌI người dùng: (1) LƯU vào bảng notifications để app đọc
     (tin cậy, không cần quyền push) + (2) đẩy APNs nếu có cấu hình (best-effort)."""
-    _broadcast_notification(title, body, kind, link)
+    _broadcast_notification(title, body, kind, link, image)
     try:
         with db() as c:
             tokens = [r["token"] for r in c.execute("SELECT token FROM device_tokens").fetchall()]
@@ -6810,7 +6818,7 @@ def list_notifications(limit: int = 20, user=Depends(get_user)) -> list[dict[str
     limit = max(1, min(limit, 100))
     with db() as c:
         rows = c.execute(
-            "SELECT id,title,body,kind,link,created_at FROM notifications "
+            "SELECT id,title,body,kind,link,COALESCE(image,'') AS image,created_at FROM notifications "
             "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]
 

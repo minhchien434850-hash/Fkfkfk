@@ -624,6 +624,7 @@ struct AppNotification: Identifiable, Decodable, Hashable {
     let body: String
     let kind: String?
     let link: String?
+    let image: String?
     let createdAt: Int?
 }
 
