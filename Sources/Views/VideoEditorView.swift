@@ -102,23 +102,12 @@ struct VideoEditorView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
 
-                    // Dải Timeline có thumbnail (kiểu CapCut)
+                    // Dải Timeline có thumbnail + KÉO TAY để cắt (kiểu CapCut)
                     if !thumbnails.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Timeline").font(.subheadline.bold())
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 2) {
-                                    ForEach(Array(thumbnails.enumerated()), id: \.offset) { _, im in
-                                        Image(uiImage: im).resizable().scaledToFill()
-                                            .frame(width: 48, height: 56).clipped()
-                                    }
-                                }
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8).stroke(Theme.accent, lineWidth: 2)
-                                )
-                            }
-                            Text("Kéo thanh 'Bắt đầu/Kết thúc' bên dưới để cắt đoạn trên timeline.")
+                            trimTimeline
+                            Text("Kéo 2 tay nắm vàng để chọn đoạn giữ lại. Vùng tối = bị cắt bỏ.")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         .padding().kCard(16)
@@ -356,6 +345,57 @@ struct VideoEditorView: View {
             }
         }
         thumbnails = imgs
+    }
+
+    // Dải timeline có 2 tay nắm kéo để cắt trực tiếp (thay thanh trượt).
+    private var trimTimeline: some View {
+        GeometryReader { geo in
+            let w = max(1, geo.size.width)
+            let dur = max(0.1, duration)
+            let sX = CGFloat(trimStart / dur) * w
+            let eX = CGFloat(trimEnd / dur) * w
+            let handleW: CGFloat = 14
+            ZStack(alignment: .leading) {
+                // Dải thumbnail lấp đầy chiều rộng
+                HStack(spacing: 0) {
+                    ForEach(Array(thumbnails.enumerated()), id: \.offset) { _, im in
+                        Image(uiImage: im).resizable().scaledToFill()
+                            .frame(width: w / CGFloat(thumbnails.count), height: 60).clipped()
+                    }
+                }
+                .frame(width: w, height: 60)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                // Vùng bị cắt (tối) ở 2 đầu
+                Rectangle().fill(.black.opacity(0.55)).frame(width: sX, height: 60)
+                Rectangle().fill(.black.opacity(0.55)).frame(width: max(0, w - eX), height: 60)
+                    .offset(x: eX)
+
+                // Khung đoạn giữ lại
+                RoundedRectangle(cornerRadius: 6).stroke(Theme.gold, lineWidth: 3)
+                    .frame(width: max(0, eX - sX), height: 60).offset(x: sX)
+
+                // Tay nắm trái (Bắt đầu)
+                handleBar.frame(width: handleW, height: 60).offset(x: max(0, sX - handleW/2))
+                    .gesture(DragGesture(coordinateSpace: .named("strip")).onChanged { v in
+                        let t = Double(min(max(0, v.location.x), w) / w) * dur
+                        trimStart = min(max(0, t), trimEnd - 0.3)
+                    })
+                // Tay nắm phải (Kết thúc)
+                handleBar.frame(width: handleW, height: 60).offset(x: min(w - handleW, eX - handleW/2))
+                    .gesture(DragGesture(coordinateSpace: .named("strip")).onChanged { v in
+                        let t = Double(min(max(0, v.location.x), w) / w) * dur
+                        trimEnd = max(min(dur, t), trimStart + 0.3)
+                    })
+            }
+            .coordinateSpace(name: "strip")
+        }
+        .frame(height: 60)
+    }
+
+    private var handleBar: some View {
+        RoundedRectangle(cornerRadius: 4).fill(Theme.gold)
+            .overlay(Image(systemName: "line.3.horizontal").font(.system(size: 9, weight: .bold)).foregroundStyle(.black))
     }
 
     private func makeComposition(_ asset: AVAsset) -> AVVideoComposition {
