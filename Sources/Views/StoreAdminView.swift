@@ -283,9 +283,7 @@ struct StoreConfigEditor: View {
     @State private var welcomePopupEnabled = false
     @State private var welcomePopupTitle = ""
     @State private var welcomePopupText = ""
-    @State private var welcomeVoiceEnabled = true
-    @State private var welcomeVoiceText = "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"
-    @State private var welcomeVoiceRate: Double = 0.5
+    // (welcomeVoice* đã chuyển sang AdminView → GlobalWelcomeEditor)
     // §1.2 — Thông báo cập nhật phiên bản mới
     @State private var latestVersion = ""
     @State private var updateUrl = ""
@@ -700,23 +698,8 @@ struct StoreConfigEditor: View {
                              "Shown once when ANY user opens the app (not only admin)."))
             }
 
-            // Giọng chào toàn cục cho MỌI người dùng khi mở app
-            Section {
-                Toggle(store.t("Bật giọng chào cho tất cả", "Enable global welcome voice"), isOn: $welcomeVoiceEnabled)
-                if welcomeVoiceEnabled {
-                    TextField(store.t("Nội dung giọng chào cho mọi khách", "Voice greeting for all users"),
-                              text: $welcomeVoiceText, axis: .vertical).lineLimit(2...5)
-                    HStack {
-                        Text(store.t("Tốc độ đọc", "Speed"))
-                        Slider(value: $welcomeVoiceRate, in: 0.3...0.65)
-                    }
-                }
-            } header: {
-                Text(store.t("Giọng chào toàn cục", "Global welcome voice"))
-            } footer: {
-                Text(store.t("Khi bật, MỌI người dùng đều nghe giọng chào khi mở app (mặc định đang bật).",
-                             "When on, EVERY user hears the voice greeting on app open (on by default)."))
-            }
+            // "Giọng chào toàn cục" ĐÃ CHUYỂN sang Admin của app
+            // (AdminView → "Giọng chào toàn cục"). Không đặt ở Cửa hàng nữa.
 
             // Thanh thông báo chạy đầu trang
             Section {
@@ -813,9 +796,6 @@ struct StoreConfigEditor: View {
             welcomePopupEnabled = c.welcomePopupEnabled ?? false
             welcomePopupTitle = c.welcomePopupTitle ?? ""
             welcomePopupText = c.welcomePopupText ?? ""
-            welcomeVoiceEnabled = c.welcomeVoiceEnabled ?? true
-            if let vt = c.welcomeVoiceText, !vt.isEmpty { welcomeVoiceText = vt }
-            welcomeVoiceRate = Double(c.welcomeVoiceRate ?? 0.5)
             latestVersion = c.latestVersion ?? ""
             updateUrl = c.updateUrl ?? ""
             updateMessage = c.updateMessage ?? ""
@@ -854,9 +834,7 @@ struct StoreConfigEditor: View {
                 welcomePopupEnabled: welcomePopupEnabled,
                 welcomePopupTitle: welcomePopupTitle,
                 welcomePopupText: welcomePopupText,
-                welcomeVoiceEnabled: welcomeVoiceEnabled,
-                welcomeVoiceText: welcomeVoiceText,
-                welcomeVoiceRate: Float(welcomeVoiceRate),
+                // Giọng chào toàn cục đã chuyển sang Admin app → không gửi ở đây nữa
                 latestVersion: latestVersion, updateUrl: updateUrl,
                 updateMessage: updateMessage)
             // Lưu cache ngay để các màn khác giữ tên/logo + thứ tự bố cục mới kể cả khi mạng chậm
