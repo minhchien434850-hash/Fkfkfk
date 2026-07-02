@@ -89,6 +89,11 @@ struct MyStore: Decodable, Hashable {
     var bannerUrl: String? = nil
     var slogan: String? = nil
 }
+struct MyStorePrice: Decodable, Hashable, Identifiable {
+    let id: Int
+    let label: String
+    let amount: Int
+}
 struct MyStoreProduct: Decodable, Hashable, Identifiable {
     let id: Int
     let name: String
@@ -97,6 +102,19 @@ struct MyStoreProduct: Decodable, Hashable, Identifiable {
     let media: [StoreMedia]?
     let downloadUrl: String?
     var categoryId: Int? = nil
+    var prices: [MyStorePrice]? = nil
+    var stock: Int? = nil
+}
+struct MyStoreKey: Decodable, Hashable, Identifiable {
+    let id: Int
+    let keyText: String
+    let status: String
+    let priceId: Int?
+}
+struct MyStoreKeysResponse: Decodable {
+    let available: Int
+    let total: Int
+    let keys: [MyStoreKey]
 }
 struct MyStoreCategory: Decodable, Hashable, Identifiable {
     let id: Int

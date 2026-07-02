@@ -653,6 +653,26 @@ def init_db() -> None:
                 download_url TEXT DEFAULT '',
                 created_at INTEGER
             );
+            -- §7 Đợt 2B — Bảng giá nhiều mốc cho sản phẩm cửa hàng cá nhân
+            CREATE TABLE IF NOT EXISTS user_store_prices(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                store_id INTEGER NOT NULL,
+                label TEXT NOT NULL,         -- "1 ngày" / "1 tuần" / "1 tháng" ...
+                amount INTEGER NOT NULL,     -- VND
+                sort INTEGER DEFAULT 0
+            );
+            -- §7 Đợt 2B — Kho KEY của sản phẩm cửa hàng cá nhân
+            CREATE TABLE IF NOT EXISTS user_store_keys(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                store_id INTEGER NOT NULL,
+                key_text TEXT NOT NULL,
+                status TEXT DEFAULT 'available',  -- available | sold
+                price_id INTEGER,
+                sold_at INTEGER,
+                created_at INTEGER
+            );
 
             -- Nạp tiền vào VÍ cửa hàng (tách biệt thanh toán app chính)
             CREATE TABLE IF NOT EXISTS store_topups(
@@ -947,6 +967,8 @@ def _create_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_store_orders_user_status ON store_orders(user_id,status)",
         "CREATE INDEX IF NOT EXISTS idx_store_orders_ref ON store_orders(ref)",
         "CREATE INDEX IF NOT EXISTS idx_store_prices_prod ON store_prices(product_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ustore_prices_prod ON user_store_prices(product_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ustore_keys_prod_status ON user_store_keys(product_id,status)",
         "CREATE INDEX IF NOT EXISTS idx_store_products_folder ON store_products(folder_id)",
         "CREATE INDEX IF NOT EXISTS idx_store_folders_cat ON store_folders(category_id)",
         "CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)",
@@ -5704,6 +5726,26 @@ def _ucat_dict(row) -> dict[str, Any]:
     return {"id": row["id"], "store_id": row["store_id"], "name": row["name"],
             "created_at": row["created_at"] or 0}
 
+def _uproduct_prices(c, pid: int) -> list:
+    rows = c.execute("SELECT id,label,amount,sort FROM user_store_prices WHERE product_id=? "
+                     "ORDER BY sort,id", (pid,)).fetchall()
+    return [{"id": r["id"], "label": r["label"], "amount": r["amount"], "sort": r["sort"]} for r in rows]
+
+def _uproduct_enrich(c, d: dict) -> dict:
+    """Gắn bảng giá + tồn kho KEY cho sản phẩm cửa hàng cá nhân (Đợt 2B)."""
+    pid = d["id"]
+    d["prices"] = _uproduct_prices(c, pid)
+    d["stock"] = c.execute("SELECT COUNT(*) FROM user_store_keys WHERE product_id=? AND status='available'",
+                           (pid,)).fetchone()[0]
+    return d
+
+def _require_my_product(c, store, pid: int):
+    row = c.execute("SELECT id FROM user_store_products WHERE id=? AND store_id=?",
+                    (pid, store["id"])).fetchone()
+    if not row:
+        raise HTTPException(status_code=403, detail="Sản phẩm không thuộc cửa hàng của bạn.")
+    return row
+
 def _require_my_store(c, user):
     row = c.execute("SELECT * FROM user_stores WHERE owner_id=?", (user["id"],)).fetchone()
     if not row:
@@ -5720,7 +5762,8 @@ def my_store_get(user=Depends(get_user)) -> dict[str, Any]:
                           (row["id"],)).fetchall()
         cats = c.execute("SELECT * FROM user_store_categories WHERE store_id=? ORDER BY id",
                          (row["id"],)).fetchall()
-    return {"store": _store_dict(row), "products": [_uproduct_dict(p) for p in prods],
+        items = [_uproduct_enrich(c, _uproduct_dict(p)) for p in prods]
+    return {"store": _store_dict(row), "products": items,
             "categories": [_ucat_dict(x) for x in cats]}
 
 @app.post("/my-store")
@@ -5756,7 +5799,8 @@ def public_user_store(sid: int, user=Depends(get_user)) -> dict[str, Any]:
                           (sid,)).fetchall()
         cats = c.execute("SELECT * FROM user_store_categories WHERE store_id=? ORDER BY id",
                          (sid,)).fetchall()
-    return {"store": _store_dict(row), "products": [_uproduct_dict(p) for p in prods],
+        items = [_uproduct_enrich(c, _uproduct_dict(p)) for p in prods]
+    return {"store": _store_dict(row), "products": items,
             "categories": [_ucat_dict(x) for x in cats]}
 
 # §7 Đợt 2 — Danh mục cửa hàng cá nhân (CÔ LẬP theo store của chính chủ)
@@ -5829,7 +5873,101 @@ def my_store_delete_product(pid: int, user=Depends(get_user)) -> dict[str, Any]:
         if not owned:
             raise HTTPException(status_code=403, detail="Không có quyền xoá sản phẩm này.")
         c.execute("DELETE FROM user_store_products WHERE id=?", (pid,))
+        c.execute("DELETE FROM user_store_prices WHERE product_id=?", (pid,))
+        c.execute("DELETE FROM user_store_keys WHERE product_id=?", (pid,))
     return {"message": "Đã xoá sản phẩm."}
+
+
+# §7 Đợt 2B — Bảng giá nhiều mốc (CÔ LẬP theo store của chính chủ)
+class MyPriceItem(BaseModel):
+    label: str
+    amount: int
+
+class MyPricesIn(BaseModel):
+    prices: list[MyPriceItem] = []
+
+@app.post("/my-store/products/{pid}/prices")
+def my_store_set_prices(pid: int, b: MyPricesIn, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        _require_my_product(c, store, pid)
+        c.execute("DELETE FROM user_store_prices WHERE product_id=?", (pid,))
+        n = 0
+        for i, p in enumerate(b.prices):
+            label = (p.label or "").strip()[:60]
+            if not label or p.amount < 0:
+                continue
+            c.execute("INSERT INTO user_store_prices(product_id,store_id,label,amount,sort) VALUES(?,?,?,?,?)",
+                      (pid, store["id"], label, int(p.amount), i))
+            n += 1
+    return {"message": f"Đã lưu {n} mốc giá."}
+
+@app.get("/my-store/products/{pid}/prices")
+def my_store_list_prices(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        _require_my_product(c, store, pid)
+        return {"prices": _uproduct_prices(c, pid)}
+
+
+# §7 Đợt 2B — Kho KEY (CÔ LẬP theo store của chính chủ)
+class MyKeysIn(BaseModel):
+    text: str = ""                    # mỗi dòng 1 key
+    price_id: Optional[int] = None    # gắn key vào 1 mốc giá. None = dùng chung
+
+@app.get("/my-store/products/{pid}/keys")
+def my_store_list_keys(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        _require_my_product(c, store, pid)
+        rows = c.execute("SELECT id,key_text,status,sold_at,price_id FROM user_store_keys "
+                         "WHERE product_id=? ORDER BY id DESC", (pid,)).fetchall()
+        avail = sum(1 for r in rows if r["status"] == "available")
+    return {"available": avail, "total": len(rows),
+            "keys": [{"id": r["id"], "key_text": r["key_text"], "status": r["status"],
+                      "sold_at": r["sold_at"], "price_id": r["price_id"]} for r in rows]}
+
+@app.post("/my-store/products/{pid}/keys")
+def my_store_add_keys(pid: int, b: MyKeysIn, user=Depends(get_user)) -> dict[str, Any]:
+    lines = [ln.strip() for ln in (b.text or "").replace("\r", "\n").split("\n")]
+    now = int(time.time())
+    with db() as c:
+        store = _require_my_store(c, user)
+        _require_my_product(c, store, pid)
+        # price_id (nếu có) phải thuộc chính sản phẩm này
+        pfilter = b.price_id
+        if pfilter is not None:
+            ok = c.execute("SELECT id FROM user_store_prices WHERE id=? AND product_id=?",
+                           (pfilter, pid)).fetchone()
+            if not ok:
+                pfilter = None
+        added = 0
+        for ln in lines:
+            if not ln:
+                continue
+            c.execute("INSERT INTO user_store_keys(product_id,store_id,key_text,status,price_id,created_at) "
+                      "VALUES(?,?,?,'available',?,?)", (pid, store["id"], ln, pfilter, now))
+            added += 1
+    return {"message": f"Đã thêm {added} key.", "added": added}
+
+@app.delete("/my-store/keys/{kid}")
+def my_store_delete_key(kid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        owned = c.execute("SELECT id FROM user_store_keys WHERE id=? AND store_id=?",
+                          (kid, store["id"])).fetchone()
+        if not owned:
+            raise HTTPException(status_code=403, detail="Key không thuộc cửa hàng của bạn.")
+        c.execute("DELETE FROM user_store_keys WHERE id=?", (kid,))
+    return {"message": "Đã xoá key."}
+
+@app.delete("/my-store/products/{pid}/keys")
+def my_store_delete_available_keys(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        _require_my_product(c, store, pid)
+        cur = c.execute("DELETE FROM user_store_keys WHERE product_id=? AND status='available'", (pid,))
+    return {"message": f"Đã xoá {cur.rowcount} key khả dụng."}
 
 
 class MediaUploadIn(BaseModel):

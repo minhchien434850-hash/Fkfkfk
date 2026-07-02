@@ -595,6 +595,26 @@ struct APIClient {
     func deleteMyCategory(_ cid: Int) async throws {
         _ = try await send("/my-store/categories/\(cid)", method: "DELETE")
     }
+    // §7 Đợt 2B — Bảng giá nhiều mốc
+    func setMyProductPrices(_ pid: Int, prices: [(label: String, amount: Int)]) async throws {
+        let arr = prices.map { ["label": $0.label, "amount": $0.amount] as [String: Any] }
+        _ = try await send("/my-store/products/\(pid)/prices", method: "POST", json: ["prices": arr])
+    }
+    // §7 Đợt 2B — Kho KEY
+    func listMyProductKeys(_ pid: Int) async throws -> MyStoreKeysResponse {
+        try decode(try await send("/my-store/products/\(pid)/keys"))
+    }
+    func addMyProductKeys(_ pid: Int, text: String, priceId: Int?) async throws {
+        var body: [String: Any] = ["text": text]
+        if let priceId { body["price_id"] = priceId }
+        _ = try await send("/my-store/products/\(pid)/keys", method: "POST", json: body)
+    }
+    func deleteMyKey(_ kid: Int) async throws {
+        _ = try await send("/my-store/keys/\(kid)", method: "DELETE")
+    }
+    func deleteMyAvailableKeys(_ pid: Int) async throws {
+        _ = try await send("/my-store/products/\(pid)/keys", method: "DELETE")
+    }
     func getUserStore(_ sid: Int) async throws -> MyStoreResponse {
         try decode(try await send("/u-store/\(sid)"))
     }

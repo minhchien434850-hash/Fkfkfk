@@ -30,6 +30,7 @@ struct MyStoreView: View {
     @State private var uploadingBanner = false
 
     @State private var showAddProduct = false
+    @State private var managingProduct: MyStoreProduct?   // Đợt 2B — quản lý giá + KEY
 
     // Tìm cửa hàng
     @State private var searchId = ""
@@ -68,6 +69,9 @@ struct MyStoreView: View {
             }
             .sheet(isPresented: $showAddProduct) {
                 AddMyProductView(categories: categories) { await loadMine() }.environmentObject(store)
+            }
+            .sheet(item: $managingProduct) { p in
+                ManageMyProductView(product: p) { await loadMine() }.environmentObject(store)
             }
         }
     }
@@ -352,13 +356,32 @@ struct MyStoreView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(p.name).font(.subheadline.bold()).lineLimit(1)
                 if let d = p.description, !d.isEmpty { Text(d).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
-                Text(kFormatVND(p.price)).font(.caption.bold()).foregroundStyle(Theme.accent)
+                // Bảng giá nhiều mốc (nếu có) — hiện mốc thấp nhất → cao nhất
+                if let prices = p.prices, !prices.isEmpty {
+                    let lo = prices.map(\.amount).min() ?? p.price
+                    let hi = prices.map(\.amount).max() ?? p.price
+                    Text(lo == hi ? kFormatVND(lo) : "\(kFormatVND(lo)) – \(kFormatVND(hi))")
+                        .font(.caption.bold()).foregroundStyle(Theme.accent)
+                    Text(store.t("\(prices.count) mốc giá", "\(prices.count) tiers"))
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    Text(kFormatVND(p.price)).font(.caption.bold()).foregroundStyle(Theme.accent)
+                }
+                // Tồn kho KEY
+                if let stock = p.stock {
+                    Text(store.t("Kho: \(stock) key", "Stock: \(stock) keys"))
+                        .font(.caption2.bold())
+                        .foregroundStyle(stock > 0 ? Color.green : Color.orange)
+                }
             }
             Spacer(minLength: 0)
             if canDelete {
+                Button { managingProduct = p } label: {
+                    Image(systemName: "slider.horizontal.3").foregroundStyle(Theme.gold)
+                }.buttonStyle(.plain).padding(.trailing, 4)
                 Button { Task { try? await store.api.deleteMyProduct(p.id); await loadMine() } } label: {
                     Image(systemName: "trash").foregroundStyle(.red)
-                }
+                }.buttonStyle(.plain)
             }
         }
         .padding(10).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
@@ -535,5 +558,139 @@ struct AddMyProductView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+}
+
+// §7 Đợt 2B — Quản lý giá nhiều mốc + kho KEY cho 1 sản phẩm (cửa hàng của tôi)
+struct ManageMyProductView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    let product: MyStoreProduct
+    var onDone: () async -> Void
+
+    struct PriceRow: Identifiable { let id = UUID(); var label: String; var amount: String }
+    @State private var tiers: [PriceRow] = []
+    @State private var keys: [MyStoreKey] = []
+    @State private var available = 0
+    @State private var newKeys = ""
+    @State private var savingPrices = false
+    @State private var addingKeys = false
+    @State private var loading = true
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                // ---- Bảng giá nhiều mốc ----
+                Section(store.t("Bảng giá (nhiều mốc)", "Price tiers")) {
+                    ForEach($tiers) { $t in
+                        HStack {
+                            TextField(store.t("Tên mốc (vd: 1 ngày)", "Label (e.g. 1 day)"), text: $t.label)
+                            TextField(store.t("Giá", "Price"), text: $t.amount)
+                                .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 100)
+                            Button(role: .destructive) {
+                                tiers.removeAll { $0.id == t.id }
+                            } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.red) }
+                                .buttonStyle(.plain)
+                        }
+                    }
+                    Button {
+                        tiers.append(PriceRow(label: "", amount: ""))
+                    } label: { Label(store.t("Thêm mốc giá", "Add tier"), systemImage: "plus") }
+                    Button {
+                        Task { await savePrices() }
+                    } label: {
+                        Text(savingPrices ? store.t("Đang lưu…", "Saving…") : store.t("Lưu bảng giá", "Save tiers"))
+                            .font(.subheadline.bold())
+                    }.disabled(savingPrices)
+                    Text(store.t("Để trống bảng giá nếu chỉ bán 1 giá cố định.",
+                                 "Leave empty to sell at a single fixed price."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+
+                // ---- Kho KEY ----
+                Section(store.t("Kho KEY — còn \(available)", "KEY inventory — \(available) left")) {
+                    TextEditor(text: $newKeys)
+                        .frame(minHeight: 90)
+                        .overlay(alignment: .topLeading) {
+                            if newKeys.isEmpty {
+                                Text(store.t("Mỗi dòng 1 key/tài khoản…", "One key/account per line…"))
+                                    .font(.caption).foregroundStyle(.secondary).padding(6).allowsHitTesting(false)
+                            }
+                        }
+                    Button {
+                        Task { await addKeys() }
+                    } label: {
+                        Text(addingKeys ? store.t("Đang thêm…", "Adding…") : store.t("Thêm key vào kho", "Add keys"))
+                            .font(.subheadline.bold())
+                    }.disabled(addingKeys || newKeys.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if !keys.isEmpty {
+                        ForEach(keys) { k in
+                            HStack {
+                                Image(systemName: k.status == "sold" ? "checkmark.seal.fill" : "key.fill")
+                                    .foregroundStyle(k.status == "sold" ? .secondary : Theme.gold)
+                                Text(k.keyText).font(.caption.monospaced()).lineLimit(1)
+                                    .strikethrough(k.status == "sold")
+                                Spacer()
+                                if k.status != "sold" {
+                                    Button(role: .destructive) {
+                                        Task { try? await store.api.deleteMyKey(k.id); await reload() }
+                                    } label: { Image(systemName: "trash").font(.caption) }.buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        Button(role: .destructive) {
+                            Task { try? await store.api.deleteMyAvailableKeys(product.id); await reload() }
+                        } label: { Text(store.t("Xoá tất cả key còn lại", "Delete all available keys")).font(.caption) }
+                    }
+                }
+
+                if let error { Section { Text(error).foregroundStyle(.red).font(.caption) } }
+            }
+            .navigationTitle(product.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(store.t("Xong", "Done")) { Task { await onDone(); dismiss() } }
+                }
+            }
+            .task { await reload() }
+        }
+    }
+
+    private func reload() async {
+        loading = true; defer { loading = false }
+        // nạp lại giá từ sản phẩm truyền vào (lần đầu) + KEY từ máy chủ
+        if tiers.isEmpty, let ps = product.prices, !ps.isEmpty {
+            tiers = ps.map { PriceRow(label: $0.label, amount: String($0.amount)) }
+        }
+        if let r = try? await store.api.listMyProductKeys(product.id) {
+            keys = r.keys; available = r.available; newKeys = ""
+        }
+        await onDone()   // để danh sách ngoài cập nhật tồn kho
+    }
+
+    private func savePrices() async {
+        savingPrices = true; defer { savingPrices = false }
+        error = nil
+        let clean: [(label: String, amount: Int)] = tiers.compactMap {
+            let l = $0.label.trimmingCharacters(in: .whitespaces)
+            guard !l.isEmpty, let a = Int($0.amount), a >= 0 else { return nil }
+            return (l, a)
+        }
+        do {
+            try await store.api.setMyProductPrices(product.id, prices: clean)
+            await onDone()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func addKeys() async {
+        addingKeys = true; defer { addingKeys = false }
+        error = nil
+        do {
+            try await store.api.addMyProductKeys(product.id, text: newKeys, priceId: nil)
+            await reload()
+        } catch { self.error = error.localizedDescription }
     }
 }
