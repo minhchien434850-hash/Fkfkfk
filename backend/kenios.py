@@ -5391,6 +5391,10 @@ def store_config() -> dict[str, Any]:
         "announce_enabled": get_setting("store_announce_enabled", "0") == "1",
         "announce_text": get_setting("store_announce_text", ""),
         "announce_color": get_setting("store_announce_color", "accent"),  # accent|red|green|gold|purple
+        # Lời chào TOÀN CỤC (popup) — admin đặt, MỌI người dùng đều thấy khi mở app
+        "welcome_popup_enabled": get_setting("store_welcome_popup_enabled", "0") == "1",
+        "welcome_popup_title": get_setting("store_welcome_popup_title", ""),
+        "welcome_popup_text": get_setting("store_welcome_popup_text", ""),
         # Số sản phẩm hiển thị tối đa mỗi danh mục ở lưới "Danh mục Game"
         "gamecat_limit": _int_setting("store_gamecat_limit", 6),
     }
@@ -5886,6 +5890,10 @@ class StoreConfigIn(BaseModel):
     stat_users_base: Optional[int] = None
     stat_sold_base: Optional[int] = None
     stat_reviews_base: Optional[int] = None
+    # Lời chào toàn cục (popup) cho mọi người dùng
+    welcome_popup_enabled: Optional[bool] = None
+    welcome_popup_title: Optional[str] = None
+    welcome_popup_text: Optional[str] = None
     # Thanh thông báo chạy
     announce_enabled: Optional[bool] = None
     announce_text: Optional[str] = None
@@ -5949,6 +5957,9 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.announce_enabled is not None: set_setting("store_announce_enabled", "1" if b.announce_enabled else "0")
     if b.announce_text is not None: set_setting("store_announce_text", b.announce_text.strip()[:200])
     if b.announce_color is not None: set_setting("store_announce_color", b.announce_color.strip()[:20])
+    if b.welcome_popup_enabled is not None: set_setting("store_welcome_popup_enabled", "1" if b.welcome_popup_enabled else "0")
+    if b.welcome_popup_title is not None: set_setting("store_welcome_popup_title", b.welcome_popup_title.strip()[:80])
+    if b.welcome_popup_text is not None: set_setting("store_welcome_popup_text", b.welcome_popup_text.strip()[:500])
     if b.gamecat_limit is not None: set_setting("store_gamecat_limit", str(max(1, min(int(b.gamecat_limit), 30))))
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 

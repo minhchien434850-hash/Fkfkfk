@@ -497,7 +497,9 @@ struct APIClient {
                              statUsersBase: Int? = nil, statSoldBase: Int? = nil,
                              statReviewsBase: Int? = nil,
                              announceEnabled: Bool? = nil, announceText: String? = nil,
-                             announceColor: String? = nil, gamecatLimit: Int? = nil) async throws -> MessageResponse {
+                             announceColor: String? = nil, gamecatLimit: Int? = nil,
+                             welcomePopupEnabled: Bool? = nil, welcomePopupTitle: String? = nil,
+                             welcomePopupText: String? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
@@ -540,6 +542,9 @@ struct APIClient {
         if let announceText { body["announce_text"] = announceText }
         if let announceColor { body["announce_color"] = announceColor }
         if let gamecatLimit { body["gamecat_limit"] = gamecatLimit }
+        if let welcomePopupEnabled { body["welcome_popup_enabled"] = welcomePopupEnabled }
+        if let welcomePopupTitle { body["welcome_popup_title"] = welcomePopupTitle }
+        if let welcomePopupText { body["welcome_popup_text"] = welcomePopupText }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
     // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)

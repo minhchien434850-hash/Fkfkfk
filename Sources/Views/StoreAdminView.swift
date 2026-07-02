@@ -279,6 +279,10 @@ struct StoreConfigEditor: View {
     @State private var announceEnabled = false
     @State private var announceText = ""
     @State private var announceColor = "accent"
+    // §1.3 — Lời chào toàn cục (popup) cho mọi người dùng
+    @State private var welcomePopupEnabled = false
+    @State private var welcomePopupTitle = ""
+    @State private var welcomePopupText = ""
     @State private var gamecatLimit = 6
     // Flash sale
     @State private var flashEnabled = false
@@ -658,6 +662,21 @@ struct StoreConfigEditor: View {
                     .font(.caption2)
             }
 
+            // §1.3 — Lời chào toàn cục (popup) cho MỌI người dùng khi mở app
+            Section {
+                Toggle(store.t("Bật lời chào toàn cục", "Enable global welcome popup"), isOn: $welcomePopupEnabled)
+                if welcomePopupEnabled {
+                    TextField(store.t("Tiêu đề (vd: Chào mừng!)", "Title (e.g. Welcome!)"), text: $welcomePopupTitle)
+                    TextField(store.t("Nội dung lời chào cho mọi khách", "Welcome text for all users"),
+                              text: $welcomePopupText, axis: .vertical).lineLimit(2...5)
+                }
+            } header: {
+                Text(store.t("Lời chào toàn cục (popup)", "Global welcome popup"))
+            } footer: {
+                Text(store.t("Popup hiện 1 lần khi MỌI người dùng mở app (không chỉ admin).",
+                             "Shown once when ANY user opens the app (not only admin)."))
+            }
+
             // Thanh thông báo chạy đầu trang
             Section {
                 Toggle(store.t("Bật thanh thông báo", "Enable announcement bar"), isOn: $announceEnabled)
@@ -750,6 +769,9 @@ struct StoreConfigEditor: View {
             announceEnabled = c.announceEnabled ?? false
             announceText = c.announceText ?? ""
             announceColor = c.announceColor ?? "accent"
+            welcomePopupEnabled = c.welcomePopupEnabled ?? false
+            welcomePopupTitle = c.welcomePopupTitle ?? ""
+            welcomePopupText = c.welcomePopupText ?? ""
             gamecatLimit = c.gamecatLimit ?? 6
         }
     }
@@ -781,7 +803,10 @@ struct StoreConfigEditor: View {
                 statUsersBase: statUsersBase, statSoldBase: statSoldBase,
                 statReviewsBase: statReviewsBase,
                 announceEnabled: announceEnabled, announceText: announceText,
-                announceColor: announceColor, gamecatLimit: gamecatLimit)
+                announceColor: announceColor, gamecatLimit: gamecatLimit,
+                welcomePopupEnabled: welcomePopupEnabled,
+                welcomePopupTitle: welcomePopupTitle,
+                welcomePopupText: welcomePopupText)
             // Lưu cache ngay để các màn khác giữ tên/logo + thứ tự bố cục mới kể cả khi mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgLogoType = logoType; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             cfgSectionOrder = sections.joined(separator: ",")

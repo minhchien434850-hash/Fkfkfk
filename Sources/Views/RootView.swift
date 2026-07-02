@@ -25,6 +25,46 @@ struct RootView: View {
     }
 }
 
+// §1.3 — Thẻ lời chào toàn cục (admin đặt), hiện cho mọi người dùng khi mở app.
+struct WelcomePopupCard: View {
+    let title: String
+    let text: String
+    let onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45).ignoresSafeArea()
+                .onTapGesture { onClose() }
+            VStack(spacing: 16) {
+                Image(systemName: "hand.wave.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(LinearGradient(colors: [Theme.accent, .purple, .pink],
+                                                    startPoint: .leading, endPoint: .trailing))
+                if !title.isEmpty {
+                    Text(title).font(.title3.bold()).multilineTextAlignment(.center)
+                }
+                Text(text)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(action: onClose) {
+                    Text("OK").font(.headline).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 46)
+                        .background(LinearGradient(colors: [Theme.accent, .purple],
+                                                   startPoint: .leading, endPoint: .trailing))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 340)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
+            .padding(30)
+        }
+    }
+}
+
 struct MaintenanceOverlay: View {
     let message: String
     var body: some View {
@@ -53,6 +93,11 @@ struct MainTabView: View {
     @AppStorage("defaultLaunchTab") private var defaultLaunchTab = 2
     @State private var didInitTab = false
     @State private var showUpgrade = false
+    // §1.3 — Lời chào TOÀN CỤC (admin đặt trên server) hiện cho MỌI người dùng
+    @State private var welcomeTitle = ""
+    @State private var welcomeText = ""
+    @State private var showWelcomePopup = false
+    @State private var welcomeChecked = false
 
     var body: some View {
         // Chỉ 5 tab chính cho gọn & rõ — các mục khác nằm trong "Khám phá"
@@ -98,6 +143,18 @@ struct MainTabView: View {
             await store.loadProviders()
             await store.refreshCredits()
             await store.refreshMe()
+            // §1.3 — Lấy lời chào toàn cục từ server, hiện popup 1 lần cho MỌI người
+            if !welcomeChecked {
+                welcomeChecked = true
+                if let cfg = try? await store.api.storeConfig(), cfg.welcomePopupEnabled == true {
+                    let t = (cfg.welcomePopupText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !t.isEmpty {
+                        welcomeTitle = (cfg.welcomePopupTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        welcomeText = t
+                        withAnimation(.spring(response: 0.4)) { showWelcomePopup = true }
+                    }
+                }
+            }
             // Theo dõi bảo trì + gói theo chu kỳ
             try? await store.api.sendActivity(tabName(store.tab))
             // Đồng bộ bảo trì + gói với máy chủ VPS mỗi 10 giây
@@ -120,6 +177,15 @@ struct MainTabView: View {
                          "Your PRO plan has expired and was switched to Free. Renew to keep using PRO features."))
         }
         .sheet(isPresented: $showUpgrade) { PaymentView().environmentObject(store) }
+        // §1.3 — Popup lời chào toàn cục cho mọi người dùng
+        .overlay {
+            if showWelcomePopup {
+                WelcomePopupCard(title: welcomeTitle, text: welcomeText) {
+                    withAnimation(.easeInOut) { showWelcomePopup = false }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+        }
     }
 
     private func tabName(_ t: Int) -> String {

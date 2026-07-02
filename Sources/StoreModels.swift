@@ -58,6 +58,10 @@ struct StoreAppConfig: Decodable, Hashable {
     var statUsersReal: Int? = nil
     var statSoldReal: Int? = nil
     var statReviewsReal: Int? = nil
+    // Lời chào toàn cục (popup) — admin đặt, mọi người dùng đều thấy khi mở app
+    var welcomePopupEnabled: Bool? = nil
+    var welcomePopupTitle: String? = nil
+    var welcomePopupText: String? = nil
     // Thanh thông báo chạy đầu trang
     var announceEnabled: Bool? = nil
     var announceText: String? = nil
