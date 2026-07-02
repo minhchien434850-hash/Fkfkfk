@@ -18,6 +18,14 @@ struct CaptionSeg: Identifiable {
     let image: CIImage
 }
 
+// §3.2 — Điểm cắt để ghép nối đoạn: vị trí (giây) + hiệu ứng chuyển cảnh + độ dài chuyển cảnh.
+struct SplitPoint: Identifiable {
+    let id = UUID()
+    var time: Double
+    var transition: Int = 1   // chỉ số trong transitionNames (1 = Mờ đen)
+    var dur: Double = 0.6     // độ dài hiệu ứng chuyển cảnh (giây)
+}
+
 // Bọc video chọn từ thư viện thành Transferable (chép ra file tạm để xử lý)
 struct EditMovie: Transferable {
     let url: URL
@@ -60,6 +68,8 @@ struct VideoEditorView: View {
     // Độ phân giải xuất: 0 = giữ nguyên; 720/1080/1440/2160 = cạnh dài mục tiêu (px)
     @State private var outRes = 0
     @State private var naturalSize: CGSize = .zero   // kích thước gốc của video (để scale độ phân giải)
+    // §3.2 — Cắt nhiều đoạn + chuyển cảnh (kiểu CapCut): mỗi điểm cắt có 1 hiệu ứng chuyển cảnh
+    @State private var splits: [SplitPoint] = []
     @State private var speed = 1.0         // 0.25 ... 4 (tốc độ phát; 1 = giữ nguyên)
     @State private var removeBg = false    // Xoá nền/tách người → làm mờ phông (Vision)
     @State private var fadeInOut = false   // Chuyển cảnh: mờ dần vào/ra (fade in/out)
@@ -92,6 +102,9 @@ struct VideoEditorView: View {
     private let sharpenLevels: [(String, Double)] = [("Tắt", 0), ("Nhẹ", 0.5), ("Vừa", 1.0), ("Mạnh", 1.5), ("Tối đa", 2.0)]
     private let denoiseLevels: [(String, Double)] = [("Tắt", 0), ("Nhẹ", 0.25), ("Vừa", 0.5), ("Mạnh", 0.75), ("Tối đa", 1.0)]
     private let resLevels: [(String, Int)] = [("Giữ nguyên", 0), ("720p", 720), ("1080p", 1080), ("2K", 1440), ("4K", 2160)]
+    // Hiệu ứng chuyển cảnh tại điểm cắt (index → tên) — chọn ngay dấu tích trên khung
+    private let transitionNames = ["Không", "Mờ đen", "Chớp trắng", "Hòa tan", "Phóng to",
+                                   "Trượt ngang", "Xoay", "Nhiễu số", "Nhòe mờ", "Lật", "Thu nhỏ"]
 
     var body: some View {
         ScrollView {
@@ -121,6 +134,46 @@ struct VideoEditorView: View {
                             trimTimeline
                             Text("Kéo 2 tay nắm vàng để chọn đoạn giữ lại. Vùng tối = bị cắt bỏ.")
                                 .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .padding().kCard(16)
+
+                        // §3.2 — Ghép đoạn & chuyển cảnh (kiểu CapCut)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Ghép đoạn & chuyển cảnh").font(.subheadline.bold())
+                            Button { addSplitAtPlayhead() } label: {
+                                Label("Cắt đoạn tại vị trí đang xem", systemImage: "scissors")
+                                    .font(.subheadline.bold()).frame(maxWidth: .infinity).frame(height: 42)
+                                    .background(Theme.accent).foregroundStyle(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            Text("Tạm dừng đúng khung muốn cắt rồi bấm nút trên. Bấm DẤU TÍCH trên đường cắt để chọn hiệu ứng chuyển cảnh.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            if splits.isEmpty {
+                                Text("Chưa có điểm cắt nào.").font(.caption2).foregroundStyle(.secondary)
+                            } else {
+                                ForEach(splits) { sp in
+                                    HStack {
+                                        Image(systemName: "scissors").foregroundStyle(Theme.gold)
+                                        Text(timeStr(sp.time)).font(.caption.monospaced())
+                                        Spacer()
+                                        Menu {
+                                            Picker("Chuyển cảnh", selection: bindingForSplit(sp.id)) {
+                                                ForEach(0..<transitionNames.count, id: \.self) { i in
+                                                    Text(transitionNames[i]).tag(i)
+                                                }
+                                            }
+                                        } label: {
+                                            Label(transitionNames[min(sp.transition, transitionNames.count - 1)],
+                                                  systemImage: "wand.and.stars").font(.caption.bold())
+                                        }
+                                        Button(role: .destructive) { removeSplit(sp.id) } label: {
+                                            Image(systemName: "trash").font(.caption)
+                                        }.buttonStyle(.plain)
+                                    }
+                                    .padding(8).background(Color(.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                            }
                         }
                         .padding().kCard(16)
                     }
@@ -375,6 +428,7 @@ struct VideoEditorView: View {
                     inputURL = movie.url
                     duration = max(0.1, d.seconds)
                     trimStart = 0; trimEnd = duration
+                    splits = []   // video mới → xoá điểm cắt cũ
                     // Kích thước hiển thị thật (sau khi áp preferredTransform) → dùng cho scale độ phân giải.
                     if let vTrack = try? await asset.loadTracks(withMediaType: .video).first {
                         let ns = (try? await vTrack.load(.naturalSize)) ?? .zero
@@ -451,6 +505,26 @@ struct VideoEditorView: View {
                         trimEnd = max(min(dur, t), trimStart + 0.3)
                         seekPreview(trimEnd)     // xem ngay khung kết thúc
                     })
+
+                // §3.2 — Điểm cắt: đường cắt + DẤU TÍCH bấm để chọn chuyển cảnh (như CapCut)
+                ForEach(splits) { sp in
+                    let cx = CGFloat(min(max(0, sp.time / dur), 1)) * w
+                    // Đường cắt dọc trên khung hình
+                    Rectangle().fill(.white).frame(width: 2, height: 60)
+                        .offset(x: max(0, cx - 1))
+                    // Dấu tích tròn ngay đường cắt → menu chọn hiệu ứng chuyển cảnh
+                    Menu {
+                        Picker("Chuyển cảnh", selection: bindingForSplit(sp.id)) {
+                            ForEach(0..<transitionNames.count, id: \.self) { i in
+                                Text(transitionNames[i]).tag(i)
+                            }
+                        }
+                        Button("Xoá điểm cắt", role: .destructive) { removeSplit(sp.id) }
+                    } label: {
+                        transitionBadge(sp.transition)
+                    }
+                    .offset(x: max(0, cx - 13))
+                }
             }
             .coordinateSpace(name: "strip")
         }
@@ -486,6 +560,37 @@ struct VideoEditorView: View {
         player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
+    // §3.2 — Dấu tích tròn tại điểm cắt (đổi màu/biểu tượng theo có chọn chuyển cảnh hay chưa).
+    private func transitionBadge(_ t: Int) -> some View {
+        Circle().fill(t > 0 ? Theme.accent : Color.black.opacity(0.6))
+            .frame(width: 26, height: 26)
+            .overlay(Circle().stroke(.white, lineWidth: 2))
+            .overlay(Image(systemName: t > 0 ? "checkmark" : "wand.and.stars")
+                        .font(.system(size: 11, weight: .heavy)).foregroundStyle(.white))
+            .shadow(radius: 3)
+    }
+
+    // Binding tới hiệu ứng chuyển cảnh của 1 điểm cắt (để Picker trong Menu chỉnh trực tiếp).
+    private func bindingForSplit(_ id: UUID) -> Binding<Int> {
+        Binding(
+            get: { splits.first(where: { $0.id == id })?.transition ?? 0 },
+            set: { nv in if let i = splits.firstIndex(where: { $0.id == id }) { splits[i].transition = nv } }
+        )
+    }
+
+    private func removeSplit(_ id: UUID) {
+        splits.removeAll { $0.id == id }
+    }
+
+    // Cắt 1 đoạn tại vị trí đang xem trong preview (thêm điểm cắt + chuyển cảnh mặc định).
+    private func addSplitAtPlayhead() {
+        let t = player?.currentTime().seconds ?? trimStart
+        let ct = min(max(trimStart + 0.15, t), trimEnd - 0.15)
+        guard ct.isFinite, !splits.contains(where: { abs($0.time - ct) < 0.2 }) else { return }
+        splits.append(SplitPoint(time: ct))
+        splits.sort { $0.time < $1.time }
+    }
+
     private func makeComposition(_ asset: AVAsset) -> AVVideoComposition {
         let f = filter
         let bright = brightness
@@ -514,6 +619,12 @@ struct VideoEditorView: View {
         let outStart = speedChanged ? 0.0 : trimStart
         let outEnd = speedChanged ? max(0.1, (trimEnd - trimStart) / speed) : trimEnd
         let target = resolvedRenderSize()   // độ phân giải xuất (nil = giữ nguyên)
+        // §3.2 — Chuyển cảnh tại điểm cắt: quy đổi thời điểm cắt sang hệ toạ độ khung xuất.
+        let splitFX: [(center: Double, half: Double, type: Int)] = splits.compactMap { sp in
+            guard sp.transition > 0, sp.dur > 0.01 else { return nil }
+            let c = speedChanged ? (sp.time - trimStart) / speed : sp.time
+            return (c, sp.dur / 2, sp.transition)
+        }
         let comp = AVVideoComposition(asset: asset) { request in
             let src = request.sourceImage
             var img = src.clampedToExtent()
@@ -686,6 +797,18 @@ struct VideoEditorView: View {
                 }
             }
 
+            // §3.2 — Chuyển cảnh tại điểm cắt: áp hiệu ứng quanh mỗi đường cắt.
+            if !splitFX.isEmpty {
+                let ct = request.compositionTime.seconds
+                for fx in splitFX where fx.half > 0.001 {
+                    let dx = (ct - fx.center) / fx.half   // -1…1 trong cửa sổ chuyển cảnh
+                    if abs(dx) < 1 {
+                        img = Self.applyTransition(img, type: fx.type,
+                                                   edge: 1 - abs(dx), x: dx, extent: src.extent)
+                    }
+                }
+            }
+
             // Độ phân giải xuất: scale khung về kích thước mục tiêu (phóng to = nét hơn).
             var outImg = img.cropped(to: src.extent)
             if let target = target {
@@ -704,6 +827,54 @@ struct VideoEditorView: View {
             return mut
         }
         return comp
+    }
+
+    /// §3.2 — Áp 1 hiệu ứng chuyển cảnh lên khung. edge∈[0,1] (1 = ngay đường cắt), x∈[-1,1].
+    static func applyTransition(_ img: CIImage, type: Int, edge: Double, x: Double, extent: CGRect) -> CIImage {
+        let e = CGFloat(max(0, min(1, edge)))
+        let cx = extent.midX, cy = extent.midY
+        func centered(_ t: CGAffineTransform) -> CIImage {
+            let m = CGAffineTransform(translationX: -cx, y: -cy)
+                .concatenating(t)
+                .concatenating(CGAffineTransform(translationX: cx, y: cy))
+            return img.transformed(by: m).clampedToExtent().cropped(to: extent)
+        }
+        switch type {
+        case 1: // Mờ đen — tối dần rồi sáng lại ngay đường cắt
+            let m = CIFilter.colorMatrix(); m.inputImage = img
+            let f = 1 - e
+            m.rVector = CIVector(x: f, y: 0, z: 0, w: 0)
+            m.gVector = CIVector(x: 0, y: f, z: 0, w: 0)
+            m.bVector = CIVector(x: 0, y: 0, z: f, w: 0)
+            return (m.outputImage ?? img).clampedToExtent().cropped(to: extent)
+        case 2: // Chớp trắng
+            let cc = CIFilter.colorControls(); cc.inputImage = img; cc.brightness = Float(e)
+            return (cc.outputImage ?? img).clampedToExtent().cropped(to: extent)
+        case 3: // Hòa tan — nhòe nhẹ
+            return img.clampedToExtent().applyingGaussianBlur(sigma: Double(e) * 22).cropped(to: extent)
+        case 4: // Phóng to (zoom punch)
+            return centered(CGAffineTransform(scaleX: 1 + e * 0.4, y: 1 + e * 0.4))
+        case 5: // Trượt ngang
+            return centered(CGAffineTransform(translationX: CGFloat(x) * extent.width, y: 0))
+        case 6: // Xoay
+            return centered(CGAffineTransform(rotationAngle: CGFloat(x) * 0.5))
+        case 7: // Nhiễu số (glitch) — vỡ hạt + lệch màu
+            let p = CIFilter.pixellate(); p.inputImage = img
+            p.center = CIVector(x: cx, y: cy); p.scale = Float(1 + e * 22)
+            var o = p.outputImage ?? img
+            let h = CIFilter.hueAdjust(); h.inputImage = o; h.angle = Float(x) * 1.5
+            o = h.outputImage ?? o
+            return o.clampedToExtent().cropped(to: extent)
+        case 8: // Nhòe mờ (mạnh)
+            return img.clampedToExtent().applyingGaussianBlur(sigma: Double(e) * 34).cropped(to: extent)
+        case 9: // Lật — ép ngang về giữa rồi bung ra
+            let s = max(0.05, abs(cos(CGFloat(x) * .pi / 2)))
+            return centered(CGAffineTransform(scaleX: s, y: 1))
+        case 10: // Thu nhỏ
+            return centered(CGAffineTransform(scaleX: max(0.05, 1 - e * 0.35), y: max(0.05, 1 - e * 0.35)))
+        default:
+            return img
+        }
     }
 
     /// Kích thước khung xuất theo độ phân giải đã chọn (giữ đúng tỉ lệ gốc). nil = giữ nguyên.
