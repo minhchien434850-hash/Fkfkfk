@@ -577,15 +577,23 @@ struct APIClient {
         return r.store
     }
     func saveMyProduct(id: Int?, name: String, description: String?, price: Int,
-                       media: [[String: String]], downloadUrl: String?) async throws {
+                       media: [[String: String]], downloadUrl: String?, categoryId: Int? = nil) async throws {
         var body: [String: Any] = ["name": name, "price": price, "media": media]
         if let id { body["id"] = id }
         if let description { body["description"] = description }
         if let downloadUrl { body["download_url"] = downloadUrl }
+        if let categoryId { body["category_id"] = categoryId }
         _ = try await send("/my-store/products", method: "POST", json: body)
     }
     func deleteMyProduct(_ pid: Int) async throws {
         _ = try await send("/my-store/products/\(pid)", method: "DELETE")
+    }
+    // §7 Đợt 2 — Danh mục cửa hàng cá nhân
+    func addMyCategory(name: String) async throws {
+        _ = try await send("/my-store/categories", method: "POST", json: ["name": name])
+    }
+    func deleteMyCategory(_ cid: Int) async throws {
+        _ = try await send("/my-store/categories/\(cid)", method: "DELETE")
     }
     func getUserStore(_ sid: Int) async throws -> MyStoreResponse {
         try decode(try await send("/u-store/\(sid)"))

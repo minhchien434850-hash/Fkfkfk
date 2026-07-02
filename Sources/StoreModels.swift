@@ -96,10 +96,16 @@ struct MyStoreProduct: Decodable, Hashable, Identifiable {
     let price: Int
     let media: [StoreMedia]?
     let downloadUrl: String?
+    var categoryId: Int? = nil
+}
+struct MyStoreCategory: Decodable, Hashable, Identifiable {
+    let id: Int
+    let name: String
 }
 struct MyStoreResponse: Decodable {
     let store: MyStore?
     let products: [MyStoreProduct]?
+    var categories: [MyStoreCategory]? = nil
 }
 
 

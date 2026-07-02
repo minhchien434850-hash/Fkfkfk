@@ -634,10 +634,18 @@ def init_db() -> None:
                 logo_url TEXT DEFAULT '',
                 created_at INTEGER
             );
+            -- §7 Đợt 2: Danh mục của cửa hàng cá nhân — CÔ LẬP theo store_id
+            CREATE TABLE IF NOT EXISTS user_store_categories(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                created_at INTEGER
+            );
             -- Sản phẩm của cửa hàng cá nhân — CÔ LẬP hoàn toàn theo store_id
             CREATE TABLE IF NOT EXISTS user_store_products(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 store_id INTEGER NOT NULL,
+                category_id INTEGER DEFAULT 0,
                 name TEXT NOT NULL,
                 description TEXT DEFAULT '',
                 price INTEGER DEFAULT 0,
@@ -892,6 +900,8 @@ def _migrate() -> None:
         # §7 Đợt 1 — Giao diện + hồ sơ cửa hàng cá nhân (ảnh bìa + slogan riêng)
         ("user_stores", "banner_url", "TEXT DEFAULT ''"),
         ("user_stores", "slogan",     "TEXT DEFAULT ''"),
+        # §7 Đợt 2 — Danh mục: gắn sản phẩm cửa hàng cá nhân vào danh mục
+        ("user_store_products", "category_id", "INTEGER DEFAULT 0"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -5668,6 +5678,10 @@ class MyProductIn(BaseModel):
     price: Optional[int] = 0
     media: Optional[list] = None
     download_url: Optional[str] = None
+    category_id: Optional[int] = 0
+
+class MyCategoryIn(BaseModel):
+    name: str
 
 def _store_dict(row) -> dict[str, Any]:
     # .keys() an toàn cho cột mới (banner_url/slogan) khi row cũ chưa có
@@ -5679,9 +5693,15 @@ def _store_dict(row) -> dict[str, Any]:
             "created_at": row["created_at"] or 0}
 
 def _uproduct_dict(row) -> dict[str, Any]:
+    keys = row.keys()
     return {"id": row["id"], "store_id": row["store_id"], "name": row["name"],
             "description": row["description"] or "", "price": row["price"] or 0,
             "media": _load_media(row["media"]), "download_url": row["download_url"] or "",
+            "category_id": (row["category_id"] if "category_id" in keys else 0) or 0,
+            "created_at": row["created_at"] or 0}
+
+def _ucat_dict(row) -> dict[str, Any]:
+    return {"id": row["id"], "store_id": row["store_id"], "name": row["name"],
             "created_at": row["created_at"] or 0}
 
 def _require_my_store(c, user):
@@ -5698,7 +5718,10 @@ def my_store_get(user=Depends(get_user)) -> dict[str, Any]:
             return {"store": None, "products": []}
         prods = c.execute("SELECT * FROM user_store_products WHERE store_id=? ORDER BY id DESC",
                           (row["id"],)).fetchall()
-    return {"store": _store_dict(row), "products": [_uproduct_dict(p) for p in prods]}
+        cats = c.execute("SELECT * FROM user_store_categories WHERE store_id=? ORDER BY id",
+                         (row["id"],)).fetchall()
+    return {"store": _store_dict(row), "products": [_uproduct_dict(p) for p in prods],
+            "categories": [_ucat_dict(x) for x in cats]}
 
 @app.post("/my-store")
 def my_store_save(b: MyStoreIn, user=Depends(get_user)) -> dict[str, Any]:
@@ -5731,7 +5754,37 @@ def public_user_store(sid: int, user=Depends(get_user)) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="Không tìm thấy cửa hàng.")
         prods = c.execute("SELECT * FROM user_store_products WHERE store_id=? ORDER BY id DESC",
                           (sid,)).fetchall()
-    return {"store": _store_dict(row), "products": [_uproduct_dict(p) for p in prods]}
+        cats = c.execute("SELECT * FROM user_store_categories WHERE store_id=? ORDER BY id",
+                         (sid,)).fetchall()
+    return {"store": _store_dict(row), "products": [_uproduct_dict(p) for p in prods],
+            "categories": [_ucat_dict(x) for x in cats]}
+
+# §7 Đợt 2 — Danh mục cửa hàng cá nhân (CÔ LẬP theo store của chính chủ)
+@app.post("/my-store/categories")
+def my_store_add_category(b: MyCategoryIn, user=Depends(get_user)) -> dict[str, Any]:
+    name = (b.name or "").strip()[:80]
+    if not name:
+        raise HTTPException(status_code=400, detail="Tên danh mục không được trống.")
+    with db() as c:
+        store = _require_my_store(c, user)
+        cur = c.execute("INSERT INTO user_store_categories(store_id,name,created_at) VALUES(?,?,?)",
+                        (store["id"], name, int(time.time())))
+        row = c.execute("SELECT * FROM user_store_categories WHERE id=?", (cur.lastrowid,)).fetchone()
+    return {"category": _ucat_dict(row)}
+
+@app.delete("/my-store/categories/{cid}")
+def my_store_del_category(cid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        owned = c.execute("SELECT id FROM user_store_categories WHERE id=? AND store_id=?",
+                          (cid, store["id"])).fetchone()
+        if not owned:
+            raise HTTPException(status_code=404, detail="Danh mục không thuộc cửa hàng của bạn.")
+        c.execute("DELETE FROM user_store_categories WHERE id=?", (cid,))
+        # Sản phẩm thuộc danh mục này → chuyển về 'Chưa phân loại' (category_id=0)
+        c.execute("UPDATE user_store_products SET category_id=0 WHERE category_id=? AND store_id=?",
+                  (cid, store["id"]))
+    return {"message": "Đã xoá danh mục."}
 
 @app.post("/my-store/products")
 def my_store_save_product(b: MyProductIn, user=Depends(get_user)) -> dict[str, Any]:
@@ -5742,21 +5795,28 @@ def my_store_save_product(b: MyProductIn, user=Depends(get_user)) -> dict[str, A
     desc = (b.description or "").strip()[:1000]
     dl = (b.download_url or "").strip()[:500]
     price = max(0, int(b.price or 0))
+    cat_id = max(0, int(b.category_id or 0))
     with db() as c:
         store = _require_my_store(c, user)
+        # Danh mục (nếu có) phải thuộc chính cửa hàng này
+        if cat_id:
+            valid = c.execute("SELECT id FROM user_store_categories WHERE id=? AND store_id=?",
+                              (cat_id, store["id"])).fetchone()
+            if not valid:
+                cat_id = 0
         if b.id:
             # §7.2 RBAC — chỉ chủ cửa hàng mới sửa được (admin tổng cũng KHÔNG can thiệp).
             owned = c.execute("SELECT id FROM user_store_products WHERE id=? AND store_id=?",
                               (b.id, store["id"])).fetchone()
             if not owned:
                 raise HTTPException(status_code=403, detail="Không có quyền sửa sản phẩm này.")
-            c.execute("UPDATE user_store_products SET name=?,description=?,price=?,media=?,download_url=? "
-                      "WHERE id=?", (name, desc, price, media, dl, b.id))
+            c.execute("UPDATE user_store_products SET name=?,description=?,price=?,media=?,download_url=?,category_id=? "
+                      "WHERE id=?", (name, desc, price, media, dl, cat_id, b.id))
             pid = b.id
         else:
-            cur = c.execute("INSERT INTO user_store_products(store_id,name,description,price,media,"
-                            "download_url,created_at) VALUES(?,?,?,?,?,?,?)",
-                            (store["id"], name, desc, price, media, dl, int(time.time())))
+            cur = c.execute("INSERT INTO user_store_products(store_id,category_id,name,description,price,media,"
+                            "download_url,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                            (store["id"], cat_id, name, desc, price, media, dl, int(time.time())))
             pid = cur.lastrowid
     return {"message": "Đã lưu sản phẩm.", "id": pid}
 

@@ -11,6 +11,8 @@ struct MyStoreView: View {
     // Cửa hàng của tôi
     @State private var myStore: MyStore?
     @State private var products: [MyStoreProduct] = []
+    @State private var categories: [MyStoreCategory] = []
+    @State private var newCatName = ""
     @State private var loading = false
     @State private var name = ""
     @State private var desc = ""
@@ -65,7 +67,7 @@ struct MyStoreView: View {
                 Task { await uploadImage(item, isBanner: true) }
             }
             .sheet(isPresented: $showAddProduct) {
-                AddMyProductView { await loadMine() }.environmentObject(store)
+                AddMyProductView(categories: categories) { await loadMine() }.environmentObject(store)
             }
         }
     }
@@ -151,7 +153,10 @@ struct MyStoreView: View {
                     }
                     .padding().kCard(16)
 
-                    // Sản phẩm
+                    // Quản lý danh mục (Đợt 2)
+                    categoryManager
+
+                    // Sản phẩm — gom theo danh mục
                     HStack {
                         Text(store.t("Sản phẩm (\(products.count))", "Products (\(products.count))")).font(.subheadline.bold())
                         Spacer()
@@ -164,7 +169,7 @@ struct MyStoreView: View {
                                      "No products yet. Tap \"Add\" to sell."))
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
-                        ForEach(products) { p in productRow(p, canDelete: true) }
+                        groupedProducts
                     }
                 }
             }
@@ -244,6 +249,58 @@ struct MyStoreView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
+    // Quản lý danh mục: thêm / xoá
+    @ViewBuilder private var categoryManager: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(store.t("Danh mục (\(categories.count))", "Categories (\(categories.count))")).font(.subheadline.bold())
+            if !categories.isEmpty {
+                ForEach(categories) { c in
+                    HStack {
+                        Image(systemName: "folder.fill").foregroundStyle(Theme.gold)
+                        Text(c.name).font(.subheadline)
+                        Spacer()
+                        Button(role: .destructive) {
+                            Task { try? await store.api.deleteMyCategory(c.id); await loadMine() }
+                        } label: { Image(systemName: "trash").font(.caption) }
+                    }
+                    .padding(8).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            HStack {
+                TextField(store.t("Tên danh mục mới (vd: Game, App...)", "New category name..."), text: $newCatName)
+                    .padding(8).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 8))
+                Button {
+                    let n = newCatName.trimmingCharacters(in: .whitespaces)
+                    guard !n.isEmpty else { return }
+                    newCatName = ""
+                    Task { try? await store.api.addMyCategory(name: n); await loadMine() }
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.title3)
+                }
+                .disabled(newCatName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding().kCard(16)
+    }
+
+    // Gom sản phẩm theo danh mục (mục "Chưa phân loại" cho cái chưa gắn)
+    @ViewBuilder private var groupedProducts: some View {
+        ForEach(categories) { c in
+            let items = products.filter { ($0.categoryId ?? 0) == c.id }
+            if !items.isEmpty {
+                Text(c.name).font(.caption.bold()).foregroundStyle(.secondary).padding(.top, 4)
+                ForEach(items) { p in productRow(p, canDelete: true) }
+            }
+        }
+        let unc = products.filter { p in !categories.contains { $0.id == (p.categoryId ?? 0) } }
+        if !unc.isEmpty {
+            if !categories.isEmpty {
+                Text(store.t("Chưa phân loại", "Uncategorized")).font(.caption.bold()).foregroundStyle(.secondary).padding(.top, 4)
+            }
+            ForEach(unc) { p in productRow(p, canDelete: true) }
+        }
+    }
+
     // Dáng cửa hàng của người khác khi xem theo Store ID (ảnh bìa + logo + tên + slogan)
     private func foundStorefront(_ s: MyStore) -> some View {
         ZStack(alignment: .bottomLeading) {
@@ -313,6 +370,7 @@ struct MyStoreView: View {
         if let r = try? await store.api.getMyStore() {
             myStore = r.store
             products = r.products ?? []
+            categories = r.categories ?? []
             if let s = r.store {
                 name = s.name; desc = s.description ?? ""
                 slogan = s.slogan ?? ""
@@ -386,6 +444,7 @@ struct MyStoreView: View {
 struct AddMyProductView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
+    var categories: [MyStoreCategory] = []
     var onDone: () async -> Void
 
     @State private var name = ""
@@ -394,6 +453,7 @@ struct AddMyProductView: View {
     @State private var downloadUrl = ""
     @State private var imageItem: PhotosPickerItem?
     @State private var imageUrl = ""
+    @State private var categoryId = 0
     @State private var uploading = false
     @State private var saving = false
     @State private var error: String?
@@ -407,6 +467,12 @@ struct AddMyProductView: View {
                     TextField(store.t("Mô tả", "Description"), text: $desc, axis: .vertical).lineLimit(1...4)
                     TextField(store.t("Link tải/giao hàng (tuỳ chọn)", "Download/delivery link (optional)"), text: $downloadUrl)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    if !categories.isEmpty {
+                        Picker(store.t("Danh mục", "Category"), selection: $categoryId) {
+                            Text(store.t("Chưa phân loại", "Uncategorized")).tag(0)
+                            ForEach(categories) { c in Text(c.name).tag(c.id) }
+                        }
+                    }
                 }
                 Section(store.t("Ảnh sản phẩm", "Product image")) {
                     if !imageUrl.isEmpty, let url = URL(string: imageUrl) {
@@ -456,7 +522,8 @@ struct AddMyProductView: View {
             try await store.api.saveMyProduct(
                 id: nil, name: name.trimmingCharacters(in: .whitespaces),
                 description: desc, price: Int(priceText) ?? 0,
-                media: media, downloadUrl: downloadUrl.isEmpty ? nil : downloadUrl)
+                media: media, downloadUrl: downloadUrl.isEmpty ? nil : downloadUrl,
+                categoryId: categoryId == 0 ? nil : categoryId)
             await onDone()
             dismiss()
         } catch {
