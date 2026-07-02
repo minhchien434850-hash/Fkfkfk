@@ -54,9 +54,12 @@ struct VideoEditorView: View {
     @State private var hue = 0.0           // -3.14 ... 3.14 (radian)
     @State private var highlights = 1.0    // 0 ... 1 (1 = giữ nguyên)
     @State private var shadows = 0.0       // -1 ... 1 (0 = giữ nguyên)
-    // Công cụ nâng cao: làm nét (deblur) + giảm nhiễu
+    // Công cụ nâng cao: làm nét (deblur) + giảm nhiễu — CHỌN MỨC (không kéo thanh)
     @State private var sharpen = 0.0       // 0 ... 2 (0 = không làm nét)
     @State private var denoise = 0.0       // 0 ... 1 (0 = không giảm nhiễu)
+    // Độ phân giải xuất: 0 = giữ nguyên; 720/1080/1440/2160 = cạnh dài mục tiêu (px)
+    @State private var outRes = 0
+    @State private var naturalSize: CGSize = .zero   // kích thước gốc của video (để scale độ phân giải)
     @State private var speed = 1.0         // 0.25 ... 4 (tốc độ phát; 1 = giữ nguyên)
     @State private var removeBg = false    // Xoá nền/tách người → làm mờ phông (Vision)
     @State private var fadeInOut = false   // Chuyển cảnh: mờ dần vào/ra (fade in/out)
@@ -83,7 +86,12 @@ struct VideoEditorView: View {
     @State private var savingToPhotos = false
     @State private var saveMsg: String?
 
-    private let filterNames = ["Gốc", "Rực rỡ", "Đen trắng", "Ấm", "Lạnh", "Cổ điển"]
+    private let filterNames = ["Gốc", "Rực rỡ", "Đen trắng", "Ấm", "Lạnh", "Cổ điển",
+                               "Điện ảnh", "Kịch tính", "Mơ màng", "Xanh ngọc", "Nắng vàng", "Tương phản"]
+    // Mức Làm nét / Giảm nhiễu (bỏ thanh kéo → chọn mức cho dễ)
+    private let sharpenLevels: [(String, Double)] = [("Tắt", 0), ("Nhẹ", 0.5), ("Vừa", 1.0), ("Mạnh", 1.5), ("Tối đa", 2.0)]
+    private let denoiseLevels: [(String, Double)] = [("Tắt", 0), ("Nhẹ", 0.25), ("Vừa", 0.5), ("Mạnh", 0.75), ("Tối đa", 1.0)]
+    private let resLevels: [(String, Int)] = [("Giữ nguyên", 0), ("720p", 720), ("1080p", 1080), ("2K", 1440), ("4K", 2160)]
 
     var body: some View {
         ScrollView {
@@ -121,9 +129,13 @@ struct VideoEditorView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Cắt video").font(.subheadline.bold())
                         HStack { Text("Bắt đầu"); Spacer(); Text(timeStr(trimStart)).foregroundStyle(.secondary) }
-                        Slider(value: $trimStart, in: 0...max(0.1, duration)) { _ in clampTrim() }
+                        Slider(value: $trimStart, in: 0...max(0.1, duration)) { editing in
+                            clampTrim(); seekPreview(trimStart); _ = editing
+                        }
                         HStack { Text("Kết thúc"); Spacer(); Text(timeStr(trimEnd)).foregroundStyle(.secondary) }
-                        Slider(value: $trimEnd, in: 0...max(0.1, duration)) { _ in clampTrim() }
+                        Slider(value: $trimEnd, in: 0...max(0.1, duration)) { editing in
+                            clampTrim(); seekPreview(trimEnd); _ = editing
+                        }
                         Text("Độ dài sau cắt: \(timeStr(max(0, trimEnd - trimStart)))")
                             .font(.caption).foregroundStyle(.green)
                     }
@@ -132,11 +144,17 @@ struct VideoEditorView: View {
                     // Bộ lọc màu
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Bộ lọc").font(.subheadline.bold())
-                        Picker("Bộ lọc", selection: $filter) {
-                            ForEach(0..<filterNames.count, id: \.self) { i in
-                                Text(filterNames[i]).tag(i)
+                        // Nhiều bộ lọc → hàng chip cuộn ngang cho dễ chọn (thay segmented chật).
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(0..<filterNames.count, id: \.self) { i in
+                                    Button(filterNames[i]) { filter = i }
+                                        .font(.caption2.bold())
+                                        .buttonStyle(.bordered)
+                                        .tint(filter == i ? Theme.accent : .gray)
+                                }
                             }
-                        }.pickerStyle(.segmented)
+                        }
 
                         HStack { Text("Độ sáng (Brightness)"); Spacer(); Text(String(format: "%.0f%%", brightness*100)) }
                             .font(.caption)
@@ -162,15 +180,25 @@ struct VideoEditorView: View {
                     }
                     .padding().kCard(16)
 
-                    // Công cụ nâng cao: làm nét video mờ + giảm nhiễu
-                    VStack(alignment: .leading, spacing: 8) {
+                    // Công cụ nâng cao: làm nét · giảm nhiễu · độ phân giải (CHỌN MỨC, không kéo thanh)
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("Nâng cao").font(.subheadline.bold())
-                        HStack { Text("Làm nét (Sharpen)"); Spacer(); Text(String(format: "%.1f", sharpen)) }
-                            .font(.caption)
-                        Slider(value: $sharpen, in: 0...2)
-                        HStack { Text("Giảm nhiễu (Denoise)"); Spacer(); Text(String(format: "%.0f%%", denoise*100)) }
-                            .font(.caption)
-                        Slider(value: $denoise, in: 0...1)
+
+                        // Độ phân giải xuất — phóng to để nét hơn / thu nhỏ cho gọn nhẹ
+                        Text("Độ phân giải (làm nét khung hình)").font(.caption).foregroundStyle(.secondary)
+                        levelChips(resLevels, isOn: { $0 == outRes }) { outRes = $0 }
+                        if outRes > 0, let t = resolvedRenderSize() {
+                            Text("Khung xuất: \(Int(t.width))×\(Int(t.height)) px")
+                                .font(.caption2).foregroundStyle(.green)
+                        }
+
+                        // Làm nét — chọn mức
+                        Text("Làm nét").font(.caption).foregroundStyle(.secondary)
+                        levelChips(sharpenLevels, isOn: { abs($0 - sharpen) < 0.01 }) { sharpen = $0 }
+
+                        // Giảm nhiễu — chọn mức
+                        Text("Giảm nhiễu").font(.caption).foregroundStyle(.secondary)
+                        levelChips(denoiseLevels, isOn: { abs($0 - denoise) < 0.01 }) { denoise = $0 }
 
                         HStack { Text("Tốc độ (Speed)"); Spacer(); Text(String(format: "%.2fx", speed)) }
                             .font(.caption)
@@ -205,7 +233,7 @@ struct VideoEditorView: View {
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                         }
-                        Text("Kéo 'Làm nét' để video mờ nét hơn; 'Giảm nhiễu' làm mịn hạt nhiễu; 'Tốc độ' làm nhanh/chậm clip. Áp dụng khi xuất video.")
+                        Text("Chọn 'Độ phân giải' cao để phóng to cho nét (4K = rõ nhất); 'Làm nét' tăng chi tiết cạnh; 'Giảm nhiễu' làm mịn hạt. Áp dụng khi xuất video.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     .padding().kCard(16)
@@ -347,6 +375,13 @@ struct VideoEditorView: View {
                     inputURL = movie.url
                     duration = max(0.1, d.seconds)
                     trimStart = 0; trimEnd = duration
+                    // Kích thước hiển thị thật (sau khi áp preferredTransform) → dùng cho scale độ phân giải.
+                    if let vTrack = try? await asset.loadTracks(withMediaType: .video).first {
+                        let ns = (try? await vTrack.load(.naturalSize)) ?? .zero
+                        let tf = (try? await vTrack.load(.preferredTransform)) ?? .identity
+                        let r = ns.applying(tf)
+                        naturalSize = CGSize(width: abs(r.width), height: abs(r.height))
+                    }
                     player = AVPlayer(url: movie.url)
                     thumbnails = []
                     await generateThumbnails(asset, duration: duration)
@@ -407,12 +442,14 @@ struct VideoEditorView: View {
                     .gesture(DragGesture(coordinateSpace: .named("strip")).onChanged { v in
                         let t = Double(min(max(0, v.location.x), w) / w) * dur
                         trimStart = min(max(0, t), trimEnd - 0.3)
+                        seekPreview(trimStart)   // xem ngay khung bắt đầu
                     })
                 // Tay nắm phải (Kết thúc)
                 handleBar.frame(width: handleW, height: 60).offset(x: min(w - handleW, eX - handleW/2))
                     .gesture(DragGesture(coordinateSpace: .named("strip")).onChanged { v in
                         let t = Double(min(max(0, v.location.x), w) / w) * dur
                         trimEnd = max(min(dur, t), trimStart + 0.3)
+                        seekPreview(trimEnd)     // xem ngay khung kết thúc
                     })
             }
             .coordinateSpace(name: "strip")
@@ -423,6 +460,30 @@ struct VideoEditorView: View {
     private var handleBar: some View {
         RoundedRectangle(cornerRadius: 4).fill(Theme.gold)
             .overlay(Image(systemName: "line.3.horizontal").font(.system(size: 9, weight: .bold)).foregroundStyle(.black))
+    }
+
+    // Hàng nút "chọn mức" chung (thay cho thanh kéo) — dùng cho độ phân giải / làm nét / giảm nhiễu.
+    @ViewBuilder private func levelChips<T: Equatable>(_ options: [(String, T)],
+                                                       isOn: @escaping (T) -> Bool,
+                                                       set: @escaping (T) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(options.enumerated()), id: \.offset) { _, opt in
+                    Button(opt.0) { set(opt.1) }
+                        .font(.caption2.bold())
+                        .buttonStyle(.bordered)
+                        .tint(isOn(opt.1) ? Theme.accent : .gray)
+                }
+            }
+        }
+    }
+
+    // Kéo tay nắm/thanh cắt tới đâu → preview NHẢY tới đúng khung đó (frame-accurate).
+    private func seekPreview(_ seconds: Double) {
+        guard let player else { return }
+        player.pause()
+        let t = CMTime(seconds: max(0, min(duration, seconds)), preferredTimescale: 600)
+        player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     private func makeComposition(_ asset: AVAsset) -> AVVideoComposition {
@@ -452,7 +513,8 @@ struct VideoEditorView: View {
         let fadeOn = fadeInOut
         let outStart = speedChanged ? 0.0 : trimStart
         let outEnd = speedChanged ? max(0.1, (trimEnd - trimStart) / speed) : trimEnd
-        return AVVideoComposition(asset: asset) { request in
+        let target = resolvedRenderSize()   // độ phân giải xuất (nil = giữ nguyên)
+        let comp = AVVideoComposition(asset: asset) { request in
             let src = request.sourceImage
             var img = src.clampedToExtent()
 
@@ -546,6 +608,38 @@ struct VideoEditorView: View {
             case 5:
                 let s = CIFilter.sepiaTone(); s.inputImage = img; s.intensity = 0.9
                 img = s.outputImage ?? img
+            case 6:   // Điện ảnh — tương phản mềm + hơi lạnh (teal/orange nhẹ)
+                let t = CIFilter.temperatureAndTint(); t.inputImage = img
+                t.neutral = CIVector(x: 6500, y: 0); t.targetNeutral = CIVector(x: 5600, y: 8)
+                img = t.outputImage ?? img
+                let cc2 = CIFilter.colorControls(); cc2.inputImage = img
+                cc2.contrast = 1.08; cc2.saturation = 0.92
+                img = cc2.outputImage ?? img
+            case 7:   // Kịch tính — tương phản cao + nét cạnh
+                let cc2 = CIFilter.colorControls(); cc2.inputImage = img
+                cc2.contrast = 1.22; cc2.saturation = 1.1
+                img = cc2.outputImage ?? img
+            case 8:   // Mơ màng — hồng nhạt + mềm sáng
+                let t = CIFilter.temperatureAndTint(); t.inputImage = img
+                t.neutral = CIVector(x: 6500, y: 0); t.targetNeutral = CIVector(x: 7200, y: -12)
+                img = t.outputImage ?? img
+                let b = CIFilter.colorControls(); b.inputImage = img; b.brightness = 0.04; b.saturation = 1.05
+                img = b.outputImage ?? img
+            case 9:   // Xanh ngọc — nghiêng lạnh teal
+                let t = CIFilter.temperatureAndTint(); t.inputImage = img
+                t.neutral = CIVector(x: 6500, y: 0); t.targetNeutral = CIVector(x: 8200, y: 20)
+                img = t.outputImage ?? img
+            case 10:  // Nắng vàng — ấm rực
+                let t = CIFilter.temperatureAndTint(); t.inputImage = img
+                t.neutral = CIVector(x: 6500, y: 0); t.targetNeutral = CIVector(x: 4300, y: -6)
+                img = t.outputImage ?? img
+                let v = CIFilter.vibrance(); v.inputImage = img; v.amount = 0.5
+                img = v.outputImage ?? img
+            case 11:  // Tương phản — đen trắng tương phản cao
+                let m = CIFilter.photoEffectMono(); m.inputImage = img
+                img = m.outputImage ?? img
+                let cc2 = CIFilter.colorControls(); cc2.inputImage = img; cc2.contrast = 1.25
+                img = cc2.outputImage ?? img
             default: break
             }
 
@@ -592,8 +686,38 @@ struct VideoEditorView: View {
                 }
             }
 
-            request.finish(with: img.cropped(to: src.extent), context: Self.ciCtx)
+            // Độ phân giải xuất: scale khung về kích thước mục tiêu (phóng to = nét hơn).
+            var outImg = img.cropped(to: src.extent)
+            if let target = target {
+                let fx = target.width / max(1, src.extent.width)
+                let fy = target.height / max(1, src.extent.height)
+                outImg = outImg
+                    .transformed(by: CGAffineTransform(translationX: -src.extent.minX, y: -src.extent.minY))
+                    .transformed(by: CGAffineTransform(scaleX: fx, y: fy))
+                    .cropped(to: CGRect(origin: .zero, size: target))
+            }
+            request.finish(with: outImg, context: Self.ciCtx)
         }
+        // Đổi renderSize khi có chọn độ phân giải (giữ nguyên = không đụng, không rủi ro).
+        if let target = target, let mut = comp.mutableCopy() as? AVMutableVideoComposition {
+            mut.renderSize = target
+            return mut
+        }
+        return comp
+    }
+
+    /// Kích thước khung xuất theo độ phân giải đã chọn (giữ đúng tỉ lệ gốc). nil = giữ nguyên.
+    private func resolvedRenderSize() -> CGSize? {
+        guard outRes > 0, naturalSize.width > 1, naturalSize.height > 1 else { return nil }
+        let longEdge = max(naturalSize.width, naturalSize.height)
+        let factor = CGFloat(outRes) / longEdge
+        var w = (naturalSize.width * factor).rounded()
+        var h = (naturalSize.height * factor).rounded()
+        // Encoder yêu cầu kích thước chẵn.
+        w -= w.truncatingRemainder(dividingBy: 2)
+        h -= h.truncatingRemainder(dividingBy: 2)
+        guard w >= 2, h >= 2 else { return nil }
+        return CGSize(width: w, height: h)
     }
 
     // MARK: - Phụ đề tự động
