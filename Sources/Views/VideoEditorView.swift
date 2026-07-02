@@ -42,6 +42,7 @@ struct VideoEditorView: View {
     // Công cụ nâng cao: làm nét (deblur) + giảm nhiễu
     @State private var sharpen = 0.0       // 0 ... 2 (0 = không làm nét)
     @State private var denoise = 0.0       // 0 ... 1 (0 = không giảm nhiễu)
+    @State private var speed = 1.0         // 0.25 ... 4 (tốc độ phát; 1 = giữ nguyên)
     @State private var loading = false
     @State private var exporting = false
     @State private var outputURL: URL?
@@ -120,7 +121,19 @@ struct VideoEditorView: View {
                         HStack { Text("Giảm nhiễu (Denoise)"); Spacer(); Text(String(format: "%.0f%%", denoise*100)) }
                             .font(.caption)
                         Slider(value: $denoise, in: 0...1)
-                        Text("Kéo 'Làm nét' để video mờ nét hơn; 'Giảm nhiễu' làm mịn hạt nhiễu. Áp dụng khi xuất video.")
+
+                        HStack { Text("Tốc độ (Speed)"); Spacer(); Text(String(format: "%.2fx", speed)) }
+                            .font(.caption)
+                        HStack(spacing: 6) {
+                            ForEach([0.5, 1.0, 1.5, 2.0, 3.0], id: \.self) { s in
+                                Button(String(format: "%.1fx", s)) { speed = s }
+                                    .font(.caption2)
+                                    .buttonStyle(.bordered)
+                                    .tint(abs(speed - s) < 0.01 ? Theme.accent : .gray)
+                            }
+                        }
+                        Slider(value: $speed, in: 0.25...4)
+                        Text("Kéo 'Làm nét' để video mờ nét hơn; 'Giảm nhiễu' làm mịn hạt nhiễu; 'Tốc độ' làm nhanh/chậm clip. Áp dụng khi xuất video.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     .padding().kCard(16)
@@ -286,19 +299,48 @@ struct VideoEditorView: View {
         guard let inputURL else { return }
         exporting = true; error = nil; info = nil; outputURL = nil
         let asset = AVURLAsset(url: inputURL)
-        guard let session = AVAssetExportSession(asset: asset,
+        let start = CMTime(seconds: trimStart, preferredTimescale: 600)
+        let end = CMTime(seconds: trimEnd, preferredTimescale: 600)
+        let range = CMTimeRange(start: start, end: end)
+
+        // Nguồn xuất: nếu đổi TỐC ĐỘ → dựng composition rồi scaleTimeRange; nếu không → dùng asset gốc.
+        let exportAsset: AVAsset
+        let exportRange: CMTimeRange
+        if abs(speed - 1.0) > 0.01 {
+            let comp = AVMutableComposition()
+            do {
+                if let vTrack = try await asset.loadTracks(withMediaType: .video).first {
+                    let cv = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+                    try cv?.insertTimeRange(range, of: vTrack, at: .zero)
+                    cv?.preferredTransform = try await vTrack.load(.preferredTransform)
+                }
+                if let aTrack = try await asset.loadTracks(withMediaType: .audio).first {
+                    let ca = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                    try? ca?.insertTimeRange(range, of: aTrack, at: .zero)
+                }
+            } catch {
+                self.error = "Lỗi dựng video: \(error.localizedDescription)"; exporting = false; return
+            }
+            let scaled = CMTime(seconds: max(0.1, (trimEnd - trimStart) / speed), preferredTimescale: 600)
+            comp.scaleTimeRange(CMTimeRange(start: .zero, duration: comp.duration), toDuration: scaled)
+            exportAsset = comp
+            exportRange = CMTimeRange(start: .zero, duration: scaled)
+        } else {
+            exportAsset = asset
+            exportRange = range
+        }
+
+        guard let session = AVAssetExportSession(asset: exportAsset,
                                                  presetName: AVAssetExportPresetHighestQuality) else {
             error = "Không tạo được phiên xuất."; exporting = false; return
         }
-        session.videoComposition = makeComposition(asset)
+        session.videoComposition = makeComposition(exportAsset)
         let out = FileManager.default.temporaryDirectory
             .appendingPathComponent("kenios_edit_\(Int(Date().timeIntervalSince1970)).mp4")
         try? FileManager.default.removeItem(at: out)
         session.outputURL = out
         session.outputFileType = .mp4
-        let start = CMTime(seconds: trimStart, preferredTimescale: 600)
-        let end = CMTime(seconds: trimEnd, preferredTimescale: 600)
-        session.timeRange = CMTimeRange(start: start, end: end)
+        session.timeRange = exportRange
 
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             session.exportAsynchronously { cont.resume() }
