@@ -66,6 +66,10 @@ struct StoreAppConfig: Codable, Hashable {
     var welcomePopupEnabled: Bool? = nil
     var welcomePopupTitle: String? = nil
     var welcomePopupText: String? = nil
+    // Giọng chào toàn cục — admin đặt, MỌI người dùng đều nghe khi mở app (mặc định bật)
+    var welcomeVoiceEnabled: Bool? = nil
+    var welcomeVoiceText: String? = nil
+    var welcomeVoiceRate: Float? = nil
     // Thanh thông báo chạy đầu trang
     var announceEnabled: Bool? = nil
     var announceText: String? = nil

@@ -5516,6 +5516,11 @@ def store_config() -> dict[str, Any]:
         "welcome_popup_enabled": get_setting("store_welcome_popup_enabled", "0") == "1",
         "welcome_popup_title": get_setting("store_welcome_popup_title", ""),
         "welcome_popup_text": get_setting("store_welcome_popup_text", ""),
+        # GIỌNG chào TOÀN CỤC — MẶC ĐỊNH BẬT để MỌI người dùng đều nghe khi mở app
+        "welcome_voice_enabled": get_setting("store_welcome_voice_enabled", "1") == "1",
+        "welcome_voice_text": get_setting("store_welcome_voice_text",
+            "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"),
+        "welcome_voice_rate": float(get_setting("store_welcome_voice_rate", "0.5") or 0.5),
         # §1.2 — Thông báo cập nhật phiên bản mới (admin đặt)
         "latest_version": get_setting("store_latest_version", ""),
         "update_url": get_setting("store_update_url", ""),
@@ -6191,6 +6196,9 @@ class StoreConfigIn(BaseModel):
     welcome_popup_enabled: Optional[bool] = None
     welcome_popup_title: Optional[str] = None
     welcome_popup_text: Optional[str] = None
+    welcome_voice_enabled: Optional[bool] = None
+    welcome_voice_text: Optional[str] = None
+    welcome_voice_rate: Optional[float] = None
     # Thanh thông báo chạy
     announce_enabled: Optional[bool] = None
     announce_text: Optional[str] = None
@@ -6260,6 +6268,9 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.welcome_popup_enabled is not None: set_setting("store_welcome_popup_enabled", "1" if b.welcome_popup_enabled else "0")
     if b.welcome_popup_title is not None: set_setting("store_welcome_popup_title", b.welcome_popup_title.strip()[:80])
     if b.welcome_popup_text is not None: set_setting("store_welcome_popup_text", b.welcome_popup_text.strip()[:500])
+    if b.welcome_voice_enabled is not None: set_setting("store_welcome_voice_enabled", "1" if b.welcome_voice_enabled else "0")
+    if b.welcome_voice_text is not None: set_setting("store_welcome_voice_text", b.welcome_voice_text.strip()[:500])
+    if b.welcome_voice_rate is not None: set_setting("store_welcome_voice_rate", str(max(0.3, min(float(b.welcome_voice_rate), 0.65))))
     if b.gamecat_limit is not None: set_setting("store_gamecat_limit", str(max(1, min(int(b.gamecat_limit), 30))))
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 

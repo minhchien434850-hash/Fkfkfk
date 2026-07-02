@@ -504,6 +504,8 @@ struct APIClient {
                              announceColor: String? = nil, gamecatLimit: Int? = nil,
                              welcomePopupEnabled: Bool? = nil, welcomePopupTitle: String? = nil,
                              welcomePopupText: String? = nil,
+                             welcomeVoiceEnabled: Bool? = nil, welcomeVoiceText: String? = nil,
+                             welcomeVoiceRate: Float? = nil,
                              latestVersion: String? = nil, updateUrl: String? = nil,
                              updateMessage: String? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
@@ -551,6 +553,9 @@ struct APIClient {
         if let welcomePopupEnabled { body["welcome_popup_enabled"] = welcomePopupEnabled }
         if let welcomePopupTitle { body["welcome_popup_title"] = welcomePopupTitle }
         if let welcomePopupText { body["welcome_popup_text"] = welcomePopupText }
+        if let welcomeVoiceEnabled { body["welcome_voice_enabled"] = welcomeVoiceEnabled }
+        if let welcomeVoiceText { body["welcome_voice_text"] = welcomeVoiceText }
+        if let welcomeVoiceRate { body["welcome_voice_rate"] = welcomeVoiceRate }
         if let latestVersion { body["latest_version"] = latestVersion }
         if let updateUrl { body["update_url"] = updateUrl }
         if let updateMessage { body["update_message"] = updateMessage }

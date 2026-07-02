@@ -152,6 +152,8 @@ struct MainTabView: View {
             } else if ![2, 14, 15, 4, 16].contains(store.tab) {
                 store.tab = 2
             }
+            // Giọng chào: nếu cấu hình TOÀN CỤC (server) đang tải → chờ .task phát cho MỌI người;
+            // trường hợp có cài đặt riêng bật sẵn thì phát luôn (playOnce có khoá chống lặp).
             if store.welcomeEnabled {
                 WelcomeVoice.shared.playOnce(
                     text: store.welcomeText,
@@ -191,6 +193,15 @@ struct MainTabView: View {
                             // Ưu tiên popup cập nhật trước; lời chào hiện nếu không có cập nhật.
                             if !showUpdate { withAnimation(.spring(response: 0.4)) { showWelcomePopup = true } }
                         }
+                    }
+                    // GIỌNG chào TOÀN CỤC — phát cho MỌI người dùng khi mở app.
+                    // Mặc định server bật (welcome_voice_enabled=1); chỉ tắt khi admin đặt = false.
+                    if cfg.welcomeVoiceEnabled != false {
+                        let vt = (cfg.welcomeVoiceText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        WelcomeVoice.shared.playOnce(
+                            text: vt.isEmpty ? store.welcomeText : vt,
+                            voiceId: store.welcomeVoiceId,
+                            rate: cfg.welcomeVoiceRate ?? store.welcomeRate)
                     }
                 }
             }
