@@ -19,6 +19,11 @@ struct DirectMessageChatView: View {
     @State private var uploading = false
     @State private var fullscreenImageURL: String? = nil
     @State private var fullscreenVideoURL: String? = nil
+    // §4.2 — avatar bạn bè (đồng bộ theo poll) + avatar của tôi (đổi ngay trong chat)
+    @State private var friendAvatarURL: String? = nil
+    @State private var myAvatarURL: String? = nil
+    @State private var avatarPickerItem: PhotosPickerItem? = nil
+    @State private var updatingAvatar = false
     @StateObject private var recorder = ChatVoiceRecorder()
 
     var body: some View {
@@ -81,13 +86,42 @@ struct DirectMessageChatView: View {
 
             inputBar
         }
-        .navigationTitle(friend.username)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { startPolling() }
+        .toolbar {
+            // §4.2 — Tiêu đề: avatar bạn + tên (avatar cập nhật theo thời gian thực qua poll)
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    avatarCircle(url: friendAvatarURL, size: 30, fallback: friend.username)
+                    Text(friend.username).font(.headline)
+                }
+            }
+            // §4.2 — Avatar của tôi: bấm để đổi ảnh ngay trong màn nhắn tin
+            ToolbarItem(placement: .topBarTrailing) {
+                PhotosPicker(selection: $avatarPickerItem, matching: .images) {
+                    ZStack {
+                        avatarCircle(url: myAvatarURL, size: 30, fallback: "Tôi")
+                        if updatingAvatar {
+                            Circle().fill(.black.opacity(0.35)).frame(width: 30, height: 30)
+                            ProgressView().scaleEffect(0.6).tint(.white)
+                        } else {
+                            Image(systemName: "camera.circle.fill")
+                                .font(.caption2).foregroundStyle(.white, Theme.accent)
+                                .offset(x: 10, y: 10)
+                        }
+                    }
+                }
+                .disabled(updatingAvatar)
+            }
+        }
+        .onAppear { startPolling(); Task { await refreshAvatars() } }
         .onDisappear { stopPolling(); recorder.cancel() }
         .onChange(of: photoItem) { item in
             guard let item else { return }
             Task { await handlePickedPhoto(item) }
+        }
+        .onChange(of: avatarPickerItem) { item in
+            guard let item else { return }
+            Task { await changeMyAvatar(item) }
         }
         .sheet(isPresented: $showFilePicker) {
             DocumentPicker(contentTypes: [.item], allowsMultipleSelection: false, asCopy: true) { urls in
@@ -299,11 +333,61 @@ struct DirectMessageChatView: View {
         } catch { sendError = error.localizedDescription }
     }
 
+    // MARK: - §4.2 Avatar
+    @ViewBuilder
+    private func avatarCircle(url: String?, size: CGFloat, fallback: String) -> some View {
+        if let url, let u = URL(string: url), !url.isEmpty {
+            AsyncImage(url: u) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Color(.tertiarySystemFill))
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            ZStack {
+                Circle().fill(Theme.accent.opacity(0.85))
+                Text(String(fallback.prefix(1)).uppercased())
+                    .font(.system(size: size * 0.5, weight: .bold)).foregroundStyle(.white)
+            }
+            .frame(width: size, height: size)
+        }
+    }
+
+    /// Lấy avatar bạn bè + của tôi (gọi lúc mở màn).
+    private func refreshAvatars() async {
+        await refreshFriendAvatar()
+        if let me = try? await store.api.myProfile() { myAvatarURL = me.avatarUrl }
+    }
+
+    /// Chỉ làm mới avatar bạn bè — gọi mỗi nhịp poll để đồng bộ gần như thời gian thực.
+    private func refreshFriendAvatar() async {
+        if let p = try? await store.api.userProfile(friend.id) { friendAvatarURL = p.avatarUrl }
+    }
+
+    /// Đổi avatar của tôi NGAY trong màn nhắn tin → bạn bè thấy sau nhịp poll kế tiếp.
+    private func changeMyAvatar(_ item: PhotosPickerItem) async {
+        updatingAvatar = true
+        defer { updatingAvatar = false; avatarPickerItem = nil }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else { return }
+            if data.count > 15 * 1024 * 1024 { sendError = "Ảnh đại diện tối đa 15MB."; return }
+            let link = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                                                       mime: "image/jpeg",
+                                                       name: "avatar_\(Int(Date().timeIntervalSince1970))")
+            _ = try await store.api.updateProfile(publicId: nil, avatarUrl: link, bio: nil)
+            myAvatarURL = link
+        } catch { sendError = error.localizedDescription }
+    }
+
     // MARK: - Helpers
     private func startPolling() {
         Task { await store.refreshDirectMessages(friendId: friend.id) }
         timer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
-            Task { await store.refreshDirectMessages(friendId: friend.id) }
+            Task {
+                await store.refreshDirectMessages(friendId: friend.id)
+                await refreshFriendAvatar()      // §4.2 — đồng bộ avatar bạn bè liên tục
+            }
         }
     }
     private func stopPolling() { timer?.invalidate(); timer = nil }
