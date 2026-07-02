@@ -16,6 +16,7 @@ struct DirectMessageChatView: View {
     @State private var photoItem: PhotosPickerItem? = nil
     @State private var showFilePicker = false
     @State private var uploading = false
+    @State private var fullscreenImageURL: String? = nil
     @StateObject private var recorder = ChatVoiceRecorder()
 
     var body: some View {
@@ -91,6 +92,12 @@ struct DirectMessageChatView: View {
                 if let u = urls.first { Task { await handlePickedFile(u) } }
             }.ignoresSafeArea()
         }
+        .fullScreenCover(item: Binding(
+            get: { fullscreenImageURL.map { IdentifiedURL(url: $0) } },
+            set: { fullscreenImageURL = $0?.url }
+        )) { item in
+            FullscreenImageViewer(urlString: item.url)
+        }
     }
 
     // MARK: - Bong bóng tin nhắn (văn bản / ảnh / video / âm thanh / tệp)
@@ -100,13 +107,16 @@ struct DirectMessageChatView: View {
             VStack(alignment: isMe ? .trailing : .leading, spacing: 6) {
                 switch media.kind {
                 case "img":
-                    AsyncImage(url: URL(string: media.url)) { img in
-                        img.resizable().scaledToFill()
-                    } placeholder: {
-                        ZStack { Color(.tertiarySystemFill); ProgressView() }
+                    Button { fullscreenImageURL = media.url } label: {
+                        AsyncImage(url: URL(string: media.url)) { img in
+                            img.resizable().scaledToFill()
+                        } placeholder: {
+                            ZStack { Color(.tertiarySystemFill); ProgressView() }
+                        }
+                        .frame(width: 200, height: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
-                    .frame(width: 200, height: 200)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .buttonStyle(.plain)
                 case "video":
                     Link(destination: URL(string: media.url) ?? URL(string: "https://")!) {
                         ZStack {
@@ -436,5 +446,83 @@ final class ChatAudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         isPlaying = false
+    }
+}
+
+// MARK: - Xem ảnh full màn hình (phóng to / lưu về máy)
+struct IdentifiedURL: Identifiable { let id = UUID(); let url: String }
+
+struct FullscreenImageViewer: View {
+    let urlString: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    @State private var savedMsg: String? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            AsyncImage(url: URL(string: urlString)) { img in
+                img.resizable().scaledToFit()
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { v in scale = max(1, min(5, lastScale * v)) }
+                            .onEnded { _ in lastScale = scale }
+                    )
+                    .simultaneousGesture(
+                        DragGesture()
+                            .onChanged { v in
+                                guard scale > 1 else { return }
+                                offset = CGSize(width: lastOffset.width + v.translation.width,
+                                                height: lastOffset.height + v.translation.height)
+                            }
+                            .onEnded { _ in lastOffset = offset }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation {
+                            if scale > 1 { scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero }
+                            else { scale = 2.5; lastScale = 2.5 }
+                        }
+                    }
+            } placeholder: { ProgressView().tint(.white) }
+
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white.opacity(0.9))
+                    }
+                    Spacer()
+                    Button { saveImage() } label: {
+                        Image(systemName: "square.and.arrow.down").font(.title2).foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+                .padding()
+                Spacer()
+                if let savedMsg {
+                    Text(savedMsg).font(.caption).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.ultraThinMaterial).clipShape(Capsule()).padding(.bottom, 30)
+                }
+            }
+        }
+    }
+
+    private func saveImage() {
+        guard let url = URL(string: urlString) else { return }
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let img = UIImage(data: data) {
+                    UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+                    await MainActor.run { savedMsg = "Đã lưu ảnh vào Thư viện" }
+                }
+            } catch {
+                await MainActor.run { savedMsg = "Lưu thất bại" }
+            }
+        }
     }
 }

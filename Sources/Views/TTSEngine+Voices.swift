@@ -1,4 +1,5 @@
 import AVFoundation
+import NaturalLanguage
 
 // ======================== Giọng iOS · Siri · Siri-Anh phiên âm ========================
 extension TTSEngine {
@@ -24,9 +25,16 @@ extension TTSEngine {
     func speakExpressive(_ text: String, voice: AVSpeechSynthesisVoice?) {
         let sentences = Self.splitSentences(text)
         guard !sentences.isEmpty else { return }
+        // Chuẩn bị sẵn giọng tiếng Anh để đọc ĐA NGÔN NGỮ (câu tiếng Anh xen giữa).
+        let enVoice = bestEnglishVoice()
         for (idx, s) in sentences.enumerated() {
             let u = AVSpeechUtterance(string: s)
-            u.voice = voice
+            // ĐA NGÔN NGỮ: câu nào là tiếng Anh → đọc bằng giọng Anh, còn lại giữ giọng chính (Việt).
+            if Self.isEnglishSentence(s), let en = enVoice {
+                u.voice = en
+            } else {
+                u.voice = voice
+            }
             u.volume = volume
 
             var r = rate
@@ -75,6 +83,20 @@ extension TTSEngine {
             if !t.isEmpty { result.append(t) }
         }
         return result
+    }
+
+    // Nhận diện câu tiếng Anh (để đọc đa ngôn ngữ).
+    // Có dấu tiếng Việt → chắc chắn KHÔNG phải tiếng Anh (nhanh, tránh gọi bộ nhận diện).
+    static func isEnglishSentence(_ s: String) -> Bool {
+        let viChars = Set("ăâêôơưđàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ")
+        let lower = s.lowercased()
+        if lower.contains(where: { viChars.contains($0) }) { return false }
+        // Cần tối thiểu vài chữ cái mới đáng nhận diện; câu quá ngắn coi như tiếng Việt (an toàn).
+        let letters = lower.filter { $0.isLetter }
+        guard letters.count >= 3 else { return false }
+        let rec = NLLanguageRecognizer()
+        rec.processString(s)
+        return rec.dominantLanguage == .english
     }
 
     // Chọn ĐÚNG giọng Siri: ưu tiên giọng Siri tiếng Việt thật, rồi tới giọng tiếng Việt

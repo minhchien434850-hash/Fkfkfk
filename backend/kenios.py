@@ -1558,6 +1558,32 @@ def _client_ip(request: Request) -> str:
         return xff.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
+# ---------- Chống flood/DDoS ở tầng ứng dụng (bản thay thế gần nhất cho chống DDoS) ----------
+# Giới hạn TỔNG số request/IP trong 1 cửa sổ ngắn. Đây là lớp phòng vệ nhẹ ở tầng app;
+# chống DDoS quy mô lớn thật sự cần dịch vụ CDN/WAF (Cloudflare...) ở tầng mạng.
+_flood_hits: dict[str, list[float]] = {}
+_FLOOD_LIMIT = 90        # tối đa 90 request
+_FLOOD_WINDOW = 10.0     # trong 10 giây cho mỗi IP
+
+@app.middleware("http")
+async def _flood_guard(request: Request, call_next):
+    ip = _client_ip(request)
+    now = time.time()
+    arr = [t for t in _flood_hits.get(ip, []) if now - t < _FLOOD_WINDOW]
+    if len(arr) >= _FLOOD_LIMIT:
+        _security_alert("flood",
+                        f"IP {ip} gửi > {_FLOOD_LIMIT} request/{int(_FLOOD_WINDOW)}s "
+                        f"— nghi ngờ tấn công flood/DDoS.")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=429,
+                            content={"detail": "Quá nhiều yêu cầu. Vui lòng thử lại sau giây lát."})
+    arr.append(now)
+    _flood_hits[ip] = arr
+    if len(_flood_hits) > 10000:      # dọn bộ nhớ định kỳ
+        for k in [k for k, v in _flood_hits.items() if not any(now - t < _FLOOD_WINDOW for t in v)]:
+            _flood_hits.pop(k, None)
+    return await call_next(request)
+
 # §9.1 — Cảnh báo xâm nhập theo thời gian thực qua Telegram (admin cấu hình).
 _sec_alert_last: dict[str, float] = {}
 

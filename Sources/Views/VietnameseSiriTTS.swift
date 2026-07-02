@@ -94,8 +94,12 @@ struct VietnameseTextNormalizer {
             isAllowedScalar(sc) ? sc : Unicode.Scalar(32) // space
         }))
 
+        // 2b) Mở rộng viết tắt CHÍNH THỐNG (sđt → số điện thoại, vd → ví dụ, vn → Việt Nam...)
+        //     — LUÔN áp dụng (kể cả giọng iOS) để đọc tự nhiên, chuẩn hơn.
+        s = replaceWords(s, using: formalAbbrev)
+
         // 3) Thay từng "từ" theo từ điển tiếng lóng (chỉ khi bật bộ lọc).
-        if slang { s = replaceWords(s) }
+        if slang { s = replaceWords(s, using: dictionary) }
 
         // 4) Gom khoảng trắng, gọn dấu câu lặp (… , !!! , ??? ).
         s = collapse(s)
@@ -131,13 +135,23 @@ struct VietnameseTextNormalizer {
         return s
     }
 
+    // Viết tắt chính thống → đọc đầy đủ (an toàn, không phải tiếng lóng), luôn áp dụng.
+    static let formalAbbrev: [String: String] = [
+        "sđt": "số điện thoại", "sdt": "số điện thoại",
+        "stk": "số tài khoản", "tphcm": "thành phố Hồ Chí Minh",
+        "vd": "ví dụ", "vv": "vân vân",
+        "vn": "Việt Nam", "sl": "số lượng",
+        "kg": "ki lô", "km": "ki lô mét",
+        "tp": "thành phố"
+    ]
+
     // Tách theo "từ" = chuỗi chữ cái/chữ số liền nhau; phần còn lại giữ nguyên.
-    private static func replaceWords(_ text: String) -> String {
+    private static func replaceWords(_ text: String, using dict: [String: String]) -> String {
         var out = ""
         var token = ""
         func flush() {
             guard !token.isEmpty else { return }
-            if let rep = dictionary[token.lowercased()] {
+            if let rep = dict[token.lowercased()] {
                 out += rep
             } else {
                 out += token
