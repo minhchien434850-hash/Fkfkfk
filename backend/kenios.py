@@ -689,6 +689,33 @@ def init_db() -> None:
                 status TEXT DEFAULT 'completed',
                 created_at INTEGER
             );
+            -- §7 Đợt 4 — Mã giảm giá riêng của từng cửa hàng cá nhân (unique theo store)
+            CREATE TABLE IF NOT EXISTS user_store_promos(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                discount_type TEXT DEFAULT 'percent',  -- percent | fixed
+                discount_value INTEGER NOT NULL,
+                min_amount INTEGER DEFAULT 0,
+                max_uses INTEGER DEFAULT 0,             -- 0 = không giới hạn
+                used_count INTEGER DEFAULT 0,
+                expires_at INTEGER DEFAULT 0,           -- 0 = không hết hạn
+                is_active INTEGER DEFAULT 1,
+                created_at INTEGER,
+                UNIQUE(store_id, code)
+            );
+            -- §7 Đợt 4 — Yêu cầu rút tiền của người bán (admin duyệt chi thật)
+            CREATE TABLE IF NOT EXISTS user_store_withdrawals(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seller_id INTEGER NOT NULL,
+                store_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                bank_info TEXT DEFAULT '',
+                status TEXT DEFAULT 'pending',   -- pending | paid | rejected
+                note TEXT DEFAULT '',
+                created_at INTEGER,
+                handled_at INTEGER
+            );
 
             -- Nạp tiền vào VÍ cửa hàng (tách biệt thanh toán app chính)
             CREATE TABLE IF NOT EXISTS store_topups(
@@ -987,6 +1014,9 @@ def _create_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_ustore_keys_prod_status ON user_store_keys(product_id,status)",
         "CREATE INDEX IF NOT EXISTS idx_ustore_orders_store ON user_store_orders(store_id)",
         "CREATE INDEX IF NOT EXISTS idx_ustore_orders_buyer ON user_store_orders(buyer_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ustore_promos_store ON user_store_promos(store_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ustore_wd_seller ON user_store_withdrawals(seller_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ustore_wd_status ON user_store_withdrawals(status)",
         "CREATE INDEX IF NOT EXISTS idx_store_products_folder ON store_products(folder_id)",
         "CREATE INDEX IF NOT EXISTS idx_store_folders_cat ON store_folders(category_id)",
         "CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)",
@@ -5989,9 +6019,33 @@ def my_store_delete_available_keys(pid: int, user=Depends(get_user)) -> dict[str
 
 
 # §7 Đợt 3 — Mua hàng từ cửa hàng cá nhân (buyer trả bằng ví, người bán nhận tiền)
+def _ustore_promo_apply(c, sid: int, code: str, amount: int):
+    """Trả (promo_row, discount) cho mã giảm giá của chính cửa hàng sid. Ném lỗi nếu không hợp lệ."""
+    code = (code or "").strip().upper()
+    if not code:
+        return None, 0
+    row = c.execute("SELECT * FROM user_store_promos WHERE store_id=? AND code=? AND is_active=1",
+                    (sid, code)).fetchone()
+    if not row:
+        raise HTTPException(status_code=400, detail="Mã giảm giá không hợp lệ.")
+    now = int(time.time())
+    if row["expires_at"] and row["expires_at"] < now:
+        raise HTTPException(status_code=400, detail="Mã giảm giá đã hết hạn.")
+    if row["max_uses"] and row["used_count"] >= row["max_uses"]:
+        raise HTTPException(status_code=400, detail="Mã đã hết lượt dùng.")
+    if amount < row["min_amount"]:
+        raise HTTPException(status_code=400,
+            detail=f"Đơn tối thiểu {row['min_amount']:,}đ để dùng mã.".replace(",", "."))
+    if row["discount_type"] == "percent":
+        discount = int(amount * row["discount_value"] / 100)
+    else:
+        discount = min(row["discount_value"], amount)
+    return row, max(0, discount)
+
 class UStoreBuyIn(BaseModel):
     product_id: int
     price_id: Optional[int] = None
+    promo_code: Optional[str] = None
 
 @app.post("/u-store/{sid}/buy")
 def u_store_buy(sid: int, b: UStoreBuyIn, user=Depends(get_user)) -> dict[str, Any]:
@@ -6018,6 +6072,9 @@ def u_store_buy(sid: int, b: UStoreBuyIn, user=Depends(get_user)) -> dict[str, A
             amount = tier["amount"]; price_id = tier["id"]; price_label = tier["label"]
         else:
             amount = prod["price"] or 0
+        # Áp mã giảm giá của chính cửa hàng (nếu có)
+        promo_row, discount = _ustore_promo_apply(c, sid, b.promo_code or "", amount)
+        amount = max(0, amount - discount)
         # Số dư ví
         balance = _wallet_balance(c, user["id"])
         if balance < amount:
@@ -6062,6 +6119,8 @@ def u_store_buy(sid: int, b: UStoreBuyIn, user=Depends(get_user)) -> dict[str, A
                   (user["id"], "purchase", -amount, f"Mua {prod['name']}", int(time.time())))
         if key:
             c.execute("DELETE FROM user_store_keys WHERE id=?", (key["id"],))  # đã giao → xoá khỏi kho
+        if promo_row:
+            c.execute("UPDATE user_store_promos SET used_count=used_count+1 WHERE id=?", (promo_row["id"],))
         cur = c.execute(
             "INSERT INTO user_store_orders(store_id,seller_id,buyer_id,product_id,product_name,price_id,"
             "price_label,key_text,download_url,amount,status,created_at) "
@@ -6071,8 +6130,9 @@ def u_store_buy(sid: int, b: UStoreBuyIn, user=Depends(get_user)) -> dict[str, A
         oid = cur.lastrowid
         new_balance = _wallet_balance(c, user["id"])
     return {"ok": True, "order_id": oid, "key": key_text, "download_url": dl,
-            "product_name": prod["name"], "balance": new_balance,
-            "message": "Mua thành công!"}
+            "product_name": prod["name"], "balance": new_balance, "discount": discount,
+            "message": ("Mua thành công!" if not discount else
+                        f"Mua thành công! Đã giảm {discount:,}đ.".replace(",", "."))}
 
 @app.get("/my-orders/u-store")
 def u_store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
@@ -6131,6 +6191,159 @@ def my_store_stats(user=Depends(get_user)) -> dict[str, Any]:
         "top_products": [{"name": r["product_name"], "sold": r["sold"], "revenue": r["rev"]} for r in top],
         "low_stock": [{"name": r["name"], "stock": r["stock"]} for r in low],
     }
+
+
+# ================= §7 Đợt 4 — Mã giảm giá của người bán (CÔ LẬP theo store) =================
+def _upromo_dict(row) -> dict[str, Any]:
+    return {"id": row["id"], "code": row["code"], "discount_type": row["discount_type"],
+            "discount_value": row["discount_value"], "min_amount": row["min_amount"],
+            "max_uses": row["max_uses"], "used_count": row["used_count"],
+            "expires_at": row["expires_at"], "is_active": row["is_active"]}
+
+class MyPromoIn(BaseModel):
+    code: str
+    discount_type: str = "percent"   # percent | fixed
+    discount_value: int
+    min_amount: int = 0
+    max_uses: int = 0
+    expires_at: int = 0
+
+@app.get("/my-store/promos")
+def my_store_list_promos(user=Depends(get_user)) -> list[dict[str, Any]]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        rows = c.execute("SELECT * FROM user_store_promos WHERE store_id=? ORDER BY id DESC",
+                         (store["id"],)).fetchall()
+    return [_upromo_dict(r) for r in rows]
+
+@app.post("/my-store/promos")
+def my_store_create_promo(b: MyPromoIn, user=Depends(get_user)) -> dict[str, Any]:
+    code = (b.code or "").strip().upper()[:40]
+    if not code:
+        raise HTTPException(status_code=400, detail="Mã không được để trống.")
+    if b.discount_value <= 0:
+        raise HTTPException(status_code=400, detail="Giá trị giảm phải lớn hơn 0.")
+    if b.discount_type == "percent" and b.discount_value > 100:
+        raise HTTPException(status_code=400, detail="% giảm không được quá 100.")
+    with db() as c:
+        store = _require_my_store(c, user)
+        try:
+            cur = c.execute(
+                "INSERT INTO user_store_promos(store_id,code,discount_type,discount_value,min_amount,"
+                "max_uses,expires_at,is_active,created_at) VALUES(?,?,?,?,?,?,?,1,?)",
+                (store["id"], code, b.discount_type, int(b.discount_value), max(0, int(b.min_amount)),
+                 max(0, int(b.max_uses)), max(0, int(b.expires_at)), int(time.time())))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Mã này đã tồn tại trong cửa hàng của bạn.")
+    return {"id": cur.lastrowid, "message": "Đã tạo mã giảm giá."}
+
+@app.post("/my-store/promos/{pid}/toggle")
+def my_store_toggle_promo(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        row = c.execute("SELECT is_active FROM user_store_promos WHERE id=? AND store_id=?",
+                        (pid, store["id"])).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Mã không thuộc cửa hàng của bạn.")
+        newv = 0 if row["is_active"] else 1
+        c.execute("UPDATE user_store_promos SET is_active=? WHERE id=?", (newv, pid))
+    return {"is_active": newv}
+
+@app.delete("/my-store/promos/{pid}")
+def my_store_delete_promo(pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        c.execute("DELETE FROM user_store_promos WHERE id=? AND store_id=?", (pid, store["id"]))
+    return {"message": "Đã xoá mã."}
+
+@app.post("/u-store/{sid}/promo/validate")
+def u_store_validate_promo(sid: int, body: dict = Body(...), user=Depends(get_user)) -> dict[str, Any]:
+    """Người mua kiểm tra mã trước khi mua (tính thử số tiền được giảm)."""
+    code = str(body.get("code", "")).strip().upper()
+    amount = int(body.get("amount", 0))
+    with db() as c:
+        _, discount = _ustore_promo_apply(c, sid, code, amount)
+    return {"valid": True, "discount": discount}
+
+
+# ================= §7 Đợt 4 — Ví người bán + rút tiền =================
+class MyWithdrawIn(BaseModel):
+    amount: int
+    bank_info: str
+
+@app.get("/my-store/wallet")
+def my_store_wallet(user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        bal = _wallet_balance(c, user["id"])
+        wds = c.execute("SELECT id,amount,bank_info,status,note,created_at,handled_at "
+                        "FROM user_store_withdrawals WHERE seller_id=? ORDER BY id DESC LIMIT 100",
+                        (user["id"],)).fetchall()
+        pending = c.execute("SELECT COALESCE(SUM(amount),0) s FROM user_store_withdrawals "
+                            "WHERE seller_id=? AND status='pending'", (user["id"],)).fetchone()["s"]
+    return {"balance": bal, "pending_withdraw": pending,
+            "withdrawals": [{"id": w["id"], "amount": w["amount"], "bank_info": w["bank_info"],
+                             "status": w["status"], "note": w["note"] or "",
+                             "created_at": w["created_at"], "handled_at": w["handled_at"]} for w in wds]}
+
+@app.post("/my-store/withdraw")
+def my_store_withdraw(b: MyWithdrawIn, user=Depends(get_user)) -> dict[str, Any]:
+    amount = int(b.amount or 0)
+    bank = (b.bank_info or "").strip()[:300]
+    if amount < 50000:
+        raise HTTPException(status_code=400, detail="Số tiền rút tối thiểu 50.000đ.")
+    if not bank:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập thông tin ngân hàng nhận tiền.")
+    with db() as c:
+        _require_my_store(c, user)
+        # Giữ tiền: trừ khỏi ví ngay, tạo yêu cầu chờ duyệt (atomic, chống âm)
+        ded = c.execute("UPDATE users SET wallet=wallet-? WHERE id=? AND wallet>=?",
+                        (amount, user["id"], amount))
+        if ded.rowcount != 1:
+            raise HTTPException(status_code=400, detail="Số dư ví không đủ để rút.")
+        store = _require_my_store(c, user)
+        c.execute("INSERT INTO store_wallet_tx(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",
+                  (user["id"], "withdraw_hold", -amount, "Yêu cầu rút tiền", int(time.time())))
+        cur = c.execute("INSERT INTO user_store_withdrawals(seller_id,store_id,amount,bank_info,status,created_at) "
+                        "VALUES(?,?,?,?, 'pending', ?)",
+                        (user["id"], store["id"], amount, bank, int(time.time())))
+        new_bal = _wallet_balance(c, user["id"])
+    _notify_admins("💸 Yêu cầu rút tiền", f"{user['username']} yêu cầu rút {amount:,}đ".replace(",", "."))
+    return {"id": cur.lastrowid, "balance": new_bal, "message": "Đã gửi yêu cầu rút tiền, chờ duyệt."}
+
+# ---- Admin duyệt chi (tài chính nền tảng — KHÔNG sửa nội dung cửa hàng người bán) ----
+@app.get("/admin/u-store/withdrawals")
+def admin_ustore_withdrawals(admin=Depends(get_admin)) -> list[dict[str, Any]]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT w.*, u.username FROM user_store_withdrawals w "
+            "LEFT JOIN users u ON u.id=w.seller_id ORDER BY "
+            "CASE w.status WHEN 'pending' THEN 0 ELSE 1 END, w.id DESC LIMIT 300").fetchall()
+    return [{"id": r["id"], "seller": r["username"] or "-", "amount": r["amount"],
+             "bank_info": r["bank_info"], "status": r["status"], "note": r["note"] or "",
+             "created_at": r["created_at"], "handled_at": r["handled_at"]} for r in rows]
+
+@app.post("/admin/u-store/withdrawals/{wid}/{action}")
+def admin_ustore_withdraw_action(wid: int, action: str, admin=Depends(get_admin)) -> dict[str, Any]:
+    if action not in ("paid", "reject"):
+        raise HTTPException(status_code=400, detail="Hành động không hợp lệ.")
+    with db() as c:
+        w = c.execute("SELECT * FROM user_store_withdrawals WHERE id=?", (wid,)).fetchone()
+        if not w:
+            raise HTTPException(status_code=404, detail="Không tìm thấy yêu cầu.")
+        if w["status"] != "pending":
+            raise HTTPException(status_code=400, detail="Yêu cầu đã được xử lý.")
+        now = int(time.time())
+        if action == "paid":
+            c.execute("UPDATE user_store_withdrawals SET status='paid',handled_at=? WHERE id=?", (now, wid))
+            msg = "Đã đánh dấu chi tiền."
+        else:
+            # Hoàn tiền lại ví người bán
+            _wallet_add(c, w["seller_id"], w["amount"], "withdraw_refund", "Hoàn tiền rút bị từ chối")
+            c.execute("UPDATE user_store_withdrawals SET status='rejected',handled_at=?,note='Bị từ chối, đã hoàn tiền' "
+                      "WHERE id=?", (now, wid))
+            msg = "Đã từ chối và hoàn tiền cho người bán."
+    return {"message": msg}
 
 
 class MediaUploadIn(BaseModel):

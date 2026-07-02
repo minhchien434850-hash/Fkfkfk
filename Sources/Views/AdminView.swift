@@ -150,6 +150,20 @@ struct AdminView: View {
                         .font(.caption2)
                 }
 
+                // §7 Đợt 4 — Duyệt rút tiền người bán (tài chính nền tảng)
+                Section {
+                    NavigationLink {
+                        AdminWithdrawalsView()
+                    } label: {
+                        Label(store.t("Duyệt rút tiền người bán", "Seller withdrawals"),
+                              systemImage: "banknote")
+                    }
+                } footer: {
+                    Text(store.t("Xem và chi/từ chối yêu cầu rút tiền của người bán. Từ chối sẽ tự hoàn tiền vào ví họ.",
+                                 "Review and pay/reject seller withdrawal requests. Rejecting auto-refunds their wallet."))
+                        .font(.caption2)
+                }
+
                 // §9.1 — Cảnh báo xâm nhập qua Telegram
                 Section {
                     Toggle(store.t("Bật cảnh báo xâm nhập", "Enable intrusion alerts"), isOn: $secEnabled)
@@ -409,6 +423,69 @@ struct AdminView: View {
             _ = try await store.api.adminSetMaintenance(on: on, message: maintMsg)
             store.maintenance = on
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+// ============================ §7 Đợt 4 — Admin duyệt rút tiền người bán ============================
+struct AdminWithdrawalsView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var items: [AdminWithdrawal] = []
+    @State private var loading = true
+    @State private var busy = false
+
+    var body: some View {
+        List {
+            if loading {
+                ProgressView()
+            } else if items.isEmpty {
+                Text(store.t("Chưa có yêu cầu rút tiền.", "No withdrawal requests."))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(items) { w in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(w.seller).font(.subheadline.bold())
+                            Spacer()
+                            Text(kFormatVND(w.amount)).font(.subheadline.bold()).foregroundStyle(Theme.accent)
+                        }
+                        Text(w.bankInfo).font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text(statusLabel(w.status)).font(.caption.bold()).foregroundStyle(statusColor(w.status))
+                            Spacer()
+                            if w.status == "pending" {
+                                Button(store.t("Đã chi", "Paid")) { Task { await act(w.id, "paid") } }
+                                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(busy)
+                                Button(store.t("Từ chối", "Reject")) { Task { await act(w.id, "reject") } }
+                                    .buttonStyle(.bordered).controlSize(.small).tint(.red).disabled(busy)
+                            }
+                        }
+                    }.padding(.vertical, 2)
+                }
+            }
+        }
+        .navigationTitle(store.t("Duyệt rút tiền", "Withdrawals"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+    }
+
+    private func statusLabel(_ s: String) -> String {
+        switch s {
+        case "paid": return store.t("Đã chi", "Paid")
+        case "rejected": return store.t("Từ chối", "Rejected")
+        default: return store.t("Chờ duyệt", "Pending")
+        }
+    }
+    private func statusColor(_ s: String) -> Color {
+        switch s { case "paid": return .green; case "rejected": return .red; default: return .orange }
+    }
+    private func reload() async {
+        loading = true; defer { loading = false }
+        items = (try? await store.api.adminUStoreWithdrawals()) ?? []
+    }
+    private func act(_ wid: Int, _ action: String) async {
+        busy = true; defer { busy = false }
+        try? await store.api.adminUStoreWithdrawAction(wid, action: action)
+        await reload()
     }
 }
 

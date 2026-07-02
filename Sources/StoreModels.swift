@@ -157,6 +157,44 @@ struct UStoreMyOrder: Decodable, Hashable, Identifiable {
     let createdAt: Int
     let storeName: String
 }
+// §7 Đợt 4 — mã giảm giá + ví người bán
+struct MyStorePromo: Decodable, Hashable, Identifiable {
+    let id: Int
+    let code: String
+    let discountType: String
+    let discountValue: Int
+    let minAmount: Int
+    let maxUses: Int
+    let usedCount: Int
+    let expiresAt: Int
+    let isActive: Int
+}
+struct MyWithdrawal: Decodable, Hashable, Identifiable {
+    let id: Int
+    let amount: Int
+    let bankInfo: String
+    let status: String
+    let note: String
+    let createdAt: Int
+    let handledAt: Int?
+}
+struct MyStoreWallet: Decodable {
+    let balance: Int
+    let pendingWithdraw: Int
+    let withdrawals: [MyWithdrawal]
+}
+struct UStorePromoResult: Decodable { let valid: Bool; let discount: Int }
+// Admin — duyệt rút tiền người bán
+struct AdminWithdrawal: Decodable, Hashable, Identifiable {
+    let id: Int
+    let seller: String
+    let amount: Int
+    let bankInfo: String
+    let status: String
+    let note: String
+    let createdAt: Int
+    let handledAt: Int?
+}
 struct MyStoreCategory: Decodable, Hashable, Identifiable {
     let id: Int
     let name: String

@@ -619,9 +619,10 @@ struct APIClient {
         try decode(try await send("/u-store/\(sid)"))
     }
     // §7 Đợt 3 — mua hàng + đơn + thống kê
-    func buyUserStore(sid: Int, productId: Int, priceId: Int?) async throws -> UStoreBuyResult {
+    func buyUserStore(sid: Int, productId: Int, priceId: Int?, promoCode: String? = nil) async throws -> UStoreBuyResult {
         var body: [String: Any] = ["product_id": productId]
         if let priceId { body["price_id"] = priceId }
+        if let promoCode, !promoCode.isEmpty { body["promo_code"] = promoCode }
         return try decode(try await send("/u-store/\(sid)/buy", method: "POST", json: body))
     }
     func myStoreOrders() async throws -> [MyStoreOrder] {
@@ -632,6 +633,41 @@ struct APIClient {
     }
     func myUserStoreOrders() async throws -> [UStoreMyOrder] {
         try decode(try await send("/my-orders/u-store"))
+    }
+    // §7 Đợt 4 — mã giảm giá người bán
+    func myStorePromos() async throws -> [MyStorePromo] {
+        try decode(try await send("/my-store/promos"))
+    }
+    func createMyPromo(code: String, discountType: String, discountValue: Int,
+                       minAmount: Int, maxUses: Int, expiresAt: Int) async throws {
+        _ = try await send("/my-store/promos", method: "POST", json: [
+            "code": code, "discount_type": discountType, "discount_value": discountValue,
+            "min_amount": minAmount, "max_uses": maxUses, "expires_at": expiresAt])
+    }
+    func toggleMyPromo(_ pid: Int) async throws {
+        _ = try await send("/my-store/promos/\(pid)/toggle", method: "POST")
+    }
+    func deleteMyPromo(_ pid: Int) async throws {
+        _ = try await send("/my-store/promos/\(pid)", method: "DELETE")
+    }
+    func validateUStorePromo(sid: Int, code: String, amount: Int) async throws -> UStorePromoResult {
+        try decode(try await send("/u-store/\(sid)/promo/validate", method: "POST",
+                                  json: ["code": code, "amount": amount]))
+    }
+    // §7 Đợt 4 — ví người bán + rút tiền
+    func myStoreWallet() async throws -> MyStoreWallet {
+        try decode(try await send("/my-store/wallet"))
+    }
+    func requestWithdraw(amount: Int, bankInfo: String) async throws {
+        _ = try await send("/my-store/withdraw", method: "POST",
+                           json: ["amount": amount, "bank_info": bankInfo])
+    }
+    // Admin — duyệt rút tiền
+    func adminUStoreWithdrawals() async throws -> [AdminWithdrawal] {
+        try decode(try await send("/admin/u-store/withdrawals"))
+    }
+    func adminUStoreWithdrawAction(_ wid: Int, action: String) async throws {
+        _ = try await send("/admin/u-store/withdrawals/\(wid)/\(action)", method: "POST")
     }
 
     // §9.1 — Cảnh báo xâm nhập qua Telegram (admin)

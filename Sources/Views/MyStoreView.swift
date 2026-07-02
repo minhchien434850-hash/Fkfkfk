@@ -167,6 +167,24 @@ struct MyStoreView: View {
                     // Đợt 3 — Bảng điều khiển: doanh thu + đơn hàng
                     sellerDashboard
 
+                    // Đợt 4 — Ví & Mã giảm giá
+                    HStack(spacing: 10) {
+                        NavigationLink {
+                            SellerWalletView().environmentObject(store)
+                        } label: {
+                            Label(store.t("Ví & Rút tiền", "Wallet"), systemImage: "creditcard")
+                                .font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 14)
+                                .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        NavigationLink {
+                            PromoManagerView().environmentObject(store)
+                        } label: {
+                            Label(store.t("Mã giảm giá", "Promo codes"), systemImage: "tag")
+                                .font(.caption.bold()).frame(maxWidth: .infinity).padding(.vertical, 14)
+                                .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+
                     // Quản lý danh mục (Đợt 2)
                     categoryManager
 
@@ -860,12 +878,17 @@ struct BuyProductView: View {
     @State private var buying = false
     @State private var result: UStoreBuyResult?
     @State private var error: String?
+    @State private var promoCode = ""
+    @State private var discount = 0
+    @State private var promoMsg: String?
+    @State private var checkingPromo = false
 
     private var hasTiers: Bool { !(product.prices ?? []).isEmpty }
-    private var amount: Int {
+    private var baseAmount: Int {
         if hasTiers, let t = (product.prices ?? []).first(where: { $0.id == selectedTier }) { return t.amount }
         return product.price
     }
+    private var amount: Int { max(0, baseAmount - discount) }
 
     var body: some View {
         NavigationStack {
@@ -895,6 +918,30 @@ struct BuyProductView: View {
                                 ForEach(product.prices ?? []) { t in
                                     Text("\(t.label) — \(kFormatVND(t.amount))").tag(t.id)
                                 }
+                            }
+                            .onChange(of: selectedTier) { _ in discount = 0; promoMsg = nil }
+                        }
+                        // Mã giảm giá
+                        HStack {
+                            TextField(store.t("Mã giảm giá (nếu có)", "Promo code (optional)"), text: $promoCode)
+                                .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                            Button {
+                                Task { await checkPromo() }
+                            } label: {
+                                Text(checkingPromo ? "…" : store.t("Áp dụng", "Apply")).font(.caption.bold())
+                            }.disabled(checkingPromo || promoCode.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                        if let promoMsg { Text(promoMsg).font(.caption2).foregroundStyle(discount > 0 ? .green : .red) }
+                        if discount > 0 {
+                            HStack {
+                                Text(store.t("Tạm tính", "Subtotal")).font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Text(kFormatVND(baseAmount)).font(.caption).strikethrough().foregroundStyle(.secondary)
+                            }
+                            HStack {
+                                Text(store.t("Giảm giá", "Discount")).font(.caption).foregroundStyle(.green)
+                                Spacer()
+                                Text("-" + kFormatVND(discount)).font(.caption).foregroundStyle(.green)
                             }
                         }
                         HStack {
@@ -938,8 +985,24 @@ struct BuyProductView: View {
         do {
             result = try await store.api.buyUserStore(
                 sid: storeId, productId: product.id,
-                priceId: hasTiers ? selectedTier : nil)
+                priceId: hasTiers ? selectedTier : nil,
+                promoCode: discount > 0 ? promoCode.trimmingCharacters(in: .whitespaces) : nil)
         } catch { self.error = error.localizedDescription }
+    }
+
+    private func checkPromo() async {
+        checkingPromo = true; defer { checkingPromo = false }
+        let code = promoCode.trimmingCharacters(in: .whitespaces).uppercased()
+        do {
+            let r = try await store.api.validateUStorePromo(sid: storeId, code: code, amount: baseAmount)
+            discount = r.discount
+            promoMsg = discount > 0
+                ? store.t("Đã giảm \(kFormatVND(discount))", "Saved \(kFormatVND(discount))")
+                : store.t("Mã không giảm cho đơn này.", "No discount for this order.")
+        } catch {
+            discount = 0
+            promoMsg = error.localizedDescription
+        }
     }
 }
 
@@ -989,6 +1052,192 @@ struct MyPurchasesView: View {
             orders = (try? await store.api.myUserStoreOrders()) ?? []
             loading = false
         }
+    }
+}
+
+// §7 Đợt 4 — Ví người bán: xem số dư + rút tiền + lịch sử
+struct SellerWalletView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var wallet: MyStoreWallet?
+    @State private var amountText = ""
+    @State private var bankInfo = ""
+    @State private var submitting = false
+    @State private var message: String?
+    @State private var error: String?
+    @State private var loading = true
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Text(store.t("Số dư ví", "Balance")).font(.subheadline)
+                    Spacer()
+                    Text(kFormatVND(wallet?.balance ?? 0)).font(.title3.bold()).foregroundStyle(Theme.accent)
+                }
+                if let p = wallet?.pendingWithdraw, p > 0 {
+                    HStack {
+                        Text(store.t("Đang chờ rút", "Pending")).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(kFormatVND(p)).font(.caption).foregroundStyle(.orange)
+                    }
+                }
+            }
+            Section(store.t("Yêu cầu rút tiền", "Withdraw")) {
+                TextField(store.t("Số tiền (tối thiểu 50.000đ)", "Amount (min 50,000đ)"), text: $amountText)
+                    .keyboardType(.numberPad)
+                TextField(store.t("Ngân hàng · Số TK · Chủ TK", "Bank · Account · Name"), text: $bankInfo, axis: .vertical)
+                    .lineLimit(1...3)
+                if let error { Text(error).foregroundStyle(.red).font(.caption) }
+                if let message { Text(message).foregroundStyle(.green).font(.caption) }
+                Button {
+                    Task { await submit() }
+                } label: {
+                    Text(submitting ? store.t("Đang gửi…", "Sending…") : store.t("Gửi yêu cầu rút", "Request withdrawal"))
+                        .font(.subheadline.bold())
+                }.disabled(submitting || (Int(amountText) ?? 0) < 50000 || bankInfo.trimmingCharacters(in: .whitespaces).isEmpty)
+                Text(store.t("Tiền chờ duyệt sẽ tạm giữ khỏi ví. Nếu bị từ chối sẽ hoàn lại.",
+                             "Pending amount is held from your wallet; refunded if rejected."))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let ws = wallet?.withdrawals, !ws.isEmpty {
+                Section(store.t("Lịch sử rút", "History")) {
+                    ForEach(ws) { w in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text(kFormatVND(w.amount)).font(.subheadline.bold())
+                                Spacer()
+                                Text(statusLabel(w.status)).font(.caption.bold()).foregroundStyle(statusColor(w.status))
+                            }
+                            Text(w.bankInfo).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                            Text(kStoreDate(w.createdAt)).font(.caption2).foregroundStyle(.secondary)
+                        }.padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+        .navigationTitle(store.t("Ví & Rút tiền", "Wallet"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+    }
+
+    private func statusLabel(_ s: String) -> String {
+        switch s {
+        case "paid": return store.t("Đã chi", "Paid")
+        case "rejected": return store.t("Từ chối", "Rejected")
+        default: return store.t("Chờ duyệt", "Pending")
+        }
+    }
+    private func statusColor(_ s: String) -> Color {
+        switch s { case "paid": return .green; case "rejected": return .red; default: return .orange }
+    }
+    private func reload() async {
+        loading = true; defer { loading = false }
+        wallet = try? await store.api.myStoreWallet()
+    }
+    private func submit() async {
+        submitting = true; defer { submitting = false }
+        error = nil; message = nil
+        do {
+            try await store.api.requestWithdraw(amount: Int(amountText) ?? 0,
+                                                bankInfo: bankInfo.trimmingCharacters(in: .whitespaces))
+            message = store.t("Đã gửi yêu cầu rút tiền.", "Withdrawal requested.")
+            amountText = ""; bankInfo = ""
+            await reload()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+// §7 Đợt 4 — Quản lý mã giảm giá của cửa hàng
+struct PromoManagerView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var promos: [MyStorePromo] = []
+    @State private var code = ""
+    @State private var isPercent = true
+    @State private var valueText = ""
+    @State private var minText = ""
+    @State private var maxUsesText = ""
+    @State private var creating = false
+    @State private var error: String?
+    @State private var loading = true
+
+    var body: some View {
+        Form {
+            Section(store.t("Tạo mã mới", "New code")) {
+                TextField(store.t("Mã (vd GIAM10)", "Code (e.g. SAVE10)"), text: $code)
+                    .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                Picker(store.t("Kiểu giảm", "Type"), selection: $isPercent) {
+                    Text(store.t("Theo %", "Percent")).tag(true)
+                    Text(store.t("Số tiền", "Fixed")).tag(false)
+                }.pickerStyle(.segmented)
+                TextField(isPercent ? store.t("Phần trăm giảm (1–100)", "Percent (1–100)")
+                                    : store.t("Số tiền giảm (VND)", "Amount off (VND)"), text: $valueText)
+                    .keyboardType(.numberPad)
+                TextField(store.t("Đơn tối thiểu (tuỳ chọn)", "Min order (optional)"), text: $minText)
+                    .keyboardType(.numberPad)
+                TextField(store.t("Giới hạn lượt dùng (0 = vô hạn)", "Max uses (0 = unlimited)"), text: $maxUsesText)
+                    .keyboardType(.numberPad)
+                if let error { Text(error).foregroundStyle(.red).font(.caption) }
+                Button {
+                    Task { await create() }
+                } label: {
+                    Text(creating ? store.t("Đang tạo…", "Creating…") : store.t("Tạo mã", "Create code"))
+                        .font(.subheadline.bold())
+                }.disabled(creating || code.trimmingCharacters(in: .whitespaces).isEmpty || (Int(valueText) ?? 0) <= 0)
+            }
+            Section(store.t("Mã hiện có (\(promos.count))", "Codes (\(promos.count))")) {
+                if promos.isEmpty {
+                    Text(store.t("Chưa có mã nào.", "No codes yet.")).font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(promos) { p in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(p.code).font(.subheadline.bold().monospaced())
+                            Text(p.discountType == "percent" ? "-\(p.discountValue)%" : "-" + kFormatVND(p.discountValue))
+                                .font(.caption.bold()).foregroundStyle(Theme.accent)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { p.isActive == 1 },
+                                set: { _ in Task { try? await store.api.toggleMyPromo(p.id); await reload() } }
+                            )).labelsHidden()
+                        }
+                        HStack(spacing: 8) {
+                            if p.minAmount > 0 { Text(store.t("Tối thiểu ", "Min ") + kFormatVND(p.minAmount)).font(.caption2).foregroundStyle(.secondary) }
+                            Text(store.t("Đã dùng: \(p.usedCount)\(p.maxUses > 0 ? "/\(p.maxUses)" : "")",
+                                         "Used: \(p.usedCount)\(p.maxUses > 0 ? "/\(p.maxUses)" : "")"))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            Task { try? await store.api.deleteMyPromo(p.id); await reload() }
+                        } label: { Label(store.t("Xoá", "Delete"), systemImage: "trash") }
+                    }
+                }
+            }
+        }
+        .navigationTitle(store.t("Mã giảm giá", "Promo codes"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        loading = true; defer { loading = false }
+        promos = (try? await store.api.myStorePromos()) ?? []
+    }
+    private func create() async {
+        creating = true; defer { creating = false }
+        error = nil
+        do {
+            try await store.api.createMyPromo(
+                code: code.trimmingCharacters(in: .whitespaces).uppercased(),
+                discountType: isPercent ? "percent" : "fixed",
+                discountValue: Int(valueText) ?? 0,
+                minAmount: Int(minText) ?? 0,
+                maxUses: Int(maxUsesText) ?? 0,
+                expiresAt: 0)
+            code = ""; valueText = ""; minText = ""; maxUsesText = ""
+            await reload()
+        } catch { self.error = error.localizedDescription }
     }
 }
 
