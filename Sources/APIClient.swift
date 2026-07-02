@@ -577,12 +577,14 @@ struct APIClient {
         return r.store
     }
     func saveMyProduct(id: Int?, name: String, description: String?, price: Int,
-                       media: [[String: String]], downloadUrl: String?, categoryId: Int? = nil) async throws {
+                       media: [[String: String]], downloadUrl: String?, categoryId: Int? = nil,
+                       kind: String? = nil) async throws {
         var body: [String: Any] = ["name": name, "price": price, "media": media]
         if let id { body["id"] = id }
         if let description { body["description"] = description }
         if let downloadUrl { body["download_url"] = downloadUrl }
         if let categoryId { body["category_id"] = categoryId }
+        if let kind { body["kind"] = kind }
         _ = try await send("/my-store/products", method: "POST", json: body)
     }
     func deleteMyProduct(_ pid: Int) async throws {
@@ -675,6 +677,27 @@ struct APIClient {
     }
     func userStorePaymentInfo(sid: Int, amount: Int = 0, note: String = "KENIOS") async throws -> StorePaymentInfo {
         try decode(try await send("/u-store/\(sid)/payment-info?amount=\(amount)&note=\(note)"))
+    }
+    // §7 Đợt 5 — cài đặt hiển thị cửa hàng + đánh giá
+    func getMyStoreSettings() async throws -> MyStoreSettings {
+        try decode(try await send("/my-store/settings"))
+    }
+    func saveMyStoreSettings(announceEnabled: Bool, announceText: String,
+                             flashEnabled: Bool, flashProductId: Int, flashEnd: Int,
+                             flashDiscount: Int, flashTitle: String,
+                             contacts: [StoreContactLink]) async throws {
+        let links = contacts.map { ["label": $0.label, "url": $0.url, "enabled": $0.enabled] as [String: Any] }
+        _ = try await send("/my-store/settings", method: "POST", json: [
+            "announce_enabled": announceEnabled, "announce_text": announceText,
+            "flash_enabled": flashEnabled, "flash_product_id": flashProductId, "flash_end": flashEnd,
+            "flash_discount": flashDiscount, "flash_title": flashTitle, "contacts": links])
+    }
+    func userStoreReviews(sid: Int, pid: Int) async throws -> MyStoreReviewsResponse {
+        try decode(try await send("/u-store/\(sid)/products/\(pid)/reviews"))
+    }
+    func postUserStoreReview(sid: Int, pid: Int, rating: Int, comment: String) async throws {
+        _ = try await send("/u-store/\(sid)/products/\(pid)/review", method: "POST",
+                           json: ["rating": rating, "comment": comment])
     }
     // Admin — duyệt rút tiền
     func adminUStoreWithdrawals() async throws -> [AdminWithdrawal] {

@@ -104,6 +104,9 @@ struct MyStoreProduct: Decodable, Hashable, Identifiable {
     var categoryId: Int? = nil
     var prices: [MyStorePrice]? = nil
     var stock: Int? = nil
+    var kind: String? = nil
+    var rating: Double? = nil
+    var reviewCount: Int? = nil
 }
 struct MyStoreKey: Decodable, Hashable, Identifiable {
     let id: Int
@@ -149,6 +152,8 @@ struct UStoreBuyResult: Decodable {
 }
 struct UStoreMyOrder: Decodable, Hashable, Identifiable {
     let id: Int
+    var storeId: Int = 0
+    var productId: Int = 0
     let productName: String
     let priceLabel: String
     let keyText: String
@@ -212,6 +217,38 @@ struct MyStoreResponse: Decodable {
     let store: MyStore?
     let products: [MyStoreProduct]?
     var categories: [MyStoreCategory]? = nil
+    var settings: MyStoreSettings? = nil
+}
+// §7 Đợt 5 — cài đặt hiển thị cửa hàng (thông báo chạy · flash sale · liên hệ)
+struct StoreContactLink: Decodable, Hashable, Identifiable {
+    var id = UUID()
+    var label: String
+    var url: String
+    var enabled: Bool
+    enum CodingKeys: String, CodingKey { case label, url, enabled }
+}
+struct MyStoreSettings: Decodable {
+    var announceEnabled: Bool = false
+    var announceText: String = ""
+    var flashEnabled: Bool = false
+    var flashProductId: Int = 0
+    var flashEnd: Int = 0
+    var flashDiscount: Int = 0
+    var flashTitle: String = "FLASH SALE"
+    var contacts: [StoreContactLink] = []
+}
+struct MyStoreReview: Decodable, Hashable, Identifiable {
+    var id = UUID()
+    let username: String
+    let rating: Int
+    let comment: String
+    let createdAt: Int?
+    enum CodingKeys: String, CodingKey { case username, rating, comment, createdAt }
+}
+struct MyStoreReviewsResponse: Decodable {
+    let count: Int
+    let rating: Double
+    let reviews: [MyStoreReview]
 }
 
 

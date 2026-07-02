@@ -40,6 +40,7 @@ struct MyStoreView: View {
     @State private var searchId = ""
     @State private var foundStore: MyStore?
     @State private var foundProducts: [MyStoreProduct] = []
+    @State private var foundSettings: MyStoreSettings?
     @State private var searchError: String?
     @State private var searching = false
 
@@ -167,6 +168,18 @@ struct MyStoreView: View {
                     // Đợt 3 — Bảng điều khiển: doanh thu + đơn hàng
                     sellerDashboard
 
+                    // Đợt 5 — Cài đặt cửa hàng (thông báo chạy · flash sale · liên hệ)
+                    NavigationLink {
+                        StoreStorefrontSettingsView(products: products).environmentObject(store)
+                    } label: {
+                        Label(store.t("Cài đặt cửa hàng (thông báo · flash sale · liên hệ)",
+                                      "Storefront settings (announce · flash · contacts)"),
+                              systemImage: "slider.horizontal.2.square")
+                            .font(.caption.bold()).frame(maxWidth: .infinity, alignment: .leading)
+                            .padding().background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+
                     // Đợt 4 — Ví & Mã giảm giá
                     HStack(spacing: 10) {
                         NavigationLink {
@@ -232,10 +245,44 @@ struct MyStoreView: View {
                 if let e = searchError { Text(e).font(.caption).foregroundStyle(.red) }
                 if let s = foundStore {
                     foundStorefront(s)
+                    // Thông báo chạy của cửa hàng (nếu bật)
+                    if let st = foundSettings, st.announceEnabled, !st.announceText.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "megaphone.fill").foregroundStyle(Theme.gold)
+                            Text(st.announceText).font(.caption.bold()).lineLimit(2)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10).background(Theme.gold.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
                     VStack(alignment: .leading, spacing: 6) {
                         if let d = s.description, !d.isEmpty { Text(d).font(.caption).foregroundStyle(.secondary) }
                         Text("Store ID #\(s.id)").font(.caption2).foregroundStyle(Theme.accent)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding().kCard(16)
+                    // Liên hệ người bán
+                    if let st = foundSettings, !st.contacts.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(store.t("Liên hệ người bán", "Contact seller")).font(.subheadline.bold())
+                            ForEach(st.contacts) { c in
+                                if let url = URL(string: c.url) {
+                                    Link(destination: url) {
+                                        Label(c.label.isEmpty ? c.url : c.label, systemImage: "bubble.left.and.text.bubble.right.fill")
+                                            .font(.caption.bold())
+                                    }.buttonStyle(.bordered)
+                                }
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding().kCard(16)
+                    }
+                    // Flash sale đang chạy
+                    if let st = foundSettings, st.flashEnabled, st.flashDiscount > 0,
+                       (st.flashEnd == 0 || st.flashEnd > Int(Date().timeIntervalSince1970)) {
+                        HStack {
+                            Image(systemName: "bolt.fill").foregroundStyle(.white)
+                            Text("\(st.flashTitle) · -\(st.flashDiscount)%").font(.caption.bold()).foregroundStyle(.white)
+                        }
+                        .frame(maxWidth: .infinity).padding(10)
+                        .background(LinearGradient(colors: [.red, .orange], startPoint: .leading, endPoint: .trailing))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
                     Text(store.t("Sản phẩm (\(foundProducts.count))", "Products (\(foundProducts.count))")).font(.subheadline.bold())
                     ForEach(foundProducts) { p in buyableRow(p, storeId: s.id) }
                 }
@@ -500,8 +547,20 @@ struct MyStoreView: View {
                 } else {
                     Text(kFormatVND(p.price)).font(.caption.bold()).foregroundStyle(Theme.accent)
                 }
-                if let stock = p.stock, stock == 0 {
-                    Text(store.t("Hết hàng", "Sold out")).font(.caption2.bold()).foregroundStyle(.orange)
+                HStack(spacing: 6) {
+                    if let r = p.rating, let n = p.reviewCount, n > 0 {
+                        Label(String(format: "%.1f", r), systemImage: "star.fill")
+                            .font(.caption2).foregroundStyle(.yellow)
+                        Text("(\(n))").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if p.kind == "acc" {
+                        Text(store.t("Acc game", "Game acc")).font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Theme.purple.opacity(0.2)).clipShape(Capsule())
+                    }
+                    if let stock = p.stock, stock == 0 {
+                        Text(store.t("Hết hàng", "Sold out")).font(.caption2.bold()).foregroundStyle(.orange)
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -580,11 +639,12 @@ struct MyStoreView: View {
     private func findStore() async {
         guard let sid = Int(searchId) else { return }
         searching = true; defer { searching = false }
-        searchError = nil; foundStore = nil; foundProducts = []
+        searchError = nil; foundStore = nil; foundProducts = []; foundSettings = nil
         do {
             let r = try await store.api.getUserStore(sid)
             foundStore = r.store
             foundProducts = r.products ?? []
+            foundSettings = r.settings
         } catch {
             searchError = store.t("Không tìm thấy cửa hàng với ID này.", "No store found with this ID.")
         }
@@ -605,6 +665,7 @@ struct AddMyProductView: View {
     @State private var imageItem: PhotosPickerItem?
     @State private var imageUrl = ""
     @State private var categoryId = 0
+    @State private var kind = "app"   // app | acc
     @State private var uploading = false
     @State private var saving = false
     @State private var error: String?
@@ -613,6 +674,10 @@ struct AddMyProductView: View {
         NavigationStack {
             Form {
                 Section(store.t("Thông tin sản phẩm", "Product info")) {
+                    Picker(store.t("Loại", "Type"), selection: $kind) {
+                        Text(store.t("Key / Ứng dụng", "Key / App")).tag("app")
+                        Text(store.t("Tài khoản game", "Game account")).tag("acc")
+                    }.pickerStyle(.segmented)
                     TextField(store.t("Tên sản phẩm", "Product name"), text: $name)
                     TextField(store.t("Giá (VND)", "Price (VND)"), text: $priceText).keyboardType(.numberPad)
                     TextField(store.t("Mô tả", "Description"), text: $desc, axis: .vertical).lineLimit(1...4)
@@ -674,7 +739,7 @@ struct AddMyProductView: View {
                 id: nil, name: name.trimmingCharacters(in: .whitespaces),
                 description: desc, price: Int(priceText) ?? 0,
                 media: media, downloadUrl: downloadUrl.isEmpty ? nil : downloadUrl,
-                categoryId: categoryId == 0 ? nil : categoryId)
+                categoryId: categoryId == 0 ? nil : categoryId, kind: kind)
             await onDone()
             dismiss()
         } catch {
@@ -1011,6 +1076,7 @@ struct MyPurchasesView: View {
     @EnvironmentObject var store: AppStore
     @State private var orders: [UStoreMyOrder] = []
     @State private var loading = true
+    @State private var reviewTarget: UStoreMyOrder?
 
     var body: some View {
         List {
@@ -1042,12 +1108,21 @@ struct MyPurchasesView: View {
                         if !o.downloadUrl.isEmpty, let u = URL(string: o.downloadUrl) {
                             Link(destination: u) { Label(store.t("Mở link tải", "Open link"), systemImage: "arrow.down.circle").font(.caption) }
                         }
+                        if o.productId > 0 {
+                            Button { reviewTarget = o } label: {
+                                Label(store.t("Đánh giá", "Review"), systemImage: "star").font(.caption)
+                            }.buttonStyle(.bordered).controlSize(.small)
+                        }
                     }.padding(.vertical, 2)
                 }
             }
         }
         .navigationTitle(store.t("Đơn đã mua", "My purchases"))
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $reviewTarget) { o in
+            ReviewProductView(storeId: o.storeId, productId: o.productId, productName: o.productName)
+                .environmentObject(store)
+        }
         .task {
             orders = (try? await store.api.myUserStoreOrders()) ?? []
             loading = false
@@ -1335,6 +1410,173 @@ struct PromoManagerView: View {
                 expiresAt: 0)
             code = ""; valueText = ""; minText = ""; maxUsesText = ""
             await reload()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+// §7 Đợt 5 — Cài đặt hiển thị cửa hàng: thông báo chạy · flash sale · liên hệ
+struct StoreStorefrontSettingsView: View {
+    @EnvironmentObject var store: AppStore
+    let products: [MyStoreProduct]
+
+    @State private var announceEnabled = false
+    @State private var announceText = ""
+    @State private var flashEnabled = false
+    @State private var flashProductId = 0
+    @State private var flashDiscount = ""
+    @State private var flashTitle = "FLASH SALE"
+    @State private var flashEndDate = Date().addingTimeInterval(3600)
+    @State private var contacts: [StoreContactLink] = []
+    @State private var saving = false
+    @State private var message: String?
+    @State private var isError = false
+
+    var body: some View {
+        Form {
+            // Thông báo chạy
+            Section(store.t("Thông báo chạy đầu cửa hàng", "Announcement bar")) {
+                Toggle(store.t("Bật thông báo", "Enable"), isOn: $announceEnabled)
+                TextField(store.t("Nội dung (vd: Sale 20% cuối tuần!)", "Text (e.g. 20% off weekend!)"),
+                          text: $announceText, axis: .vertical).lineLimit(1...3)
+            }
+            // Flash sale
+            Section(store.t("Flash sale (đếm ngược giảm giá)", "Flash sale")) {
+                Toggle(store.t("Bật flash sale", "Enable flash sale"), isOn: $flashEnabled)
+                if flashEnabled {
+                    Picker(store.t("Sản phẩm", "Product"), selection: $flashProductId) {
+                        Text(store.t("— Chọn —", "— Pick —")).tag(0)
+                        ForEach(products) { p in Text(p.name).tag(p.id) }
+                    }
+                    TextField(store.t("% giảm (1–100)", "Discount % (1–100)"), text: $flashDiscount)
+                        .keyboardType(.numberPad)
+                    TextField(store.t("Tiêu đề", "Title"), text: $flashTitle)
+                    DatePicker(store.t("Kết thúc lúc", "Ends at"), selection: $flashEndDate)
+                }
+            }
+            // Liên hệ người bán
+            Section(store.t("Liên hệ người bán (khách bấm để chat)", "Seller contacts")) {
+                ForEach($contacts) { $c in
+                    VStack(spacing: 4) {
+                        HStack {
+                            TextField(store.t("Tên (Zalo, Facebook…)", "Label (Zalo, Facebook…)"), text: $c.label)
+                            Toggle("", isOn: $c.enabled).labelsHidden()
+                        }
+                        TextField(store.t("Link (https://…)", "Link (https://…)"), text: $c.url)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().font(.caption)
+                    }
+                }
+                .onDelete { contacts.remove(atOffsets: $0) }
+                Button {
+                    contacts.append(StoreContactLink(label: "", url: "", enabled: true))
+                } label: { Label(store.t("Thêm liên hệ", "Add contact"), systemImage: "plus") }
+            }
+            Section {
+                Button {
+                    Task { await save() }
+                } label: { Text(saving ? store.t("Đang lưu…", "Saving…") : store.t("Lưu cài đặt", "Save")).font(.subheadline.bold()) }
+                    .disabled(saving)
+                if let message { Text(message).font(.caption).foregroundStyle(isError ? .red : .green) }
+            }
+        }
+        .navigationTitle(store.t("Cài đặt cửa hàng", "Storefront settings"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard let s = try? await store.api.getMyStoreSettings() else { return }
+        announceEnabled = s.announceEnabled; announceText = s.announceText
+        flashEnabled = s.flashEnabled; flashProductId = s.flashProductId
+        flashDiscount = s.flashDiscount > 0 ? String(s.flashDiscount) : ""
+        flashTitle = s.flashTitle
+        if s.flashEnd > 0 { flashEndDate = Date(timeIntervalSince1970: TimeInterval(s.flashEnd)) }
+        contacts = s.contacts
+    }
+    private func save() async {
+        saving = true; defer { saving = false }
+        message = nil
+        do {
+            try await store.api.saveMyStoreSettings(
+                announceEnabled: announceEnabled, announceText: announceText.trimmingCharacters(in: .whitespacesAndNewlines),
+                flashEnabled: flashEnabled, flashProductId: flashProductId,
+                flashEnd: flashEnabled ? Int(flashEndDate.timeIntervalSince1970) : 0,
+                flashDiscount: Int(flashDiscount) ?? 0, flashTitle: flashTitle.trimmingCharacters(in: .whitespaces),
+                contacts: contacts.filter { !$0.label.isEmpty || !$0.url.isEmpty })
+            isError = false; message = store.t("Đã lưu cài đặt cửa hàng.", "Storefront settings saved.")
+        } catch { isError = true; message = error.localizedDescription }
+    }
+}
+
+// §7 Đợt 5 — Đánh giá sản phẩm đã mua
+struct ReviewProductView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    let storeId: Int
+    let productId: Int
+    let productName: String
+
+    @State private var rating = 5
+    @State private var comment = ""
+    @State private var reviews: [MyStoreReview] = []
+    @State private var avg = 0.0
+    @State private var count = 0
+    @State private var submitting = false
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(store.t("Chấm điểm", "Your rating")) {
+                    HStack {
+                        ForEach(1...5, id: \.self) { i in
+                            Image(systemName: i <= rating ? "star.fill" : "star")
+                                .foregroundStyle(.yellow).font(.title3)
+                                .onTapGesture { rating = i }
+                        }
+                    }
+                    TextField(store.t("Nhận xét (tuỳ chọn)", "Comment (optional)"), text: $comment, axis: .vertical)
+                        .lineLimit(1...4)
+                    if let error { Text(error).font(.caption).foregroundStyle(.red) }
+                    Button {
+                        Task { await submit() }
+                    } label: { Text(submitting ? store.t("Đang gửi…", "Sending…") : store.t("Gửi đánh giá", "Submit")).bold() }
+                        .disabled(submitting)
+                }
+                if count > 0 {
+                    Section(store.t("Đánh giá (\(count)) · TB \(String(format: "%.1f", avg))★",
+                                    "Reviews (\(count)) · avg \(String(format: "%.1f", avg))★")) {
+                        ForEach(reviews) { r in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(r.username).font(.caption.bold())
+                                    Spacer()
+                                    Text(String(repeating: "★", count: r.rating)).font(.caption).foregroundStyle(.yellow)
+                                }
+                                if !r.comment.isEmpty { Text(r.comment).font(.caption).foregroundStyle(.secondary) }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(productName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
+            .task { await loadReviews() }
+        }
+    }
+
+    private func loadReviews() async {
+        if let r = try? await store.api.userStoreReviews(sid: storeId, pid: productId) {
+            reviews = r.reviews; avg = r.rating; count = r.count
+        }
+    }
+    private func submit() async {
+        submitting = true; defer { submitting = false }
+        error = nil
+        do {
+            try await store.api.postUserStoreReview(sid: storeId, pid: productId, rating: rating, comment: comment)
+            comment = ""
+            await loadReviews()
         } catch { self.error = error.localizedDescription }
     }
 }

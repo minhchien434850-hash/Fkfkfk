@@ -716,6 +716,31 @@ def init_db() -> None:
                 created_at INTEGER,
                 handled_at INTEGER
             );
+            -- §7 Đợt 5 — Cài đặt hiển thị RIÊNG từng cửa hàng (thông báo chạy · flash sale · liên hệ)
+            CREATE TABLE IF NOT EXISTS user_store_settings(
+                store_id INTEGER PRIMARY KEY,
+                announce_enabled INTEGER DEFAULT 0,
+                announce_text TEXT DEFAULT '',
+                flash_enabled INTEGER DEFAULT 0,
+                flash_product_id INTEGER DEFAULT 0,
+                flash_end INTEGER DEFAULT 0,
+                flash_discount INTEGER DEFAULT 0,   -- % giảm
+                flash_title TEXT DEFAULT 'FLASH SALE',
+                contact_links TEXT DEFAULT '[]',    -- JSON [{label,url,enabled}]
+                updated_at INTEGER
+            );
+            -- §7 Đợt 5 — Đánh giá sản phẩm của cửa hàng cá nhân
+            CREATE TABLE IF NOT EXISTS user_store_reviews(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                username TEXT DEFAULT '',
+                rating INTEGER DEFAULT 5,
+                comment TEXT DEFAULT '',
+                created_at INTEGER,
+                UNIQUE(product_id, user_id)
+            );
             -- §7 Đợt 4 — Cài đặt thanh toán RIÊNG từng cửa hàng (giống admin: ngân hàng + API key tự động)
             CREATE TABLE IF NOT EXISTS user_store_payment(
                 store_id INTEGER PRIMARY KEY,
@@ -977,6 +1002,7 @@ def _migrate() -> None:
         ("user_stores", "slogan",     "TEXT DEFAULT ''"),
         # §7 Đợt 2 — Danh mục: gắn sản phẩm cửa hàng cá nhân vào danh mục
         ("user_store_products", "category_id", "INTEGER DEFAULT 0"),
+        ("user_store_products", "kind", "TEXT DEFAULT 'app'"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -1029,6 +1055,7 @@ def _create_indexes() -> None:
         "CREATE INDEX IF NOT EXISTS idx_ustore_promos_store ON user_store_promos(store_id)",
         "CREATE INDEX IF NOT EXISTS idx_ustore_wd_seller ON user_store_withdrawals(seller_id)",
         "CREATE INDEX IF NOT EXISTS idx_ustore_wd_status ON user_store_withdrawals(status)",
+        "CREATE INDEX IF NOT EXISTS idx_ustore_reviews_prod ON user_store_reviews(product_id)",
         "CREATE INDEX IF NOT EXISTS idx_store_products_folder ON store_products(folder_id)",
         "CREATE INDEX IF NOT EXISTS idx_store_folders_cat ON store_folders(category_id)",
         "CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)",
@@ -5761,6 +5788,7 @@ class MyProductIn(BaseModel):
     media: Optional[list] = None
     download_url: Optional[str] = None
     category_id: Optional[int] = 0
+    kind: Optional[str] = "app"   # app (key/ứng dụng) | acc (tài khoản game)
 
 class MyCategoryIn(BaseModel):
     name: str
@@ -5780,11 +5808,30 @@ def _uproduct_dict(row) -> dict[str, Any]:
             "description": row["description"] or "", "price": row["price"] or 0,
             "media": _load_media(row["media"]), "download_url": row["download_url"] or "",
             "category_id": (row["category_id"] if "category_id" in keys else 0) or 0,
+            "kind": (row["kind"] if "kind" in keys else "app") or "app",
             "created_at": row["created_at"] or 0}
 
 def _ucat_dict(row) -> dict[str, Any]:
     return {"id": row["id"], "store_id": row["store_id"], "name": row["name"],
             "created_at": row["created_at"] or 0}
+
+def _ustore_settings_dict(c, sid: int, public: bool = False) -> dict[str, Any]:
+    """Cài đặt hiển thị của cửa hàng (Đợt 5). public=True chỉ trả liên hệ đã BẬT."""
+    row = c.execute("SELECT * FROM user_store_settings WHERE store_id=?", (sid,)).fetchone()
+    if not row:
+        return {"announce_enabled": False, "announce_text": "", "flash_enabled": False,
+                "flash_product_id": 0, "flash_end": 0, "flash_discount": 0,
+                "flash_title": "FLASH SALE", "contacts": []}
+    try:
+        links = json.loads(row["contact_links"] or "[]")
+    except Exception:
+        links = []
+    if public:
+        links = [x for x in links if x.get("enabled") and (x.get("url") or "").strip()]
+    return {"announce_enabled": bool(row["announce_enabled"]), "announce_text": row["announce_text"] or "",
+            "flash_enabled": bool(row["flash_enabled"]), "flash_product_id": row["flash_product_id"] or 0,
+            "flash_end": row["flash_end"] or 0, "flash_discount": row["flash_discount"] or 0,
+            "flash_title": row["flash_title"] or "FLASH SALE", "contacts": links}
 
 def _uproduct_prices(c, pid: int) -> list:
     rows = c.execute("SELECT id,label,amount,sort FROM user_store_prices WHERE product_id=? "
@@ -5792,11 +5839,15 @@ def _uproduct_prices(c, pid: int) -> list:
     return [{"id": r["id"], "label": r["label"], "amount": r["amount"], "sort": r["sort"]} for r in rows]
 
 def _uproduct_enrich(c, d: dict) -> dict:
-    """Gắn bảng giá + tồn kho KEY cho sản phẩm cửa hàng cá nhân (Đợt 2B)."""
+    """Gắn bảng giá + tồn kho KEY + điểm đánh giá cho sản phẩm cửa hàng cá nhân."""
     pid = d["id"]
     d["prices"] = _uproduct_prices(c, pid)
     d["stock"] = c.execute("SELECT COUNT(*) FROM user_store_keys WHERE product_id=? AND status='available'",
                            (pid,)).fetchone()[0]
+    r = c.execute("SELECT COUNT(*) n, COALESCE(AVG(rating),0) a FROM user_store_reviews WHERE product_id=?",
+                  (pid,)).fetchone()
+    d["review_count"] = r["n"]
+    d["rating"] = round(r["a"], 1)
     return d
 
 def _require_my_product(c, store, pid: int):
@@ -5823,8 +5874,9 @@ def my_store_get(user=Depends(get_user)) -> dict[str, Any]:
         cats = c.execute("SELECT * FROM user_store_categories WHERE store_id=? ORDER BY id",
                          (row["id"],)).fetchall()
         items = [_uproduct_enrich(c, _uproduct_dict(p)) for p in prods]
+        settings = _ustore_settings_dict(c, row["id"], public=False)
     return {"store": _store_dict(row), "products": items,
-            "categories": [_ucat_dict(x) for x in cats]}
+            "categories": [_ucat_dict(x) for x in cats], "settings": settings}
 
 @app.post("/my-store")
 def my_store_save(b: MyStoreIn, user=Depends(get_user)) -> dict[str, Any]:
@@ -5860,8 +5912,9 @@ def public_user_store(sid: int, user=Depends(get_user)) -> dict[str, Any]:
         cats = c.execute("SELECT * FROM user_store_categories WHERE store_id=? ORDER BY id",
                          (sid,)).fetchall()
         items = [_uproduct_enrich(c, _uproduct_dict(p)) for p in prods]
+        settings = _ustore_settings_dict(c, sid, public=True)
     return {"store": _store_dict(row), "products": items,
-            "categories": [_ucat_dict(x) for x in cats]}
+            "categories": [_ucat_dict(x) for x in cats], "settings": settings}
 
 # §7 Đợt 2 — Danh mục cửa hàng cá nhân (CÔ LẬP theo store của chính chủ)
 @app.post("/my-store/categories")
@@ -5900,6 +5953,7 @@ def my_store_save_product(b: MyProductIn, user=Depends(get_user)) -> dict[str, A
     dl = (b.download_url or "").strip()[:500]
     price = max(0, int(b.price or 0))
     cat_id = max(0, int(b.category_id or 0))
+    kind = "acc" if (b.kind or "app") == "acc" else "app"
     with db() as c:
         store = _require_my_store(c, user)
         # Danh mục (nếu có) phải thuộc chính cửa hàng này
@@ -5914,13 +5968,13 @@ def my_store_save_product(b: MyProductIn, user=Depends(get_user)) -> dict[str, A
                               (b.id, store["id"])).fetchone()
             if not owned:
                 raise HTTPException(status_code=403, detail="Không có quyền sửa sản phẩm này.")
-            c.execute("UPDATE user_store_products SET name=?,description=?,price=?,media=?,download_url=?,category_id=? "
-                      "WHERE id=?", (name, desc, price, media, dl, cat_id, b.id))
+            c.execute("UPDATE user_store_products SET name=?,description=?,price=?,media=?,download_url=?,category_id=?,kind=? "
+                      "WHERE id=?", (name, desc, price, media, dl, cat_id, kind, b.id))
             pid = b.id
         else:
             cur = c.execute("INSERT INTO user_store_products(store_id,category_id,name,description,price,media,"
-                            "download_url,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                            (store["id"], cat_id, name, desc, price, media, dl, int(time.time())))
+                            "download_url,kind,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                            (store["id"], cat_id, name, desc, price, media, dl, kind, int(time.time())))
             pid = cur.lastrowid
     return {"message": "Đã lưu sản phẩm.", "id": pid}
 
@@ -6084,9 +6138,18 @@ def u_store_buy(sid: int, b: UStoreBuyIn, user=Depends(get_user)) -> dict[str, A
             amount = tier["amount"]; price_id = tier["id"]; price_label = tier["label"]
         else:
             amount = prod["price"] or 0
-        # Áp mã giảm giá của chính cửa hàng (nếu có)
+        # Flash sale của cửa hàng (nếu sản phẩm đang flash & còn hạn) — giảm % trước.
+        flash_discount = 0
+        st = _ustore_settings_dict(c, sid, public=True)
+        if (st["flash_enabled"] and st["flash_product_id"] == b.product_id
+                and (st["flash_end"] == 0 or st["flash_end"] > int(time.time()))
+                and st["flash_discount"] > 0):
+            flash_discount = int(amount * st["flash_discount"] / 100)
+            amount = max(0, amount - flash_discount)
+        # Áp mã giảm giá của chính cửa hàng (nếu có) — tính trên giá sau flash.
         promo_row, discount = _ustore_promo_apply(c, sid, b.promo_code or "", amount)
         amount = max(0, amount - discount)
+        discount += flash_discount   # tổng giảm để báo cho người mua
         # Số dư ví
         balance = _wallet_balance(c, user["id"])
         if balance < amount:
@@ -6151,11 +6214,12 @@ def u_store_my_orders(user=Depends(get_user)) -> list[dict[str, Any]]:
     """Đơn buyer đã mua từ các cửa hàng cá nhân (để lấy lại key)."""
     with db() as c:
         rows = c.execute(
-            "SELECT o.id,o.product_name,o.price_label,o.key_text,o.download_url,o.amount,o.created_at,"
-            "s.name AS store_name FROM user_store_orders o "
+            "SELECT o.id,o.store_id,o.product_id,o.product_name,o.price_label,o.key_text,o.download_url,"
+            "o.amount,o.created_at,s.name AS store_name FROM user_store_orders o "
             "LEFT JOIN user_stores s ON s.id=o.store_id "
             "WHERE o.buyer_id=? ORDER BY o.id DESC LIMIT 200", (user["id"],)).fetchall()
-    return [{"id": r["id"], "product_name": r["product_name"], "price_label": r["price_label"] or "",
+    return [{"id": r["id"], "store_id": r["store_id"], "product_id": r["product_id"],
+             "product_name": r["product_name"], "price_label": r["price_label"] or "",
              "key_text": r["key_text"] or "", "download_url": r["download_url"] or "",
              "amount": r["amount"], "created_at": r["created_at"], "store_name": r["store_name"] or "-"}
             for r in rows]
@@ -6410,6 +6474,103 @@ def u_store_payment_info(sid: int, amount: int = 0, note: str = "KENIOS", user=D
         if not store:
             raise HTTPException(status_code=404, detail="Không tìm thấy cửa hàng.")
         return _ustore_bank_info(c, sid, amount=amount, note=note)
+
+
+# ===== §7 Đợt 5 — Cài đặt hiển thị cửa hàng (thông báo chạy · flash sale · liên hệ) =====
+class MyContactLink(BaseModel):
+    label: str = ""
+    url: str = ""
+    enabled: bool = True
+
+class MyStoreSettingsIn(BaseModel):
+    announce_enabled: Optional[bool] = None
+    announce_text: Optional[str] = None
+    flash_enabled: Optional[bool] = None
+    flash_product_id: Optional[int] = None
+    flash_end: Optional[int] = None
+    flash_discount: Optional[int] = None
+    flash_title: Optional[str] = None
+    contacts: Optional[list[MyContactLink]] = None
+
+@app.get("/my-store/settings")
+def my_store_get_settings(user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        return _ustore_settings_dict(c, store["id"], public=False)
+
+@app.post("/my-store/settings")
+def my_store_set_settings(b: MyStoreSettingsIn, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        store = _require_my_store(c, user)
+        sid = store["id"]
+        if not c.execute("SELECT 1 FROM user_store_settings WHERE store_id=?", (sid,)).fetchone():
+            c.execute("INSERT INTO user_store_settings(store_id,updated_at) VALUES(?,?)", (sid, int(time.time())))
+        # MERGE từng field
+        if b.announce_enabled is not None:
+            c.execute("UPDATE user_store_settings SET announce_enabled=? WHERE store_id=?",
+                      (1 if b.announce_enabled else 0, sid))
+        if b.announce_text is not None:
+            c.execute("UPDATE user_store_settings SET announce_text=? WHERE store_id=?",
+                      (b.announce_text.strip()[:300], sid))
+        if b.flash_enabled is not None:
+            c.execute("UPDATE user_store_settings SET flash_enabled=? WHERE store_id=?",
+                      (1 if b.flash_enabled else 0, sid))
+        if b.flash_product_id is not None:
+            c.execute("UPDATE user_store_settings SET flash_product_id=? WHERE store_id=?",
+                      (max(0, int(b.flash_product_id)), sid))
+        if b.flash_end is not None:
+            c.execute("UPDATE user_store_settings SET flash_end=? WHERE store_id=?", (max(0, int(b.flash_end)), sid))
+        if b.flash_discount is not None:
+            c.execute("UPDATE user_store_settings SET flash_discount=? WHERE store_id=?",
+                      (max(0, min(100, int(b.flash_discount))), sid))
+        if b.flash_title is not None:
+            c.execute("UPDATE user_store_settings SET flash_title=? WHERE store_id=?",
+                      (b.flash_title.strip()[:40] or "FLASH SALE", sid))
+        if b.contacts is not None:
+            links = [{"label": (x.label or "").strip()[:40], "url": (x.url or "").strip()[:300],
+                      "enabled": bool(x.enabled)} for x in b.contacts if (x.label or x.url)]
+            c.execute("UPDATE user_store_settings SET contact_links=? WHERE store_id=?",
+                      (json.dumps(links, ensure_ascii=False), sid))
+        c.execute("UPDATE user_store_settings SET updated_at=? WHERE store_id=?", (int(time.time()), sid))
+        out = _ustore_settings_dict(c, sid, public=False)
+    return out
+
+
+# ===== §7 Đợt 5 — Đánh giá sản phẩm cửa hàng cá nhân =====
+class MyReviewIn(BaseModel):
+    rating: int = 5
+    comment: str = ""
+
+@app.get("/u-store/{sid}/products/{pid}/reviews")
+def u_store_product_reviews(sid: int, pid: int, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        rows = c.execute("SELECT username,rating,comment,created_at FROM user_store_reviews "
+                         "WHERE product_id=? ORDER BY id DESC LIMIT 100", (pid,)).fetchall()
+        agg = c.execute("SELECT COUNT(*) n, COALESCE(AVG(rating),0) a FROM user_store_reviews WHERE product_id=?",
+                        (pid,)).fetchone()
+    return {"count": agg["n"], "rating": round(agg["a"], 1),
+            "reviews": [{"username": r["username"] or "Ẩn danh", "rating": r["rating"],
+                         "comment": r["comment"] or "", "created_at": r["created_at"]} for r in rows]}
+
+@app.post("/u-store/{sid}/products/{pid}/review")
+def u_store_product_review(sid: int, pid: int, b: MyReviewIn, user=Depends(get_user)) -> dict[str, Any]:
+    rating = max(1, min(5, int(b.rating or 5)))
+    comment = (b.comment or "").strip()[:500]
+    with db() as c:
+        prod = c.execute("SELECT id FROM user_store_products WHERE id=? AND store_id=?", (pid, sid)).fetchone()
+        if not prod:
+            raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+        # Chỉ cho đánh giá khi ĐÃ mua sản phẩm này ở cửa hàng đó
+        bought = c.execute("SELECT 1 FROM user_store_orders WHERE buyer_id=? AND product_id=? AND status='completed'",
+                           (user["id"], pid)).fetchone()
+        if not bought:
+            raise HTTPException(status_code=403, detail="Bạn cần mua sản phẩm này trước khi đánh giá.")
+        c.execute("INSERT INTO user_store_reviews(store_id,product_id,user_id,username,rating,comment,created_at) "
+                  "VALUES(?,?,?,?,?,?,?) "
+                  "ON CONFLICT(product_id,user_id) DO UPDATE SET rating=excluded.rating,"
+                  "comment=excluded.comment,created_at=excluded.created_at",
+                  (sid, pid, user["id"], user.get("username", ""), rating, comment, int(time.time())))
+    return {"message": "Cảm ơn bạn đã đánh giá!"}
 
 
 # ---- Admin duyệt chi (tài chính nền tảng — KHÔNG sửa nội dung cửa hàng người bán) ----
