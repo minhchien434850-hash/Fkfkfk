@@ -444,6 +444,14 @@ struct AppFormView: View {
         dismiss()
     }
 
+    private let gameSchemeGuide: [String] = [
+        "Trên máy tính: đổi tên file TênGame.ipa thành TênGame.zip rồi giải nén.",
+        "Mở thư mục Payload → TênGame.app → mở file Info.plist.",
+        "Tìm dòng CFBundleURLSchemes, lấy chuỗi bắt đầu bằng fb (vd fb123456789012345).",
+        "Quay lại đây, gõ Tên game ở ô trên và dán chuỗi fb... vào ô 'URL scheme', rồi bấm Lưu.",
+        "Bấm mở game trong App Launcher — iOS sẽ bật đúng game lên.",
+    ]
+
     var body: some View {
         NavigationStack {
             Form {
@@ -497,6 +505,30 @@ struct AppFormView: View {
                         .textInputAutocapitalization(.never)
                     TextField(store.t("App Store ID (tuỳ chọn, chỉ số)", "App Store ID (optional, digits)"), text: $app.appStoreID)
                         .keyboardType(.numberPad)
+                }
+
+                // Hướng dẫn tìm scheme cho GAME cài bằng IPA (PUBG, Liên Quân, Free Fire...)
+                if !isEditing {
+                    Section {
+                        DisclosureGroup(store.t("🎮 Cách thêm GAME cài bằng IPA (PUBG, Liên Quân, Free Fire...)",
+                                                "🎮 How to add GAMES installed via IPA")) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(Array(gameSchemeGuide.enumerated()), id: \.offset) { i, step in
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Text("\(i + 1)").font(.caption.bold()).foregroundStyle(.white)
+                                            .frame(width: 20, height: 20).background(Theme.accent).clipShape(Circle())
+                                        Text(step).font(.caption).fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .font(.subheadline.bold())
+                    } footer: {
+                        Text(store.t("Đa số game không có scheme 'mở game' riêng, nhưng luôn có scheme đăng nhập Facebook (fb...) — mở scheme đó là game tự bật lên.",
+                                     "Most games have no launch scheme, but always have a Facebook login scheme (fb...) that launches the game."))
+                            .font(.caption2)
+                    }
                 }
 
                 Section(store.t("Biểu tượng", "Icon")) {
