@@ -240,13 +240,19 @@ struct StoreThumb: View {
 // Dùng marquee: danh sách nhân đôi + cuộn offset liên tục, id theo VỊ TRÍ (không theo
 // item.id) → khi dữ liệu ảo đổi mỗi lần poll, các dòng chỉ đổi nội dung tại chỗ, KHÔNG
 // bị gỡ/chèn gây chớp hay tan biến.
+// Dải tự cuộn "giao dịch / nạp tiền gần đây".
+// QUAN TRỌNG (chống văng app): CHỈ dựng (visible + 1) dòng tại một thời điểm —
+// KHÔNG dựng cả nghìn dòng như trước (nguyên nhân lác rồi tràn bộ nhớ → crash).
+// Cứ 5 giây trượt lên đúng 1 dòng (chạy chậm, mượt) rồi xoay vòng dữ liệu.
 struct AutoScrollTicker<Item: Identifiable, Row: View>: View {
     let items: [Item]
-    var visible: Int = 6
+    var visible: Int = 5
     @ViewBuilder let row: (Item) -> Row
 
-    @State private var offset: CGFloat = 0
-    private let rowH: CGFloat = 46
+    @State private var start = 0
+    @State private var slide: CGFloat = 0
+    @State private var timer: Timer? = nil
+    private let rowH: CGFloat = 54
 
     var body: some View {
         let h = rowH * CGFloat(visible)
@@ -254,22 +260,22 @@ struct AutoScrollTicker<Item: Identifiable, Row: View>: View {
             if items.isEmpty {
                 Color.clear.frame(height: h)
             } else if items.count <= visible {
+                // Ít dòng → hiện hết, đứng yên (không cần cuộn).
                 VStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.offset) { _, it in
-                        cell(it)
-                    }
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, it in cell(it) }
                 }
                 .frame(maxHeight: h, alignment: .top)
             } else {
+                // Chỉ render visible+1 dòng theo cửa sổ trượt → nhẹ, không crash.
                 VStack(spacing: 0) {
-                    ForEach(Array((items + items).enumerated()), id: \.offset) { _, it in
-                        cell(it)
+                    ForEach(0..<(visible + 1), id: \.self) { k in
+                        cell(items[(start + k) % items.count])
                     }
                 }
-                .offset(y: offset)
-                .frame(height: h, alignment: .top)
-                .onAppear { startScroll() }
-                .onChange(of: items.count) { _ in startScroll() }
+                .offset(y: slide)
+                .frame(height: h + rowH, alignment: .top)
+                .onAppear { startTimer() }
+                .onDisappear { timer?.invalidate(); timer = nil }
             }
         }
         .frame(height: h, alignment: .top)
@@ -283,14 +289,19 @@ struct AutoScrollTicker<Item: Identifiable, Row: View>: View {
             row(item).padding(.horizontal, 12).frame(height: rowH - 1)
             Divider()
         }
+        .frame(height: rowH)
     }
 
-    private func startScroll() {
-        offset = 0
+    private func startTimer() {
+        timer?.invalidate()
         guard items.count > visible else { return }
-        let total = rowH * CGFloat(items.count)
-        withAnimation(.linear(duration: Double(items.count) * 1.5).repeatForever(autoreverses: false)) {
-            offset = -total
+        // 5 giây trượt lên 1 dòng — chạy chậm theo yêu cầu.
+        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: 0.55)) { slide = -rowH }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.62) {
+                slide = 0
+                start = (start + 1) % max(items.count, 1)
+            }
         }
     }
 }

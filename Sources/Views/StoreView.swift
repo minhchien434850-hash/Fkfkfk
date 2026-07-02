@@ -132,9 +132,10 @@ struct StoreView: View {
             return "\(h) \(d) \(c)***"
         }
 
-        // Pool 1.000 dòng (mỗi dòng 1 tên khác nhau) để ticker tự cuộn lên 5 giây/lần,
-        // hết 1.000 tên thì tự lặp lại từ đầu. Mỗi 5 phút (tick) sản phẩm/số tiền đổi cho mới.
-        let poolSize = 1000
+        // Pool 60 dòng (mỗi dòng 1 tên khác nhau) — ticker chỉ hiện 1 cửa sổ nhỏ và
+        // trượt 1 dòng mỗi 5 giây, 60 dòng = 5 phút mới lặp (trùng nhịp đổi tick 5 phút).
+        // KHÔNG dùng pool nghìn dòng nữa để tránh dựng quá nhiều view gây văng app.
+        let poolSize = 60
         let orders: [ShowcaseOrder] = (0..<poolSize).map { i in
             let ci = (i + tick) % combos.count
             return ShowcaseOrder(
@@ -612,9 +613,10 @@ struct StoreView: View {
                         .foregroundStyle(Theme.accent).clipShape(Circle())
                     VStack(alignment: .leading, spacing: 1) {
                         (Text(o.user).bold() + Text(" " + store.t("mua","bought") + " ") + Text(o.product).bold())
-                            .font(.caption).lineLimit(1)
+                            .font(.caption).lineLimit(2).minimumScaleFactor(0.8)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text((o.label.isEmpty ? "" : o.label + " · ") + timeAgo(o.at))
-                            .font(.caption2).foregroundStyle(.secondary)
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
                     Text(kFormatVND(o.amount)).font(.caption.bold()).foregroundStyle(.primary)
@@ -637,8 +639,9 @@ struct StoreView: View {
                         .foregroundStyle(.green).clipShape(Circle())
                     VStack(alignment: .leading, spacing: 1) {
                         (Text(t.user).bold() + Text(" " + store.t("đã nạp","topped up")))
-                            .font(.caption).lineLimit(1)
-                        Text(timeAgo(t.at)).font(.caption2).foregroundStyle(.secondary)
+                            .font(.caption).lineLimit(2).minimumScaleFactor(0.8)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(timeAgo(t.at)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
                     Text("+" + kFormatVND(t.amount)).font(.caption.bold()).foregroundStyle(.green)
