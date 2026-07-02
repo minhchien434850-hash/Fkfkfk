@@ -547,6 +547,20 @@ struct APIClient {
         if let welcomePopupText { body["welcome_popup_text"] = welcomePopupText }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
+    // §9.1 — Cảnh báo xâm nhập qua Telegram (admin)
+    func getSecurityAlert() async throws -> SecurityAlertConfig {
+        try decode(try await send("/admin/security-alert"))
+    }
+    func setSecurityAlert(enabled: Bool? = nil, botToken: String? = nil,
+                          chatId: String? = nil, test: Bool? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let enabled { body["enabled"] = enabled }
+        if let botToken { body["bot_token"] = botToken }
+        if let chatId { body["chat_id"] = chatId }
+        if let test { body["test"] = test }
+        _ = try await send("/admin/security-alert", method: "POST", json: body)
+    }
+
     // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)
     func mediaUpload(dataBase64: String, mime: String, name: String) async throws -> String {
         let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",

@@ -71,6 +71,14 @@ struct StoreAppConfig: Decodable, Hashable {
 }
 
 
+// §9.1 — Cấu hình cảnh báo xâm nhập (Telegram)
+struct SecurityAlertConfig: Decodable {
+    let enabled: Bool?
+    let botToken: String?
+    let chatId: String?
+}
+
+
 // ---- Trang chủ cửa hàng (showcase): giao dịch / nạp / xếp hạng ----
 struct ShowcaseOrder: Decodable, Hashable, Identifiable {
     var id: String { "\(user)-\(product)-\(at)-\(amount)" }

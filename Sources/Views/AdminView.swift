@@ -15,6 +15,10 @@ struct AdminView: View {
     @State private var showPro = false
     @State private var pendingPayments: [PaymentRecord] = []
     @State private var maintMsg = "Ứng dụng đang nâng cấp phiên bản. Vui lòng đợi trong giây lát."
+    // §9.1 — cảnh báo xâm nhập
+    @State private var secEnabled = false
+    @State private var secToken = ""
+    @State private var secChat = ""
 
     var body: some View {
         NavigationStack {
@@ -132,6 +136,28 @@ struct AdminView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
+                // §9.1 — Cảnh báo xâm nhập qua Telegram
+                Section {
+                    Toggle(store.t("Bật cảnh báo xâm nhập", "Enable intrusion alerts"), isOn: $secEnabled)
+                    SecureField(store.t("Bot Token Telegram", "Telegram Bot Token"), text: $secToken)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField(store.t("Chat ID nhận cảnh báo", "Alert chat_id"), text: $secChat)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    HStack {
+                        Button(store.t("Lưu", "Save")) { Task { await saveSecurityAlert(test: false) } }
+                            .buttonStyle(.borderedProminent)
+                        Spacer()
+                        Button(store.t("Gửi thử", "Send test")) { Task { await saveSecurityAlert(test: true) } }
+                            .buttonStyle(.bordered)
+                    }
+                } header: {
+                    Text(store.t("Bảo mật — Cảnh báo xâm nhập", "Security — Intrusion alerts"))
+                } footer: {
+                    Text(store.t("Khi phát hiện dò quét/spam (vượt rate-limit), hệ thống gửi cảnh báo tới Telegram của bạn. Tạo bot ở @BotFather để lấy Token & chat_id.",
+                                 "On scan/spam (rate-limit breach), the server alerts your Telegram. Create a bot via @BotFather for the Token & chat_id."))
+                        .font(.caption2)
+                }
+
                 // ==================== Danh sách người dùng ====================
                 Section(store.t("Người dùng", "Users") + " (\(users.count))") {
                     ForEach(users) { u in
@@ -215,6 +241,7 @@ struct AdminView: View {
                 await reload()
                 await loadStats()
                 await loadPendingPayments()
+                await loadSecurityAlert()
                 // Tự làm mới danh sách người dùng mỗi 15s để xem "đang dùng" theo thời gian thực
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 15_000_000_000)
@@ -315,6 +342,27 @@ struct AdminView: View {
         } catch {
             stats = nil
             statsError = error.localizedDescription
+        }
+    }
+
+    // §9.1 — cảnh báo xâm nhập
+    private func loadSecurityAlert() async {
+        if let c = try? await store.api.getSecurityAlert() {
+            secEnabled = c.enabled ?? false
+            secToken = c.botToken ?? ""
+            secChat = c.chatId ?? ""
+        }
+    }
+
+    private func saveSecurityAlert(test: Bool) async {
+        do {
+            try await store.api.setSecurityAlert(enabled: secEnabled,
+                                                 botToken: secToken, chatId: secChat, test: test)
+            message = test
+                ? store.t("Đã gửi tin thử — kiểm tra Telegram.", "Test sent — check Telegram.")
+                : store.t("Đã lưu cảnh báo bảo mật.", "Security alert saved.")
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 

@@ -1537,12 +1537,48 @@ def _client_ip(request: Request) -> str:
         return xff.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
+# §9.1 — Cảnh báo xâm nhập theo thời gian thực qua Telegram (admin cấu hình).
+_sec_alert_last: dict[str, float] = {}
+
+def _security_alert(kind: str, detail: str, force: bool = False) -> None:
+    """Gửi cảnh báo bảo mật cho admin qua Telegram Bot (best-effort, không chặn luồng)."""
+    if not force and get_setting("sec_alert_enabled", "0") != "1":
+        return
+    token = (get_setting("sec_alert_bot_token", "").strip()
+             or os.environ.get("SECURITY_ALERT_BOT_TOKEN", "").strip())
+    chat = (get_setting("sec_alert_chat_id", "").strip()
+            or os.environ.get("SECURITY_ALERT_CHAT_ID", "").strip())
+    if not token or not chat:
+        return
+    now = time.time()
+    if not force and now - _sec_alert_last.get(kind, 0) < 120:  # tối đa 1 cảnh báo/loại mỗi 120s
+        return
+    _sec_alert_last[kind] = now
+    text = (f"🚨 KENIOS — cảnh báo bảo mật\nLoại: {kind}\n{detail}\n"
+            f"Lúc: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    def _send():
+        try:
+            import urllib.request, urllib.parse
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            data = urllib.parse.urlencode({"chat_id": chat, "text": text}).encode()
+            urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=8).read()
+        except Exception:
+            pass
+
+    import threading
+    threading.Thread(target=_send, daemon=True).start()
+
+
 def _rate_limit(request: Request, bucket: str, limit: int, window: int) -> None:
     """Cho phép tối đa `limit` lần trong `window` giây cho mỗi IP + bucket."""
     key = f"{bucket}:{_client_ip(request)}"
     now = time.time()
     arr = [t for t in _rl_hits.get(key, []) if now - t < window]
     if len(arr) >= limit:
+        _security_alert("rate_limit",
+                        f"Bucket '{bucket}' vượt giới hạn từ IP {_client_ip(request)} "
+                        f"({limit} lần/{window}s) — nghi ngờ dò quét/tấn công.")
         raise HTTPException(status_code=429,
             detail="Bạn thao tác quá nhiều lần. Vui lòng thử lại sau vài phút.")
     arr.append(now)
@@ -6018,6 +6054,31 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.welcome_popup_text is not None: set_setting("store_welcome_popup_text", b.welcome_popup_text.strip()[:500])
     if b.gamecat_limit is not None: set_setting("store_gamecat_limit", str(max(1, min(int(b.gamecat_limit), 30))))
     return {"message": "Đã cập nhật giao diện app bán hàng."}
+
+
+# -------------------- §9.1 Admin: cảnh báo xâm nhập qua Telegram --------------------
+class SecAlertIn(BaseModel):
+    enabled: Optional[bool] = None
+    bot_token: Optional[str] = None
+    chat_id: Optional[str] = None
+    test: Optional[bool] = None
+
+@app.get("/admin/security-alert")
+def admin_get_security_alert(admin=Depends(get_admin)) -> dict[str, Any]:
+    return {
+        "enabled": get_setting("sec_alert_enabled", "0") == "1",
+        "bot_token": get_setting("sec_alert_bot_token", ""),
+        "chat_id": get_setting("sec_alert_chat_id", ""),
+    }
+
+@app.post("/admin/security-alert")
+def admin_set_security_alert(b: SecAlertIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    if b.enabled is not None: set_setting("sec_alert_enabled", "1" if b.enabled else "0")
+    if b.bot_token is not None: set_setting("sec_alert_bot_token", b.bot_token.strip()[:120])
+    if b.chat_id is not None: set_setting("sec_alert_chat_id", b.chat_id.strip()[:60])
+    if b.test:
+        _security_alert("test", "Tin nhắn THỬ cảnh báo bảo mật. Nhận được nghĩa là cấu hình đúng ✅", force=True)
+    return {"ok": True}
 
 
 # -------------------- Admin: % khuyến mãi nạp ví --------------------
