@@ -450,6 +450,20 @@ struct SocialMediaToolsView: View {
             } else {
                 Text("YouTube cần đăng nhập Google (OAuth) — cookie không tạo được live.")
                     .font(.caption2).foregroundStyle(.secondary)
+                Link(destination: URL(string: "https://console.cloud.google.com/apis/credentials")!) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "questionmark.circle.fill").font(.caption)
+                        Text("Hướng dẫn lấy Google Client ID").font(.caption.bold())
+                        Spacer()
+                        Image(systemName: "arrow.up.right.square").font(.caption2)
+                    }
+                    .foregroundStyle(.red)
+                    .padding(8)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                Text("Vào link trên → Tạo project → Bật YouTube Data API v3 → Tạo OAuth Client ID (iOS) → Copy Client ID dán vào ô dưới.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
                 TextField("Dán Google Client ID (…apps.googleusercontent.com)", text: $ytClientID)
                     .font(.system(.caption, design: .monospaced))
                     .autocorrectionDisabled().textInputAutocapitalization(.never)
@@ -527,6 +541,20 @@ struct SocialMediaToolsView: View {
             } else {
                 Text("Facebook cần đăng nhập (OAuth) — cookie không tạo được live.")
                     .font(.caption2).foregroundStyle(.secondary)
+                Link(destination: URL(string: "https://developers.facebook.com/apps/")!) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "questionmark.circle.fill").font(.caption)
+                        Text("Hướng dẫn lấy Facebook App ID").font(.caption.bold())
+                        Spacer()
+                        Image(systemName: "arrow.up.right.square").font(.caption2)
+                    }
+                    .foregroundStyle(.blue)
+                    .padding(8)
+                    .background(Color.blue.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                Text("Vào link trên → Tạo app mới → Chọn loại 'Consumer' → Thêm sản phẩm 'Facebook Login' → Copy App ID (dãy số) dán vào ô dưới.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
                 TextField("Dán Facebook App ID (chỉ gồm chữ số)", text: $fbAppID)
                     .font(.system(.caption, design: .monospaced))
                     .keyboardType(.numberPad)
