@@ -1008,6 +1008,11 @@ def _migrate() -> None:
         ("user_stores", "slogan_effect", "TEXT DEFAULT 'none'"),
         ("user_stores", "name_color",    "TEXT DEFAULT ''"),
         ("user_stores", "slogan_color",  "TEXT DEFAULT ''"),
+        # §7 — Font chữ + hiệu ứng động cho cửa hàng cá nhân (giống admin)
+        ("user_stores", "name_font",     "TEXT DEFAULT 'rounded'"),
+        ("user_stores", "slogan_font",   "TEXT DEFAULT 'default'"),
+        ("user_stores", "name_anim",     "TEXT DEFAULT 'none'"),
+        ("user_stores", "slogan_anim",   "TEXT DEFAULT 'none'"),
     ]
     with db() as c:
         for table, col, ddl in migrations:
@@ -5788,6 +5793,10 @@ class MyStoreIn(BaseModel):
     slogan_effect: Optional[str] = None
     name_color: Optional[str] = None
     slogan_color: Optional[str] = None
+    name_font: Optional[str] = None
+    slogan_font: Optional[str] = None
+    name_anim: Optional[str] = None
+    slogan_anim: Optional[str] = None
 
 class MyProductIn(BaseModel):
     id: Optional[int] = None
@@ -5813,6 +5822,10 @@ def _store_dict(row) -> dict[str, Any]:
             "slogan_effect": (row["slogan_effect"] if "slogan_effect" in keys else "none") or "none",
             "name_color": (row["name_color"] if "name_color" in keys else "") or "",
             "slogan_color": (row["slogan_color"] if "slogan_color" in keys else "") or "",
+            "name_font": (row["name_font"] if "name_font" in keys else "rounded") or "rounded",
+            "slogan_font": (row["slogan_font"] if "slogan_font" in keys else "default") or "default",
+            "name_anim": (row["name_anim"] if "name_anim" in keys else "none") or "none",
+            "slogan_anim": (row["slogan_anim"] if "slogan_anim" in keys else "none") or "none",
             "created_at": row["created_at"] or 0}
 
 def _uproduct_dict(row) -> dict[str, Any]:
@@ -5902,7 +5915,9 @@ def my_store_save(b: MyStoreIn, user=Depends(get_user)) -> dict[str, Any]:
     slogan = (b.slogan or "").strip()[:200]
     # Hiệu ứng chữ: chỉ cập nhật cột nào được gửi (None = giữ nguyên).
     effs = [("name_effect", b.name_effect), ("slogan_effect", b.slogan_effect),
-            ("name_color", b.name_color), ("slogan_color", b.slogan_color)]
+            ("name_color", b.name_color), ("slogan_color", b.slogan_color),
+            ("name_font", b.name_font), ("slogan_font", b.slogan_font),
+            ("name_anim", b.name_anim), ("slogan_anim", b.slogan_anim)]
     with db() as c:
         row = c.execute("SELECT * FROM user_stores WHERE owner_id=?", (user["id"],)).fetchone()
         if row:

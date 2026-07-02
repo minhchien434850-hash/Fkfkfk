@@ -568,7 +568,9 @@ struct APIClient {
     func saveMyStore(name: String, description: String?, logoUrl: String?,
                      bannerUrl: String? = nil, slogan: String? = nil,
                      nameEffect: String? = nil, sloganEffect: String? = nil,
-                     nameColor: String? = nil, sloganColor: String? = nil) async throws -> MyStore {
+                     nameColor: String? = nil, sloganColor: String? = nil,
+                     nameFont: String? = nil, sloganFont: String? = nil,
+                     nameAnim: String? = nil, sloganAnim: String? = nil) async throws -> MyStore {
         var body: [String: Any] = ["name": name]
         if let description { body["description"] = description }
         if let logoUrl { body["logo_url"] = logoUrl }
@@ -578,6 +580,10 @@ struct APIClient {
         if let sloganEffect { body["slogan_effect"] = sloganEffect }
         if let nameColor { body["name_color"] = nameColor }
         if let sloganColor { body["slogan_color"] = sloganColor }
+        if let nameFont { body["name_font"] = nameFont }
+        if let sloganFont { body["slogan_font"] = sloganFont }
+        if let nameAnim { body["name_anim"] = nameAnim }
+        if let sloganAnim { body["slogan_anim"] = sloganAnim }
         struct R: Decodable { let store: MyStore }
         let r: R = try decode(try await send("/my-store", method: "POST", json: body))
         return r.store

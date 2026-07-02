@@ -75,17 +75,19 @@ struct VendorStorefrontView: View {
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     let ne = s.nameEffect ?? "gradient"
-                    LogoEffectText(text: s.name,
-                                   effect: ne == "none" ? "solid" : ne,
-                                   font: .title3.bold(),
-                                   solidColor: hexColor(s.nameColor) ?? .white)
+                    AnimatedStoreText(text: s.name,
+                                      effect: ne == "none" ? "solid" : ne,
+                                      font: keniosFont(s.nameFont ?? "rounded", size: 22),
+                                      anim: s.nameAnim ?? "none",
+                                      solidColor: hexColor(s.nameColor) ?? .white)
                         .lineLimit(1)
                     if let sl = s.slogan, !sl.isEmpty {
                         let se = s.sloganEffect ?? "none"
-                        LogoEffectText(text: sl,
-                                       effect: (se == "none") ? "solid" : se,
-                                       font: .caption.bold(),
-                                       solidColor: hexColor(s.sloganColor) ?? .white.opacity(0.92))
+                        AnimatedStoreText(text: sl,
+                                          effect: (se == "none") ? "solid" : se,
+                                          font: keniosFont(s.sloganFont ?? "default", size: 13),
+                                          anim: s.sloganAnim ?? "none",
+                                          solidColor: hexColor(s.sloganColor) ?? .white.opacity(0.92))
                             .lineLimit(2)
                     }
                 }

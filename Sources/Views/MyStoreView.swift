@@ -26,6 +26,10 @@ struct MyStoreView: View {
     @State private var sloganEffect = "none"
     @State private var nameColor = ""     // "#RRGGBB" khi effect == "solid"
     @State private var sloganColor = ""
+    @State private var nameFont = "rounded"
+    @State private var sloganFont = "default"
+    @State private var nameAnim = "none"
+    @State private var sloganAnim = "none"
     @State private var saving = false
     @State private var message: String?
     @State private var errorMessage: String?
@@ -329,18 +333,20 @@ struct MyStoreView: View {
             Label(store.t("Hiệu ứng chữ (giống cửa hàng admin)", "Text effects (like admin store)"),
                   systemImage: "sparkles").font(.subheadline.bold())
 
-            // Xem trước trực tiếp trên nền tối như hero storefront
+            // Xem trước trực tiếp trên nền tối như hero storefront (có font + chuyển động)
             VStack(alignment: .leading, spacing: 4) {
-                LogoEffectText(text: name.isEmpty ? store.t("Tên cửa hàng", "Store name") : name,
-                               effect: nameEffect == "none" ? "solid" : nameEffect,
-                               font: .title3.bold(),
-                               solidColor: hexColor(nameColor) ?? .white)
+                AnimatedStoreText(text: name.isEmpty ? store.t("Tên cửa hàng", "Store name") : name,
+                                  effect: nameEffect == "none" ? "solid" : nameEffect,
+                                  font: keniosFont(nameFont, size: 22),
+                                  anim: nameAnim,
+                                  solidColor: hexColor(nameColor) ?? .white)
                     .lineLimit(1)
                 if !slogan.isEmpty {
-                    LogoEffectText(text: slogan,
-                                   effect: sloganEffect == "none" ? "solid" : sloganEffect,
-                                   font: .caption.bold(),
-                                   solidColor: hexColor(sloganColor) ?? .white.opacity(0.92))
+                    AnimatedStoreText(text: slogan,
+                                      effect: sloganEffect == "none" ? "solid" : sloganEffect,
+                                      font: keniosFont(sloganFont, size: 13),
+                                      anim: sloganAnim,
+                                      solidColor: hexColor(sloganColor) ?? .white.opacity(0.92))
                         .lineLimit(2)
                 }
             }
@@ -350,12 +356,14 @@ struct MyStoreView: View {
                                        startPoint: .top, endPoint: .bottom))
             .clipShape(RoundedRectangle(cornerRadius: 12))
 
-            // Tên cửa hàng
+            // Tên cửa hàng — hiệu ứng màu · font · chuyển động
             effectPicker(title: store.t("Hiệu ứng TÊN", "NAME effect"),
-                         selection: $nameEffect, color: $nameColor)
-            // Slogan
+                         selection: $nameEffect, color: $nameColor,
+                         font: $nameFont, anim: $nameAnim)
+            // Slogan — hiệu ứng màu · font · chuyển động
             effectPicker(title: store.t("Hiệu ứng SLOGAN", "SLOGAN effect"),
-                         selection: $sloganEffect, color: $sloganColor)
+                         selection: $sloganEffect, color: $sloganColor,
+                         font: $sloganFont, anim: $sloganAnim)
 
             Text(store.t("Chọn \"Màu tự chọn 🎨\" để tự đặt màu chữ. Nhớ bấm \"Lưu thay đổi\" ở trên.",
                          "Pick \"Custom color 🎨\" to set your own. Remember to tap \"Save changes\" above."))
@@ -364,27 +372,15 @@ struct MyStoreView: View {
         .padding().kCard(16)
     }
 
-    // 1 hàng chọn hiệu ứng + (nếu solid) chọn màu
+    // 1 khối chỉnh: hiệu ứng màu (+ màu nếu solid) · font · chuyển động
     @ViewBuilder private func effectPicker(title: String,
                                            selection: Binding<String>,
-                                           color: Binding<String>) -> some View {
+                                           color: Binding<String>,
+                                           font: Binding<String>,
+                                           anim: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.caption.bold()).foregroundStyle(.secondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(kLogoEffects, id: \.0) { key, label in
-                        Button {
-                            selection.wrappedValue = key
-                        } label: {
-                            Text(label).font(.caption2.bold())
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(selection.wrappedValue == key ? Theme.accent : Color(.secondarySystemBackground))
-                                .foregroundStyle(selection.wrappedValue == key ? .white : .primary)
-                                .clipShape(Capsule())
-                        }.buttonStyle(.plain)
-                    }
-                }
-            }
+            chipRow(kLogoEffects, selection: selection)
             if selection.wrappedValue == "solid" {
                 ColorPicker(store.t("Màu chữ", "Text color"),
                             selection: Binding(
@@ -392,6 +388,29 @@ struct MyStoreView: View {
                                 set: { color.wrappedValue = $0.hexStringRGB }),
                             supportsOpacity: false)
                     .font(.caption)
+            }
+            Text(store.t("Kiểu chữ", "Font")).font(.caption2).foregroundStyle(.secondary)
+            chipRow(kSloganFonts, selection: font)
+            Text(store.t("Chuyển động", "Motion")).font(.caption2).foregroundStyle(.secondary)
+            chipRow(kLogoAnims, selection: anim)
+        }
+    }
+
+    // Hàng chip cuộn ngang chung cho hiệu ứng / font / chuyển động
+    @ViewBuilder private func chipRow(_ options: [(String, String)], selection: Binding<String>) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(options, id: \.0) { key, label in
+                    Button {
+                        selection.wrappedValue = key
+                    } label: {
+                        Text(label).font(.caption2.bold())
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(selection.wrappedValue == key ? Theme.accent : Color(.secondarySystemBackground))
+                            .foregroundStyle(selection.wrappedValue == key ? .white : .primary)
+                            .clipShape(Capsule())
+                    }.buttonStyle(.plain)
+                }
             }
         }
     }
@@ -694,6 +713,10 @@ struct MyStoreView: View {
                 sloganEffect = s.sloganEffect ?? "none"
                 nameColor = s.nameColor ?? ""
                 sloganColor = s.sloganColor ?? ""
+                nameFont = s.nameFont ?? "rounded"
+                sloganFont = s.sloganFont ?? "default"
+                nameAnim = s.nameAnim ?? "none"
+                sloganAnim = s.sloganAnim ?? "none"
                 stats = try? await store.api.myStoreStats()   // Đợt 3 — thống kê
             }
         }
@@ -726,7 +749,11 @@ struct MyStoreView: View {
                 nameEffect: nameEffect,
                 sloganEffect: sloganEffect,
                 nameColor: nameEffect == "solid" ? nameColor : "",
-                sloganColor: sloganEffect == "solid" ? sloganColor : "")
+                sloganColor: sloganEffect == "solid" ? sloganColor : "",
+                nameFont: nameFont,
+                sloganFont: sloganFont,
+                nameAnim: nameAnim,
+                sloganAnim: sloganAnim)
             myStore = s
             store.myStoreId = s.id
             message = store.t("Đã lưu cửa hàng ✅", "Store saved ✅")
