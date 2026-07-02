@@ -22,6 +22,8 @@ struct RemoteDesktopView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) var dismiss
     @AppStorage("remoteDesktopConns") private var connsRaw: String = "[]"
+    // Link PC Controller riêng (mặc định = link ngrok của bạn; sửa được vì ngrok đổi link mỗi lần chạy)
+    @AppStorage("pcControllerURL") private var pcURL: String = "https://sublime-character-chief.ngrok-free.dev/"
     @State private var showAdd = false
     @State private var openConn: RemoteDesktopConn? = nil
 
@@ -40,6 +42,35 @@ struct RemoteDesktopView: View {
                                 title: store.t("Điều khiển PC từ xa", "Remote PC Control"),
                                 subtitle: store.t("Xem & điều khiển màn hình máy tính", "View & control your PC screen"))
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                }
+
+                // ⚡ Kết nối nhanh PC Controller riêng (link ngrok của bạn)
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(store.t("PC Controller của tôi", "My PC Controller"), systemImage: "bolt.fill")
+                            .font(.subheadline.bold()).foregroundStyle(Theme.accent)
+                        TextField("https://...ngrok-free.dev/", text: $pcURL)
+                            .font(.caption).textInputAutocapitalization(.never)
+                            .autocorrectionDisabled().keyboardType(.URL)
+                            .padding(10).background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        Button {
+                            var u = pcURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !u.isEmpty, !u.hasPrefix("http") { u = "https://" + u }
+                            pcURL = u
+                            openConn = RemoteDesktopConn(name: "PC Controller", url: u, kind: "rdp")
+                        } label: {
+                            Label(store.t("Mở điều khiển PC", "Open PC control"), systemImage: "play.display")
+                                .font(.subheadline.bold()).frame(maxWidth: .infinity).frame(height: 46)
+                                .background(Theme.accent).foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(pcURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                        Text(store.t("Ngrok đổi link mỗi lần chạy lại — dán link mới vào ô trên. App tự bỏ qua trang cảnh báo ngrok.",
+                                     "Ngrok changes the link on each restart — paste the new one above. The app auto-skips ngrok's warning page."))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
 
                 // Danh sách kết nối đã lưu
