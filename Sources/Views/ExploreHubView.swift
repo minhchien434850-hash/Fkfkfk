@@ -5,7 +5,7 @@ import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, remoteServer, certImport
+    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, remoteServer, certImport, ipaLibrary
     var id: String { rawValue }
 
     var title: String {
@@ -25,6 +25,7 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Nhắn tin"
         case .remoteServer:   return "Remote Server"
         case .certImport:     return "Chứng chỉ ký"
+        case .ipaLibrary:     return "Kho IPA"
         }
     }
     var subtitle: String {
@@ -44,6 +45,7 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Thủ công · Tự động Web"
         case .remoteServer:   return "SSH · SFTP · Chạy script VPS"
         case .certImport:     return "Nhập .p12 · .mobileprovision"
+        case .ipaLibrary:     return "Gom IPA · Ký & cài qua ESign"
         }
     }
     var titleEN: String {
@@ -63,6 +65,7 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Messaging"
         case .remoteServer:   return "Remote Server"
         case .certImport:     return "Signing Cert"
+        case .ipaLibrary:     return "IPA Library"
         }
     }
     var subtitleEN: String {
@@ -82,6 +85,7 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Manual · Auto Web"
         case .remoteServer:   return "SSH · SFTP · Run VPS scripts"
         case .certImport:     return "Import .p12 · .mobileprovision"
+        case .ipaLibrary:     return "Collect IPAs · Sign via ESign"
         }
     }
     var icon: String {
@@ -101,6 +105,7 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "bubble.left.and.bubble.right.fill"
         case .remoteServer:   return "terminal.fill"
         case .certImport:     return "checkmark.seal.fill"
+        case .ipaLibrary:     return "shippingbox.fill"
         }
     }
     var colors: [Color] {
@@ -120,6 +125,7 @@ enum HubDest: String, Identifiable {
         case .messenger:      return [Color(red: 0.05, green: 0.7, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.75)]
         case .remoteServer:   return [Color(red: 0.1, green: 0.5, blue: 0.3), Color(red: 0.05, green: 0.3, blue: 0.5)]
         case .certImport:     return [Color(red: 0.2, green: 0.7, blue: 0.4), Color(red: 0.1, green: 0.5, blue: 0.35)]
+        case .ipaLibrary:     return [Color(red: 0.55, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.3, blue: 0.85)]
         }
     }
     var gradient: LinearGradient {
@@ -133,7 +139,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .remoteServer, .certImport, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .remoteServer, .certImport, .ipaLibrary, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -205,6 +211,8 @@ struct ExploreHubView: View {
             RemoteServerRootView(baseURL: store.baseURL, token: store.token ?? "")
         case .certImport:
             CertificateImportView()
+        case .ipaLibrary:
+            IPALibraryView()
         }
     }
 }
