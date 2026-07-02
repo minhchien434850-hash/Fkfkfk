@@ -333,7 +333,9 @@ struct StoreView: View {
         NavigationStack {
             ScrollView {
                 ScrollViewReader { proxy in
-                    VStack(alignment: .leading, spacing: 16) {
+                    // LazyVStack: chỉ dựng mục nào lướt tới → mở tab Cửa hàng KHÔNG đơ
+                    // (trước dùng VStack dựng hết mọi mục cùng lúc nên bị khựng lâu).
+                    LazyVStack(alignment: .leading, spacing: 16) {
                         storeHeader
                         walletBar
                         // Các mục hiển thị ĐÚNG theo thứ tự admin đã sắp xếp (kể cả "Tải về").
@@ -418,8 +420,10 @@ struct StoreView: View {
                 if let c = contacts { StoreContactsSheet(contacts: c) }
             }
             .task {
-                // HIỆN NGAY từ cache đĩa (không phải chờ mạng) → hết cảnh "đợi lâu mới vào".
-                if allProducts.isEmpty, let c = StoreCache.load() {
+                // HIỆN NGAY từ cache đĩa (giải mã ở LUỒNG NỀN để không nghẽn main → không đơ).
+                if allProducts.isEmpty, let c = await Task.detached(priority: .userInitiated, operation: {
+                    StoreCache.load()
+                }).value {
                     if config == nil { config = c.config }
                     if categories.isEmpty { categories = c.categories }
                     allProducts = c.allProducts
