@@ -549,7 +549,9 @@ final class ChatAudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 }
 
 // MARK: - Xem ảnh full màn hình (phóng to / lưu về máy)
-struct ChatImageURL: Identifiable { let id = UUID(); let url: String }
+// id PHẢI ổn định theo url. Nếu để id = UUID() thì mỗi lần poll làm body dựng lại,
+// item đổi id → fullScreenCover tưởng item mới → đóng/mở liên tục (thoát ra vào lại + lag).
+struct ChatImageURL: Identifiable { var id: String { url }; let url: String }
 
 struct FullscreenImageViewer: View {
     let urlString: String
