@@ -5419,6 +5419,54 @@ def _mask_name(s: str) -> str:
     return s[:2] + "*" * max(3, len(s) - 3) + s[-1]
 
 
+# §6.2 — Bể dữ liệu ảo: tên Việt tự nhiên (Họ + Tên đệm + Tên), khác biệt Họ+Tên đệm.
+_VN_HO = ["Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Huỳnh", "Phan", "Vũ", "Võ", "Đặng",
+          "Bùi", "Đỗ", "Hồ", "Ngô", "Dương", "Lý", "Đinh", "Trịnh", "Đoàn", "Lương"]
+_VN_DEM = ["Văn", "Thị", "Hữu", "Đức", "Minh", "Quang", "Thanh", "Ngọc", "Gia", "Bảo",
+           "Anh", "Tuấn", "Thu", "Kim", "Hoài", "Xuân", "Nhật", "Thành", "Công", "Khánh"]
+_VN_TEN = ["An", "Bình", "Cường", "Dũng", "Giang", "Hà", "Hải", "Hùng", "Huy", "Khoa",
+           "Lâm", "Linh", "Long", "Mai", "Nam", "Nga", "Ngọc", "Phong", "Phúc", "Quân",
+           "Sơn", "Tâm", "Thảo", "Trang", "Trung", "Tú", "Vy", "Đạt", "Khang", "Duy"]
+_FAKE_PRODUCTS = ["Tài khoản Premium", "Key bản quyền 1 năm", "Gói VIP 1 tháng", "Nâng cấp Pro",
+                  "Tài khoản Netflix", "Key Windows 11", "Gói ULTRA", "Tài khoản ChatGPT Plus",
+                  "Key Office 365", "Gói MAX 3 tháng", "Tài khoản Spotify", "Key Capcut Pro"]
+
+
+def _fake_showcase(n_orders: int, n_topups: int, now: int):
+    import random
+    seen: set = set()
+
+    def _name() -> str:
+        ho, dem = random.choice(_VN_HO), random.choice(_VN_DEM)
+        for _ in range(8):  # đảm bảo khác biệt Họ+Tên đệm
+            if (ho, dem) not in seen:
+                break
+            ho, dem = random.choice(_VN_HO), random.choice(_VN_DEM)
+        seen.add((ho, dem))
+        return f"{ho} {dem} {random.choice(_VN_TEN)}"
+
+    orders = []
+    for _ in range(max(0, n_orders)):
+        orders.append({
+            "user": _mask_name(_name()),
+            "product": random.choice(_FAKE_PRODUCTS),
+            "label": random.choice(["1 tháng", "3 tháng", "6 tháng", "1 năm", "Vĩnh viễn"]),
+            "amount": random.choice([20000, 35000, 50000, 79000, 99000, 120000, 150000, 199000, 250000, 299000]),
+            "at": now - random.randint(40, 6 * 3600),
+        })
+    orders.sort(key=lambda x: x["at"], reverse=True)
+
+    topups = []
+    for _ in range(max(0, n_topups)):
+        topups.append({
+            "user": _mask_name(_name()),
+            "amount": random.choice([50000, 100000, 200000, 300000, 500000, 1000000]),
+            "at": now - random.randint(40, 6 * 3600),
+        })
+    topups.sort(key=lambda x: x["at"], reverse=True)
+    return orders, topups
+
+
 @app.get("/store/showcase")
 def store_showcase() -> dict[str, Any]:
     """Dữ liệu trang chủ cửa hàng: giao dịch gần đây, nạp gần đây, bảng xếp hạng nạp."""
@@ -5442,16 +5490,24 @@ def store_showcase() -> dict[str, Any]:
             "FROM store_topups t JOIN users u ON u.id=t.user_id "
             "WHERE t.status='completed' "
             "GROUP BY t.user_id ORDER BY total DESC LIMIT 5").fetchall()
+    now = int(time.time())
+    real_orders = [
+        {"user": _mask_name(r["uname"]), "product": r["pname"],
+         "label": r["plabel"] or "", "amount": r["amount"] or 0, "at": r["at"] or 0}
+        for r in orders
+    ]
+    real_topups = [
+        {"user": _mask_name(r["uname"]), "amount": r["amount"] or 0, "at": r["at"] or 0}
+        for r in topups
+    ]
+    # §6.2 — Ưu tiên dữ liệu THẬT; nếu thiếu thì lấp bằng dữ liệu ảo (tên Việt tự nhiên)
+    # để thanh chạy liên tục. Không có công tắc tắt ở phía người dùng.
+    TARGET = 15
+    fake_orders, fake_topups = _fake_showcase(
+        max(0, TARGET - len(real_orders)), max(0, TARGET - len(real_topups)), now)
     return {
-        "recent_orders": [
-            {"user": _mask_name(r["uname"]), "product": r["pname"],
-             "label": r["plabel"] or "", "amount": r["amount"] or 0, "at": r["at"] or 0}
-            for r in orders
-        ],
-        "recent_topups": [
-            {"user": _mask_name(r["uname"]), "amount": r["amount"] or 0, "at": r["at"] or 0}
-            for r in topups
-        ],
+        "recent_orders": (real_orders + fake_orders)[:TARGET],
+        "recent_topups": (real_topups + fake_topups)[:TARGET],
         "leaderboard": [
             {"rank": i + 1, "user": _mask_name(r["uname"]), "total": r["total"] or 0}
             for i, r in enumerate(leaders)

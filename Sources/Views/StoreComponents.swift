@@ -236,37 +236,62 @@ struct StoreThumb: View {
 /// Dải tự cuộn (giao dịch / nạp tiền gần đây) — đổi 6 dòng mỗi 5 giây.
 /// TÁCH RIÊNG khỏi StoreView: timer + chỉ số cuộn nằm trong chính view này nên
 /// mỗi 5 giây CHỈ dải này vẽ lại, KHÔNG kéo cả cửa hàng vẽ lại theo (hết nháy).
+// §6.2 — Thanh cuộn vô hạn MƯỢT 100%, không bao giờ biến mất.
+// Dùng marquee: danh sách nhân đôi + cuộn offset liên tục, id theo VỊ TRÍ (không theo
+// item.id) → khi dữ liệu ảo đổi mỗi lần poll, các dòng chỉ đổi nội dung tại chỗ, KHÔNG
+// bị gỡ/chèn gây chớp hay tan biến.
 struct AutoScrollTicker<Item: Identifiable, Row: View>: View {
     let items: [Item]
     var visible: Int = 6
     @ViewBuilder let row: (Item) -> Row
 
-    @State private var index = 0
-    private let timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
-
-    private var window: [Item] {
-        guard items.count > visible else { return items }
-        let start = ((index % items.count) + items.count) % items.count
-        return (0..<visible).map { items[(start + $0) % items.count] }
-    }
+    @State private var offset: CGFloat = 0
+    private let rowH: CGFloat = 46
 
     var body: some View {
-        VStack(spacing: 0) {
-            ForEach(window) { item in
+        let h = rowH * CGFloat(visible)
+        Group {
+            if items.isEmpty {
+                Color.clear.frame(height: h)
+            } else if items.count <= visible {
                 VStack(spacing: 0) {
-                    row(item).padding(.vertical, 8)
-                    Divider()
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, it in
+                        cell(it)
+                    }
                 }
-                .transition(.asymmetric(
-                    insertion: .move(edge: .bottom).combined(with: .opacity),
-                    removal: .move(edge: .top).combined(with: .opacity)))
+                .frame(maxHeight: h, alignment: .top)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array((items + items).enumerated()), id: \.offset) { _, it in
+                        cell(it)
+                    }
+                }
+                .offset(y: offset)
+                .frame(height: h, alignment: .top)
+                .onAppear { startScroll() }
+                .onChange(of: items.count) { _ in startScroll() }
             }
         }
-        .padding(.horizontal, 12)
+        .frame(height: h, alignment: .top)
         .clipped()
-        .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
-        .animation(.easeInOut(duration: 0.55), value: index)
-        .onReceive(timer) { _ in if items.count > visible { index += 1 } }
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder private func cell(_ item: Item) -> some View {
+        VStack(spacing: 0) {
+            row(item).padding(.horizontal, 12).frame(height: rowH - 1)
+            Divider()
+        }
+    }
+
+    private func startScroll() {
+        offset = 0
+        guard items.count > visible else { return }
+        let total = rowH * CGFloat(items.count)
+        withAnimation(.linear(duration: Double(items.count) * 1.5).repeatForever(autoreverses: false)) {
+            offset = -total
+        }
     }
 }
 
