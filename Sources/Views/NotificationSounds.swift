@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UserNotifications
 
 // ============================================================================
 //  ÂM THANH THÔNG BÁO (giống TikFinity) — tổng hợp tại chỗ, 100% cục bộ.
@@ -88,6 +89,46 @@ let kNotifSounds: [NotifSoundPreset] = [
     .init(id: "rise",     label: "Vươn cao",   icon: "chart.line.uptrend.xyaxis",     segments: [(440, 0.04), (587, 0.04), (740, 0.04), (880, 0.04), (1175, 0.16)]),
     .init(id: "twobell",  label: "Hai chuông", icon: "bell.and.waves.left.and.right.fill", segments: [(1319, 0.14), (0, 0.05), (1319, 0.22)]),
 ]
+
+// ============================================================================
+//  CHUÔNG THÔNG BÁO KÊU CẢ KHI TẮT APP.
+//  iOS chỉ phát được tiếng tuỳ chỉnh lúc app tắt nếu file âm thanh nằm trong
+//  thư mục Library/Sounds/ của app. Ta tổng hợp 1 tiếng chuông rồi ghi vào đó
+//  ngay khi mở app; mọi thông báo (sản phẩm/bảo trì) + push từ máy chủ đều trỏ
+//  vào file này → tắt app vẫn kêu chuông.
+// ============================================================================
+enum NotifSoundFile {
+    /// Tên file phải khớp GIỮA app (UNNotificationSound) và payload push của máy chủ.
+    static let fileName = "kenios_notify.wav"
+
+    /// Chuông "ngân lên" dễ nghe (~0.9 giây).
+    private static let bellSegments: [(Double, Double)] =
+        [(523, 0.12), (659, 0.12), (784, 0.14), (1047, 0.5)]
+
+    /// Ghi file chuông vào Library/Sounds/ (chỉ ghi 1 lần, giữ qua các lần mở app).
+    static func ensureInstalled() {
+        let fm = FileManager.default
+        guard let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first else { return }
+        let dir = lib.appendingPathComponent("Sounds", isDirectory: true)
+        let dest = dir.appendingPathComponent(fileName)
+        if fm.fileExists(atPath: dest.path) { return }
+        guard let wav = NotifSoundSynth.makeWAV(bellSegments) else { return }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? wav.write(to: dest)
+    }
+
+    /// Âm thanh thông báo dùng chuông tuỳ chỉnh (fallback tiếng mặc định nếu chưa ghi được).
+    static var sound: UNNotificationSound {
+        let fm = FileManager.default
+        if let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first {
+            let path = lib.appendingPathComponent("Sounds/\(fileName)").path
+            if fm.fileExists(atPath: path) {
+                return UNNotificationSound(named: UNNotificationSoundName(fileName))
+            }
+        }
+        return .default
+    }
+}
 
 enum NotifSoundSynth {
     static let sampleRate: Double = 44100

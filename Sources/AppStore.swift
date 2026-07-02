@@ -218,7 +218,7 @@ final class AppStore: ObservableObject {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        content.sound = NotifSoundFile.sound   // chuông tuỳ chỉnh — kêu cả khi tắt app
         content.categoryIdentifier = "KENIOS_PRODUCT"
 
         func submit(_ attachments: [UNNotificationAttachment]) {
@@ -257,7 +257,7 @@ final class AppStore: ObservableObject {
         let content = UNMutableNotificationContent()
         content.title = "🔧 KENIOS - Thông báo bảo trì"
         content.body = body
-        content.sound = .default
+        content.sound = NotifSoundFile.sound   // chuông tuỳ chỉnh — kêu cả khi tắt app
         content.categoryIdentifier = "KENIOS_MAINTENANCE"
         let req = UNNotificationRequest(identifier: "maint-\(UUID().uuidString)",
                                         content: content, trigger: nil)

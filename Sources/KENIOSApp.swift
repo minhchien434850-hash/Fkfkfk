@@ -15,6 +15,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Gắn nút "ẩn bàn phím" lên mọi ô nhập trong toàn app
         KeyboardDismissBar.installGlobally()
 
+        // Ghi chuông thông báo vào Library/Sounds/ để TẮT APP vẫn kêu chuông.
+        NotifSoundFile.ensureInstalled()
+
         // Đặt delegate thông báo
         UNUserNotificationCenter.current().delegate = self
 
@@ -113,7 +116,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        content.sound = NotifSoundFile.sound   // chuông tuỳ chỉnh — kêu cả khi tắt app
         content.categoryIdentifier = category
         let req = UNNotificationRequest(identifier: "\(category)-\(UUID().uuidString)",
                                         content: content, trigger: nil)

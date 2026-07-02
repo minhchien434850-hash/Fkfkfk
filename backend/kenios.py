@@ -7434,7 +7434,8 @@ def _apns_send(tokens: list[str], title: str, body: str) -> tuple[int, int]:
         jwt_token = pyjwt.encode({"iss": os.getenv("APNS_TEAM_ID"), "iat": int(time.time())},
                                  private_key, algorithm="ES256",
                                  headers={"kid": os.getenv("APNS_KEY_ID")})
-        payload = {"aps": {"alert": {"title": title, "body": body}, "sound": "default"}}
+        # Chuông tuỳ chỉnh (khớp file trong Library/Sounds của app) — kêu cả khi tắt app.
+        payload = {"aps": {"alert": {"title": title, "body": body}, "sound": "kenios_notify.wav"}}
         headers = {"authorization": f"bearer {jwt_token}",
                    "apns-topic": os.getenv("APNS_BUNDLE_ID"), "apns-push-type": "alert"}
         sent = failed = 0
