@@ -39,6 +39,9 @@ struct VideoEditorView: View {
     @State private var hue = 0.0           // -3.14 ... 3.14 (radian)
     @State private var highlights = 1.0    // 0 ... 1 (1 = giữ nguyên)
     @State private var shadows = 0.0       // -1 ... 1 (0 = giữ nguyên)
+    // Công cụ nâng cao: làm nét (deblur) + giảm nhiễu
+    @State private var sharpen = 0.0       // 0 ... 2 (0 = không làm nét)
+    @State private var denoise = 0.0       // 0 ... 1 (0 = không giảm nhiễu)
     @State private var loading = false
     @State private var exporting = false
     @State private var outputURL: URL?
@@ -105,6 +108,20 @@ struct VideoEditorView: View {
                         Button("Đặt lại màu") {
                             brightness = 0; contrast = 1; saturation = 1; hue = 0; highlights = 1; shadows = 0
                         }.font(.caption).buttonStyle(.bordered)
+                    }
+                    .padding().kCard(16)
+
+                    // Công cụ nâng cao: làm nét video mờ + giảm nhiễu
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Nâng cao").font(.subheadline.bold())
+                        HStack { Text("Làm nét (Sharpen)"); Spacer(); Text(String(format: "%.1f", sharpen)) }
+                            .font(.caption)
+                        Slider(value: $sharpen, in: 0...2)
+                        HStack { Text("Giảm nhiễu (Denoise)"); Spacer(); Text(String(format: "%.0f%%", denoise*100)) }
+                            .font(.caption)
+                        Slider(value: $denoise, in: 0...1)
+                        Text("Kéo 'Làm nét' để video mờ nét hơn; 'Giảm nhiễu' làm mịn hạt nhiễu. Áp dụng khi xuất video.")
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                     .padding().kCard(16)
 
@@ -196,6 +213,8 @@ struct VideoEditorView: View {
         let hueAngle = hue
         let hi = highlights
         let sh = shadows
+        let shp = sharpen
+        let dns = denoise
         return AVVideoComposition(asset: asset) { request in
             let src = request.sourceImage
             var img = src.clampedToExtent()
@@ -219,6 +238,21 @@ struct VideoEditorView: View {
                 hs.highlightAmount = Float(hi)
                 hs.shadowAmount = Float(sh)
                 img = hs.outputImage ?? img
+            }
+            // Giảm nhiễu (Denoise) — làm trước để không khuếch đại hạt khi làm nét.
+            if dns > 0.001 {
+                let nr = CIFilter.noiseReduction()
+                nr.inputImage = img
+                nr.noiseLevel = Float(dns * 0.05)   // 0…0.05
+                nr.sharpness = 0.4
+                img = nr.outputImage ?? img
+            }
+            // Làm nét video mờ (Sharpen)
+            if shp > 0.001 {
+                let sp = CIFilter.sharpenLuminance()
+                sp.inputImage = img
+                sp.sharpness = Float(shp)
+                img = sp.outputImage ?? img
             }
 
             switch f {
