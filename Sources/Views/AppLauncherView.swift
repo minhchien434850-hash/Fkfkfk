@@ -430,6 +430,43 @@ struct AppFormView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if !isEditing {
+                    Section(store.t("Chọn nhanh app phổ biến", "Quick pick popular apps")) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(AppLauncher.presets) { p in
+                                    Button {
+                                        app.name = p.name
+                                        app.urlScheme = p.urlScheme
+                                        app.icon = p.icon
+                                        app.colorIndex = p.colorIndex
+                                        app.appStoreID = p.appStoreID
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            ZStack {
+                                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                    .fill(LinearGradient(colors: AppLauncherView.colors(p.colorIndex),
+                                                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                                                    .frame(width: 52, height: 52)
+                                                Image(systemName: p.icon).font(.title3.weight(.semibold)).foregroundStyle(.white)
+                                            }
+                                            Text(p.name).font(.caption2).lineLimit(1)
+                                                .foregroundStyle(.primary)
+                                        }
+                                        .frame(width: 60)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                        Text(store.t("Bấm 1 app để tự điền sẵn, rồi bấm Lưu. Hoặc tự nhập app khác bên dưới.",
+                                     "Tap an app to auto-fill, then Save. Or enter another app below."))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+
                 Section(store.t("Thông tin app", "App info")) {
                     TextField(store.t("Tên app (vd: YouTube)", "App name (e.g. YouTube)"), text: $app.name)
                     TextField("URL scheme (vd: youtube, fb, zalo...)", text: $app.urlScheme)
