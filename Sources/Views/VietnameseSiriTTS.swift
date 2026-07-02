@@ -58,7 +58,15 @@ struct VietnameseTextNormalizer {
         "like": "thích", "share": "chia sẻ", "live": "phát trực tiếp",
         // --- Số / thời gian thông dụng ---
         "ah": "à", "à": "à", "nha": "nha", "nhé": "nhé", "nhaa": "nha",
-        "đ": "đồng", "k đồng": "nghìn đồng", "tr": "triệu", "củ": "triệu"
+        "đ": "đồng", "k đồng": "nghìn đồng", "tr": "triệu", "củ": "triệu",
+        // --- Bổ sung thêm từ lóng / viết tắt thông dụng ---
+        "cx": "cũng", "vậy nhỉ": "vậy nhỉ", "nma": "nhưng mà", "tks": "cảm ơn",
+        "thanks": "cảm ơn", "ty": "cảm ơn", "sr": "xin lỗi", "sorry": "xin lỗi",
+        "plz": "làm ơn", "pls": "làm ơn", "acc": "tài khoản", "pass": "mật khẩu",
+        "user": "tài khoản", "gv": "giáo viên", "hs": "học sinh", "sv": "sinh viên",
+        "ck": "chồng", "vk": "vợ", "e": "em", "a": "anh", "c": "chị", "b": "bạn",
+        "đợi tí": "đợi tí", "nãy": "nãy", "z hả": "vậy hả", "tr?": "thật ạ",
+        "vãi": "vãi", "trời": "trời", "ố dề": "ố dề", "chằm zn": "trầm cảm"
     ]
 
     /// Ký hiệu -> đọc thành chữ (để TTS không đọc máy móc hoặc bỏ qua).
@@ -74,6 +82,10 @@ struct VietnameseTextNormalizer {
 
         // 1) Đổi ký hiệu thành chữ.
         for (k, v) in symbolMap { s = s.replacingOccurrences(of: k, with: v) }
+
+        // 1b) Đọc SỐ TIỀN viết tắt: 50k → "50 nghìn", 2tr → "2 triệu", 1tỷ → "1 tỷ",
+        //     100000đ → "100000 đồng" (rất hợp cửa hàng). Chỉ áp khi số liền đơn vị.
+        s = normalizeMoney(s)
 
         // 2) Bỏ emoji & ký tự lạ (giữ chữ, số, khoảng trắng, dấu câu cơ bản).
         s = String(String.UnicodeScalarView(s.unicodeScalars.map { sc in
@@ -96,6 +108,25 @@ struct VietnameseTextNormalizer {
         if ("0"..."9").contains(Character(sc)) { return true }
         if sc == " " || sc == "\n" || sc == "\t" { return true }
         return punctuation.contains(Character(sc))
+    }
+
+    // Đọc số tiền viết tắt bằng regex: bắt "<số>" + đơn vị (k/tr/tỷ/ty/đ/d) đứng liền,
+    // ranh giới sau là hết từ (không phải chữ cái) → tránh phá "trung", "kính"...
+    private static func normalizeMoney(_ text: String) -> String {
+        var s = text
+        let rules: [(String, String)] = [
+            ("(\\d+)\\s*tỷ\\b", "$1 tỷ"),
+            ("(\\d+)\\s*(tr|triệu)\\b", "$1 triệu"),
+            ("(\\d+)\\s*(k|nghìn|ngàn)\\b", "$1 nghìn"),
+            ("(\\d+)\\s*(đ|d|vnđ|vnd)\\b", "$1 đồng")
+        ]
+        for (pat, rep) in rules {
+            if let re = try? NSRegularExpression(pattern: pat, options: [.caseInsensitive]) {
+                let range = NSRange(s.startIndex..<s.endIndex, in: s)
+                s = re.stringByReplacingMatches(in: s, options: [], range: range, withTemplate: rep)
+            }
+        }
+        return s
     }
 
     // Tách theo "từ" = chuỗi chữ cái/chữ số liền nhau; phần còn lại giữ nguyên.
