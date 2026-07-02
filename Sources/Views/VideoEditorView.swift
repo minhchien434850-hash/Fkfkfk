@@ -60,6 +60,7 @@ struct VideoEditorView: View {
     @State private var speed = 1.0         // 0.25 ... 4 (tốc độ phát; 1 = giữ nguyên)
     @State private var removeBg = false    // Xoá nền/tách người → làm mờ phông (Vision)
     @State private var fadeInOut = false   // Chuyển cảnh: mờ dần vào/ra (fade in/out)
+    @State private var zoomMotion = false  // Chuyển động phóng to dần (Ken Burns / keyframe)
     // Nhạc nền
     @State private var musicURL: URL?
     @State private var musicName = ""
@@ -194,6 +195,13 @@ struct VideoEditorView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("Chuyển cảnh mờ dần (Fade)").font(.caption)
                                 Text("Mở đầu & kết thúc video mờ dần vào/ra")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Toggle(isOn: $zoomMotion) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Chuyển động phóng to (Ken Burns)").font(.caption)
+                                Text("Tự phóng to dần theo thời gian cho video sống động")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                         }
@@ -439,6 +447,7 @@ struct VideoEditorView: View {
             return t.isEmpty ? nil : renderCaption(t)
         }()
         let overlayY = overlayPosY
+        let zoomOn = zoomMotion
         // Fade in/out: mốc thời gian đầu/cuối trong hệ toạ độ khung xuất.
         let fadeOn = fadeInOut
         let outStart = speedChanged ? 0.0 : trimStart
@@ -446,6 +455,19 @@ struct VideoEditorView: View {
         return AVVideoComposition(asset: asset) { request in
             let src = request.sourceImage
             var img = src.clampedToExtent()
+
+            // Chuyển động phóng to dần (Ken Burns): phóng quanh tâm theo tiến độ thời gian.
+            if zoomOn {
+                let span = max(0.1, outEnd - outStart)
+                let prog = min(1.0, max(0.0, (request.compositionTime.seconds - outStart) / span))
+                let z = 1.0 + 0.18 * prog
+                let cx = src.extent.midX, cy = src.extent.midY
+                var tr = CGAffineTransform.identity
+                tr = tr.translatedBy(x: cx, y: cy)
+                tr = tr.scaledBy(x: CGFloat(z), y: CGFloat(z))
+                tr = tr.translatedBy(x: -cx, y: -cy)
+                img = img.transformed(by: tr).cropped(to: src.extent).clampedToExtent()
+            }
 
             // Xoá nền / tách người: Vision tách người → làm mờ phông sau lưng (chân dung).
             if rmBg {
