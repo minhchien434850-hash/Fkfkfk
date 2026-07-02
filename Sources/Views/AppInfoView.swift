@@ -53,7 +53,7 @@ struct AppInfoView: View {
                 VStack(spacing: 0) {
                     infoRow(store.t("Tên ứng dụng", "App name"), appName)
                     Divider()
-                    infoRow(store.t("Phiên bản", "Version"), "\(version) (build \(build))")
+                    infoRow(store.t("Phiên bản", "Version"), version)
                     Divider()
                     infoRow(store.t("Ngày sản xuất", "Production date"), productionDateString)
                     Divider()
