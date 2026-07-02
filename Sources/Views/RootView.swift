@@ -104,6 +104,11 @@ struct MainTabView: View {
     @State private var updateMsg = ""
     @State private var updateLink = ""
     @State private var updateVersion = ""
+    // §1.1 — Thông báo phát cho MỌI người (vd: sản phẩm mới) — đọc trong app, không cần APNs
+    @AppStorage("lastSeenNotifId") private var lastSeenNotifId = 0
+    @State private var showNotif = false
+    @State private var notifTitle = ""
+    @State private var notifBody = ""
 
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
@@ -189,12 +194,15 @@ struct MainTabView: View {
                     }
                 }
             }
+            // §1.1 — Kiểm tra thông báo phát (sản phẩm mới…) ngay khi mở app
+            await checkNotifications()
             // Theo dõi bảo trì + gói theo chu kỳ
             try? await store.api.sendActivity(tabName(store.tab))
             // Đồng bộ bảo trì + gói với máy chủ VPS mỗi 10 giây
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 await store.refreshMe()
+                await checkNotifications()   // §1.1 — có sản phẩm mới thì hiện ngay (kể cả khi đang mở app)
             }
         }
         .onChange(of: scenePhase) { phase in
@@ -220,6 +228,16 @@ struct MainTabView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }
+        // §1.1 — Popup thông báo phát (sản phẩm mới…) cho MỌI người dùng
+        .overlay {
+            if showNotif {
+                WelcomePopupCard(title: notifTitle.isEmpty ? store.t("Thông báo", "Notice") : notifTitle,
+                                 text: notifBody) {
+                    withAnimation(.easeInOut) { showNotif = false }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+        }
         // §1.2 — Thông báo có phiên bản mới, bấm để mở link tải/cập nhật
         .alert(store.t("Có phiên bản mới \(updateVersion)", "New version \(updateVersion) available"),
                isPresented: $showUpdate) {
@@ -235,6 +253,25 @@ struct MainTabView: View {
                  ? store.t("Đã có phiên bản mới hơn. Cập nhật để dùng tính năng mới nhất.",
                            "A newer version is available. Update for the latest features.")
                  : updateMsg)
+        }
+    }
+
+    // §1.1 — Lấy thông báo phát mới nhất; nếu mới hơn lần đã xem → hiện popup cho MỌI người.
+    private func checkNotifications() async {
+        guard let notifs = try? await store.api.getNotifications(limit: 5),
+              let latest = notifs.first else { return }
+        guard latest.id > lastSeenNotifId else { return }
+        let firstRun = (lastSeenNotifId == 0)
+        lastSeenNotifId = latest.id
+        // Lần đầu cài: chỉ hiện nếu thông báo còn mới (trong 24h), tránh bung thông báo cũ.
+        if firstRun {
+            let age = Int(Date().timeIntervalSince1970) - (latest.createdAt ?? 0)
+            if age > 86_400 { return }
+        }
+        notifTitle = latest.title
+        notifBody = latest.body
+        if !showUpdate && !showWelcomePopup {
+            withAnimation(.spring(response: 0.4)) { showNotif = true }
         }
     }
 

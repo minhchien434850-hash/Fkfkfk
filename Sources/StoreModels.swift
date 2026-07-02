@@ -613,6 +613,16 @@ struct DirectMessageItem: Identifiable, Decodable, Hashable {
     let isRead: Int
 }
 
+// §1.1 — Thông báo phát cho MỌI người dùng (đọc trong app, không cần APNs)
+struct AppNotification: Identifiable, Decodable, Hashable {
+    let id: Int
+    let title: String
+    let body: String
+    let kind: String?
+    let link: String?
+    let createdAt: Int?
+}
+
 // ---- Giỏ hàng ----
 struct CartItem: Identifiable, Codable, Hashable {
     var id: UUID

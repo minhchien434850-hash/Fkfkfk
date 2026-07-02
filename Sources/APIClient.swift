@@ -298,6 +298,10 @@ struct APIClient {
     func myProfile() async throws -> UserProfile {
         try decode(try await send("/me/profile"))
     }
+    // §1.1 — Danh sách thông báo phát cho mọi người (app poll để hiện trong app)
+    func getNotifications(limit: Int = 20) async throws -> [AppNotification] {
+        try decode(try await send("/notifications?limit=\(limit)"))
+    }
     func updateProfile(publicId: String?, avatarUrl: String?, bio: String?) async throws -> MessageResponse {
         var body: [String: Any] = [:]
         if let v = publicId { body["public_id"] = v }

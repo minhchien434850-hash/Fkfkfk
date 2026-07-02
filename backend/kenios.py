@@ -693,6 +693,15 @@ def init_db() -> None:
                 platform TEXT DEFAULT 'ios',
                 created_at INTEGER
             );
+            -- §1.1 — Thông báo phát cho TẤT CẢ người dùng (đọc trong app, không cần APNs)
+            CREATE TABLE IF NOT EXISTS notifications(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                body TEXT DEFAULT '',
+                kind TEXT DEFAULT 'general',
+                link TEXT DEFAULT '',
+                created_at INTEGER
+            );
         """)
     _migrate()
 
@@ -6752,8 +6761,24 @@ def _notify_admins(title: str, body: str) -> None:
         log.warning("notify_admins lỗi: %s", e)
 
 
-def _notify_all_users(title: str, body: str) -> None:
-    """§1.1 — Gửi push cho MỌI thiết bị người dùng (không chỉ admin), chạy nền."""
+def _broadcast_notification(title: str, body: str, kind: str = "general", link: str = "") -> None:
+    """§1.1 — Lưu thông báo PHÁT cho tất cả người dùng để app đọc (không phụ thuộc APNs).
+    Đây là kênh tin cậy: mọi user mở app đều thấy, kể cả bản cài qua eSign."""
+    try:
+        with db() as c:
+            c.execute("INSERT INTO notifications(title,body,kind,link,created_at) VALUES(?,?,?,?,?)",
+                      (title, body, kind, link, int(time.time())))
+            # Giữ gọn: chỉ lưu 200 thông báo gần nhất
+            c.execute("DELETE FROM notifications WHERE id NOT IN "
+                      "(SELECT id FROM notifications ORDER BY id DESC LIMIT 200)")
+    except Exception as e:
+        log.warning("broadcast_notification lỗi: %s", e)
+
+
+def _notify_all_users(title: str, body: str, kind: str = "general", link: str = "") -> None:
+    """§1.1 — Thông báo cho MỌI người dùng: (1) LƯU vào bảng notifications để app đọc
+    (tin cậy, không cần quyền push) + (2) đẩy APNs nếu có cấu hình (best-effort)."""
+    _broadcast_notification(title, body, kind, link)
     try:
         with db() as c:
             tokens = [r["token"] for r in c.execute("SELECT token FROM device_tokens").fetchall()]
@@ -6764,6 +6789,17 @@ def _notify_all_users(title: str, body: str) -> None:
                          daemon=True, name="notify-all").start()
     except Exception as e:
         log.warning("notify_all lỗi: %s", e)
+
+
+@app.get("/notifications")
+def list_notifications(limit: int = 20, user=Depends(get_user)) -> list[dict[str, Any]]:
+    """§1.1 — Danh sách thông báo phát cho mọi người (app poll để hiện trong app)."""
+    limit = max(1, min(limit, 100))
+    with db() as c:
+        rows = c.execute(
+            "SELECT id,title,body,kind,link,created_at FROM notifications "
+            "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 @app.post("/admin/push-notification")
