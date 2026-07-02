@@ -122,20 +122,43 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // MARK: - UNUserNotificationCenterDelegate
 
+    // Chống thông báo TRÙNG: 1 sản phẩm mới thường tới 2 kênh cùng lúc
+    // (đẩy APNs từ máy chủ + local notification khi app tự dò /notifications).
+    // Cả 2 đều vào willPresent → nếu không lọc sẽ đọc giọng nói 2 lần.
+    nonisolated(unsafe) private static var lastNotifBody = ""
+    nonisolated(unsafe) private static var lastNotifAt: TimeInterval = 0
+
+    private static func isDuplicateNotification(_ body: String) -> Bool {
+        let now = Date().timeIntervalSince1970
+        // Cùng nội dung trong vòng 20 giây → coi là trùng, bỏ qua.
+        if body == lastNotifBody && (now - lastNotifAt) < 20 { return true }
+        lastNotifBody = body
+        lastNotifAt = now
+        return false
+    }
+
     /// Hiển thị banner + âm thanh ngay cả khi app đang mở ở foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler handler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        handler([.banner, .badge, .sound])
-
-        // Đọc thông báo bằng giọng nói khi app đang chạy (chỉ product/maintenance)
         let cat = notification.request.content.categoryIdentifier
+        let text = notification.request.content.body
+
+        // Với thông báo sản phẩm/bảo trì: lọc trùng để KHÔNG hiện banner/đọc giọng 2 lần.
         if cat == "KENIOS_PRODUCT" || cat == "KENIOS_MAINTENANCE" {
-            let text = notification.request.content.body
+            if AppDelegate.isDuplicateNotification(text) {
+                handler([])   // nuốt bản trùng: không banner, không tiếng, không đọc lại
+                return
+            }
+            handler([.banner, .badge, .sound])
+            // Đọc thông báo bằng giọng nói khi app đang chạy (chỉ đọc 1 lần).
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 WelcomeVoice.shared.testSpeak(text: text, voiceId: "", rate: 0.48)
             }
+            return
         }
+
+        handler([.banner, .badge, .sound])
     }
 
     /// Xử lý khi người dùng bấm vào thông báo
