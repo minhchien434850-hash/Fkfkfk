@@ -4,26 +4,77 @@ import AVFoundation
 extension TTSEngine {
 
     func playSystemTTS(_ text: String) {
-        let u = AVSpeechUtterance(string: text)
-        if let v = AVSpeechSynthesisVoice(identifier: voiceId) { u.voice = v }
-        u.rate = rate
-        u.pitchMultiplier = pitch
-        u.volume = volume
-        synth.speak(u)          // tự xếp hàng nếu đang đọc cái khác
+        let v = AVSpeechSynthesisVoice(identifier: voiceId)
+        speakExpressive(text, voice: v)   // đọc biểu cảm, tự xếp hàng nếu đang đọc cái khác
     }
 
     func playSiriTTS(_ text: String) {
-        let u = AVSpeechUtterance(string: text)
         // Ưu tiên giọng người dùng tự chọn trong app; nếu chưa chọn thì tự lấy giọng tốt nhất.
-        if !siriVoiceId.isEmpty, let v = AVSpeechSynthesisVoice(identifier: siriVoiceId) {
-            u.voice = v
-        } else if let v = bestSiriVoice() {
-            u.voice = v
+        let voice: AVSpeechSynthesisVoice? = {
+            if !siriVoiceId.isEmpty, let v = AVSpeechSynthesisVoice(identifier: siriVoiceId) { return v }
+            return bestSiriVoice()
+        }()
+        speakExpressive(text, voice: voice)
+    }
+
+    // ===== Bộ đọc BIỂU CẢM cho giọng iOS =====
+    // Tách câu theo dấu câu rồi đọc từng câu với ngữ điệu (cao độ/tốc độ/ngắt nghỉ)
+    // phù hợp: câu hỏi lên giọng, câu cảm thán mạnh hơn, ngắt nghỉ tự nhiên giữa các câu.
+    // Câu đầu tiên KHÔNG có độ trễ để giữ độ trễ siêu thấp khi bắt đầu đọc.
+    func speakExpressive(_ text: String, voice: AVSpeechSynthesisVoice?) {
+        let sentences = Self.splitSentences(text)
+        guard !sentences.isEmpty else { return }
+        for (idx, s) in sentences.enumerated() {
+            let u = AVSpeechUtterance(string: s)
+            u.voice = voice
+            u.volume = volume
+
+            var r = rate
+            var p = pitch
+            var vol = volume
+            let last = s.last
+            if last == "?" || last == "？" {
+                // Câu hỏi: hơi chậm cuối câu + lên giọng.
+                p = min(2.0, pitch * 1.06); r = rate * 0.97
+            } else if last == "!" || last == "！" {
+                // Câu cảm thán: mạnh & rõ hơn một chút.
+                p = min(2.0, pitch * 1.04); vol = min(1.0, volume * 1.10); r = rate * 1.02
+            } else if last == "…" || s.hasSuffix("...") {
+                // Câu bỏ lửng: nhẹ & chậm lại.
+                p = max(0.5, pitch * 0.97); r = rate * 0.95
+            }
+            u.rate = r
+            u.pitchMultiplier = p
+            u.volume = vol
+
+            // Ngắt nghỉ tự nhiên giữa các câu; câu đầu không trễ (độ trễ siêu thấp).
+            u.preUtteranceDelay = idx == 0 ? 0.0 : 0.12
+            // Câu có nhiều dấu phẩy → thêm nhịp nghỉ nhẹ ở cuối cho tự nhiên.
+            u.postUtteranceDelay = s.contains(",") ? 0.10 : 0.02
+            synth.speak(u)
         }
-        u.rate = rate
-        u.pitchMultiplier = pitch
-        u.volume = volume
-        synth.speak(u)
+    }
+
+    // Tách văn bản thành các câu, GIỮ dấu câu cuối để suy ra ngữ điệu.
+    static func splitSentences(_ text: String) -> [String] {
+        var result: [String] = []
+        var cur = ""
+        for ch in text {
+            cur.append(ch)
+            if ch == "." || ch == "!" || ch == "?" || ch == "…" || ch == "。" || ch == "！" || ch == "？" || ch == "\n" {
+                let t = cur.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { result.append(t) }
+                cur = ""
+            }
+        }
+        let tail = cur.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { result.append(tail) }
+        // Nếu văn bản không có dấu câu nào → đọc nguyên đoạn.
+        if result.isEmpty {
+            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { result.append(t) }
+        }
+        return result
     }
 
     // Chọn ĐÚNG giọng Siri: ưu tiên giọng Siri tiếng Việt thật, rồi tới giọng tiếng Việt
