@@ -161,21 +161,36 @@ struct KENIOSApp: App {
                              diskPath: "kenios_img_cache")
         URLCache.shared = cache
 
-        // ===== Giao diện navy cao cấp: nền xanh đen sâu, thẻ navy, chữ trắng =====
-        let bg      = Theme.bgNavyUI
-        let card    = Theme.cardNavyUI
+        // ===== Giao diện THÍCH ỨNG sáng/tối (§2.1): tối = navy sâu + chữ trắng;
+        // sáng = nền hệ thống + chữ đậm — hết lem màu khi chuyển Light Mode. =====
+        // Nền thanh (nav/tab/toolbar): tối→navy, sáng→trắng hệ thống.
+        let barBg = UIColor { tc in
+            tc.userInterfaceStyle == .dark ? Theme.bgNavyUI : UIColor.systemBackground
+        }
+        // Nền bảng/list: tối→navy, sáng→nền nhóm hệ thống.
+        let tableBg = UIColor { tc in
+            tc.userInterfaceStyle == .dark ? Theme.bgNavyUI : UIColor.systemGroupedBackground
+        }
+        // Nền ô/thẻ: tối→navy thẻ, sáng→nền phụ hệ thống.
+        let cardBg = UIColor { tc in
+            tc.userInterfaceStyle == .dark ? Theme.cardNavyUI : UIColor.secondarySystemGroupedBackground
+        }
+        // Chữ tiêu đề: tối→trắng, sáng→đen (label).
+        let titleCol = UIColor { tc in
+            tc.userInterfaceStyle == .dark ? .white : .label
+        }
         let tintCol = UIColor(red: 0.0, green: 0.58, blue: 0.96, alpha: 1)
 
         let tab = UITabBarAppearance()
         tab.configureWithOpaqueBackground()
-        tab.backgroundColor = bg
-        tab.shadowColor = UIColor.white.withAlphaComponent(0.06)
+        tab.backgroundColor = barBg
+        tab.shadowColor = UIColor.separator
         let selected = tab.stackedLayoutAppearance.selected
         let normal   = tab.stackedLayoutAppearance.normal
         selected.iconColor = tintCol
         selected.titleTextAttributes = [.foregroundColor: tintCol]
-        normal.iconColor = UIColor(white: 0.62, alpha: 1)
-        normal.titleTextAttributes = [.foregroundColor: UIColor(white: 0.62, alpha: 1)]
+        normal.iconColor = UIColor.secondaryLabel
+        normal.titleTextAttributes = [.foregroundColor: UIColor.secondaryLabel]
         UITabBar.appearance().standardAppearance = tab
         if #available(iOS 15.0, *) {
             UITabBar.appearance().scrollEdgeAppearance = tab
@@ -183,21 +198,21 @@ struct KENIOSApp: App {
 
         let nav = UINavigationBarAppearance()
         nav.configureWithOpaqueBackground()
-        nav.backgroundColor = bg
+        nav.backgroundColor = barBg
         nav.shadowColor = .clear
-        nav.titleTextAttributes = [.foregroundColor: UIColor.white]
-        nav.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        nav.titleTextAttributes = [.foregroundColor: titleCol]
+        nav.largeTitleTextAttributes = [.foregroundColor: titleCol]
         UINavigationBar.appearance().standardAppearance = nav
         UINavigationBar.appearance().scrollEdgeAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
 
-        UITableView.appearance().backgroundColor = bg
-        UITableViewCell.appearance().backgroundColor = card
-        UICollectionView.appearance().backgroundColor = bg
+        UITableView.appearance().backgroundColor = tableBg
+        UITableViewCell.appearance().backgroundColor = cardBg
+        UICollectionView.appearance().backgroundColor = tableBg
 
         let bar = UIToolbarAppearance()
         bar.configureWithOpaqueBackground()
-        bar.backgroundColor = bg
+        bar.backgroundColor = barBg
         UIToolbar.appearance().standardAppearance = bar
     }
 
