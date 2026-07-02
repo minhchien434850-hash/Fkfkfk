@@ -886,6 +886,34 @@ def _migrate() -> None:
             except Exception:
                 pass
     _create_indexes()
+    _migrate_strip_ken_ids()
+
+
+def _migrate_strip_ken_ids() -> None:
+    """§6.1 — Làm sạch ID cũ: bỏ tiền tố 'KEN' khỏi public_id người dùng đã có.
+    An toàn: chỉ đổi khi phần còn lại toàn số VÀ chưa bị ai khác dùng (tránh trùng)."""
+    try:
+        with db() as c:
+            rows = c.execute(
+                "SELECT id, public_id FROM users WHERE public_id LIKE 'KEN%'"
+            ).fetchall()
+            changed = 0
+            for r in rows:
+                old = r["public_id"] or ""
+                new = old[3:]                      # bỏ 'KEN'
+                if not new.isdigit():
+                    continue                       # chỉ xử lý dạng KEN + số
+                dup = c.execute(
+                    "SELECT 1 FROM users WHERE public_id=? AND id!=?", (new, r["id"])
+                ).fetchone()
+                if dup:
+                    continue                       # trùng → giữ nguyên cho an toàn
+                c.execute("UPDATE users SET public_id=? WHERE id=?", (new, r["id"]))
+                changed += 1
+            if changed:
+                print(f"[§6.1] Đã bỏ tiền tố KEN khỏi {changed} public_id.")
+    except Exception as e:
+        print(f"[§6.1] Bỏ qua migration public_id: {e}")
 
 
 def _create_indexes() -> None:
@@ -1011,12 +1039,13 @@ def _grant_new_user_trial(c, uid: int, device_id: str) -> bool:
 
 
 def _gen_public_id(c) -> str:
+    # §6.1 — ID người dùng là SỐ THUẦN, KHÔNG còn tiền tố "KEN".
     import random
     for _ in range(20):
-        pid = "KEN" + "".join(random.choices("0123456789", k=8))
+        pid = "".join(random.choices("0123456789", k=9))
         if not c.execute("SELECT 1 FROM users WHERE public_id=?", (pid,)).fetchone():
             return pid
-    return "KEN" + str(int(time.time()))[-8:]
+    return str(int(time.time()))[-9:]
 
 
 def _ensure_public_id(c, uid) -> str:
@@ -7439,8 +7468,8 @@ def live_create(b: LiveCreateIn, request: Request, user=Depends(get_user)) -> di
     host = _live_host(request)
     hls_port = os.getenv("LIVE_HLS_PORT", "8080")
     rtmp_port = os.getenv("LIVE_RTMP_PORT", "1935")
-    # Tự sinh stream key + link HLS nếu người dùng không tự dán link
-    stream_key = f"ken{int(time.time())}{secrets.token_hex(3)}"
+    # Tự sinh stream key + link HLS nếu người dùng không tự dán link (§6.1: bỏ tiền tố "ken")
+    stream_key = f"live{int(time.time())}{secrets.token_hex(3)}"
     hls_url = (b.hls_url or "").strip()
     if not hls_url:
         hls_url = f"http://{host}:{hls_port}/hls/{stream_key}.m3u8"
