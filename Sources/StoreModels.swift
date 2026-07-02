@@ -2,12 +2,12 @@ import Foundation
 
 
 // ============================ APP BÁN HÀNG (STORE) ============================
-struct StoreMedia: Decodable, Hashable {
+struct StoreMedia: Codable, Hashable {
     let type: String   // image | video
     let url: String
 }
 
-struct StoreAppConfig: Decodable, Hashable {
+struct StoreAppConfig: Codable, Hashable {
     let logoName: String
     let logoUrl: String
     var logoType: String? = nil    // image | video (nil = tự đoán theo đuôi URL)
@@ -204,7 +204,7 @@ struct StoreContacts: Decodable, Equatable {
     let groups: [SocialLink]
 }
 
-struct StoreCategory: Identifiable, Decodable, Hashable {
+struct StoreCategory: Identifiable, Codable, Hashable {
     let id: Int
     let name: String
     let media: [StoreMedia]
@@ -217,7 +217,7 @@ struct StoreFolder: Identifiable, Decodable, Hashable {
     let media: [StoreMedia]
 }
 
-struct StorePrice: Identifiable, Decodable, Hashable {
+struct StorePrice: Identifiable, Codable, Hashable {
     let id: Int
     let label: String
     let amount: Int
@@ -226,7 +226,7 @@ struct StorePrice: Identifiable, Decodable, Hashable {
     var inStock: Bool { (available ?? 1) > 0 }
 }
 
-struct StoreProduct: Identifiable, Decodable, Hashable {
+struct StoreProduct: Identifiable, Codable, Hashable {
     let id: Int
     let folderId: Int
     let name: String
@@ -666,3 +666,33 @@ struct PushDeviceStats: Decodable {
     let totalUsers: Int
 }
 
+
+// ============================ Cache cửa hàng (hiện NGAY khi mở, làm mới ngầm) ============================
+// Lưu cấu hình + danh mục + toàn bộ sản phẩm xuống đĩa. Khi mở cửa hàng, nạp cache
+// hiển thị tức thì (không phải chờ mạng), rồi mới tải mới trong nền → hết lag/đợi.
+struct StoreCacheBundle: Codable {
+    var config: StoreAppConfig?
+    var categories: [StoreCategory]
+    var allProducts: [StoreProduct]
+    var productsByCategory: [Int: [StoreProduct]]
+}
+
+enum StoreCache {
+    private static var fileURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("store_cache_v1.json")
+    }
+
+    static func save(_ bundle: StoreCacheBundle) {
+        DispatchQueue.global(qos: .utility).async {
+            if let data = try? JSONEncoder().encode(bundle) {
+                try? data.write(to: fileURL, options: .atomic)
+            }
+        }
+    }
+
+    static func load() -> StoreCacheBundle? {
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return try? JSONDecoder().decode(StoreCacheBundle.self, from: data)
+    }
+}

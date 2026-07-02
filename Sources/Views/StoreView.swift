@@ -418,7 +418,14 @@ struct StoreView: View {
                 if let c = contacts { StoreContactsSheet(contacts: c) }
             }
             .task {
-                // Chỉ tải 1 lần khi mở cửa hàng. KHÔNG tự poll 30s nữa —
+                // HIỆN NGAY từ cache đĩa (không phải chờ mạng) → hết cảnh "đợi lâu mới vào".
+                if allProducts.isEmpty, let c = StoreCache.load() {
+                    if config == nil { config = c.config }
+                    if categories.isEmpty { categories = c.categories }
+                    allProducts = c.allProducts
+                    productsByCategory = c.productsByCategory
+                }
+                // Rồi mới tải mới trong nền. KHÔNG tự poll 30s nữa —
                 // việc gán lại dữ liệu theo chu kỳ làm lưới sản phẩm vẽ lại,
                 // ảnh nạp lại → giao diện bị "giật". Muốn cập nhật: vuốt để làm mới.
                 await reload()
@@ -1422,6 +1429,7 @@ struct StoreView: View {
             }
             if productsByCategory != groupedFast { productsByCategory = groupedFast }
             if allProducts != flat { allProducts = flat }
+            saveStoreCache()
             loadingProducts = false
             return
         }
@@ -1451,7 +1459,17 @@ struct StoreView: View {
         }
         if allProducts != products { allProducts = products }
         if productsByCategory != grouped { productsByCategory = grouped }
+        saveStoreCache()
         loadingProducts = false
+    }
+
+    // Lưu cache cửa hàng xuống đĩa để lần sau mở là hiện ngay.
+    private func saveStoreCache() {
+        StoreCache.save(StoreCacheBundle(
+            config: config,
+            categories: categories,
+            allProducts: allProducts,
+            productsByCategory: productsByCategory))
     }
 }
 

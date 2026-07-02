@@ -179,7 +179,7 @@ struct StoreAdminView: View {
                             HStack(spacing: 10) {
                                 // Thumbnail danh mục
                                 if let m = cat.media.first, m.type != "video", let url = URL(string: m.url) {
-                                    AsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
                                     placeholder: { Color(.tertiarySystemBackground) }
                                         .frame(width: 38, height: 38)
                                         .clipShape(RoundedRectangle(cornerRadius: 8))
