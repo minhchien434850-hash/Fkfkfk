@@ -761,7 +761,7 @@ struct MessengerHubView: View {
                             Slider(value: $autoDelaySec, in: 0.1...5.0, step: 0.1) { _ in
                                 speedPresetRaw = ""
                             }
-                            Text("Càng nhỏ gửi càng nhanh (0.1 = rất nhanh, 5.0 = chậm).")
+                            Text("Kéo về 0.1–1.0 = chế độ NHANH (gửi liền tay, không chờ kiểm tra). Trên 1.0 = chậm & an toàn hơn, tránh khoá nick.")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
@@ -1018,9 +1018,21 @@ struct MessengerHubView: View {
         let wv = HubWebViews.shared.view(for: p)
         let ins = (try? await wv.evaluateJavaScript(p.insertJS(text))) as? String
         if ins == "no_composer" { return false }
-        try? await Task.sleep(nanoseconds: 450_000_000)
+
+        // Tốc độ càng cao (thanh kéo về sát 0.1) thì chờ nội bộ càng ngắn.
+        let fast = autoDelaySec <= 1.0
+        // Đợi web bật nút Gửi sau khi chèn chữ
+        try? await Task.sleep(nanoseconds: fast ? 180_000_000 : 400_000_000)
         _ = try? await wv.evaluateJavaScript(p.clickSendJS)
-        try? await Task.sleep(nanoseconds: 900_000_000)
+
+        if fast {
+            // Chế độ nhanh: nút gửi đã được bấm ở lệnh riêng phía trên (chạy thật kể
+            // cả khi webview ẩn) → không chờ kiểm tra để gửi liền tay.
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            return true
+        }
+        // Chế độ chậm: chờ tin bay đi rồi kiểm tra ô soạn trống lại (báo trạng thái chính xác).
+        try? await Task.sleep(nanoseconds: 800_000_000)
         let v = (try? await wv.evaluateJavaScript(p.verifyEmptyJS)) as? String
         return v != "stuck"   // sent / gone / không rõ → coi như đã gửi; chỉ "stuck" là lỗi thật
     }
