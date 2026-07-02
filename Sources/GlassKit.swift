@@ -18,15 +18,17 @@ extension View {
         }
     }
 
-    // Nền thẻ navy cao cấp dùng chung cho các khối nội dung
+    // Nền thẻ — TỰ THÍCH ỨNG Sáng/Tối (§2.1). Viền theo màu hệ thống để thẻ trắng
+    // vẫn tách khỏi nền sáng; kèm bóng nhẹ cho nổi khối. Dynamic color đổi mượt khi chuyển Sáng/Tối.
     func kCard(_ radius: CGFloat = 16) -> some View {
         self
             .background(Theme.cardNavy)
             .clipShape(RoundedRectangle(cornerRadius: radius))
             .overlay(
                 RoundedRectangle(cornerRadius: radius)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    .stroke(Color(.separator).opacity(0.5), lineWidth: 0.5)
             )
+            .shadow(color: Color.black.opacity(0.06), radius: 5, x: 0, y: 2)
     }
 }
 
