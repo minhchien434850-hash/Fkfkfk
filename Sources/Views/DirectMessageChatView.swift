@@ -15,6 +15,7 @@ struct DirectMessageChatView: View {
 
     // Đa phương tiện
     @State private var photoItem: PhotosPickerItem? = nil
+    @State private var showPhotoPicker = false
     @State private var showFilePicker = false
     @State private var uploading = false
     @State private var fullscreenImageURL: String? = nil
@@ -123,6 +124,8 @@ struct DirectMessageChatView: View {
             guard let item else { return }
             Task { await changeMyAvatar(item) }
         }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem,
+                      matching: .any(of: [.images, .videos]))
         .sheet(isPresented: $showFilePicker) {
             DocumentPicker(contentTypes: [.item], allowsMultipleSelection: false, asCopy: true) { urls in
                 if let u = urls.first { Task { await handlePickedFile(u) } }
@@ -225,7 +228,9 @@ struct DirectMessageChatView: View {
             HStack(spacing: 10) {
                 // Menu đính kèm
                 Menu {
-                    PhotosPicker(selection: $photoItem, matching: .any(of: [.images, .videos])) {
+                    // KHÔNG đặt PhotosPicker trong Menu (SwiftUI lỗi: bấm là thoát/crash).
+                    // Dùng Button bật cờ rồi mở PhotosPicker bằng .photosPicker ở ngoài.
+                    Button { showPhotoPicker = true } label: {
                         Label("Ảnh / Video", systemImage: "photo.on.rectangle")
                     }
                     Button { showFilePicker = true } label: {
