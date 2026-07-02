@@ -93,7 +93,7 @@ struct DirectMessageChatView: View {
             }.ignoresSafeArea()
         }
         .fullScreenCover(item: Binding(
-            get: { fullscreenImageURL.map { IdentifiedURL(url: $0) } },
+            get: { fullscreenImageURL.map { ChatImageURL(url: $0) } },
             set: { fullscreenImageURL = $0?.url }
         )) { item in
             FullscreenImageViewer(urlString: item.url)
@@ -450,7 +450,7 @@ final class ChatAudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
 }
 
 // MARK: - Xem ảnh full màn hình (phóng to / lưu về máy)
-struct IdentifiedURL: Identifiable { let id = UUID(); let url: String }
+struct ChatImageURL: Identifiable { let id = UUID(); let url: String }
 
 struct FullscreenImageViewer: View {
     let urlString: String
