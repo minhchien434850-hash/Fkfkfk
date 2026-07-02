@@ -282,77 +282,162 @@ struct RemoteServerRootView: View {
 struct QuickConnectView: View {
     @ObservedObject var engine: RemoteServerEngine
 
+    private var canSubmit: Bool {
+        !engine.host.trimmingCharacters(in: .whitespaces).isEmpty
+            && !engine.username.trimmingCharacters(in: .whitespaces).isEmpty
+            && !engine.password.isEmpty
+            && engine.state != .connecting
+    }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 22) {
-                VStack(spacing: 8) {
-                    Image(systemName: "terminal.fill")
-                        .font(.system(size: 48)).foregroundStyle(.green)
-                    Text("Remote Server Tool").font(.title2.bold())
-                    Text("SSH · SFTP · Script Executor")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .padding(.top, 18)
-
-                VStack(alignment: .leading, spacing: 14) {
-                    fieldBlock("Host or IP Address") {
-                        TextField("e.g. 192.168.1.1", text: $engine.host)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .keyboardType(.URL)
-                    }
-                    fieldBlock("Port") {
-                        TextField("22", text: $engine.port).keyboardType(.numberPad)
-                    }
-                    fieldBlock("Username") {
-                        TextField("e.g. root", text: $engine.username)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    }
-                    fieldBlock("Password") {
-                        SecureField("Required", text: $engine.password)
-                    }
-                }
-
-                if let err = engine.errorMessage {
-                    Text(err)
-                        .font(.caption).foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Button {
-                    Task { await engine.connect() }
-                } label: {
-                    HStack(spacing: 8) {
-                        if engine.state == .connecting { ProgressView().tint(.white) }
-                        Text(engine.state == .connecting ? "Connecting..." : "Connect")
-                            .font(.headline)
-                    }
-                    .frame(maxWidth: .infinity).frame(height: 52)
-                    .background(LinearGradient(colors: [.blue, .purple],
-                                               startPoint: .leading, endPoint: .trailing))
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .disabled(engine.state == .connecting)
-
-                Text("Credentials are sent over HTTPS to your Kenios server, which connects to the target VPS on your behalf. They are not stored.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 20) {
+                heroSection
+                connectionFormSection
+                connectionStatusSection
+                actionSection
             }
-            .padding()
+            .padding(20)
         }
-        .navigationTitle("Remote Server")
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Quick Connect")
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private var heroSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Remote Server Tool")
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(.primary)
+            Text("Securely connect to your VPS and open the remote workspace.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var connectionFormSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Connection Information")
+                .font(.headline)
+
+            VStack(spacing: 14) {
+                labeledField("Host or IP Address", systemImage: "network") {
+                    TextField("192.168.1.10 or example.com", text: $engine.host)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .keyboardType(.URL)
+                }
+                labeledField("Port", systemImage: "number") {
+                    TextField("22", text: $engine.port).keyboardType(.numberPad)
+                }
+                labeledField("Username", systemImage: "person.fill") {
+                    TextField("root", text: $engine.username)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                labeledField("Password", systemImage: "lock.fill") {
+                    SecureField("Enter password", text: $engine.password)
+                }
+            }
+        }
+        .padding(18)
+        .background(Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var connectionStatusSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Connection Status")
+                .font(.headline)
+
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 12, height: 12)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(statusTitle)
+                        .font(.subheadline.weight(.semibold))
+                    if engine.state == .connected {
+                        Text("\(engine.username)@\(engine.host)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if let err = engine.errorMessage {
+                        Text(err)
+                            .font(.caption).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("No active connection.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+        }
+        .padding(18)
+        .background(Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var actionSection: some View {
+        VStack(spacing: 12) {
+            Button {
+                Task { await engine.connect() }
+            } label: {
+                HStack {
+                    if engine.state == .connecting { ProgressView().tint(.white) }
+                    Text(engine.state == .connecting ? "Connecting..." : "Connect and Open Workspace")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .padding(.vertical, 16)
+                .foregroundStyle(.white)
+                .background(
+                    LinearGradient(colors: canSubmit ? [.blue, .cyan] : [.gray, .gray],
+                                   startPoint: .leading, endPoint: .trailing),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSubmit)
+
+            Text("Credentials are sent over HTTPS to your Kenios server, which connects to the target VPS on your behalf. They are not stored.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var statusTitle: String {
+        switch engine.state {
+        case .idle:       return "Idle"
+        case .connecting: return "Connecting"
+        case .connected:  return "Connected"
+        case .failed:     return "Failed"
+        }
+    }
+
+    private var statusColor: Color {
+        switch engine.state {
+        case .idle:       return .gray
+        case .connecting: return .orange
+        case .connected:  return .green
+        case .failed:     return .red
+        }
+    }
+
     @ViewBuilder
-    private func fieldBlock<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label).font(.caption.bold()).foregroundStyle(.secondary)
-            content()
-                .padding(12)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+    private func labeledField<Content: View>(_ title: String, systemImage: String,
+                                             @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                content()
+            }
+            .padding(14)
+            .background(Color(.tertiarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 }
@@ -474,6 +559,11 @@ struct SFTPBrowserView: View {
                 Text(engine.currentPath)
                     .font(.caption.monospaced()).lineLimit(1).truncationMode(.head)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    Task { await engine.listDirectory(engine.currentPath) }
+                } label: {
+                    Image(systemName: "arrow.clockwise").font(.caption.bold())
+                }
                 Button(selectMode ? "Done" : "Select") {
                     selectMode.toggle()
                     if !selectMode { selected.removeAll() }
