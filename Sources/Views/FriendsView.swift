@@ -316,12 +316,12 @@ struct FriendsView: View {
                 Image(systemName: "qrcode").foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(store.t("ID của bạn", "Your ID")).font(.caption2).foregroundStyle(.secondary)
-                    Text(store.publicId.isEmpty ? "—" : store.publicId)
+                    Text(store.publicId.isEmpty ? "—" : store.displayPublicId)
                         .font(.subheadline.bold()).foregroundStyle(Theme.accent)
                 }
                 Spacer()
                 Button {
-                    UIPasteboard.general.string = store.publicId
+                    UIPasteboard.general.string = store.displayPublicId
                 } label: { Image(systemName: "doc.on.doc") }
             }
             .padding(12).kCard(12).padding(.horizontal)

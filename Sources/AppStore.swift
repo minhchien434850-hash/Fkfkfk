@@ -32,6 +32,13 @@ final class AppStore: ObservableObject {
     @Published var publicId: String = ""
     @Published var userId: Int?
 
+    // §6.1 — ID hiển thị: bỏ tiền tố "KEN" ở đầu (kể cả khi máy chủ chưa cập nhật).
+    var displayPublicId: String {
+        let p = publicId
+        if p.uppercased().hasPrefix("KEN") { return String(p.dropFirst(3)) }
+        return p
+    }
+
     // Bảo trì (admin bật → khoá app người dùng)
     @Published var maintenance: Bool = false
     @Published var maintenanceMessage: String = ""

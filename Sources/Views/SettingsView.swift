@@ -55,7 +55,7 @@ struct SettingsView: View {
                     HStack {
                         Text(store.t("ID của bạn", "Your ID"))
                         Spacer()
-                        Text(store.publicId.isEmpty ? "—" : store.publicId)
+                        Text(store.publicId.isEmpty ? "—" : store.displayPublicId)
                             .foregroundStyle(Theme.accent)
                             .textSelection(.enabled)
                     }
