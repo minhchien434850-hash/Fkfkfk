@@ -55,6 +55,7 @@ struct VideoEditorView: View {
     @State private var denoise = 0.0       // 0 ... 1 (0 = không giảm nhiễu)
     @State private var speed = 1.0         // 0.25 ... 4 (tốc độ phát; 1 = giữ nguyên)
     @State private var removeBg = false    // Xoá nền/tách người → làm mờ phông (Vision)
+    @State private var fadeInOut = false   // Chuyển cảnh: mờ dần vào/ra (fade in/out)
     // Phụ đề tự động (Auto Captions)
     @State private var captions: [CaptionSeg] = []
     @State private var burnCaptions = true
@@ -155,6 +156,13 @@ struct VideoEditorView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("Xoá nền / tách người").font(.caption)
                                 Text("Không cần phông xanh — tự làm mờ phông sau lưng người")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Toggle(isOn: $fadeInOut) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Chuyển cảnh mờ dần (Fade)").font(.caption)
+                                Text("Mở đầu & kết thúc video mờ dần vào/ra")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                         }
@@ -283,6 +291,10 @@ struct VideoEditorView: View {
         let speedChanged = abs(speed - 1.0) > 0.01
         let capOffset = speedChanged ? trimStart : 0.0
         let capSpeed = speedChanged ? speed : 1.0
+        // Fade in/out: mốc thời gian đầu/cuối trong hệ toạ độ khung xuất.
+        let fadeOn = fadeInOut
+        let outStart = speedChanged ? 0.0 : trimStart
+        let outEnd = speedChanged ? max(0.1, (trimEnd - trimStart) / speed) : trimEnd
         return AVVideoComposition(asset: asset) { request in
             let src = request.sourceImage
             var img = src.clampedToExtent()
@@ -379,6 +391,23 @@ struct VideoEditorView: View {
                     let ty = src.extent.minY + src.extent.height * 0.06 - cap.extent.minY
                     cap = cap.transformed(by: CGAffineTransform(translationX: tx, y: ty))
                     img = cap.composited(over: img)
+                }
+            }
+
+            // Chuyển cảnh mờ dần vào/ra: 0.6s đầu và 0.6s cuối làm tối dần về đen.
+            if fadeOn {
+                let ct = request.compositionTime.seconds
+                let fromStart = ct - outStart
+                let fromEnd = outEnd - ct
+                let dur = 0.6
+                let f = max(0.0, min(1.0, min(fromStart / dur, fromEnd / dur)))
+                if f < 0.999 {
+                    let m = CIFilter.colorMatrix()
+                    m.inputImage = img
+                    m.rVector = CIVector(x: CGFloat(f), y: 0, z: 0, w: 0)
+                    m.gVector = CIVector(x: 0, y: CGFloat(f), z: 0, w: 0)
+                    m.bVector = CIVector(x: 0, y: 0, z: CGFloat(f), w: 0)
+                    img = (m.outputImage ?? img).clampedToExtent()
                 }
             }
 
