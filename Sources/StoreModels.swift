@@ -75,6 +75,28 @@ struct StoreAppConfig: Decodable, Hashable {
 }
 
 
+// §7 — Đa người bán: cửa hàng cá nhân
+struct MyStore: Decodable, Hashable {
+    let id: Int
+    let ownerId: Int?
+    let name: String
+    let description: String?
+    let logoUrl: String?
+}
+struct MyStoreProduct: Decodable, Hashable, Identifiable {
+    let id: Int
+    let name: String
+    let description: String?
+    let price: Int
+    let media: [StoreMedia]?
+    let downloadUrl: String?
+}
+struct MyStoreResponse: Decodable {
+    let store: MyStore?
+    let products: [MyStoreProduct]?
+}
+
+
 // §9.1 — Cấu hình cảnh báo xâm nhập (Telegram)
 struct SecurityAlertConfig: Decodable {
     let enabled: Bool?

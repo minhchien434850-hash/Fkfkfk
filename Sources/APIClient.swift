@@ -552,6 +552,33 @@ struct APIClient {
         if let updateMessage { body["update_message"] = updateMessage }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
+    // §7 — Đa người bán: cửa hàng cá nhân
+    func getMyStore() async throws -> MyStoreResponse {
+        try decode(try await send("/my-store"))
+    }
+    func saveMyStore(name: String, description: String?, logoUrl: String?) async throws -> MyStore {
+        var body: [String: Any] = ["name": name]
+        if let description { body["description"] = description }
+        if let logoUrl { body["logo_url"] = logoUrl }
+        struct R: Decodable { let store: MyStore }
+        let r: R = try decode(try await send("/my-store", method: "POST", json: body))
+        return r.store
+    }
+    func saveMyProduct(id: Int?, name: String, description: String?, price: Int,
+                       media: [[String: String]], downloadUrl: String?) async throws {
+        var body: [String: Any] = ["name": name, "price": price, "media": media]
+        if let id { body["id"] = id }
+        if let description { body["description"] = description }
+        if let downloadUrl { body["download_url"] = downloadUrl }
+        _ = try await send("/my-store/products", method: "POST", json: body)
+    }
+    func deleteMyProduct(_ pid: Int) async throws {
+        _ = try await send("/my-store/products/\(pid)", method: "DELETE")
+    }
+    func getUserStore(_ sid: Int) async throws -> MyStoreResponse {
+        try decode(try await send("/u-store/\(sid)"))
+    }
+
     // §9.1 — Cảnh báo xâm nhập qua Telegram (admin)
     func getSecurityAlert() async throws -> SecurityAlertConfig {
         try decode(try await send("/admin/security-alert"))
