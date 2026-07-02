@@ -163,10 +163,16 @@ final class LoopingPlayerPool {
     func player(for url: URL) -> AVQueuePlayer {
         let key = url.absoluteString
         if let e = cache[key] { touch(key); return e.player }
-        let item = AVPlayerItem(url: url)
-        let p = AVQueuePlayer(playerItem: item)
+        // Timing chính xác → điểm nối vòng lặp khít, không lệch/giật.
+        let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = 1   // luôn nạp sẵn ~1s để lặp không khựng
+        // AVQueuePlayer RỖNG rồi để AVPlayerLooper tự nạp bản sao — vòng lặp liền mạch,
+        // không dừng khi hết video (khác với cách seek-to-zero gây giật hình).
+        let p = AVQueuePlayer()
         p.isMuted = true
         p.actionAtItemEnd = .none
+        p.automaticallyWaitsToMinimizeStalling = true   // chờ đủ buffer mới phát → mượt
         let looper = AVPlayerLooper(player: p, templateItem: item)
         cache[key] = (p, looper)
         order.append(key)
