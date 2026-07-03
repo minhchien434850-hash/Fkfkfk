@@ -1,6 +1,53 @@
 import Foundation
 
 extension APIClient {
+    // §IPA — Ký IPA ở máy chủ (zsign) rồi trả link cài OTA. Upload multipart qua file tạm
+    // để chịu được IPA lớn (không nạp hết vào RAM).
+    func signIPAOnServer(ipa: URL, p12: URL, password: String, provision: URL) async throws -> IPASignResult {
+        let boundary = "KeniosBoundary-\(UUID().uuidString)"
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("ipaup_\(UUID().uuidString).bin")
+        FileManager.default.createFile(atPath: tmp.path, contents: nil)
+        let out = try FileHandle(forWritingTo: tmp)
+        func put(_ s: String) throws { try out.write(contentsOf: Data(s.utf8)) }
+        func putFile(_ name: String, _ filename: String, _ url: URL, _ mime: String) throws {
+            try put("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\nContent-Type: \(mime)\r\n\r\n")
+            let inH = try FileHandle(forReadingFrom: url)
+            while true { let c = inH.readData(ofLength: 1_048_576); if c.isEmpty { break }; try out.write(contentsOf: c) }
+            try? inH.close()
+            try put("\r\n")
+        }
+        do {
+            try putFile("ipa", "app.ipa", ipa, "application/octet-stream")
+            try putFile("p12", "cert.p12", p12, "application/x-pkcs12")
+            try putFile("provision", "cert.mobileprovision", provision, "application/octet-stream")
+            try put("--\(boundary)\r\nContent-Disposition: form-data; name=\"password\"\r\n\r\n\(password)\r\n")
+            try put("--\(boundary)--\r\n")
+            try? out.close()
+        } catch { try? out.close(); try? FileManager.default.removeItem(at: tmp); throw error }
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        var req = URLRequest(url: try makeURL("/ipa/sign"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 1200
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data, resp) = try await URLSession.shared.upload(for: req, fromFile: tmp)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.message("Phản hồi không hợp lệ.") }
+        if !(200..<300).contains(http.statusCode) {
+            var detail = "Lỗi máy chủ (\(http.statusCode))."
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let d = obj["detail"] as? String { detail = d }
+            throw APIError.message(detail)
+        }
+        return try decode(data)
+    }
+    func adminGetIpaBase() async throws -> IPABaseStatus {
+        try decode(try await send("/admin/ipa/base"))
+    }
+    func adminSetIpaBase(_ base: String) async throws -> IPABaseStatus {
+        try decode(try await send("/admin/ipa/base", method: "POST", json: ["base": base]))
+    }
+
     // -- Admin: danh mục / thư mục / sản phẩm --
     func adminStoreSaveCategory(id: Int?, name: String, media: [[String: String]]) async throws -> IdResponse {
         var body: [String: Any] = ["name": name, "media": media]

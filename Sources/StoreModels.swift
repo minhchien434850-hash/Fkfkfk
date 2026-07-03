@@ -870,6 +870,18 @@ struct PushDeviceStats: Decodable {
     let totalUsers: Int
 }
 
+// Ký IPA ở máy chủ → link cài OTA
+struct IPASignResult: Decodable {
+    let installUrl: String
+    let ipaUrl: String
+    let title: String
+    let bundleId: String
+}
+struct IPABaseStatus: Decodable {
+    let base: String
+    let hasZsign: Bool
+}
+
 // Trạng thái cấu hình APNs (admin nhập trong app)
 struct ApnsConfigStatus: Decodable {
     let keyId: String

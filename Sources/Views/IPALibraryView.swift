@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 // ============================================================================
 //  Kho IPA — gom file .ipa vào app, rồi mở sang ESign để KÝ + CÀI.
@@ -113,6 +114,25 @@ struct IPALibraryView: View {
 
     @State private var showImporter = false
     @State private var downloadURL = ""
+    // §IPA — ký ở máy chủ (zsign) + cài OTA
+    @State private var signingId: UUID?
+    @State private var signMsg: String?
+    // Admin cấu hình domain HTTPS + trạng thái zsign
+    @State private var ipaBase = ""
+    @State private var hasZsign = false
+    @State private var savingBase = false
+    @State private var baseMsg: String?
+
+    // Chứng chỉ đã nhập (ở màn "Chứng chỉ ký") — cùng app, cùng Documents.
+    private var certDocs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
+    private var certP12: URL { certDocs.appendingPathComponent("cert.p12") }
+    private var certProvision: URL { certDocs.appendingPathComponent("cert.mobileprovision") }
+    private var certPassword: String { Keychain.load("cert_p12_password") ?? "" }
+    private var certReady: Bool {
+        FileManager.default.fileExists(atPath: certP12.path)
+            && FileManager.default.fileExists(atPath: certProvision.path)
+            && !certPassword.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -144,6 +164,34 @@ struct IPALibraryView: View {
                             else { Image(systemName: "arrow.down.circle.fill") }
                         }
                         .disabled(ipa.downloading || downloadURL.isEmpty)
+                    }
+                }
+
+                // Cấu hình ký ở máy chủ (chỉ admin) — cần domain HTTPS cho cài OTA
+                if store.isAdmin {
+                    Section {
+                        HStack {
+                            Image(systemName: hasZsign ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(hasZsign ? .green : .orange)
+                            Text(hasZsign ? store.t("Máy chủ đã có zsign", "Server has zsign")
+                                          : store.t("Máy chủ chưa cài zsign (chạy capnhat-vps.sh)",
+                                                    "Server missing zsign (run capnhat-vps.sh)")).font(.caption)
+                        }
+                        TextField("https://ten-mien-cua-ban.com", text: $ipaBase)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        Button {
+                            Task { await saveBase() }
+                        } label: {
+                            HStack { if savingBase { ProgressView().padding(.trailing, 4) }
+                                Text(store.t("Lưu domain HTTPS", "Save HTTPS domain")).bold() }
+                        }.disabled(savingBase)
+                        if let baseMsg { Text(baseMsg).font(.caption).foregroundStyle(.secondary) }
+                    } header: {
+                        Text(store.t("Ký ở máy chủ — cấu hình (Admin)", "Server signing — config (Admin)"))
+                    } footer: {
+                        Text(store.t("Cài OTA BẮT BUỘC domain HTTPS có chứng chỉ TLS thật (vd Let's Encrypt) trỏ về máy chủ KENIOS. IP thường không dùng được.",
+                                     "OTA install REQUIRES an HTTPS domain with a real TLS cert (e.g. Let's Encrypt) pointing to the KENIOS server. A bare IP won't work."))
+                            .font(.caption2)
                     }
                 }
 
@@ -184,9 +232,32 @@ struct IPALibraryView: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
+                                // Ký ngay ở máy chủ + cài OTA (không cần eSign)
+                                Button {
+                                    Task { await signOnServer(item) }
+                                } label: {
+                                    HStack {
+                                        if signingId == item.id { ProgressView().tint(.white).padding(.trailing, 4) }
+                                        Label(store.t("Ký & cài trên máy chủ (OTA)", "Sign & install on server (OTA)"),
+                                              systemImage: "checkmark.seal.fill").font(.caption.bold())
+                                    }
+                                    .frame(maxWidth: .infinity).frame(height: 38)
+                                    .background(certReady ? Color.green : Color.gray).foregroundStyle(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(signingId != nil || !certReady)
+                                if !certReady {
+                                    Text(store.t("Cần nhập chứng chỉ ở 'Chứng chỉ ký' trước (p12 + provision + mật khẩu).",
+                                                 "Import your cert in 'Signing Cert' first (p12 + provision + password)."))
+                                        .font(.caption2).foregroundStyle(.orange)
+                                }
                             }
                             .padding(.vertical, 4)
                         }
+                    }
+                    if let signMsg {
+                        Section { Text(signMsg).font(.caption).foregroundStyle(.secondary) }
                     }
                 }
 
@@ -207,6 +278,11 @@ struct IPALibraryView: View {
             .navigationTitle(store.t("Kho IPA", "IPA Library"))
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { ipa.refresh() }
+            .task {
+                if store.isAdmin, let s = try? await store.api.adminGetIpaBase() {
+                    ipaBase = s.base; hasZsign = s.hasZsign
+                }
+            }
             // Dùng DocumentPicker (UIKit) thay .fileImporter: .fileImporter hay bị "Mở" mờ,
             // chọn được file nhưng bấm Mở không lên. DocumentPicker asCopy hiện nút Mở dùng được.
             .sheet(isPresented: $showImporter) {
@@ -236,5 +312,39 @@ struct IPALibraryView: View {
         f.allowedUnits = [.useKB, .useMB, .useGB]
         f.countStyle = .file
         return f.string(fromByteCount: Int64(bytes))
+    }
+
+    private func saveBase() async {
+        savingBase = true; baseMsg = nil
+        defer { savingBase = false }
+        do {
+            let s = try await store.api.adminSetIpaBase(ipaBase.trimmingCharacters(in: .whitespaces))
+            ipaBase = s.base; hasZsign = s.hasZsign
+            baseMsg = s.base.hasPrefix("https://") ? store.t("Đã lưu ✅", "Saved ✅")
+                                                   : store.t("Cần địa chỉ bắt đầu bằng https://", "Address must start with https://")
+        } catch { baseMsg = error.localizedDescription }
+    }
+
+    // Ký IPA ở máy chủ (dùng chứng chỉ đã nhập) → mở link cài OTA.
+    private func signOnServer(_ item: IPAFile) async {
+        guard certReady else {
+            signMsg = store.t("Chưa có chứng chỉ. Vào 'Chứng chỉ ký' nhập p12 + provision + mật khẩu.",
+                              "No certificate. Go to 'Signing Cert' and import p12 + provision + password.")
+            return
+        }
+        signingId = item.id; signMsg = store.t("Đang tải lên & ký ở máy chủ...", "Uploading & signing on server...")
+        defer { signingId = nil }
+        do {
+            let r = try await store.api.signIPAOnServer(
+                ipa: item.url, p12: certP12, password: certPassword, provision: certProvision)
+            signMsg = store.t("Ký xong: \(r.title). Đang mở cài đặt...", "Signed: \(r.title). Opening install...")
+            if let u = URL(string: r.installUrl) {
+                await MainActor.run { UIApplication.shared.open(u) }
+            } else {
+                signMsg = store.t("Link cài không hợp lệ.", "Invalid install link.")
+            }
+        } catch {
+            signMsg = store.t("Ký thất bại: ", "Sign failed: ") + error.localizedDescription
+        }
     }
 }

@@ -6705,6 +6705,116 @@ def media_serve(fid: int, background_tasks: BackgroundTasks):
         return FileResponse(tmp, media_type=row["mime"] or "image/jpeg")
     raise HTTPException(status_code=404, detail="Không có nội dung ảnh.")
 
+# ======================== Ký IPA ở máy chủ (zsign) + cài OTA (itms-services) ========================
+_IPA_DIR = os.path.join(os.path.dirname(os.path.abspath(UPLOAD_DIR)) or ".", "signed_ipa")
+try: os.makedirs(_IPA_DIR, exist_ok=True)
+except Exception: pass
+
+def _ipa_base_url() -> str:
+    # Domain HTTPS admin cấu hình (BẮT BUỘC cho cài OTA). Fallback biến môi trường.
+    return (get_setting("ipa_sign_base", "") or os.getenv("IPA_SIGN_BASE", "")).rstrip("/")
+
+def _extract_ipa_meta(ipa_path: str) -> dict:
+    import zipfile, plistlib
+    try:
+        with zipfile.ZipFile(ipa_path) as z:
+            info_name = next((n for n in z.namelist()
+                              if n.startswith("Payload/") and n.endswith(".app/Info.plist")
+                              and n.count("/") == 2), None)
+            if not info_name:
+                return {}
+            pl = plistlib.loads(z.read(info_name))
+            return {"bundle_id": pl.get("CFBundleIdentifier", ""),
+                    "version": pl.get("CFBundleShortVersionString", "1.0"),
+                    "title": pl.get("CFBundleDisplayName") or pl.get("CFBundleName") or "App"}
+    except Exception:
+        return {}
+
+def _ipa_manifest(base: str, token: str, meta: dict) -> str:
+    return (f'<?xml version="1.0" encoding="UTF-8"?>\n'
+            f'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            f'<plist version="1.0"><dict><key>items</key><array><dict>'
+            f'<key>assets</key><array><dict>'
+            f'<key>kind</key><string>software-package</string>'
+            f'<key>url</key><string>{base}/ipa/dl/{token}.ipa</string>'
+            f'</dict></array>'
+            f'<key>metadata</key><dict>'
+            f'<key>bundle-identifier</key><string>{meta.get("bundle_id","com.unknown.app")}</string>'
+            f'<key>bundle-version</key><string>{meta.get("version","1.0")}</string>'
+            f'<key>kind</key><string>software</string>'
+            f'<key>title</key><string>{meta.get("title","App")}</string>'
+            f'</dict></dict></array></dict></plist>')
+
+@app.post("/ipa/sign")
+async def ipa_sign(ipa: UploadFile = FastAPIFile(...),
+                   p12: UploadFile = FastAPIFile(...),
+                   provision: UploadFile = FastAPIFile(...),
+                   password: str = Form(""),
+                   user=Depends(get_user)) -> dict[str, Any]:
+    if not shutil.which("zsign"):
+        raise HTTPException(status_code=503, detail="Máy chủ chưa cài zsign. Chạy lại capnhat-vps.sh trên VPS.")
+    base = _ipa_base_url()
+    if not base.startswith("https://"):
+        raise HTTPException(status_code=400,
+            detail="Chưa đặt domain HTTPS để cài OTA. Vào Quản trị → đặt 'Địa chỉ HTTPS ký IPA' (vd https://ten-mien.com).")
+    token = secrets.token_hex(8)
+    work = os.path.join(_IPA_DIR, "w_" + token)
+    os.makedirs(work, exist_ok=True)
+    in_ipa = os.path.join(work, "in.ipa")
+    p12_path = os.path.join(work, "cert.p12")
+    prov_path = os.path.join(work, "prov.mobileprovision")
+    out_ipa = os.path.join(_IPA_DIR, f"{token}.ipa")
+    try:
+        for up, path in ((ipa, in_ipa), (p12, p12_path), (provision, prov_path)):
+            with open(path, "wb") as f:
+                while True:
+                    chunk = await up.read(1024 * 1024)
+                    if not chunk: break
+                    f.write(chunk)
+        try:
+            r = subprocess.run(["zsign", "-k", p12_path, "-p", password, "-m", prov_path,
+                                "-o", out_ipa, "-z", "9", in_ipa],
+                               capture_output=True, text=True, timeout=900)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Chạy zsign lỗi: {e}")
+        if not os.path.exists(out_ipa) or os.path.getsize(out_ipa) < 1000:
+            msg = ((r.stderr or "") + (r.stdout or ""))[-400:]
+            raise HTTPException(status_code=400,
+                detail="Ký thất bại (mật khẩu/cert/provision sai, hoặc IPA không hợp lệ). " + msg)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)   # luôn xoá cert + input
+    meta = _extract_ipa_meta(out_ipa)
+    with open(os.path.join(_IPA_DIR, f"{token}.plist"), "w") as f:
+        f.write(_ipa_manifest(base, token, meta))
+    manifest_url = f"{base}/ipa/dl/{token}.plist"
+    return {"install_url": f"itms-services://?action=download-manifest&url={manifest_url}",
+            "ipa_url": f"{base}/ipa/dl/{token}.ipa", "manifest_url": manifest_url,
+            "title": meta.get("title", "App"), "bundle_id": meta.get("bundle_id", "")}
+
+@app.get("/ipa/dl/{name}")
+def ipa_download(name: str):
+    safe = os.path.basename(name)
+    if safe != name or ".." in name:
+        raise HTTPException(status_code=404, detail="Không hợp lệ.")
+    path = os.path.join(_IPA_DIR, safe)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Không tìm thấy.")
+    if safe.endswith(".plist"):
+        return FileResponse(path, media_type="application/xml")
+    return FileResponse(path, media_type="application/octet-stream", filename=safe)
+
+class IpaBaseIn(BaseModel):
+    base: str
+
+@app.get("/admin/ipa/base")
+def admin_get_ipa_base(admin=Depends(get_admin)) -> dict[str, Any]:
+    return {"base": _ipa_base_url(), "has_zsign": bool(shutil.which("zsign"))}
+
+@app.post("/admin/ipa/base")
+def admin_set_ipa_base(b: IpaBaseIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    set_setting("ipa_sign_base", (b.base or "").strip().rstrip("/"))
+    return {"ok": True, "base": _ipa_base_url(), "has_zsign": bool(shutil.which("zsign"))}
+
 
 # ======================== VÍ CỬA HÀNG (tách biệt thanh toán app chính) ========================
 def _topup_bonus_percent() -> int:

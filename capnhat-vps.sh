@@ -31,6 +31,22 @@ else
   pip install -q "asyncssh>=2.14" 2>/dev/null || true
 fi
 
+# Cài zsign (KÝ IPA ở máy chủ để cài OTA) — nếu thiếu thì build.
+echo "==> Đảm bảo zsign (ký IPA)..."
+if ! command -v zsign >/dev/null 2>&1; then
+  apt-get install -y -qq git g++ pkg-config libssl-dev zip unzip >/dev/null 2>&1 || true
+  rm -rf /opt/zsign
+  git clone -q --depth 1 https://github.com/zhlynn/zsign.git /opt/zsign 2>/dev/null || true
+  ( cd /opt/zsign/build/linux 2>/dev/null && make >/dev/null 2>&1 && cp -f zsign /usr/local/bin/zsign ) \
+    || ( cd /opt/zsign 2>/dev/null && g++ *.cpp common/*.cpp -o /usr/local/bin/zsign -lcrypto -std=c++14 -O3 -I. >/dev/null 2>&1 ) \
+    || true
+  command -v zsign >/dev/null 2>&1 \
+    && echo "    ✓ zsign sẵn sàng." \
+    || echo "    ⚠️ Build zsign chưa được — cài thủ công (github.com/zhlynn/zsign) rồi để vào /usr/local/bin/zsign."
+else
+  echo "    ✓ zsign đã có."
+fi
+
 # Cài thư viện PUSH APNs (gửi thông báo cả khi tắt app) — nếu thiếu thì cài.
 echo "==> Đảm bảo thư viện APNs (PyJWT + httpx[http2])..."
 if [ -x "$WORK/venv/bin/pip" ]; then
