@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 struct FriendsView: View {
     @EnvironmentObject var store: AppStore
@@ -8,6 +9,7 @@ struct FriendsView: View {
     @State private var myAvatar = ""
     @State private var avatarItem: PhotosPickerItem?
     @State private var uploadingAvatar = false
+    @State private var avatarError: String?
 
     @State private var selectedSegment = 0 // 0: Bạn bè, 1: Lời mời, 2: Tìm kiếm
     @State private var searchQuery = ""
@@ -102,9 +104,13 @@ struct FriendsView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(store.t("Ảnh đại diện của bạn", "Your avatar")).font(.subheadline.bold())
-                Text(store.t("Bạn bè sẽ thấy ảnh mới khi làm mới trò chuyện.",
-                             "Friends see the new photo when the chat refreshes."))
-                    .font(.caption2).foregroundStyle(.secondary)
+                if let avatarError {
+                    Text(avatarError).font(.caption2).foregroundStyle(.red)
+                } else {
+                    Text(store.t("Bạn bè sẽ thấy ảnh mới khi làm mới trò chuyện.",
+                                 "Friends see the new photo when the chat refreshes."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
             Spacer()
             PhotosPicker(selection: $avatarItem, matching: .images) {
@@ -130,17 +136,50 @@ struct FriendsView: View {
 
     private func uploadAvatar(_ item: PhotosPickerItem) async {
         uploadingAvatar = true
+        avatarError = nil
         defer { uploadingAvatar = false; avatarItem = nil }
-        guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty else { return }
+        guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty,
+              let img = UIImage(data: data) else {
+            avatarError = store.t("Không đọc được ảnh đã chọn. Thử ảnh khác.",
+                                  "Couldn't read the selected image. Try another.")
+            return
+        }
+        // Thu nhỏ + nén JPEG (ảnh gốc HEIC/full-size rất lớn → hay lỗi tải lên).
+        let jpeg = Self.jpegDownsized(img, maxDimension: 1024, quality: 0.85)
+        guard !jpeg.isEmpty else {
+            avatarError = store.t("Không nén được ảnh.", "Couldn't compress the image."); return
+        }
         do {
             let url = try await store.api.mediaUpload(
-                dataBase64: data.base64EncodedString(), mime: "image/jpeg",
+                dataBase64: jpeg.base64EncodedString(), mime: "image/jpeg",
                 name: "avatar_\(Int(Date().timeIntervalSince1970)).jpg")
             _ = try await store.api.updateProfile(publicId: nil, avatarUrl: url, bio: nil)
             myAvatar = url
+            avatarError = nil
         } catch {
-            // Lỗi mạng/tải lên — giữ ảnh cũ, người dùng thử lại.
+            let raw = error.localizedDescription.lowercased()
+            if raw.contains("not found") || raw.contains("404") {
+                avatarError = store.t("Máy chủ chưa hỗ trợ đổi ảnh. Cập nhật máy chủ (capnhat-vps.sh) rồi thử lại.",
+                                      "Server doesn't support avatar yet. Update the server and retry.")
+            } else if raw.contains("large") || raw.contains("413") {
+                avatarError = store.t("Ảnh quá lớn. Chọn ảnh nhỏ hơn.", "Image too large. Pick a smaller one.")
+            } else {
+                avatarError = store.t("Đổi ảnh thất bại: ", "Change failed: ") + error.localizedDescription
+            }
         }
+    }
+
+    // Thu nhỏ ảnh về cạnh dài tối đa + nén JPEG → tải nhanh, tránh payload quá lớn.
+    private static func jpegDownsized(_ image: UIImage, maxDimension: CGFloat, quality: CGFloat) -> Data {
+        let w = image.size.width, h = image.size.height
+        let scale = min(1, maxDimension / max(w, h))
+        let target = CGSize(width: max(1, w * scale), height: max(1, h * scale))
+        let fmt = UIGraphicsImageRendererFormat.default()
+        fmt.opaque = true; fmt.scale = 1
+        let out = UIGraphicsImageRenderer(size: target, format: fmt).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+        return out.jpegData(compressionQuality: quality) ?? (image.jpegData(compressionQuality: quality) ?? Data())
     }
 
     // MARK: - Friends Pane
