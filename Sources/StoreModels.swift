@@ -635,12 +635,6 @@ struct AsmResponse: Decodable {
     let result: String
 }
 
-struct SSHResultResponse: Decodable {
-    let stdout: String
-    let stderr: String
-    let exitCode: Int
-}
-
 struct HTTPTestResponse: Decodable {
     let status: Int
     let headers: [String: String]

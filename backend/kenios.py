@@ -8853,58 +8853,6 @@ async def code_asm(b: CodeAsmIn, user=Depends(get_user)) -> dict[str, Any]:
     return {"result": reply}
 
 
-# ======================== DevOps & DevOps Tools ========================
-class SSHIn(BaseModel):
-    host: str
-    username: str
-    password: str
-    command: str
-
-
-@app.post("/run/ssh")
-def run_ssh(b: SSHIn, user=Depends(get_user)) -> dict[str, Any]:
-    """Kết nối SSH vào VPS và chạy câu lệnh."""
-    host = b.host.strip()
-    username = b.username.strip()
-    password = b.password.strip()
-    command = b.command.strip()
-    
-    if not (host and username and command):
-        raise HTTPException(status_code=400, detail="Thiếu tham số kết nối SSH (Host, Username, Command).")
-    
-    # Fallback for mock/test IPs
-    if "127.0.0.1" in host or "localhost" in host or "192.168" in host or "FAKE" in host.upper():
-        return {
-            "stdout": f"[MOCK SSH] Executing on {username}@{host}:\n$ {command}\nSuccess: mock output here.",
-            "stderr": "",
-            "exitCode": 0
-        }
-        
-    try:
-        import paramiko
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(host, username=username, password=password, timeout=10)
-        stdin, stdout, stderr = ssh.exec_command(command, timeout=30)
-        out = stdout.read().decode('utf-8', errors='replace')
-        err = stderr.read().decode('utf-8', errors='replace')
-        code = stdout.channel.recv_exit_status()
-        ssh.close()
-        return {"stdout": out, "stderr": err, "exitCode": code}
-    except ImportError:
-        import subprocess
-        try:
-            cmd = ["sshpass", "-p", password, "ssh", "-o", "StrictHostKeyChecking=no", f"{username}@{host}", command]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            return {"stdout": r.stdout, "stderr": r.stderr, "exitCode": r.returncode}
-        except Exception:
-            raise HTTPException(
-                status_code=400, 
-                detail="Thư viện 'paramiko' chưa được cài trên server VPS. Hãy chạy lệnh 'pip install paramiko' trên VPS hoặc chạy lại start-vps.sh."
-            )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Lỗi kết nối SSH: {e}")
-
 
 class HTTPIn(BaseModel):
     url: str

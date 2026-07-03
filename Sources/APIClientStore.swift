@@ -460,17 +460,6 @@ extension APIClient {
         return try decode(try await send("/code/asm", method: "POST", json: body))
     }
 
-    // ---- DevOps & DevOps Tools ----
-    func runSSH(host: String, user: String, pass: String, cmd: String) async throws -> SSHResultResponse {
-        let body: [String: Any] = [
-            "host": host,
-            "username": user,
-            "password": pass,
-            "command": cmd
-        ]
-        return try decode(try await send("/run/ssh", method: "POST", json: body))
-    }
-
     func runHTTP(url: String, method: String, headers: [String: String], body: String) async throws -> HTTPTestResponse {
         let body: [String: Any] = [
             "url": url,
