@@ -163,16 +163,22 @@ final class LoopingPlayerPool {
     func player(for url: URL) -> AVQueuePlayer {
         let key = url.absoluteString
         if let e = cache[key] { touch(key); return e.player }
+        // Ưu tiên bản ĐÃ TẢI VỀ MÁY → không phụ thuộc mạng, không bị đứng chờ buffer.
+        let local = Self.cachedFileURL(for: url)
+        let isLocal = local != nil
+        if !isLocal { Self.prefetch(url) }   // tải ngầm để lần sau mượt hẳn
+        let playURL = local ?? url
         // Timing chính xác → điểm nối vòng lặp khít, không lệch/giật.
-        let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        let asset = AVURLAsset(url: playURL, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = 1   // luôn nạp sẵn ~1s để lặp không khựng
+        item.preferredForwardBufferDuration = isLocal ? 0 : 5   // remote: nạp sẵn nhiều để đỡ stall
         // AVQueuePlayer RỖNG rồi để AVPlayerLooper tự nạp bản sao — vòng lặp liền mạch,
         // không dừng khi hết video (khác với cách seek-to-zero gây giật hình).
         let p = AVQueuePlayer()
         p.isMuted = true
         p.actionAtItemEnd = .none
-        p.automaticallyWaitsToMinimizeStalling = true   // chờ đủ buffer mới phát → mượt
+        // File local: phát ngay cho mượt; remote: chờ đủ buffer để đỡ khựng.
+        p.automaticallyWaitsToMinimizeStalling = !isLocal
         let looper = AVPlayerLooper(player: p, templateItem: item)
         cache[key] = (p, looper)
         order.append(key)
@@ -186,12 +192,47 @@ final class LoopingPlayerPool {
     private func touch(_ key: String) {
         if let i = order.firstIndex(of: key) { order.remove(at: i); order.append(key) }
     }
+
+    // ---- Cache video nền xuống đĩa (Caches) để lặp không phụ thuộc mạng ----
+    private static let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    private static var downloading = Set<String>()
+
+    private static func stableName(_ s: String) -> String {
+        var h: UInt64 = 1469598103934665603
+        for b in s.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
+        return String(h, radix: 16)
+    }
+    private static func cacheFile(for url: URL) -> URL {
+        let ext = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
+        return cachesDir.appendingPathComponent("kenios_vbg_\(stableName(url.absoluteString)).\(ext)")
+    }
+    static func cachedFileURL(for url: URL) -> URL? {
+        guard url.scheme?.hasPrefix("http") == true else { return url }   // vốn đã là file local
+        let f = cacheFile(for: url)
+        return FileManager.default.fileExists(atPath: f.path) ? f : nil
+    }
+    private static func prefetch(_ url: URL) {
+        guard url.scheme?.hasPrefix("http") == true else { return }
+        let key = url.absoluteString
+        if downloading.contains(key) { return }
+        downloading.insert(key)
+        URLSession.shared.downloadTask(with: url) { tmp, resp, _ in
+            defer { downloading.remove(key) }
+            guard let tmp,
+                  let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { return }
+            let dest = cacheFile(for: url)
+            try? FileManager.default.removeItem(at: dest)
+            try? FileManager.default.moveItem(at: tmp, to: dest)
+        }.resume()
+    }
 }
 
 // Video nền lặp vô hạn, tắt tiếng — dùng player từ bể chứa (không tải lại → không chớp đen).
 final class LoopingPlayerUIView: UIView {
     private var player: AVQueuePlayer?
     private var activeObserver: NSObjectProtocol?
+    private var stallObserver: NSObjectProtocol?
+    private var watchdog: Timer?
     override class var layerClass: AnyClass { AVPlayerLayer.self }
     private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 
@@ -212,6 +253,17 @@ final class LoopingPlayerUIView: UIView {
                 if self.playerLayer.player !== self.player { self.playerLayer.player = self.player }
                 self.player?.play()
             }
+        // Bị NGHẼN buffer (stall) → phát lại NGAY khi có thể, không để đứng chờ lâu.
+        stallObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemPlaybackStalled,
+            object: nil, queue: .main) { [weak self] _ in self?.player?.play() }
+        // Watchdog: nếu vì lý do nào đó player dừng khi đang hiển thị → tự chạy lại.
+        let wd = Timer(timeInterval: 0.7, repeats: true) { [weak self] _ in
+            guard let self, self.window != nil, let p = self.player else { return }
+            if p.timeControlStatus != .playing { p.play() }
+        }
+        RunLoop.main.add(wd, forMode: .common)
+        watchdog = wd
     }
 
     override func didMoveToWindow() {
@@ -226,6 +278,8 @@ final class LoopingPlayerUIView: UIView {
     deinit {
         // KHÔNG huỷ player — bể chứa giữ nó sống để lần sau quay lại không bị chớp đen.
         if let obs = activeObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = stallObserver { NotificationCenter.default.removeObserver(obs) }
+        watchdog?.invalidate()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
 }
