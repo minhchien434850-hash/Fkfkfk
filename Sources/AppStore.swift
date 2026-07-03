@@ -97,7 +97,15 @@ final class AppStore: ObservableObject {
     }
 
     init() {
-        let savedURL = d.string(forKey: "baseURL") ?? ""
+        var savedURL = d.string(forKey: "baseURL") ?? ""
+        // Nâng cấp máy chủ cũ (IP HTTP) → domain HTTPS mới cho khách hàng đang dùng app,
+        // để không ai phải nhập lại máy chủ. Chỉ đổi đúng địa chỉ IP cũ đã biết.
+        let legacyHosts = ["http://103.131.56.11", "https://103.131.56.11",
+                           "http://103.131.56.11/", "https://103.131.56.11/"]
+        if legacyHosts.contains(savedURL) {
+            savedURL = Config.defaultServerURL
+            d.set(savedURL, forKey: "baseURL")
+        }
         baseURL = savedURL.isEmpty ? Config.defaultServerURL : savedURL
         serverType = d.string(forKey: "serverType") ?? Config.defaultServerType
         username = d.string(forKey: "username")

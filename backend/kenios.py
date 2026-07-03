@@ -6711,8 +6711,10 @@ try: os.makedirs(_IPA_DIR, exist_ok=True)
 except Exception: pass
 
 def _ipa_base_url() -> str:
-    # Domain HTTPS admin cấu hình (BẮT BUỘC cho cài OTA). Fallback biến môi trường.
-    return (get_setting("ipa_sign_base", "") or os.getenv("IPA_SIGN_BASE", "")).rstrip("/")
+    # Domain HTTPS cho cài OTA. Ưu tiên cấu hình admin → biến môi trường →
+    # mặc định app.kenios.store (đã dựng sẵn) để KHÔNG cần cấu hình vẫn ký/cài được.
+    return (get_setting("ipa_sign_base", "") or os.getenv("IPA_SIGN_BASE", "")
+            or "https://app.kenios.store").rstrip("/")
 
 def _extract_ipa_meta(ipa_path: str) -> dict:
     import zipfile, plistlib
