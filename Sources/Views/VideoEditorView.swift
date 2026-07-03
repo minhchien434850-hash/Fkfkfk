@@ -860,7 +860,7 @@ struct VideoEditorView: View {
             return centered(CGAffineTransform(rotationAngle: CGFloat(x) * 0.5))
         case 7: // Nhiễu số (glitch) — vỡ hạt + lệch màu
             let p = CIFilter.pixellate(); p.inputImage = img
-            p.center = CIVector(x: cx, y: cy); p.scale = Float(1 + e * 22)
+            p.center = CGPoint(x: cx, y: cy); p.scale = Float(1 + e * 22)
             var o = p.outputImage ?? img
             let h = CIFilter.hueAdjust(); h.inputImage = o; h.angle = Float(x) * 1.5
             o = h.outputImage ?? o
