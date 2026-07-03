@@ -152,19 +152,7 @@ struct AdminView: View {
                         .font(.caption2)
                 }
 
-                // §7 Đợt 4 — Duyệt rút tiền người bán (tài chính nền tảng)
-                Section {
-                    NavigationLink {
-                        AdminWithdrawalsView()
-                    } label: {
-                        Label(store.t("Duyệt rút tiền người bán", "Seller withdrawals"),
-                              systemImage: "banknote")
-                    }
-                } footer: {
-                    Text(store.t("Xem và chi/từ chối yêu cầu rút tiền của người bán. Từ chối sẽ tự hoàn tiền vào ví họ.",
-                                 "Review and pay/reject seller withdrawal requests. Rejecting auto-refunds their wallet."))
-                        .font(.caption2)
-                }
+                // ("Duyệt rút tiền người bán" đã gỡ theo yêu cầu — cùng với cửa hàng người bán.)
 
                 // §9.1 — Cảnh báo xâm nhập qua Telegram
                 Section {
@@ -511,12 +499,29 @@ struct AppNoticesEditor: View {
     @State private var bannerType = "image"
     @State private var bannerUrl = ""
     @State private var loaded = false
+    @State private var loadError = false
     @State private var saving = false
     @State private var message: String?
     @State private var isError = false
 
     var body: some View {
         Form {
+            if !loaded {
+                Section {
+                    if loadError {
+                        Label(store.t("Không tải được cấu hình từ máy chủ.",
+                                      "Couldn't load config from server."), systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                        Button(store.t("Thử lại", "Retry")) { Task { await load() } }.font(.caption.bold())
+                    } else {
+                        HStack { ProgressView(); Text(store.t("Đang tải...", "Loading...")).font(.caption) }
+                    }
+                } footer: {
+                    Text(store.t("Cần máy chủ bật (đã chạy capnhat-vps.sh). Chưa tải được thì chưa Lưu để tránh ghi đè cấu hình.",
+                                 "Requires the server up (capnhat-vps.sh run). Until loaded, saving is disabled to avoid overwriting config."))
+                        .font(.caption2)
+                }
+            }
             Section {
                 TextField(store.t("Phiên bản mới nhất (vd 3.1)", "Latest version (e.g. 3.1)"), text: $latestVersion)
                     .keyboardType(.decimalPad)
@@ -566,7 +571,8 @@ struct AppNoticesEditor: View {
     }
 
     private func load() async {
-        guard let c = try? await store.api.storeConfig() else { return }
+        loadError = false
+        guard let c = try? await store.api.storeConfig() else { loadError = true; return }
         latestVersion = c.latestVersion ?? ""
         updateUrl = c.updateUrl ?? ""
         updateMessage = c.updateMessage ?? ""
