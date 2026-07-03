@@ -7612,27 +7612,40 @@ class PushNotifIn(BaseModel):
     body: str
     target: str = "all"   # all | uid:<id>
 
+def _apns_cfg() -> dict:
+    """Cấu hình APNs: ưu tiên DB (admin nhập TRONG APP), fallback biến môi trường."""
+    key_id = get_setting("apns_key_id", "") or os.getenv("APNS_KEY_ID", "")
+    team_id = get_setting("apns_team_id", "") or os.getenv("APNS_TEAM_ID", "")
+    bundle_id = get_setting("apns_bundle_id", "") or os.getenv("APNS_BUNDLE_ID", "")
+    key_p8 = get_setting("apns_key_p8", "")
+    if not key_p8:
+        p = os.getenv("APNS_KEY_PATH", "")
+        if p:
+            try: key_p8 = open(p).read()
+            except Exception: key_p8 = ""
+    return {"key_id": key_id.strip(), "team_id": team_id.strip(),
+            "bundle_id": bundle_id.strip(), "key_p8": key_p8}
+
 def _apns_configured() -> bool:
-    return all([os.getenv("APNS_KEY_ID", ""), os.getenv("APNS_TEAM_ID", ""),
-                os.getenv("APNS_BUNDLE_ID", ""), os.getenv("APNS_KEY_PATH", "")])
+    c = _apns_cfg()
+    return all([c["key_id"], c["team_id"], c["bundle_id"], c["key_p8"]])
 
 def _apns_send(tokens: list[str], title: str, body: str) -> tuple[int, int]:
     """Gửi push tới danh sách device token. Trả (sent, failed).
     Im lặng trả (0,0) nếu chưa cấu hình APNs — dùng được cho thông báo tự động."""
     tokens = [t for t in tokens if t]
-    if not tokens or not _apns_configured():
+    cfg = _apns_cfg()
+    if not tokens or not all([cfg["key_id"], cfg["team_id"], cfg["bundle_id"], cfg["key_p8"]]):
         return (0, 0)
     try:
         import httpx, jwt as pyjwt
-        with open(os.getenv("APNS_KEY_PATH"), "r") as f:
-            private_key = f.read()
-        jwt_token = pyjwt.encode({"iss": os.getenv("APNS_TEAM_ID"), "iat": int(time.time())},
-                                 private_key, algorithm="ES256",
-                                 headers={"kid": os.getenv("APNS_KEY_ID")})
+        jwt_token = pyjwt.encode({"iss": cfg["team_id"], "iat": int(time.time())},
+                                 cfg["key_p8"], algorithm="ES256",
+                                 headers={"kid": cfg["key_id"]})
         # Chuông tuỳ chỉnh (khớp file trong Library/Sounds của app) — kêu cả khi tắt app.
         payload = {"aps": {"alert": {"title": title, "body": body}, "sound": "kenios_notify.wav"}}
         headers = {"authorization": f"bearer {jwt_token}",
-                   "apns-topic": os.getenv("APNS_BUNDLE_ID"), "apns-push-type": "alert"}
+                   "apns-topic": cfg["bundle_id"], "apns-push-type": "alert"}
         sent = failed = 0
         with httpx.Client(http2=True, timeout=10) as client:
             for t in tokens:
@@ -8144,6 +8157,30 @@ def admin_list_devices(admin=Depends(get_admin)) -> dict[str, Any]:
         total = c.execute("SELECT COUNT(*) as n FROM device_tokens").fetchone()["n"]
         users = c.execute("SELECT COUNT(DISTINCT user_id) as n FROM device_tokens").fetchone()["n"]
     return {"total_devices": total, "total_users": users}
+
+class ApnsConfigIn(BaseModel):
+    key_id: Optional[str] = None
+    team_id: Optional[str] = None
+    bundle_id: Optional[str] = None
+    key_p8: Optional[str] = None   # nội dung file .p8 (dán vào)
+
+@app.get("/admin/push/config")
+def admin_get_push_config(admin=Depends(get_admin)) -> dict[str, Any]:
+    c = _apns_cfg()
+    return {"key_id": c["key_id"], "team_id": c["team_id"], "bundle_id": c["bundle_id"],
+            "has_key": bool(c["key_p8"]), "configured": _apns_configured()}
+
+@app.post("/admin/push/config")
+def admin_set_push_config(b: ApnsConfigIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    if b.key_id is not None: set_setting("apns_key_id", b.key_id.strip())
+    if b.team_id is not None: set_setting("apns_team_id", b.team_id.strip())
+    if b.bundle_id is not None: set_setting("apns_bundle_id", b.bundle_id.strip())
+    # Chỉ ghi đè khoá .p8 khi admin dán khoá mới (để trống = giữ khoá cũ).
+    if b.key_p8 is not None and b.key_p8.strip():
+        set_setting("apns_key_p8", b.key_p8.strip())
+    return {"ok": True, "configured": _apns_configured(),
+            "message": "Đã lưu cấu hình APNs." if _apns_configured()
+                       else "Đã lưu, nhưng còn thiếu thông tin (Key ID / Team ID / Bundle ID / khoá .p8)."}
 
 
 # ======================== Prompt Templates ========================

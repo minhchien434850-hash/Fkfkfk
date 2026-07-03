@@ -125,6 +125,15 @@ extension APIClient {
     func adminPushDeviceStats() async throws -> PushDeviceStats {
         try decode(try await send("/admin/push-notification/devices"))
     }
+    // Cấu hình APNs nhập TRONG APP (khỏi sửa env trên VPS)
+    func adminGetPushConfig() async throws -> ApnsConfigStatus {
+        try decode(try await send("/admin/push/config"))
+    }
+    func adminSetPushConfig(keyId: String, teamId: String, bundleId: String, keyP8: String) async throws -> MessageResponse {
+        var body: [String: Any] = ["key_id": keyId, "team_id": teamId, "bundle_id": bundleId]
+        if !keyP8.isEmpty { body["key_p8"] = keyP8 }   // để trống = giữ khoá cũ
+        return try decode(try await send("/admin/push/config", method: "POST", json: body))
+    }
 
     // ---- File ----
     func listFiles(category: String?) async throws -> [FileItem] {

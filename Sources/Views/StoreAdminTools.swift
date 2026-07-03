@@ -566,9 +566,56 @@ struct AdminPushNotificationView: View {
     @State private var result: String?
     @State private var isError = false
     @State private var deviceStats: PushDeviceStats?
+    // Cấu hình APNs nhập trong app
+    @State private var apnsKeyId = ""
+    @State private var apnsTeamId = ""
+    @State private var apnsBundleId = ""
+    @State private var apnsKeyP8 = ""
+    @State private var apnsHasKey = false
+    @State private var apnsConfigured = false
+    @State private var savingApns = false
+    @State private var apnsMsg = ""
 
     var body: some View {
         Form {
+            // ===== Cấu hình APNs (nhập ngay trong app — khỏi sửa env trên VPS) =====
+            Section {
+                HStack {
+                    Image(systemName: apnsConfigured ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(apnsConfigured ? .green : .orange)
+                    Text(apnsConfigured ? store.t("Đã cấu hình APNs — push chạy được",
+                                                  "APNs configured — push ready")
+                                        : store.t("Chưa đủ cấu hình APNs", "APNs not fully configured"))
+                        .font(.caption)
+                }
+                TextField("Key ID (vd ABC123DEFG)", text: $apnsKeyId)
+                    .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                TextField("Team ID (vd 1A2B3C4D5E)", text: $apnsTeamId)
+                    .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                TextField(store.t("Bundle ID (vd com.kenios.app)", "Bundle ID (e.g. com.kenios.app)"), text: $apnsBundleId)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField(apnsHasKey ? store.t("Khoá .p8 đã lưu — dán khoá MỚI để thay",
+                                               "Key .p8 saved — paste NEW to replace")
+                                     : store.t("Dán nội dung khoá .p8 (-----BEGIN PRIVATE KEY----- …)",
+                                               "Paste .p8 key content (-----BEGIN PRIVATE KEY----- …)"),
+                          text: $apnsKeyP8, axis: .vertical)
+                    .lineLimit(2...5).font(.caption.monospaced())
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Button {
+                    Task { await saveApns() }
+                } label: {
+                    HStack { if savingApns { ProgressView().padding(.trailing, 4) }
+                        Text(store.t("Lưu cấu hình APNs", "Save APNs config")).bold() }
+                }.disabled(savingApns)
+                if !apnsMsg.isEmpty { Text(apnsMsg).font(.caption).foregroundStyle(.secondary) }
+            } header: {
+                Text(store.t("Cấu hình APNs (push khi tắt app)", "APNs config (push when app closed)"))
+            } footer: {
+                Text(store.t("Lấy Key ID + khoá .p8 ở Apple Developer → Keys (bật Apple Push Notifications). Team ID ở Membership. Bundle ID = định danh app. LƯU Ý: push thật chỉ chạy khi app được ký bằng provisioning profile CÓ bật Push (không phải eSign thường).",
+                             "Get Key ID + .p8 from Apple Developer → Keys (enable APNs). Team ID from Membership. Bundle ID = app id. NOTE: real push only works when the app is signed with a Push-enabled profile (not plain eSign)."))
+                    .font(.caption2)
+            }
+
             if let stats = deviceStats {
                 Section(store.t("Thiết bị đã đăng ký", "Registered devices")) {
                     Label("\(stats.totalDevices) " + store.t("thiết bị", "devices"), systemImage: "iphone")
@@ -602,20 +649,34 @@ struct AdminPushNotificationView: View {
                 }
             }
 
-            Section(store.t("Hướng dẫn cấu hình APNs", "APNs setup guide")) {
-                Text("""
-                Để gửi push notification thật, cần cấu hình các biến môi trường trên server:
-                • APNS_KEY_ID — Key ID từ Apple Developer
-                • APNS_TEAM_ID — Team ID của tài khoản
-                • APNS_BUNDLE_ID — Bundle ID của app
-                • APNS_KEY_PATH — Đường dẫn file .p8
-                """)
-                .font(.caption).foregroundStyle(.secondary)
-            }
         }
         .navigationTitle(store.t("Gửi thông báo", "Send notification"))
         .navigationBarTitleDisplayMode(.inline)
-        .task { deviceStats = try? await store.api.adminPushDeviceStats() }
+        .task {
+            deviceStats = try? await store.api.adminPushDeviceStats()
+            await loadApns()
+        }
+    }
+
+    private func loadApns() async {
+        guard let c = try? await store.api.adminGetPushConfig() else { return }
+        apnsKeyId = c.keyId; apnsTeamId = c.teamId; apnsBundleId = c.bundleId
+        apnsHasKey = c.hasKey; apnsConfigured = c.configured
+    }
+
+    private func saveApns() async {
+        savingApns = true; apnsMsg = ""
+        defer { savingApns = false }
+        do {
+            let r = try await store.api.adminSetPushConfig(
+                keyId: apnsKeyId.trimmingCharacters(in: .whitespacesAndNewlines),
+                teamId: apnsTeamId.trimmingCharacters(in: .whitespacesAndNewlines),
+                bundleId: apnsBundleId.trimmingCharacters(in: .whitespacesAndNewlines),
+                keyP8: apnsKeyP8.trimmingCharacters(in: .whitespacesAndNewlines))
+            apnsMsg = r.message
+            apnsKeyP8 = ""   // xoá khỏi ô sau khi lưu
+            await loadApns()
+        } catch { apnsMsg = error.localizedDescription }
     }
 
     private func sendNotif() async {

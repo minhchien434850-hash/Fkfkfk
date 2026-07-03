@@ -870,6 +870,15 @@ struct PushDeviceStats: Decodable {
     let totalUsers: Int
 }
 
+// Trạng thái cấu hình APNs (admin nhập trong app)
+struct ApnsConfigStatus: Decodable {
+    let keyId: String
+    let teamId: String
+    let bundleId: String
+    let hasKey: Bool
+    let configured: Bool
+}
+
 
 // ============================ Cache cửa hàng (hiện NGAY khi mở, làm mới ngầm) ============================
 // Lưu cấu hình + danh mục + toàn bộ sản phẩm xuống đĩa. Khi mở cửa hàng, nạp cache
