@@ -15,7 +15,6 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         case system = "system"
         case google = "google"
         case siri = "siri"
-        case siriEnVi = "siri_en_vi"
         case elevenlabs = "elevenlabs"
 
         var id: String { self.rawValue }
@@ -24,7 +23,6 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
             case .system: return "Mặc định (iOS)"
             case .google: return "Chị Google (Online)"
             case .siri: return "Giọng Siri (iOS)"
-            case .siriEnVi: return "Siri Anh·Việt (phiên âm)"
             case .elevenlabs: return "Giọng ElevenLabs"
             }
         }
@@ -202,8 +200,6 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
             playGoogleTTS(t)
         case .siri:
             playSiriTTS(t)
-        case .siriEnVi:
-            playSiriEnViTTS(t)
         case .elevenlabs:
             playElevenLabsTTS(t)
         case .system:

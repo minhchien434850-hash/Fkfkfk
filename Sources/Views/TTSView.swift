@@ -425,7 +425,6 @@ struct TTSView: View {
                     // ----- Chọn giọng (tách thành các view con để trình biên dịch không quá tải) -----
                     if tts.engineType == .system { systemVoiceSection }
                     if tts.engineType == .siri { siriVoiceSection }
-                    if tts.engineType == .siriEnVi { siriEnViNoteSection }
                 }
                 .padding()
             }
@@ -734,17 +733,7 @@ struct TTSView: View {
         }
     }
 
-    // ----- Ghi chú cho chế độ Siri Anh·Việt (phiên âm) -----
-    @ViewBuilder private var siriEnViNoteSection: some View {
-        section("Siri tiếng Anh đọc phiên âm tiếng Việt") {
-            Label("Chế độ thử nghiệm", systemImage: "flask.fill")
-                .font(.subheadline.bold()).foregroundStyle(.orange)
-            Text("App tự đổi chữ tiếng Việt sang cách viết kiểu Anh rồi cho giọng Siri tiếng Anh đọc. Vì giọng Anh KHÔNG có dấu thanh tiếng Việt nên sẽ đọc \"lơ lớ\", không dấu — nghe vui/tham khảo, chưa chuẩn 100%.")
-                .font(.caption2).foregroundStyle(.secondary)
-            Text("Để giọng Anh hay nhất: iOS → Cài đặt → Trợ năng → Nội dung nói → Giọng nói → English → tải giọng Siri / Cao cấp.")
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-    }
+    // (Đã xoá chế độ "Siri Anh·Việt phiên âm" theo yêu cầu.)
 
     // Một hàng giọng: chọn + nghe thử. Tách ra để body nhẹ, biên dịch nhanh.
     @ViewBuilder private func voiceRow(_ v: AVSpeechSynthesisVoice, selected: Bool,
