@@ -15,7 +15,8 @@ struct CertInfo {
     var p12Size: Int = 0
     var provisionName: String?
     var provisionSize: Int = 0
-    var passwordValid: Bool?          // nil = chưa kiểm tra
+    var passwordValid: Bool?          // nil = chưa kiểm tra / không xác minh được
+    var p12Unverified = false         // .p12 mã hoá kiểu mới (OpenSSL 3) — iOS không đọc được để xác minh
     var certSubject: String?          // vd "iPhone Distribution: Tên (TEAMID)"
     var provisionTeam: String?
     var provisionExpiry: Date?        // hạn của .mobileprovision
@@ -110,13 +111,23 @@ final class CertificateStore: ObservableObject {
            let arr = items as? [[String: Any]], let first = arr.first,
            let identityRef = first[kSecImportItemIdentity as String] {
             info.passwordValid = true
+            info.p12Unverified = false
             let identity = identityRef as! SecIdentity
             var certRef: SecCertificate?
             if SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess, let cert = certRef {
                 info.certSubject = SecCertificateCopySubjectSummary(cert) as String?
             }
+        } else if status == errSecDecode {
+            info.passwordValid = false   // hỏng thật (không giải mã được cấu trúc ASN.1)
+            info.p12Unverified = false
+            info.certSubject = nil
         } else {
-            info.passwordValid = false
+            // errSecAuthFailed (-25293) và các lỗi khác: KHÔNG kết luận sai chắc chắn —
+            // iOS trả lỗi này cho CẢ mật khẩu sai LẪN .p12 mã hoá kiểu mới (OpenSSL 3:
+            // AES-256 + MAC SHA-256) mà iOS không đọc được. Mật khẩu vẫn đã lưu (Keychain)
+            // để eSign (OpenSSL đầy đủ) tự xác minh khi ký.
+            info.passwordValid = nil
+            info.p12Unverified = true
             info.certSubject = nil
         }
     }
@@ -217,11 +228,24 @@ struct CertificateImportView: View {
                         }
                         .disabled(password.isEmpty || certs.checking)
 
-                        if let valid = certs.info.passwordValid {
-                            Label(valid ? "Mật khẩu đúng — chứng chỉ hợp lệ" : "Mật khẩu sai hoặc file .p12 hỏng",
-                                  systemImage: valid ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .font(.caption.bold())
-                                .foregroundStyle(valid ? .green : .red)
+                        if certs.info.passwordValid == true {
+                            Label(store.t("Mật khẩu đúng — chứng chỉ hợp lệ", "Password OK — certificate valid"),
+                                  systemImage: "checkmark.circle.fill")
+                                .font(.caption.bold()).foregroundStyle(.green)
+                        } else if certs.info.p12Unverified {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(store.t("Đã lưu mật khẩu — app chưa xác minh được",
+                                              "Password saved — app couldn't verify"),
+                                      systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption.bold()).foregroundStyle(.orange)
+                                Text(store.t("File .p12 dùng mã hoá kiểu mới (OpenSSL 3) mà iOS không đọc được để kiểm tra — KHÔNG có nghĩa mật khẩu sai. Mật khẩu đã lưu; cứ ký/cài qua eSign, nếu eSign báo sai thì mới đổi mật khẩu.",
+                                             "The .p12 uses new encryption (OpenSSL 3) iOS can't read to verify — it does NOT mean the password is wrong. It's saved; sign/install via eSign — only change it if eSign rejects it."))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        } else if certs.info.passwordValid == false {
+                            Label(store.t("File .p12 hỏng hoặc không đọc được", "The .p12 file is corrupt or unreadable"),
+                                  systemImage: "xmark.circle.fill")
+                                .font(.caption.bold()).foregroundStyle(.red)
                         }
                     } header: {
                         Text("3. Mật khẩu chứng chỉ")
