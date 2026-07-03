@@ -10,6 +10,14 @@ struct FriendsView: View {
     @State private var avatarItem: PhotosPickerItem?
     @State private var uploadingAvatar = false
     @State private var avatarError: String?
+    @State private var avatarCacheBust = 0   // ép CachedAsyncImage tải lại ảnh mới (không dùng cache cũ)
+
+    // URL hiển thị có tham số chống-cache → luôn thấy ảnh mới sau khi đổi.
+    private var avatarDisplayURL: URL? {
+        guard !myAvatar.isEmpty else { return nil }
+        let sep = myAvatar.contains("?") ? "&" : "?"
+        return URL(string: myAvatar + "\(sep)cb=\(avatarCacheBust)")
+    }
 
     @State private var selectedSegment = 0 // 0: Bạn bè, 1: Lời mời, 2: Tìm kiếm
     @State private var searchQuery = ""
@@ -86,12 +94,13 @@ struct FriendsView: View {
     private var myAvatarRow: some View {
         HStack(spacing: 12) {
             ZStack {
-                if let url = URL(string: myAvatar), !myAvatar.isEmpty {
+                if let url = avatarDisplayURL {
                     CachedAsyncImage(url: url) { img in
                         img.resizable().scaledToFill()
                     } placeholder: {
                         Color(.tertiarySystemBackground)
                     }
+                    .id(avatarCacheBust)   // đổi ảnh → view tải lại, không giữ ảnh cũ
                     .frame(width: 52, height: 52).clipShape(Circle())
                 } else {
                     Circle().fill(Theme.accent.opacity(0.15)).frame(width: 52, height: 52)
@@ -154,8 +163,19 @@ struct FriendsView: View {
                 dataBase64: jpeg.base64EncodedString(), mime: "image/jpeg",
                 name: "avatar_\(Int(Date().timeIntervalSince1970)).jpg")
             _ = try await store.api.updateProfile(publicId: nil, avatarUrl: url, bio: nil)
-            myAvatar = url
-            avatarError = nil
+            // Xác minh LẠI từ máy chủ (nguồn thật) — phát hiện nếu server không lưu.
+            let serverAvatar = (try? await store.api.myProfile())?.avatarUrl ?? ""
+            if serverAvatar == url {
+                myAvatar = url
+                avatarCacheBust += 1        // ép hiển thị ảnh mới, bỏ ảnh cache cũ
+                avatarError = nil
+            } else {
+                // Upload OK nhưng máy chủ trả ảnh khác → chưa lưu (backend cũ / thiếu cột avatar_url).
+                myAvatar = serverAvatar.isEmpty ? url : serverAvatar
+                avatarCacheBust += 1
+                avatarError = store.t("Máy chủ chưa lưu được ảnh mới. Hãy cập nhật máy chủ (chạy capnhat-vps.sh) rồi thử lại.",
+                                      "The server didn't save the new photo. Update the server (run capnhat-vps.sh) and retry.")
+            }
         } catch {
             let raw = error.localizedDescription.lowercased()
             if raw.contains("not found") || raw.contains("404") {
