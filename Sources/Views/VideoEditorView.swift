@@ -42,11 +42,34 @@ struct EditMovie: Transferable {
     }
 }
 
+// Hàng chip trạng thái tự xuống dòng — mỗi mục đã bật hiện 1 chip xanh có dấu tích.
+struct FlowChips: View {
+    let items: [(String, String)]
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, it in
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 11))
+                    Image(systemName: it.0).font(.system(size: 11))
+                    Text(it.1).font(.caption2.bold()).lineLimit(1).minimumScaleFactor(0.7)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.accent).clipShape(Capsule())
+            }
+        }
+    }
+}
+
 // ======================== Sửa video cơ bản: cắt · lọc màu · sáng · xuất MP4 ========================
 struct VideoEditorView: View {
     private static let ciCtx = CIContext()
 
     @State private var picker: PhotosPickerItem?
+    @State private var multiPick: [PhotosPickerItem] = []   // ghép NHIỀU video cùng lúc
+    @State private var clips: [URL] = []                    // các video nguồn (theo thứ tự ghép)
+    @State private var merging = false
     @State private var inputURL: URL?
     @State private var duration: Double = 0
     // Timeline UI: trình phát xem trước + dải thumbnail
@@ -109,15 +132,53 @@ struct VideoEditorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                PhotosPicker(selection: $picker, matching: .videos) {
-                    Label(inputURL == nil ? "Chọn video" : "Đổi video khác",
-                          systemImage: "film.stack")
-                        .frame(maxWidth: .infinity).frame(height: 48)
-                        .background(Theme.accent).foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                HStack(spacing: 10) {
+                    PhotosPicker(selection: $picker, matching: .videos) {
+                        Label(inputURL == nil ? "Chọn video" : "Đổi video",
+                              systemImage: "film.stack")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity).frame(height: 48)
+                            .background(Theme.accent).foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    // Ghép NHIỀU video cùng lúc (kiểu CapCut)
+                    PhotosPicker(selection: $multiPick, maxSelectionCount: 20, matching: .videos) {
+                        Label("Thêm video ghép", systemImage: "plus.rectangle.on.rectangle")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity).frame(height: 48)
+                            .background(Theme.purple).foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
                 }
 
+                if merging { ProgressView("Đang ghép video...").frame(maxWidth: .infinity) }
                 if loading { ProgressView("Đang nạp video...").frame(maxWidth: .infinity) }
+
+                // Danh sách các clip đã ghép (xoá được) — hiện khi có từ 2 clip
+                if clips.count > 1 {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Các đoạn đã ghép (\(clips.count))").font(.subheadline.bold())
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(Array(clips.enumerated()), id: \.offset) { i, _ in
+                                    HStack(spacing: 4) {
+                                        Text("\(i + 1)").font(.caption.bold())
+                                            .frame(width: 22, height: 22)
+                                            .background(Theme.accent).foregroundStyle(.white).clipShape(Circle())
+                                        Button { removeClip(i) } label: {
+                                            Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                                        }
+                                    }
+                                    .padding(.horizontal, 8).padding(.vertical, 6)
+                                    .background(Color(.secondarySystemBackground)).clipShape(Capsule())
+                                }
+                            }
+                        }
+                        Text("Video sẽ nối liền theo thứ tự. Bấm DẤU TÍCH ở mỗi đường cắt để chọn hiệu ứng chuyển cảnh.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding().kCard(16)
+                }
 
                 if inputURL != nil {
                     // Trình phát xem trước (Preview)
@@ -126,6 +187,9 @@ struct VideoEditorView: View {
                             .frame(height: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                     }
+
+                    // Bảng TRẠNG THÁI: hiện rõ đang bật/đã chỉnh gì (để biết đã dùng chưa)
+                    statusSummary
 
                     // Dải Timeline có thumbnail + KÉO TAY để cắt (kiểu CapCut)
                     if !thumbnails.isEmpty {
@@ -401,11 +465,51 @@ struct VideoEditorView: View {
         }
         .navigationTitle("Sửa video")
         .onChange(of: picker) { _ in loadPicked() }
+        .onChange(of: multiPick) { items in
+            guard !items.isEmpty else { return }
+            Task { await addClips(items) }
+        }
         .sheet(isPresented: $showMusicPicker) {
             DocumentPicker(contentTypes: [.audio, .mp3, .mpeg4Audio], allowsMultipleSelection: false, asCopy: true) { urls in
                 if let u = urls.first { musicURL = u; musicName = u.lastPathComponent }
             }.ignoresSafeArea()
         }
+    }
+
+    // Bảng trạng thái: mỗi mục ĐÃ CHỈNH hiện 1 chip xanh có dấu tích → biết đã dùng gì.
+    @ViewBuilder private var statusSummary: some View {
+        let tr = splits.filter { $0.transition > 0 }.count
+        let items: [(String, String)] = {
+            var a: [(String, String)] = []
+            a.append(("scissors", "Cắt: \(timeStr(max(0, trimEnd - trimStart)))"))
+            if clips.count > 1 { a.append(("rectangle.stack.fill", "Ghép \(clips.count) video")) }
+            if tr > 0 { a.append(("wand.and.stars", "\(tr) chuyển cảnh")) }
+            if filter != 0 { a.append(("camera.filters", "Lọc: \(filterNames[filter])")) }
+            if abs(brightness) > 0.001 || abs(contrast - 1) > 0.001 || abs(saturation - 1) > 0.001
+                || abs(hue) > 0.001 || abs(highlights - 1) > 0.001 || abs(shadows) > 0.001 {
+                a.append(("slider.horizontal.3", "Chỉnh màu"))
+            }
+            if outRes > 0 { a.append(("4k.tv", "Độ phân giải \(resLevels.first { $0.1 == outRes }?.0 ?? "")")) }
+            if sharpen > 0.001 { a.append(("wand.and.rays", "Làm nét")) }
+            if denoise > 0.001 { a.append(("aqi.medium", "Giảm nhiễu")) }
+            if abs(speed - 1) > 0.01 { a.append(("speedometer", String(format: "Tốc độ %.2fx", speed))) }
+            if removeBg { a.append(("person.crop.rectangle", "Xoá nền")) }
+            if fadeInOut { a.append(("circle.lefthalf.filled", "Mờ dần")) }
+            if zoomMotion { a.append(("arrow.up.left.and.arrow.down.right", "Phóng to")) }
+            if musicURL != nil { a.append(("music.note", "Nhạc nền")) }
+            if !overlayText.trimmingCharacters(in: .whitespaces).isEmpty { a.append(("textformat", "Chữ trên video")) }
+            if burnCaptions && !captions.isEmpty { a.append(("captions.bubble", "Phụ đề \(captions.count)")) }
+            return a
+        }()
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Đã áp dụng").font(.subheadline.bold())
+            if items.count <= 1 {
+                Text("Chưa chỉnh gì thêm. Kéo/chọn các mục bên dưới — mục nào đang bật sẽ hiện ở đây.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            FlowChips(items: items)
+        }
+        .padding().kCard(16)
     }
 
     // MARK: - Helpers
@@ -423,27 +527,93 @@ struct VideoEditorView: View {
         Task {
             do {
                 if let movie = try await picker.loadTransferable(type: EditMovie.self) {
-                    let asset = AVURLAsset(url: movie.url)
-                    let d = try await asset.load(.duration)
-                    inputURL = movie.url
-                    duration = max(0.1, d.seconds)
-                    trimStart = 0; trimEnd = duration
-                    splits = []   // video mới → xoá điểm cắt cũ
-                    // Kích thước hiển thị thật (sau khi áp preferredTransform) → dùng cho scale độ phân giải.
-                    if let vTrack = try? await asset.loadTracks(withMediaType: .video).first {
-                        let ns = (try? await vTrack.load(.naturalSize)) ?? .zero
-                        let tf = (try? await vTrack.load(.preferredTransform)) ?? .identity
-                        let r = ns.applying(tf)
-                        naturalSize = CGSize(width: abs(r.width), height: abs(r.height))
-                    }
-                    player = AVPlayer(url: movie.url)
-                    thumbnails = []
-                    await generateThumbnails(asset, duration: duration)
+                    clips = [movie.url]                 // chọn 1 video → làm nền cho ghép
+                    await useWorkingVideo(movie.url, autoSplits: [])
                 } else {
                     error = "Không đọc được video."
                 }
             } catch { self.error = error.localizedDescription }
             loading = false
+        }
+    }
+
+    // Nạp 1 file video làm video đang chỉnh (preview + timeline + thông số).
+    private func useWorkingVideo(_ url: URL, autoSplits: [Double]) async {
+        let asset = AVURLAsset(url: url)
+        let d = (try? await asset.load(.duration)) ?? .zero
+        inputURL = url
+        duration = max(0.1, d.seconds)
+        trimStart = 0; trimEnd = duration
+        // Điểm cắt tự động ở ranh giới các clip ghép (transition = 0 → user bấm chọn).
+        splits = autoSplits.filter { $0 > 0.05 && $0 < duration - 0.05 }
+            .map { SplitPoint(time: $0, transition: 0) }
+        if let vTrack = try? await asset.loadTracks(withMediaType: .video).first {
+            let ns = (try? await vTrack.load(.naturalSize)) ?? .zero
+            let tf = (try? await vTrack.load(.preferredTransform)) ?? .identity
+            let r = ns.applying(tf)
+            naturalSize = CGSize(width: abs(r.width), height: abs(r.height))
+        }
+        player = AVPlayer(url: url)
+        thumbnails = []
+        await generateThumbnails(asset, duration: duration)
+    }
+
+    // Ghép NHIỀU video: nối các clip theo thứ tự thành 1 file, đặt điểm cắt ở ranh giới.
+    private func addClips(_ items: [PhotosPickerItem]) async {
+        merging = true; error = nil
+        defer { merging = false; multiPick = [] }
+        var urls: [URL] = []
+        for it in items {
+            if let m = try? await it.loadTransferable(type: EditMovie.self) { urls.append(m.url) }
+        }
+        guard !urls.isEmpty else { return }
+        clips.append(contentsOf: urls)
+        await rebuildMerged()
+    }
+
+    private func removeClip(_ index: Int) {
+        guard clips.indices.contains(index) else { return }
+        clips.remove(at: index)
+        Task { merging = true; defer { merging = false }; await rebuildMerged() }
+    }
+
+    // Dựng lại file ghép từ danh sách clips + tính mốc điểm cắt ở mỗi ranh giới.
+    private func rebuildMerged() async {
+        guard !clips.isEmpty else { inputURL = nil; return }
+        if clips.count == 1 { await useWorkingVideo(clips[0], autoSplits: []); return }
+        let comp = AVMutableComposition()
+        let vTrack = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+        let aTrack = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+        var at = CMTime.zero
+        var boundaries: [Double] = []
+        for (i, u) in clips.enumerated() {
+            let a = AVURLAsset(url: u)
+            guard let v = try? await a.loadTracks(withMediaType: .video).first,
+                  let dur = try? await a.load(.duration) else { continue }
+            let range = CMTimeRange(start: .zero, duration: dur)
+            try? vTrack?.insertTimeRange(range, of: v, at: at)
+            if i == 0, let tf = try? await v.load(.preferredTransform) { vTrack?.preferredTransform = tf }
+            if let au = try? await a.loadTracks(withMediaType: .audio).first {
+                try? aTrack?.insertTimeRange(range, of: au, at: at)
+            }
+            at = at + dur
+            if i < clips.count - 1 { boundaries.append(at.seconds) }
+        }
+        // Xuất file ghép ra temp rồi dùng như 1 video bình thường (mọi công cụ áp lên bản ghép).
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kenios_merge_\(Int(Date().timeIntervalSince1970)).mp4")
+        try? FileManager.default.removeItem(at: out)
+        guard let session = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else {
+            error = "Không ghép được video."; return
+        }
+        session.outputURL = out; session.outputFileType = .mp4
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            session.exportAsynchronously { c.resume() }
+        }
+        if session.status == .completed {
+            await useWorkingVideo(out, autoSplits: boundaries)
+        } else {
+            error = "Ghép video thất bại: \(session.error?.localizedDescription ?? "lỗi")"
         }
     }
 
