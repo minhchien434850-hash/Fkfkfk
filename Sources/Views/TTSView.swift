@@ -687,13 +687,21 @@ struct TTSView: View {
         .padding(.vertical, 4)
     }
 
-    // ----- Chọn giọng hệ thống (iOS mặc định) -----
+    // ----- Chọn giọng hệ thống (iOS mặc định) — layout đồng bộ ElevenLabs -----
     @ViewBuilder private var systemVoiceSection: some View {
         section("Giọng đọc hệ thống (\(Self.cachedVoices.count) giọng · \(vietnameseVoiceCount) tiếng Việt)") {
+            Text("Chọn 1 giọng có sẵn trên máy để đọc tiếng Việt. Bấm loa để nghe thử.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            selectedVoiceBadge(voiceName(for: tts.voiceId))
+
+            Divider().padding(.vertical, 4)
+
             Toggle(isOn: $onlyVietnameseVoices) {
                 Label("Chỉ hiện giọng tiếng Việt", systemImage: "flag.fill").font(.subheadline)
             }.tint(Theme.accent)
             textField("Tìm theo tên / ngôn ngữ (vd: vi, English)", $search)
+
             VStack(spacing: 0) {
                 ForEach(voices, id: \.identifier) { v in
                     voiceRow(v, selected: tts.voiceId == v.identifier) { tts.voiceId = v.identifier }
@@ -704,22 +712,38 @@ struct TTSView: View {
         }
     }
 
-    // ----- Chọn giọng cho chế độ "Giọng Siri (iOS)" -----
+    // ----- Chọn giọng cho chế độ "Giọng Siri (iOS)" — layout đồng bộ ElevenLabs -----
     @ViewBuilder private var siriVoiceSection: some View {
         section("Giọng Siri / iOS — chọn giọng có sẵn trên máy bạn") {
             Text("App đã tìm các giọng máy bạn đang có. Chọn 1 giọng (ưu tiên Cao cấp/Nâng cao nghe gần Siri nhất), bấm loa để nghe thử.")
                 .font(.caption2).foregroundStyle(.secondary)
+
+            selectedVoiceBadge(tts.siriVoiceId.isEmpty ? nil : voiceName(for: tts.siriVoiceId))
+
+            Divider().padding(.vertical, 4)
+
             Button { tts.siriVoiceId = "" } label: {
+                let auto = tts.siriVoiceId.isEmpty
                 HStack {
-                    Image(systemName: tts.siriVoiceId.isEmpty ? "largecircle.fill.circle" : "circle")
-                        .foregroundStyle(Theme.accent)
+                    Image(systemName: auto ? "largecircle.fill.circle" : "circle")
+                        .foregroundStyle(auto ? Color.green : Theme.accent)
                     VStack(alignment: .leading) {
                         Text("Tự động (giọng tốt nhất)").font(.subheadline)
+                            .foregroundStyle(auto ? Color.green : .primary)
                         Text("App tự chọn giọng chất lượng cao nhất").font(.caption2).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if auto {
+                        Text("Đang dùng").font(.caption2.bold()).foregroundStyle(.green)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.green.opacity(0.15)).clipShape(Capsule())
+                    }
                 }
-            }.buttonStyle(.plain).padding(.vertical, 6)
+                .padding(.vertical, 6)
+                .padding(.horizontal, auto ? 8 : 0)
+                .background(auto ? Color.green.opacity(0.10) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }.buttonStyle(.plain)
             Divider()
             VStack(spacing: 0) {
                 ForEach(siriCandidateVoices, id: \.identifier) { v in
@@ -735,6 +759,26 @@ struct TTSView: View {
 
     // (Đã xoá chế độ "Siri Anh·Việt phiên âm" theo yêu cầu.)
 
+    // Badge hiển thị giọng đang dùng — đồng bộ chỉ báo "Giọng: X" của ElevenLabs.
+    @ViewBuilder private func selectedVoiceBadge(_ name: String?) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "person.wave.2.fill").foregroundStyle(.green).font(.caption)
+            Text(name != nil ? "Đang dùng: \(name!)" : "Tự động (giọng tốt nhất)")
+                .font(.caption.bold()).foregroundStyle(.green)
+            Spacer()
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.green.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // Tên giọng theo identifier (để hiện badge "Đang dùng").
+    private func voiceName(for id: String) -> String? {
+        guard !id.isEmpty else { return nil }
+        return Self.cachedVoices.first { $0.identifier == id }?.name
+    }
+
     // Một hàng giọng: chọn + nghe thử. Tách ra để body nhẹ, biên dịch nhanh.
     @ViewBuilder private func voiceRow(_ v: AVSpeechSynthesisVoice, selected: Bool,
                                        highlightQuality: Bool = false,
@@ -743,14 +787,20 @@ struct TTSView: View {
             Button(action: onSelect) {
                 HStack {
                     Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(selected ? Color.green : Theme.accent)
                     VStack(alignment: .leading) {
                         Text(v.name).font(.subheadline)
+                            .foregroundStyle(selected ? Color.green : .primary)
                         Text("\(v.language) · \(qualityText(v.quality))")
                             .font(.caption2)
                             .foregroundStyle(highlightQuality && v.quality != .default ? Color.green : Color.secondary)
                     }
                     Spacer()
+                    if selected {
+                        Text("Đang dùng").font(.caption2.bold()).foregroundStyle(.green)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.green.opacity(0.15)).clipShape(Capsule())
+                    }
                 }
             }.buttonStyle(.plain)
             Button {
@@ -762,7 +812,11 @@ struct TTSView: View {
             } label: {
                 Image(systemName: "speaker.wave.2.fill").foregroundStyle(.secondary)
             }.buttonStyle(.plain)
-        }.padding(.vertical, 6)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, selected ? 8 : 0)
+        .background(selected ? Color.green.opacity(0.10) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         Divider()
     }
 
