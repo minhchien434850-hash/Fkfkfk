@@ -7705,6 +7705,240 @@ def list_notifications(limit: int = 20, user=Depends(get_user)) -> list[dict[str
     return [dict(r) for r in rows]
 
 
+# ==================== §11 — Điều khiển PC từ xa (relay qua KENIOS, không cần VPS riêng) ====================
+# Agent nhỏ chạy trên PC đăng nhập bằng tài khoản KENIOS → đăng ký máy. App/Web gửi lệnh
+# chuột/phím tới đây, agent hỏi lệnh (~60ms) rồi thực thi. Agent đẩy ảnh màn hình để xem preview.
+# Lưu trong RAM (đủ cho 1 tiến trình uvicorn) — không đụng CSDL.
+import threading as _pc_threading
+_PC_LOCK = _pc_threading.Lock()
+_PC_AGENTS: dict[str, dict] = {}   # agent_id -> {user_id,name,os,last_seen,frame_b64,frame_ts}
+_PC_CMDS: dict[str, list] = {}     # agent_id -> [cmd,...]
+
+def _pc_online(a: dict) -> bool:
+    return (int(time.time()) - a.get("last_seen", 0)) <= 15
+
+class PCRegisterIn(BaseModel):
+    name: str = "My PC"
+    os: str = ""
+    agent_id: Optional[str] = None   # gửi lại để giữ id cũ khi khởi động lại
+
+@app.post("/pc/register")
+def pc_register(b: PCRegisterIn, user=Depends(get_user)) -> dict[str, Any]:
+    aid = b.agent_id or secrets.token_hex(8)
+    with _PC_LOCK:
+        old = _PC_AGENTS.get(aid, {})
+        _PC_AGENTS[aid] = {"user_id": user["id"], "name": (b.name or "PC")[:60],
+                           "os": (b.os or "")[:20], "last_seen": int(time.time()),
+                           "frame_b64": old.get("frame_b64", ""), "frame_ts": old.get("frame_ts", 0)}
+        _PC_CMDS.setdefault(aid, [])
+    return {"agent_id": aid}
+
+class PCHeartbeatIn(BaseModel):
+    agent_id: str
+
+@app.post("/pc/heartbeat")
+def pc_heartbeat(b: PCHeartbeatIn, user=Depends(get_user)) -> dict[str, Any]:
+    with _PC_LOCK:
+        a = _PC_AGENTS.get(b.agent_id)
+        if not a or a["user_id"] != user["id"]:
+            raise HTTPException(status_code=404, detail="Agent không tồn tại.")
+        a["last_seen"] = int(time.time())
+        cmds = _PC_CMDS.get(b.agent_id, [])
+        _PC_CMDS[b.agent_id] = []
+    return {"commands": cmds}
+
+class PCFrameIn(BaseModel):
+    agent_id: str
+    jpg: str   # base64 JPEG
+
+@app.post("/pc/frame")
+def pc_frame(b: PCFrameIn, user=Depends(get_user)) -> dict[str, Any]:
+    with _PC_LOCK:
+        a = _PC_AGENTS.get(b.agent_id)
+        if not a or a["user_id"] != user["id"]:
+            raise HTTPException(status_code=404, detail="Agent không tồn tại.")
+        a["frame_b64"] = (b.jpg or "")[:4_000_000]
+        a["frame_ts"] = int(time.time())
+    return {"ok": True}
+
+@app.get("/pc/mine")
+def pc_mine(user=Depends(get_user)) -> list[dict[str, Any]]:
+    out = []
+    with _PC_LOCK:
+        for aid, a in _PC_AGENTS.items():
+            if a["user_id"] == user["id"]:
+                out.append({"agent_id": aid, "name": a["name"], "os": a["os"], "online": _pc_online(a)})
+    return out
+
+class PCCmdIn(BaseModel):
+    agent_id: str
+    cmd: dict
+
+@app.post("/pc/send")
+def pc_send(b: PCCmdIn, user=Depends(get_user)) -> dict[str, Any]:
+    with _PC_LOCK:
+        a = _PC_AGENTS.get(b.agent_id)
+        if not a or a["user_id"] != user["id"]:
+            raise HTTPException(status_code=404, detail="Agent không tồn tại.")
+        q = _PC_CMDS.setdefault(b.agent_id, [])
+        c = b.cmd or {}
+        # Gộp các lệnh 'move' liên tiếp → con trỏ mượt, không dồn hàng dài gây trễ.
+        if c.get("t") == "move" and q and q[-1].get("t") == "move":
+            q[-1]["dx"] = q[-1].get("dx", 0) + c.get("dx", 0)
+            q[-1]["dy"] = q[-1].get("dy", 0) + c.get("dy", 0)
+        else:
+            q.append(c)
+        if len(q) > 200:
+            del q[:len(q) - 200]
+    return {"ok": True}
+
+@app.get("/pc/screen/{agent_id}")
+def pc_screen(agent_id: str, user=Depends(get_user)) -> dict[str, Any]:
+    with _PC_LOCK:
+        a = _PC_AGENTS.get(agent_id)
+        if not a or a["user_id"] != user["id"]:
+            raise HTTPException(status_code=404, detail="Agent không tồn tại.")
+        return {"jpg": a.get("frame_b64", ""), "ts": a.get("frame_ts", 0), "online": _pc_online(a)}
+
+@app.delete("/pc/{agent_id}")
+def pc_delete(agent_id: str, user=Depends(get_user)) -> dict[str, Any]:
+    with _PC_LOCK:
+        a = _PC_AGENTS.get(agent_id)
+        if a and a["user_id"] == user["id"]:
+            _PC_AGENTS.pop(agent_id, None)
+            _PC_CMDS.pop(agent_id, None)
+    return {"ok": True}
+
+_PC_WEB_HTML = """<!doctype html><html lang="vi"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>KENIOS · Điều khiển PC</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0b0f1a;color:#fff}
+.wrap{max-width:640px;margin:0 auto;padding:14px}
+h1{font-size:18px;text-align:center;color:#3aa0ff;letter-spacing:2px}
+input,button{font-size:15px;border-radius:10px;border:none;padding:12px}
+input{width:100%;margin:6px 0;background:#1a2030;color:#fff}
+.btn{background:#1a2030;color:#fff;border:1px solid #2a3346;cursor:pointer}
+.btn:active{background:#243049}
+.primary{background:#0a84ff}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+#screen{width:100%;border-radius:10px;background:#000;display:block;aspect-ratio:16/9;object-fit:contain}
+#pad{height:230px;background:#141a28;border:1px dashed #2a3346;border-radius:12px;margin-top:8px;
+     display:flex;align-items:center;justify-content:center;color:#55607a;touch-action:none;user-select:none}
+.small{font-size:11px;color:#8a93a6}.hide{display:none}
+.pcitem{padding:14px;background:#1a2030;border-radius:10px;margin:6px 0;cursor:pointer;display:flex;justify-content:space-between}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
+label{font-size:12px;color:#8a93a6}
+</style></head><body><div class="wrap">
+<h1>PC CONTROLLER</h1>
+
+<div id="login">
+  <input id="u" placeholder="Tài khoản KENIOS" autocapitalize="off">
+  <input id="p" type="password" placeholder="Mật khẩu">
+  <button class="btn primary" style="width:100%" onclick="login()">Đăng nhập</button>
+  <p class="small" id="lmsg"></p>
+</div>
+
+<div id="list" class="hide">
+  <div class="row"><button class="btn" onclick="loadPCs()">Tải lại</button><button class="btn" onclick="logout()">Đăng xuất</button></div>
+  <div id="pcs"></div>
+  <p class="small">Chạy agent trên PC (pc_remote.py) và đăng nhập cùng tài khoản để máy hiện ở đây.</p>
+</div>
+
+<div id="ctrl" class="hide">
+  <div class="row"><button class="btn" onclick="backList()">◀ Máy</button><span id="pcname" style="text-align:center;padding:12px"></span></div>
+  <img id="screen" alt="screen">
+  <div id="pad">DI NGÓN TAY ĐỂ ĐIỀU KHIỂN CHUỘT</div>
+  <label>Tốc độ: <span id="spd">2.5</span>x</label>
+  <input id="speed" type="range" min="1" max="6" step="0.5" value="2.5" style="width:100%" oninput="spd.textContent=this.value">
+  <div class="row" style="margin-top:6px">
+    <button class="btn" onclick="send({t:'click',b:'left'})">◁ Chuột trái</button>
+    <button class="btn" onclick="send({t:'click',b:'right'})">Chuột phải ▷</button>
+  </div>
+  <div class="grid">
+    <button class="btn" onclick="send({t:'media',a:'prev'})">⏮ Prev</button>
+    <button class="btn" onclick="send({t:'media',a:'playpause'})">⏯ Play</button>
+    <button class="btn" onclick="send({t:'media',a:'next'})">⏭ Next</button>
+    <button class="btn" onclick="send({t:'media',a:'mute'})">🔇 Mute</button>
+    <button class="btn" onclick="send({t:'media',a:'voldown'})">🔉 Vol-</button>
+    <button class="btn" onclick="send({t:'media',a:'volup'})">🔊 Vol+</button>
+    <button class="btn" onclick="send({t:'sys',a:'desktop'})">🖥 Desktop</button>
+    <button class="btn" onclick="send({t:'sys',a:'lock'})">🔒 Lock</button>
+    <button class="btn" onclick="kbd()">⌨️ Bàn phím</button>
+    <button class="btn" onclick="send({t:'key',k:'backspace'})">⌫ Xoá</button>
+    <button class="btn" onclick="send({t:'key',k:'space'})">␣ Space</button>
+    <button class="btn" onclick="send({t:'key',k:'enter'})">⏎ Enter</button>
+    <button class="btn" onclick="scr(-3)">▲ Cuộn lên</button>
+    <button class="btn" onclick="scr(3)">▼ Cuộn xuống</button>
+    <button class="btn" onclick="send({t:'click',b:'double'})">Double click</button>
+    <button class="btn" onclick="fs()">⛶ Toàn màn</button>
+  </div>
+  <input id="hidden" style="position:fixed;top:-100px" oninput="onType(event)" onkeydown="onKey(event)">
+</div>
+
+<script>
+var TK="",AID="",dx=0,dy=0,last=null,poll=null,frameTimer=null;
+function h(){return {'Authorization':'Bearer '+TK,'Content-Type':'application/json'}}
+async function login(){
+  lmsg.textContent="Đang đăng nhập...";
+  try{
+    var r=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({username:u.value.trim(),password:p.value})});
+    var d=await r.json();
+    if(!r.ok){lmsg.textContent=d.detail||'Sai tài khoản';return;}
+    TK=d.token; localStorage.setItem('kpc_tk',TK);
+    showList();
+  }catch(e){lmsg.textContent='Lỗi mạng';}
+}
+function logout(){TK="";localStorage.removeItem('kpc_tk');login_.classList.remove('hide');list.classList.add('hide');ctrl.classList.add('hide');}
+function showList(){login_.classList.add('hide');ctrl.classList.add('hide');list.classList.remove('hide');loadPCs();}
+async function loadPCs(){
+  var r=await fetch('/pc/mine',{headers:h()});
+  if(r.status===401){logout();return;}
+  var arr=await r.json(); pcs.innerHTML='';
+  if(!arr.length){pcs.innerHTML='<p class="small">Chưa có máy nào online.</p>';}
+  arr.forEach(function(a){
+    var d=document.createElement('div');d.className='pcitem';
+    d.innerHTML='<span><span class="dot" style="background:'+(a.online?'#34c759':'#ff9f0a')+'"></span>'+a.name+'</span><span class="small">'+(a.os||'')+'</span>';
+    d.onclick=function(){openPC(a);};pcs.appendChild(d);
+  });
+}
+function openPC(a){AID=a.agent_id;pcname.textContent=a.name;list.classList.add('hide');ctrl.classList.remove('hide');
+  frameTimer=setInterval(refresh,600);refresh();}
+function backList(){clearInterval(frameTimer);showList();}
+async function refresh(){
+  try{var r=await fetch('/pc/screen/'+AID,{headers:h()});var d=await r.json();
+    if(d.jpg) document.getElementById('screen').src='data:image/jpeg;base64,'+d.jpg;}catch(e){}
+}
+async function send(cmd){try{await fetch('/pc/send',{method:'POST',headers:h(),body:JSON.stringify({agent_id:AID,cmd:cmd})});}catch(e){}}
+function scr(n){send({t:'scroll',dy:n});}
+function kbd(){document.getElementById('hidden').focus();}
+function onType(e){var v=e.target.value;if(v){send({t:'text',s:v});e.target.value='';}}
+function onKey(e){if(e.key==='Enter'){send({t:'key',k:'enter'});e.preventDefault();}
+  else if(e.key==='Backspace'){send({t:'key',k:'backspace'});}}
+function fs(){var el=document.documentElement;(el.requestFullscreen||el.webkitRequestFullscreen).call(el);}
+// Trackpad: gộp delta, gửi mỗi 50ms cho mượt
+var pad=document.getElementById('pad');
+function pos(e){return e.touches?e.touches[0]:e;}
+pad.addEventListener('pointerdown',function(e){last={x:e.clientX,y:e.clientY};pad.setPointerCapture(e.pointerId);});
+pad.addEventListener('pointermove',function(e){if(!last)return;var s=parseFloat(speed.value);
+  dx+=(e.clientX-last.x)*s;dy+=(e.clientY-last.y)*s;last={x:e.clientX,y:e.clientY};});
+pad.addEventListener('pointerup',function(e){last=null;});
+setInterval(function(){if(AID&&(Math.abs(dx)>=1||Math.abs(dy)>=1)){send({t:'move',dx:Math.round(dx),dy:Math.round(dy)});dx=0;dy=0;}},50);
+// tự đăng nhập lại nếu còn token
+window.onload=function(){var t=localStorage.getItem('kpc_tk');if(t){TK=t;showList();}};
+var login_=document.getElementById('login');
+</script></div></body></html>"""
+
+
+@app.get("/pc", response_class=HTMLResponse)
+def pc_web_controller() -> str:
+    """Trang điều khiển PC trên Web — đăng nhập tài khoản KENIOS rồi điều khiển như app."""
+    return _PC_WEB_HTML
+
+
 @app.post("/admin/push-notification")
 def admin_send_push(b: PushNotifIn, admin=Depends(get_admin)) -> dict[str, Any]:
     """Gửi push notification qua APNs. Cần cấu hình APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID, APNS_KEY_PATH."""

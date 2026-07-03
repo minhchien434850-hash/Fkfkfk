@@ -711,6 +711,19 @@ struct APIClient {
         _ = try await send("/u-store/\(sid)/products/\(pid)/review", method: "POST",
                            json: ["rating": rating, "comment": comment])
     }
+    // §11 — Điều khiển PC từ xa (relay qua KENIOS)
+    func pcMine() async throws -> [PCAgent] {
+        try decode(try await send("/pc/mine"))
+    }
+    func pcSend(agentId: String, cmd: [String: Any]) async throws {
+        _ = try await send("/pc/send", method: "POST", json: ["agent_id": agentId, "cmd": cmd])
+    }
+    func pcScreen(agentId: String) async throws -> PCScreen {
+        try decode(try await send("/pc/screen/\(agentId)"))
+    }
+    func pcDelete(agentId: String) async throws {
+        _ = try await send("/pc/\(agentId)", method: "DELETE")
+    }
     // Admin — duyệt rút tiền
     func adminUStoreWithdrawals() async throws -> [AdminWithdrawal] {
         try decode(try await send("/admin/u-store/withdrawals"))

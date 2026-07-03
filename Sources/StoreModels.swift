@@ -197,6 +197,20 @@ struct MyStoreWallet: Decodable {
     let withdrawals: [MyWithdrawal]
 }
 struct UStorePromoResult: Decodable { let valid: Bool; let discount: Int }
+// §11 — Điều khiển PC từ xa (relay)
+struct PCAgent: Decodable, Identifiable, Hashable {
+    let agentId: String
+    let name: String
+    let os: String
+    let online: Bool
+    var id: String { agentId }
+}
+struct PCScreen: Decodable {
+    let jpg: String
+    let ts: Int
+    let online: Bool
+}
+
 // §7 Đợt 4 — QR nhận tiền của cửa hàng (ngân hàng riêng người bán)
 struct StorePaymentInfo: Decodable {
     let bank: String
