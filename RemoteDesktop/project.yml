@@ -1,0 +1,42 @@
+# XcodeGen — sinh RemoteDesktop.xcodeproj.  Cài: brew install xcodegen ; chạy: xcodegen
+name: RemoteDesktop
+options:
+  bundleIdPrefix: com.kenios.remotedesktop
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    # Ngôn ngữ Swift 5 để CHẮC biên dịch; code đã viết async/await sẵn sàng nâng lên Swift 6.
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  RemoteDesktop:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Presentation
+      - Domain
+      - Application
+      - Infrastructure
+      - Platform
+      - Resources
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "Đăng nhập nhanh và an toàn bằng Face ID."
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Truyền âm thanh hai chiều tới máy tính."
+        INFOPLIST_KEY_NSCameraUsageDescription: "Chuyển hướng camera vào phiên điều khiển."
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+  RemoteDesktopTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    dependencies:
+      - target: RemoteDesktop
