@@ -70,6 +70,7 @@ struct VideoEditorView: View {
     @State private var multiPick: [PhotosPickerItem] = []   // ghép NHIỀU video cùng lúc
     @State private var clips: [URL] = []                    // các video nguồn (theo thứ tự ghép)
     @State private var merging = false
+    @State private var previewRefreshTask: Task<Void, Never>?   // cập nhật preview khi đổi hiệu ứng
     @State private var inputURL: URL?
     @State private var duration: Double = 0
     // Timeline UI: trình phát xem trước + dải thumbnail
@@ -469,6 +470,7 @@ struct VideoEditorView: View {
             guard !items.isEmpty else { return }
             Task { await addClips(items) }
         }
+        .onChange(of: fxSignature) { _ in schedulePreviewRefresh() }
         .sheet(isPresented: $showMusicPicker) {
             DocumentPicker(contentTypes: [.audio, .mp3, .mpeg4Audio], allowsMultipleSelection: false, asCopy: true) { urls in
                 if let u = urls.first { musicURL = u; musicName = u.lastPathComponent }
@@ -512,6 +514,29 @@ struct VideoEditorView: View {
         .padding().kCard(16)
     }
 
+    // Chữ ký toàn bộ thông số hiệu ứng — đổi bất kỳ mục nào → cập nhật lại preview.
+    private var fxSignature: String {
+        "\(filter)|\(brightness)|\(contrast)|\(saturation)|\(hue)|\(highlights)|\(shadows)|"
+        + "\(sharpen)|\(denoise)|\(outRes)|\(removeBg)|\(fadeInOut)|\(zoomMotion)|"
+        + "\(overlayText)|\(overlayPosY)|\(burnCaptions)|\(captions.count)|"
+        + "\(trimStart)|\(trimEnd)|" + splits.map { "\($0.time)-\($0.transition)" }.joined(separator: ",")
+    }
+
+    // Gắn lại bộ lọc/hiệu ứng vào khung xem trước để thấy KẾT QUẢ THẬT ngay.
+    private func refreshPreview() {
+        guard let item = player?.currentItem, let asset = item.asset as? AVURLAsset else { return }
+        item.videoComposition = makeComposition(asset)
+    }
+    // Gộp thay đổi liên tục (kéo thanh) rồi mới dựng lại → mượt, không giật.
+    private func schedulePreviewRefresh() {
+        previewRefreshTask?.cancel()
+        previewRefreshTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            if Task.isCancelled { return }
+            refreshPreview()
+        }
+    }
+
     // MARK: - Helpers
     private func timeStr(_ s: Double) -> String {
         let t = Int(s.rounded())
@@ -553,7 +578,10 @@ struct VideoEditorView: View {
             let r = ns.applying(tf)
             naturalSize = CGSize(width: abs(r.width), height: abs(r.height))
         }
-        player = AVPlayer(url: url)
+        // Xem trước CÓ HIỆU ỨNG (WYSIWYG): gắn bộ lọc/màu/chữ/chuyển cảnh vào player.
+        let item = AVPlayerItem(asset: asset)
+        item.videoComposition = makeComposition(asset)
+        player = AVPlayer(playerItem: item)
         thumbnails = []
         await generateThumbnails(asset, duration: duration)
     }
