@@ -136,19 +136,7 @@ struct AdminView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
-                // ============ Giọng chào toàn cục (chuyển từ Cửa hàng sang) ============
-                Section {
-                    NavigationLink {
-                        GlobalWelcomeEditor()
-                    } label: {
-                        Label(store.t("Giọng chào toàn cục", "Global welcome voice"),
-                              systemImage: "megaphone.fill")
-                    }
-                } footer: {
-                    Text(store.t("Đặt giọng chào phát cho MỌI người dùng khi mở app. (Cài đặt của app — không phải cài đặt cửa hàng.)",
-                                 "Set a spoken greeting played to ALL users on app open. (App setting — not the store setting.)"))
-                        .font(.caption2)
-                }
+                // "Giọng chào toàn cục" đã GỘP vào Cài đặt → Lời chào khi mở app (chỉ admin thấy).
 
                 // ============ Thông báo & Lời chào (chuyển từ Cửa hàng sang) ============
                 Section {
@@ -503,116 +491,8 @@ struct AdminWithdrawalsView: View {
     }
 }
 
-// ============================ Giọng chào toàn cục (admin đặt cho MỌI người) ============================
-// Chuyển từ Cài đặt Cửa hàng sang Admin của app theo yêu cầu.
-// Backend MERGE (chỉ cập nhật field gửi lên) nên chỉ cần giữ nguyên 4 field bắt buộc
-// (logo/banner) rồi sửa 3 field giọng chào → KHÔNG ảnh hưởng cài đặt cửa hàng khác.
-struct GlobalWelcomeEditor: View {
-    @EnvironmentObject var store: AppStore
-
-    @State private var enabled = true
-    @State private var text = "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"
-    @State private var rate: Double = 0.5
-    // Giữ nguyên các field bắt buộc để không đổi logo/banner khi lưu
-    @State private var logoName = ""
-    @State private var logoUrl = ""
-    @State private var bannerType = "image"
-    @State private var bannerUrl = ""
-
-    @State private var loaded = false
-    @State private var saving = false
-    @State private var message: String?
-    @State private var isError = false
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle(store.t("Bật giọng chào cho tất cả", "Enable global welcome voice"), isOn: $enabled)
-            } footer: {
-                Text(store.t("Khi bật, MỌI người dùng đều nghe giọng chào khi mở app (mặc định đang bật).",
-                             "When on, EVERY user hears the voice greeting on app open (on by default)."))
-                    .font(.caption2)
-            }
-
-            if enabled {
-                Section(store.t("Nội dung giọng chào cho mọi khách", "Voice greeting for all users")) {
-                    TextField(store.t("Nhập lời chào...", "Enter greeting..."),
-                              text: $text, axis: .vertical).lineLimit(2...6)
-                }
-                Section(store.t("Tốc độ đọc", "Reading speed")) {
-                    HStack(spacing: 10) {
-                        Text("🐢").font(.caption)
-                        Slider(value: $rate, in: 0.3...0.65, step: 0.025)
-                        Text("🐇").font(.caption)
-                    }
-                    Text(store.t("Tốc độ", "Speed") + ": \(Int(rate * 100))%")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Section(store.t("Thử giọng đọc", "Test voice")) {
-                    Button {
-                        WelcomeVoice.shared.testSpeak(text: text, voiceId: "", rate: Float(rate))
-                    } label: {
-                        Label(store.t("▶  Phát thử", "▶  Play"), systemImage: "play.circle.fill")
-                            .foregroundStyle(.green)
-                    }
-                    Button(role: .destructive) { WelcomeVoice.shared.stop() } label: {
-                        Label(store.t("■  Dừng", "■  Stop"), systemImage: "stop.circle")
-                    }
-                }
-            }
-
-            Section {
-                Button {
-                    Task { await save() }
-                } label: {
-                    HStack {
-                        if saving { ProgressView().padding(.trailing, 4) }
-                        Text(store.t("Lưu", "Save"))
-                    }
-                }
-                .disabled(!loaded || saving)   // chưa nạp xong thì không cho lưu (tránh ghi đè trống)
-            }
-
-            if !loaded {
-                Text(store.t("Đang tải cấu hình...", "Loading config..."))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if let message {
-                Text(message).font(.footnote).foregroundStyle(isError ? .red : .green)
-            }
-        }
-        .navigationTitle(store.t("Giọng chào toàn cục", "Global welcome"))
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
-    }
-
-    private func load() async {
-        guard let c = try? await store.api.storeConfig() else { return }
-        enabled = c.welcomeVoiceEnabled ?? true
-        if let vt = c.welcomeVoiceText, !vt.isEmpty { text = vt }
-        rate = Double(c.welcomeVoiceRate ?? 0.5)
-        logoName = c.logoName; logoUrl = c.logoUrl
-        bannerType = c.bannerType; bannerUrl = c.bannerUrl
-        loaded = true
-    }
-
-    private func save() async {
-        guard loaded else { return }
-        saving = true; message = nil
-        defer { saving = false }
-        do {
-            let r = try await store.api.adminStoreSetConfig(
-                logoName: logoName, logoUrl: logoUrl,
-                bannerType: bannerType, bannerUrl: bannerUrl,
-                welcomeVoiceEnabled: enabled,
-                welcomeVoiceText: text,
-                welcomeVoiceRate: Float(rate))
-            isError = false; message = r.message
-        } catch {
-            isError = true; message = error.localizedDescription
-        }
-    }
-}
+// "Giọng chào toàn cục" (GlobalWelcomeEditor) đã được GỘP vào
+// SettingsView → WelcomeGreetingView (mục "Lời chào khi mở app", chỉ admin thấy).
 
 // ============ Thông báo cập nhật phiên bản + Lời chào toàn cục (Quản trị app) ============
 struct AppNoticesEditor: View {

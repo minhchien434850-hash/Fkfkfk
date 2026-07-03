@@ -341,6 +341,19 @@ struct WelcomeGreetingView: View {
     @State private var voices: [AVSpeechSynthesisVoice] = []
     @State private var rateBinding: Double = 0.5
 
+    // ===== Giọng chào TOÀN CỤC (admin đặt cho MỌI người) — gộp từ mục Quản trị =====
+    @State private var gEnabled = true
+    @State private var gText = "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"
+    @State private var gRate: Double = 0.5
+    @State private var gLogoName = ""
+    @State private var gLogoUrl = ""
+    @State private var gBannerType = "image"
+    @State private var gBannerUrl = ""
+    @State private var gLoaded = false
+    @State private var gSaving = false
+    @State private var gMessage: String?
+    @State private var gIsError = false
+
     private let templates = [
         "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!",
         "Xin chào! Rất vui được gặp lại bạn tại KENIOS hôm nay.",
@@ -426,12 +439,101 @@ struct WelcomeGreetingView: View {
                     }
                 }
             }
+
+            // ===== GIỌNG CHÀO TOÀN CỤC (chỉ admin) — gộp từ mục Quản trị =====
+            if store.isAdmin {
+                Section {
+                    Toggle(store.t("Bật giọng chào toàn cục (áp cho MỌI người)",
+                                   "Enable global welcome voice (ALL users)"), isOn: $gEnabled)
+                } header: {
+                    Text(store.t("🔊 Giọng chào toàn cục — Admin", "🔊 Global welcome voice — Admin"))
+                } footer: {
+                    Text(store.t("Khi bật, MỌI người dùng đều nghe giọng chào này khi mở app. (Khác với lời chào cá nhân ở trên.)",
+                                 "When on, EVERY user hears this greeting on app open. (Separate from your personal greeting above.)"))
+                        .font(.caption2)
+                }
+
+                if gEnabled {
+                    Section(store.t("Nội dung giọng chào cho mọi khách", "Voice greeting for all users")) {
+                        TextField(store.t("Nhập lời chào...", "Enter greeting..."),
+                                  text: $gText, axis: .vertical).lineLimit(2...6)
+                    }
+                    Section(store.t("Tốc độ đọc (toàn cục)", "Reading speed (global)")) {
+                        HStack(spacing: 10) {
+                            Text("🐢").font(.caption)
+                            Slider(value: $gRate, in: 0.3...0.65, step: 0.025)
+                            Text("🐇").font(.caption)
+                        }
+                        Text(store.t("Tốc độ", "Speed") + ": \(Int(gRate * 100))%")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Section(store.t("Thử giọng toàn cục", "Test global voice")) {
+                        Button {
+                            WelcomeVoice.shared.testSpeak(text: gText, voiceId: "", rate: Float(gRate))
+                        } label: {
+                            Label(store.t("▶  Phát thử", "▶  Play"), systemImage: "play.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                        Button(role: .destructive) { WelcomeVoice.shared.stop() } label: {
+                            Label(store.t("■  Dừng", "■  Stop"), systemImage: "stop.circle")
+                        }
+                    }
+                }
+
+                Section {
+                    Button {
+                        Task { await saveGlobal() }
+                    } label: {
+                        HStack {
+                            if gSaving { ProgressView().padding(.trailing, 4) }
+                            Text(store.t("Lưu giọng chào toàn cục", "Save global welcome voice"))
+                        }
+                    }
+                    .disabled(!gLoaded || gSaving)
+                    if !gLoaded {
+                        Text(store.t("Đang tải cấu hình toàn cục...", "Loading global config..."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let gMessage {
+                        Text(gMessage).font(.footnote).foregroundStyle(gIsError ? .red : .green)
+                    }
+                }
+            }
         }
         .navigationTitle(store.t("Lời chào khi mở app", "Welcome greeting"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             voices = WelcomeVoice.availableVoices
             rateBinding = Double(store.welcomeRate)
+            if store.isAdmin { await loadGlobal() }
+        }
+    }
+
+    // MARK: - Giọng chào toàn cục (admin)
+    private func loadGlobal() async {
+        guard let c = try? await store.api.storeConfig() else { return }
+        gEnabled = c.welcomeVoiceEnabled ?? true
+        if let vt = c.welcomeVoiceText, !vt.isEmpty { gText = vt }
+        gRate = Double(c.welcomeVoiceRate ?? 0.5)
+        gLogoName = c.logoName; gLogoUrl = c.logoUrl
+        gBannerType = c.bannerType; gBannerUrl = c.bannerUrl
+        gLoaded = true
+    }
+
+    private func saveGlobal() async {
+        guard gLoaded else { return }
+        gSaving = true; gMessage = nil
+        defer { gSaving = false }
+        do {
+            let r = try await store.api.adminStoreSetConfig(
+                logoName: gLogoName, logoUrl: gLogoUrl,
+                bannerType: gBannerType, bannerUrl: gBannerUrl,
+                welcomeVoiceEnabled: gEnabled,
+                welcomeVoiceText: gText,
+                welcomeVoiceRate: Float(gRate))
+            gIsError = false; gMessage = r.message
+        } catch {
+            gIsError = true; gMessage = error.localizedDescription
         }
     }
 }
