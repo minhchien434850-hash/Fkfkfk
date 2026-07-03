@@ -279,15 +279,7 @@ struct StoreConfigEditor: View {
     @State private var announceEnabled = false
     @State private var announceText = ""
     @State private var announceColor = "accent"
-    // §1.3 — Lời chào toàn cục (popup) cho mọi người dùng
-    @State private var welcomePopupEnabled = false
-    @State private var welcomePopupTitle = ""
-    @State private var welcomePopupText = ""
-    // (welcomeVoice* đã chuyển sang AdminView → GlobalWelcomeEditor)
-    // §1.2 — Thông báo cập nhật phiên bản mới
-    @State private var latestVersion = ""
-    @State private var updateUrl = ""
-    @State private var updateMessage = ""
+    // (Lời chào toàn cục + Thông báo cập nhật phiên bản đã chuyển sang Quản trị app.)
     @State private var gamecatLimit = 6
     // Flash sale
     @State private var flashEnabled = false
@@ -667,36 +659,8 @@ struct StoreConfigEditor: View {
                     .font(.caption2)
             }
 
-            // §1.2 — Thông báo cập nhật phiên bản mới
-            Section {
-                TextField(store.t("Phiên bản mới nhất (vd 3.1)", "Latest version (e.g. 3.1)"), text: $latestVersion)
-                    .keyboardType(.decimalPad)
-                TextField(store.t("Link tải/cập nhật (https://...)", "Update link (https://...)"), text: $updateUrl)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                TextField(store.t("Lời nhắn cập nhật (tuỳ chọn)", "Update message (optional)"),
-                          text: $updateMessage, axis: .vertical).lineLimit(1...3)
-            } header: {
-                Text(store.t("Thông báo cập nhật phiên bản", "Version update notice"))
-            } footer: {
-                Text(store.t("Khi bản mới > phiên bản đang cài, mọi user thấy popup 'Cập nhật ngay' mở link. Để trống Phiên bản để tắt.",
-                             "When newer than the installed version, all users see an 'Update now' popup opening the link. Leave version empty to disable."))
-                    .font(.caption2)
-            }
-
-            // §1.3 — Lời chào toàn cục (popup) cho MỌI người dùng khi mở app
-            Section {
-                Toggle(store.t("Bật lời chào toàn cục", "Enable global welcome popup"), isOn: $welcomePopupEnabled)
-                if welcomePopupEnabled {
-                    TextField(store.t("Tiêu đề (vd: Chào mừng!)", "Title (e.g. Welcome!)"), text: $welcomePopupTitle)
-                    TextField(store.t("Nội dung lời chào cho mọi khách", "Welcome text for all users"),
-                              text: $welcomePopupText, axis: .vertical).lineLimit(2...5)
-                }
-            } header: {
-                Text(store.t("Lời chào toàn cục (popup)", "Global welcome popup"))
-            } footer: {
-                Text(store.t("Popup hiện 1 lần khi MỌI người dùng mở app (không chỉ admin).",
-                             "Shown once when ANY user opens the app (not only admin)."))
-            }
+            // §1.2 + §1.3 — "Thông báo cập nhật phiên bản" và "Lời chào toàn cục"
+            // ĐÃ CHUYỂN sang Quản trị app (AdminView → "Thông báo & Lời chào").
 
             // "Giọng chào toàn cục" ĐÃ CHUYỂN sang Admin của app
             // (AdminView → "Giọng chào toàn cục"). Không đặt ở Cửa hàng nữa.
@@ -793,12 +757,7 @@ struct StoreConfigEditor: View {
             announceEnabled = c.announceEnabled ?? false
             announceText = c.announceText ?? ""
             announceColor = c.announceColor ?? "accent"
-            welcomePopupEnabled = c.welcomePopupEnabled ?? false
-            welcomePopupTitle = c.welcomePopupTitle ?? ""
-            welcomePopupText = c.welcomePopupText ?? ""
-            latestVersion = c.latestVersion ?? ""
-            updateUrl = c.updateUrl ?? ""
-            updateMessage = c.updateMessage ?? ""
+            // Lời chào toàn cục + Thông báo cập nhật đã chuyển sang Quản trị app.
             gamecatLimit = c.gamecatLimit ?? 6
         }
     }
@@ -830,13 +789,9 @@ struct StoreConfigEditor: View {
                 statUsersBase: statUsersBase, statSoldBase: statSoldBase,
                 statReviewsBase: statReviewsBase,
                 announceEnabled: announceEnabled, announceText: announceText,
-                announceColor: announceColor, gamecatLimit: gamecatLimit,
-                welcomePopupEnabled: welcomePopupEnabled,
-                welcomePopupTitle: welcomePopupTitle,
-                welcomePopupText: welcomePopupText,
-                // Giọng chào toàn cục đã chuyển sang Admin app → không gửi ở đây nữa
-                latestVersion: latestVersion, updateUrl: updateUrl,
-                updateMessage: updateMessage)
+                announceColor: announceColor, gamecatLimit: gamecatLimit)
+                // Lời chào toàn cục + Thông báo cập nhật phiên bản ĐÃ CHUYỂN sang
+                // Quản trị app (AdminView → "Thông báo & Lời chào") → không gửi ở đây nữa.
             // Lưu cache ngay để các màn khác giữ tên/logo + thứ tự bố cục mới kể cả khi mạng chậm
             cfgName = logoName; cfgLogo = logoUrl; cfgLogoType = logoType; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
             cfgSectionOrder = sections.joined(separator: ",")

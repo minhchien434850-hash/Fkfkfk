@@ -150,6 +150,20 @@ struct AdminView: View {
                         .font(.caption2)
                 }
 
+                // ============ Thông báo & Lời chào (chuyển từ Cửa hàng sang) ============
+                Section {
+                    NavigationLink {
+                        AppNoticesEditor()
+                    } label: {
+                        Label(store.t("Thông báo & Lời chào", "Notices & Welcome"),
+                              systemImage: "bell.badge.fill")
+                    }
+                } footer: {
+                    Text(store.t("Thông báo cập nhật phiên bản mới + Lời chào toàn cục (popup) cho MỌI người dùng. (Cài đặt của app — không phải cửa hàng.)",
+                                 "New-version update notice + global welcome popup for ALL users. (App setting — not the store.)"))
+                        .font(.caption2)
+                }
+
                 // §7 Đợt 4 — Duyệt rút tiền người bán (tài chính nền tảng)
                 Section {
                     NavigationLink {
@@ -593,6 +607,110 @@ struct GlobalWelcomeEditor: View {
                 welcomeVoiceEnabled: enabled,
                 welcomeVoiceText: text,
                 welcomeVoiceRate: Float(rate))
+            isError = false; message = r.message
+        } catch {
+            isError = true; message = error.localizedDescription
+        }
+    }
+}
+
+// ============ Thông báo cập nhật phiên bản + Lời chào toàn cục (Quản trị app) ============
+struct AppNoticesEditor: View {
+    @EnvironmentObject var store: AppStore
+    // §1.2 — Thông báo cập nhật phiên bản
+    @State private var latestVersion = ""
+    @State private var updateUrl = ""
+    @State private var updateMessage = ""
+    // §1.3 — Lời chào toàn cục (popup)
+    @State private var welcomePopupEnabled = false
+    @State private var welcomePopupTitle = ""
+    @State private var welcomePopupText = ""
+    // Truyền lại các trường bắt buộc để không ghi đè rỗng
+    @State private var logoName = ""
+    @State private var logoUrl = ""
+    @State private var bannerType = "image"
+    @State private var bannerUrl = ""
+    @State private var loaded = false
+    @State private var saving = false
+    @State private var message: String?
+    @State private var isError = false
+
+    var body: some View {
+        Form {
+            Section {
+                TextField(store.t("Phiên bản mới nhất (vd 3.1)", "Latest version (e.g. 3.1)"), text: $latestVersion)
+                    .keyboardType(.decimalPad)
+                TextField(store.t("Link tải/cập nhật (https://...)", "Update link (https://...)"), text: $updateUrl)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                TextField(store.t("Lời nhắn cập nhật (tuỳ chọn)", "Update message (optional)"),
+                          text: $updateMessage, axis: .vertical).lineLimit(1...3)
+            } header: {
+                Text(store.t("Thông báo cập nhật phiên bản", "Version update notice"))
+            } footer: {
+                Text(store.t("Khi bản mới > phiên bản đang cài, mọi user thấy popup 'Cập nhật ngay' mở link. Để trống Phiên bản để tắt.",
+                             "When newer than the installed version, all users see an 'Update now' popup opening the link. Leave version empty to disable."))
+                    .font(.caption2)
+            }
+
+            Section {
+                Toggle(store.t("Bật lời chào toàn cục", "Enable global welcome popup"), isOn: $welcomePopupEnabled)
+                if welcomePopupEnabled {
+                    TextField(store.t("Tiêu đề (vd: Chào mừng!)", "Title (e.g. Welcome!)"), text: $welcomePopupTitle)
+                    TextField(store.t("Nội dung lời chào cho mọi khách", "Welcome text for all users"),
+                              text: $welcomePopupText, axis: .vertical).lineLimit(2...5)
+                }
+            } header: {
+                Text(store.t("Lời chào toàn cục (popup)", "Global welcome popup"))
+            } footer: {
+                Text(store.t("Popup hiện 1 lần khi MỌI người dùng mở app (không chỉ admin).",
+                             "Shown once when ANY user opens the app (not only admin)."))
+            }
+
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    HStack {
+                        if saving { ProgressView().padding(.trailing, 4) }
+                        Text(store.t("Lưu", "Save")).bold()
+                    }
+                }.disabled(saving || !loaded)
+                if let message {
+                    Text(message).font(.caption).foregroundStyle(isError ? .red : .green)
+                }
+            }
+        }
+        .navigationTitle(store.t("Thông báo & Lời chào", "Notices & Welcome"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard let c = try? await store.api.storeConfig() else { return }
+        latestVersion = c.latestVersion ?? ""
+        updateUrl = c.updateUrl ?? ""
+        updateMessage = c.updateMessage ?? ""
+        welcomePopupEnabled = c.welcomePopupEnabled ?? false
+        welcomePopupTitle = c.welcomePopupTitle ?? ""
+        welcomePopupText = c.welcomePopupText ?? ""
+        logoName = c.logoName; logoUrl = c.logoUrl
+        bannerType = c.bannerType; bannerUrl = c.bannerUrl
+        loaded = true
+    }
+
+    private func save() async {
+        guard loaded else { return }
+        saving = true; message = nil
+        defer { saving = false }
+        do {
+            let r = try await store.api.adminStoreSetConfig(
+                logoName: logoName, logoUrl: logoUrl,
+                bannerType: bannerType, bannerUrl: bannerUrl,
+                welcomePopupEnabled: welcomePopupEnabled,
+                welcomePopupTitle: welcomePopupTitle,
+                welcomePopupText: welcomePopupText,
+                latestVersion: latestVersion, updateUrl: updateUrl,
+                updateMessage: updateMessage)
             isError = false; message = r.message
         } catch {
             isError = true; message = error.localizedDescription
