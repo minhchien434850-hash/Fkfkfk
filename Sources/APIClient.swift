@@ -724,6 +724,22 @@ struct APIClient {
     func pcDelete(agentId: String) async throws {
         _ = try await send("/pc/\(agentId)", method: "DELETE")
     }
+    // §11b — Cầu nối RDP tại máy chủ: kết nối máy thuê chỉ bằng IP + user + pass
+    func rdpStart(host: String, username: String, password: String,
+                  width: Int = 1280, height: Int = 720) async throws -> RDPStartResult {
+        try decode(try await send("/rdp/start", method: "POST",
+                                  json: ["host": host, "username": username, "password": password,
+                                         "width": width, "height": height]))
+    }
+    func rdpScreen(_ rid: String) async throws -> RDPScreen {
+        try decode(try await send("/rdp/screen/\(rid)"))
+    }
+    func rdpInput(_ rid: String, cmd: [String: Any]) async throws {
+        _ = try await send("/rdp/input", method: "POST", json: ["rdp_id": rid, "cmd": cmd])
+    }
+    func rdpStop(_ rid: String) async throws {
+        _ = try await send("/rdp/stop", method: "POST", json: ["rdp_id": rid])
+    }
     // Admin — duyệt rút tiền
     func adminUStoreWithdrawals() async throws -> [AdminWithdrawal] {
         try decode(try await send("/admin/u-store/withdrawals"))

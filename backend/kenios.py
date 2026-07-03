@@ -7809,6 +7809,185 @@ def pc_delete(agent_id: str, user=Depends(get_user)) -> dict[str, Any]:
             _PC_CMDS.pop(agent_id, None)
     return {"ok": True}
 
+# ============================================================================
+#  §11b — Cầu nối RDP tại MÁY CHỦ (kết nối máy thuê chỉ bằng IP + user + pass)
+#  Máy chủ KENIOS chạy: Xvfb (màn hình ảo) + xfreerdp (kết nối RDP tới máy thuê)
+#  + ffmpeg (chụp khung) + xdotool (bơm chuột/phím). App chỉ gõ IP/user/pass.
+#  Cần cài trên VPS: freerdp2-x11 xvfb ffmpeg xdotool (capnhat-vps.sh tự cài).
+# ============================================================================
+import shutil as _shutil
+_RDP_LOCK = _pc_threading.Lock()
+_RDP: dict[str, "RDPSession"] = {}   # rdp_id -> RDPSession
+_XKEY = {
+    "enter": "Return", "backspace": "BackSpace", "space": "space", "tab": "Tab",
+    "esc": "Escape", "up": "Up", "down": "Down", "left": "Left", "right": "Right",
+    "delete": "Delete", "home": "Home", "end": "End", "pageup": "Prior", "pagedown": "Next",
+    "insert": "Insert", "printscreen": "Print", "capslock": "Caps_Lock",
+    "ctrl": "ctrl", "alt": "alt", "shift": "shift", "win": "super",
+    "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5", "f6": "F6",
+    "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10", "f11": "F11", "f12": "F12",
+}
+
+def _rdp_tools_missing() -> list[str]:
+    return [t for t in ("Xvfb", "xfreerdp", "ffmpeg", "xdotool") if not _shutil.which(t)]
+
+class RDPSession:
+    def __init__(self, user_id: int, host: str, user: str, password: str, w: int, h: int):
+        self.user_id = user_id
+        self.host = host; self.user = user; self.password = password
+        self.w = max(640, min(1920, w)); self.h = max(480, min(1200, h))
+        self.display = ""; self.frame_path = ""; self.procs = []
+        self.status = "starting"; self.error = ""
+        self.last_seen = time.time()
+
+    def start(self):
+        try:
+            dn = 90 + secrets.randbelow(800)
+            self.display = f":{dn}"
+            self.frame_path = f"/tmp/kenios_rdp_{dn}.jpg"
+            env = dict(os.environ, DISPLAY=self.display)
+            # 1) Màn hình ảo
+            self.procs.append(subprocess.Popen(
+                ["Xvfb", self.display, "-screen", "0", f"{self.w}x{self.h}x24", "-nolisten", "tcp"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            time.sleep(1.2)
+            # 2) Kết nối RDP tới máy thuê (fullscreen trong màn ảo)
+            self.procs.append(subprocess.Popen(
+                ["xfreerdp", f"/v:{self.host}", f"/u:{self.user}", f"/p:{self.password}",
+                 f"/size:{self.w}x{self.h}", "/cert:ignore", "+clipboard",
+                 "-grab-keyboard", "/f", "+auto-reconnect", "/log-level:ERROR"],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            time.sleep(0.5)
+            # 3) Chụp khung liên tục → 1 file JPEG cập nhật (app đọc file này)
+            self.procs.append(subprocess.Popen(
+                ["ffmpeg", "-y", "-f", "x11grab", "-video_size", f"{self.w}x{self.h}",
+                 "-framerate", "8", "-i", self.display, "-q:v", "6", "-update", "1", self.frame_path],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            self.status = "running"
+        except Exception as e:
+            self.status = "error"; self.error = str(e)
+
+    def frame_b64(self) -> str:
+        try:
+            with open(self.frame_path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        except Exception:
+            return ""
+
+    def input(self, cmd: dict):
+        env = dict(os.environ, DISPLAY=self.display)
+        t = cmd.get("t")
+        def run(args): subprocess.run(["xdotool"] + args, env=env,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        try:
+            if t == "move":
+                run(["mousemove_relative", "--", str(int(cmd.get("dx", 0))), str(int(cmd.get("dy", 0)))])
+            elif t == "moveto":
+                run(["mousemove", str(int(float(cmd.get("x", 0)) * self.w)), str(int(float(cmd.get("y", 0)) * self.h))])
+            elif t == "click":
+                b = cmd.get("b", "left")
+                if b == "double": run(["click", "--repeat", "2", "1"])
+                elif b == "right": run(["click", "3"])
+                else: run(["click", "1"])
+            elif t == "drag":
+                run(["mousedown", "1"])
+                run(["mousemove_relative", "--", str(int(cmd.get("dx", 0))), str(int(cmd.get("dy", 0)))])
+                run(["mouseup", "1"])
+            elif t == "scroll":
+                dy = int(cmd.get("dy", 0)); btn = "4" if dy < 0 else "5"
+                for _ in range(min(10, abs(dy) // 30 + 1)): run(["click", btn])
+            elif t == "text":
+                run(["type", "--", str(cmd.get("s", ""))])
+            elif t == "key":
+                k = _XKEY.get(cmd.get("k", ""))
+                if k: run(["key", k])
+            elif t == "hotkey":
+                keys = "+".join(_XKEY.get(x, x) for x in cmd.get("keys", []) if x)
+                if keys: run(["key", keys])
+            elif t == "clip":
+                run(["type", "--", str(cmd.get("s", ""))])
+        except Exception:
+            pass
+        self.last_seen = time.time()
+
+    def stop(self):
+        for p in reversed(self.procs):
+            try: p.terminate()
+            except Exception: pass
+        try: os.remove(self.frame_path)
+        except Exception: pass
+        self.status = "stopped"
+
+def _rdp_reap():
+    now = time.time()
+    with _RDP_LOCK:
+        dead = [rid for rid, s in _RDP.items() if now - s.last_seen > 300]
+        for rid in dead:
+            try: _RDP[rid].stop()
+            except Exception: pass
+            _RDP.pop(rid, None)
+
+class RDPStartIn(BaseModel):
+    host: str
+    username: str
+    password: str
+    width: int = 1280
+    height: int = 720
+
+@app.post("/rdp/start")
+def rdp_start(b: RDPStartIn, user=Depends(get_user)) -> dict[str, Any]:
+    miss = _rdp_tools_missing()
+    if miss:
+        raise HTTPException(status_code=503,
+            detail="Máy chủ chưa cài công cụ RDP (" + ", ".join(miss) +
+                   "). Chạy lại capnhat-vps.sh trên VPS để tự cài.")
+    host = (b.host or "").strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="Thiếu địa chỉ máy (IP/hostname).")
+    _rdp_reap()
+    rid = secrets.token_hex(8)
+    s = RDPSession(user["id"], host, (b.username or "").strip(), b.password or "", b.width, b.height)
+    s.start()
+    if s.status == "error":
+        raise HTTPException(status_code=500, detail="Không khởi động được RDP: " + s.error)
+    with _RDP_LOCK:
+        _RDP[rid] = s
+    return {"rdp_id": rid, "w": s.w, "h": s.h}
+
+def _rdp_get(rid: str, user) -> "RDPSession":
+    with _RDP_LOCK:
+        s = _RDP.get(rid)
+    if not s or s.user_id != user["id"]:
+        raise HTTPException(status_code=404, detail="Phiên RDP không tồn tại.")
+    return s
+
+@app.get("/rdp/screen/{rid}")
+def rdp_screen(rid: str, user=Depends(get_user)) -> dict[str, Any]:
+    s = _rdp_get(rid, user)
+    s.last_seen = time.time()
+    return {"jpg": s.frame_b64(), "running": s.status == "running", "error": s.error}
+
+class RDPInputIn(BaseModel):
+    rdp_id: str
+    cmd: dict
+
+@app.post("/rdp/input")
+def rdp_input(b: RDPInputIn, user=Depends(get_user)) -> dict[str, Any]:
+    s = _rdp_get(b.rdp_id, user)
+    s.input(b.cmd or {})
+    return {"ok": True}
+
+class RDPStopIn(BaseModel):
+    rdp_id: str
+
+@app.post("/rdp/stop")
+def rdp_stop(b: RDPStopIn, user=Depends(get_user)) -> dict[str, Any]:
+    with _RDP_LOCK:
+        s = _RDP.pop(b.rdp_id, None)
+    if s and s.user_id == user["id"]:
+        s.stop()
+    return {"ok": True}
+
 _PC_WEB_HTML = """<!doctype html><html lang="vi"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>KENIOS · Điều khiển PC</title>

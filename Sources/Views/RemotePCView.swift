@@ -44,6 +44,9 @@ struct RemotePCView: View {
     @State private var editingPC: SavedPC?
     @State private var connecting = false
     @State private var connectMsg: String?
+    // §11b — Kết nối máy thuê bằng IP + user + pass (cầu nối RDP máy chủ)
+    @State private var showRDP = false
+    @State private var rdpOpen: RDPOpen?
 
     private var webURL: String {
         var s = store.baseURL.trimmingCharacters(in: .whitespaces)
@@ -98,6 +101,33 @@ struct RemotePCView: View {
                             } label: { Image(systemName: "trash") }
                         }
                     }
+                }
+
+                // §11b — Kết nối máy thuê chỉ bằng IP + tài khoản (không cần cài agent)
+                Section {
+                    Button { showRDP = true } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "network")
+                                .font(.title3).foregroundStyle(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Color.blue).clipShape(RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(store.t("Kết nối bằng IP + tài khoản", "Connect by IP + account"))
+                                    .font(.subheadline.bold()).foregroundStyle(.primary)
+                                Text(store.t("Cho máy thuê (VPS) — chỉ nhập IP/user/pass",
+                                             "For a rented PC (VPS) — just enter IP/user/pass"))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text(store.t("Máy thuê (RDP thẳng)", "Rented PC (direct RDP)"))
+                } footer: {
+                    Text(store.t("Máy chủ KENIOS kết nối RDP tới máy thuê giúp bạn — không cần cài gì lên máy đó. Máy cần có IP công khai và bật Remote Desktop.",
+                                 "The KENIOS server makes the RDP connection for you — nothing to install on that PC. It needs a public IP with Remote Desktop enabled."))
+                        .font(.caption2)
                 }
 
                 // Add PC — máy đã lưu (đăng nhập bằng tài khoản như app Microsoft)
@@ -188,6 +218,17 @@ struct RemotePCView: View {
                     }
                 }.environmentObject(store)
             }
+            .sheet(isPresented: $showRDP) {
+                RDPConnectView { open in
+                    showRDP = false
+                    // Chờ sheet đóng hẳn rồi mới mở màn điều khiển (tránh xung đột trình bày).
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { rdpOpen = open }
+                }.environmentObject(store)
+            }
+            .fullScreenCover(item: $rdpOpen) { o in
+                PCControllerView(agent: PCAgent(agentId: o.rid, name: o.host, os: "Windows", online: true),
+                                 rdpId: o.rid).environmentObject(store)
+            }
             .task { await reload() }
         }
     }
@@ -247,7 +288,11 @@ final class PCEngine: ObservableObject {
     private var accDY: CGFloat = 0
     private var running = false
 
-    init(api: APIClient, agentId: String) { self.api = api; self.agentId = agentId }
+    var rdpId: String? = nil   // nếu có → điều khiển qua cầu nối RDP máy chủ (máy thuê)
+
+    init(api: APIClient, agentId: String, rdpId: String? = nil) {
+        self.api = api; self.agentId = agentId; self.rdpId = rdpId
+    }
     // StateObject không truy cập được store lúc init → gán lại máy chủ + token thật khi onAppear.
     func rebind(api: APIClient) { self.api = api }
 
@@ -278,19 +323,30 @@ final class PCEngine: ObservableObject {
 
     private func screenLoop() async {
         while running {
-            if let s = try? await api.pcScreen(agentId: agentId) {
+            if let rid = rdpId {
+                if let s = try? await api.rdpScreen(rid) {
+                    online = s.running
+                    if !s.jpg.isEmpty, let data = Data(base64Encoded: s.jpg), let img = UIImage(data: data) {
+                        screen = img
+                    }
+                }
+            } else if let s = try? await api.pcScreen(agentId: agentId) {
                 online = s.online
                 if !s.jpg.isEmpty, let data = Data(base64Encoded: s.jpg), let img = UIImage(data: data) {
                     screen = img
                 }
             }
-            // Nhận khung ~7 fps cho khớp agent (mượt hơn nhiều so với 0.6s cũ).
+            // Nhận khung ~7 fps cho khớp agent/bridge (mượt hơn nhiều so với 0.6s cũ).
             try? await Task.sleep(nanoseconds: 150_000_000)
         }
     }
 
     func send(_ cmd: [String: Any]) {
-        Task { try? await api.pcSend(agentId: agentId, cmd: cmd) }
+        if let rid = rdpId {
+            Task { try? await api.rdpInput(rid, cmd: cmd) }
+        } else {
+            Task { try? await api.pcSend(agentId: agentId, cmd: cmd) }
+        }
     }
     func click(_ b: String) { send(["t": "click", "b": b]) }
     func scroll(_ dy: Int) { send(["t": "scroll", "dy": dy]) }
@@ -307,6 +363,7 @@ struct PCControllerView: View {
     @Environment(\.dismiss) private var dismiss
     let agent: PCAgent
     var apiOverride: APIClient? = nil   // token tài khoản đã lưu (nil = tài khoản hiện tại)
+    var rdpId: String? = nil            // nếu có → điều khiển máy thuê qua cầu nối RDP
 
     @StateObject private var eng: PCEngine
     @State private var lastTrans: CGSize?
@@ -314,11 +371,13 @@ struct PCControllerView: View {
     @FocusState private var kbFocused: Bool
     @State private var fullscreen = false
 
-    init(agent: PCAgent, apiOverride: APIClient? = nil) {
+    init(agent: PCAgent, apiOverride: APIClient? = nil, rdpId: String? = nil) {
         self.agent = agent
         self.apiOverride = apiOverride
+        self.rdpId = rdpId
         // api dựng tạm; sẽ được cấp lại trong onAppear.
-        _eng = StateObject(wrappedValue: PCEngine(api: APIClient(baseURL: "", token: nil), agentId: agent.agentId))
+        _eng = StateObject(wrappedValue: PCEngine(api: APIClient(baseURL: "", token: nil),
+                                                  agentId: agent.agentId, rdpId: rdpId))
     }
 
     var body: some View {
@@ -351,7 +410,13 @@ struct PCControllerView: View {
             eng.rebind(api: apiOverride ?? store.api)   // token tài khoản đã lưu, hoặc tài khoản hiện tại
             eng.start()
         }
-        .onDisappear { eng.stop() }
+        .onDisappear {
+            eng.stop()
+            if let rid = rdpId {   // đóng phiên RDP ở máy chủ để giải phóng tài nguyên
+                let api = apiOverride ?? store.api
+                Task { try? await api.rdpStop(rid) }
+            }
+        }
         .fullScreenCover(isPresented: $fullscreen) {
             PCFullscreen(eng: eng, lastTrans: $lastTrans) { fullscreen = false }
         }
@@ -738,5 +803,87 @@ struct CredentialsEntryView: View {
         .padding()
         .onAppear { a = account; p = password }
         .presentationDetents([.height(300)])
+    }
+}
+
+// §11b — Phiên RDP đang mở (dùng cho fullScreenCover)
+struct RDPOpen: Identifiable {
+    let id = UUID()
+    let rid: String
+    let host: String
+    let w: Int
+    let h: Int
+}
+
+// Form kết nối máy thuê bằng IP + tài khoản + mật khẩu (máy chủ KENIOS làm cầu nối RDP)
+struct RDPConnectView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    var onConnected: (RDPOpen) -> Void
+
+    @State private var host = ""
+    @State private var user = ""
+    @State private var pass = ""
+    @State private var connecting = false
+    @State private var err: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(store.t("Thông tin máy thuê", "Rented PC details")) {
+                    TextField(store.t("IP hoặc Hostname (vd 103.20.1.5)", "IP or Hostname (e.g. 103.20.1.5)"), text: $host)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField(store.t("Tài khoản (vd Administrator)", "Account (e.g. Administrator)"), text: $user)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    SecureField(store.t("Mật khẩu", "Password"), text: $pass)
+                }
+                if let err { Section { Text(err).foregroundStyle(.red).font(.caption) } }
+                Section {
+                    Button { connect() } label: {
+                        HStack {
+                            if connecting { ProgressView().padding(.trailing, 4) }
+                            Text(connecting ? store.t("Đang kết nối… (có thể mất vài giây)", "Connecting… (may take a few seconds)")
+                                            : store.t("Kết nối", "Connect")).bold()
+                            Spacer()
+                        }
+                    }
+                    .disabled(connecting || host.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Section {
+                    Text(store.t("Máy chủ KENIOS sẽ mở kết nối RDP tới máy này giúp bạn — KHÔNG cần cài gì lên máy thuê. Máy cần có IP công khai và đã bật Remote Desktop (cổng 3389).",
+                                 "The KENIOS server opens the RDP connection to this PC for you — nothing to install on the rented PC. It needs a public IP with Remote Desktop enabled (port 3389)."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(store.t("Kết nối bằng IP", "Connect by IP"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                }
+            }
+        }
+    }
+
+    private func connect() {
+        connecting = true; err = nil
+        Task {
+            defer { connecting = false }
+            do {
+                let r = try await store.api.rdpStart(
+                    host: host.trimmingCharacters(in: .whitespaces),
+                    username: user.trimmingCharacters(in: .whitespaces),
+                    password: pass)
+                onConnected(RDPOpen(rid: r.rdpId, host: host.trimmingCharacters(in: .whitespaces), w: r.w, h: r.h))
+            } catch {
+                let raw = error.localizedDescription
+                if raw.lowercased().contains("chưa cài") || raw.contains("503") {
+                    err = store.t("Máy chủ KENIOS chưa cài công cụ RDP. Chạy lại capnhat-vps.sh trên VPS rồi thử lại.\n(",
+                                  "The KENIOS server hasn't installed RDP tools yet. Re-run capnhat-vps.sh on the VPS.\n(") + raw + ")"
+                } else {
+                    err = store.t("Kết nối thất bại: ", "Connection failed: ") + raw
+                }
+            }
+        }
     }
 }

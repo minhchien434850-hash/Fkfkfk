@@ -211,6 +211,18 @@ struct PCScreen: Decodable {
     let online: Bool
 }
 
+// §11b — Cầu nối RDP tại máy chủ (kết nối máy thuê bằng IP + user + pass)
+struct RDPStartResult: Decodable {
+    let rdpId: String
+    let w: Int
+    let h: Int
+}
+struct RDPScreen: Decodable {
+    let jpg: String
+    let running: Bool
+    let error: String
+}
+
 // §7 Đợt 4 — QR nhận tiền của cửa hàng (ngân hàng riêng người bán)
 struct StorePaymentInfo: Decodable {
     let bank: String

@@ -31,6 +31,17 @@ else
   pip install -q "asyncssh>=2.14" 2>/dev/null || true
 fi
 
+# Cài công cụ CẦU NỐI RDP (điều khiển máy thuê chỉ bằng IP+user+pass) — thiếu thì cài.
+echo "==> Đảm bảo công cụ RDP (FreeRDP + Xvfb + ffmpeg + xdotool)..."
+if ! command -v xfreerdp >/dev/null 2>&1 || ! command -v Xvfb >/dev/null 2>&1 \
+   || ! command -v ffmpeg >/dev/null 2>&1 || ! command -v xdotool >/dev/null 2>&1; then
+  (apt-get update -qq && apt-get install -y -qq freerdp2-x11 xvfb ffmpeg xdotool >/dev/null 2>&1 \
+     && echo "    ✓ Đã cài công cụ RDP.") \
+     || echo "    ⚠️ Cài công cụ RDP chưa được (tính năng 'Kết nối bằng IP' sẽ báo cho tới khi cài xong)."
+else
+  echo "    ✓ Công cụ RDP đã sẵn sàng."
+fi
+
 # Xoá cache bytecode cũ (lý do hay gặp: restart nhưng vẫn chạy code cũ)
 echo "==> Xoá cache Python cũ..."
 rm -rf "$WORK/__pycache__" 2>/dev/null || true
