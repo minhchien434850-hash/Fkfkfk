@@ -12,13 +12,14 @@ struct LoginView: View {
     @State private var didAutoTry = false
     @State private var googleClientId = ""   // lấy từ máy chủ; rỗng = ẩn nút Google
     @State private var googleLoading = false
-    @State private var brand: StoreAppConfig?   // logo/tên admin đặt → hiện ngay ở màn đăng nhập
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    brandLogo
+                    // Logo + tên của CHÍNH APP (icon app), KHÔNG dùng logo cửa hàng.
+                    Image("AppLogo")
+                        .resizable().scaledToFill()
                         .frame(width: 116, height: 116)
                         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
                         .overlay(
@@ -30,7 +31,7 @@ struct LoginView: View {
                         .shadow(color: Theme.purple.opacity(0.55), radius: 26, y: 12)
                         .padding(.top, 52)
 
-                    brandName
+                    RainbowText(text: "KENIOS", size: 40)
                     Text(store.t("Mạng xã hội · Video · Giải trí · Công cụ", "Social · Video · Entertainment · Tools"))
                         .font(.subheadline).foregroundStyle(.secondary)
 
@@ -141,41 +142,10 @@ struct LoginView: View {
         }
     }
 
-    // Logo màn đăng nhập — theo logo admin đặt (ẢNH · VIDEO · GIF); fallback về AppLogo.
-    @ViewBuilder private var brandLogo: some View {
-        if let u = brand?.logoUrl, !u.isEmpty, let url = URL(string: u) {
-            let isVideo = (brand?.logoType == "video") || isVideoLink(u)
-            if isVideo {
-                LoopingVideoBackground(url: url, fit: false)
-            } else if isAnimatedImage(u) {
-                GIFWebView(url: url, contentMode: "cover")
-            } else {
-                CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
-                    placeholder: { Image("AppLogo").resizable().scaledToFill() }
-            }
-        } else {
-            Image("AppLogo").resizable().scaledToFill()
-        }
-    }
-
-    // Tên thương hiệu — theo logoName + hiệu ứng/font/chuyển động admin đặt; fallback "KENIOS".
-    @ViewBuilder private var brandName: some View {
-        if let n = brand?.logoName, !n.isEmpty {
-            let eff = brand?.logoEffect ?? "rainbow"
-            AnimatedStoreText(text: n,
-                              effect: (eff.isEmpty || eff == "none") ? "rainbow" : eff,
-                              font: keniosFont(brand?.logoFont ?? "rounded", size: 40),
-                              anim: brand?.logoAnim ?? "none")
-        } else {
-            RainbowText(text: "KENIOS", size: 40)
-        }
-    }
-
     /// Lấy Google Client ID từ máy chủ để quyết định có hiện nút "Đăng nhập bằng Google".
     private func loadGoogleClientId() async {
         if let cfg = try? await store.api.storeConfig() {
             googleClientId = cfg.googleClientId ?? ""
-            brand = cfg   // logo + tên admin đặt → màn đăng nhập tự đổi theo
         }
     }
 
