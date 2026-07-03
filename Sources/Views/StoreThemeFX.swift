@@ -178,7 +178,7 @@ final class LoopingPlayerPool {
         }
         // Chưa có bản local → tải về rồi TỰ ĐỔI player sang local ngay (hết đứng khi lặp).
         if local == nil { downloadAndUpgrade(url, key: key) }
-        return p
+        return p.player
     }
 
     private func makePlayer(playURL: URL, isLocal: Bool) -> (player: AVQueuePlayer, looper: AVPlayerLooper) {
