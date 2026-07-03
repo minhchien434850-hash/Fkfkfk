@@ -5,7 +5,7 @@ import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, myStore, winApp
+    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, myStore, winApp, remoteDesktop
     var id: String { rawValue }
 
     var title: String {
@@ -27,6 +27,7 @@ enum HubDest: String, Identifiable {
         case .ipaLibrary:     return "Kho IPA"
         case .myStore:        return "Cửa hàng của tôi"
         case .winApp:         return "Windows App"
+        case .remoteDesktop:  return "Remote Desktop"
         }
     }
     var subtitle: String {
@@ -48,6 +49,7 @@ enum HubDest: String, Identifiable {
         case .ipaLibrary:     return "Gom IPA · Ký & cài qua ESign"
         case .myStore:        return "Mở shop riêng · bán hàng"
         case .winApp:         return "Điều khiển PC Windows (RDP)"
+        case .remoteDesktop:  return "Bảng điều khiển · máy thuê IP · agent"
         }
     }
     var titleEN: String {
@@ -69,6 +71,7 @@ enum HubDest: String, Identifiable {
         case .ipaLibrary:     return "IPA Library"
         case .myStore:        return "My Store"
         case .winApp:         return "Windows App"
+        case .remoteDesktop:  return "Remote Desktop"
         }
     }
     var subtitleEN: String {
@@ -90,6 +93,7 @@ enum HubDest: String, Identifiable {
         case .ipaLibrary:     return "Collect IPAs · Sign via ESign"
         case .myStore:        return "Your own shop · sell"
         case .winApp:         return "Control a Windows PC (RDP)"
+        case .remoteDesktop:  return "Dashboard · rented IP · agent"
         }
     }
     var icon: String {
@@ -111,6 +115,7 @@ enum HubDest: String, Identifiable {
         case .ipaLibrary:     return "shippingbox.fill"
         case .myStore:        return "storefront.fill"
         case .winApp:         return "pc"
+        case .remoteDesktop:  return "display"
         }
     }
     var colors: [Color] {
@@ -132,6 +137,7 @@ enum HubDest: String, Identifiable {
         case .ipaLibrary:     return [Color(red: 0.55, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.3, blue: 0.85)]
         case .myStore:        return [Color(red: 0.0, green: 0.72, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.7)]
         case .winApp:         return [Color(red: 0.0, green: 0.47, blue: 0.84), Color(red: 0.0, green: 0.28, blue: 0.6)]
+        case .remoteDesktop:  return [Color(red: 0.0, green: 0.47, blue: 0.84), Color(red: 0.35, green: 0.15, blue: 0.7)]
         }
     }
     var gradient: LinearGradient {
@@ -145,7 +151,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .myStore, .winApp, .certImport, .ipaLibrary, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .myStore, .winApp, .remoteDesktop, .certImport, .ipaLibrary, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -221,6 +227,8 @@ struct ExploreHubView: View {
             MyStoreView()
         case .winApp:
             RemotePCView()
+        case .remoteDesktop:
+            RemoteDesktopHubView()
         }
     }
 }
