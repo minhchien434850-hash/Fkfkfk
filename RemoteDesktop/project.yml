@@ -17,6 +17,9 @@ targets:
   RemoteDesktop:
     type: application
     platform: iOS
+    configFiles:
+      Debug: Configuration/Debug.xcconfig
+      Release: Configuration/Release.xcconfig
     sources:
       - App
       - Presentation
@@ -24,19 +27,48 @@ targets:
       - Application
       - Infrastructure
       - Platform
+      - Shared
       - Resources
+      - RemoteDesktop.docc
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.kenios.remotedesktop.RemoteDesktop
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_NSFaceIDUsageDescription: "Đăng nhập nhanh và an toàn bằng Face ID."
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Truyền âm thanh hai chiều tới máy tính."
         INFOPLIST_KEY_NSCameraUsageDescription: "Chuyển hướng camera vào phiên điều khiển."
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+    dependencies:
+      - target: RemoteDesktopWidget
+
+  RemoteDesktopWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Widgets
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: RemoteDesktop
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kenios.remotedesktop.RemoteDesktop.widget
+
   RemoteDesktopTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - Tests
+    dependencies:
+      - target: RemoteDesktop
+
+  RemoteDesktopUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
     dependencies:
       - target: RemoteDesktop

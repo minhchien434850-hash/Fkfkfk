@@ -10,6 +10,11 @@ struct RemoteDesktopApp: App {
     /// The single DI container for the whole app lifetime.
     @StateObject private var container = DIContainer.makeDefault()
 
+    init() {
+        CrashLogger.shared.install()
+        AppLog.shared.info("RemoteDesktop launched", category: "app")
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

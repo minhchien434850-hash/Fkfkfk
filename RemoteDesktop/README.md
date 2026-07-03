@@ -57,6 +57,42 @@ packages are required.
 - A full low-latency codec pipeline requires a Desktop Agent that speaks the
   matching wire protocol; this project provides the client architecture for it.
 
+## Advanced modules (added)
+
+- **Shared/** — structured `AppLog` (os.Logger) + breadcrumbs, `RetryPolicy`
+  (exponential backoff), extensions, Live Activity attributes/controller.
+- **Advanced networking** — `NetworkMonitor` (NWPathMonitor, Wi-Fi↔cellular),
+  `ConnectionSupervisor` (heartbeat + auto-reconnect), `SecureTransport`
+  (TLS 1.3 + QUIC parameters over `NWConnection`), `OfflineCache`.
+- **Advanced security** — `RSAKeyService` (RSA-4096 OAEP), `SecureEnclaveService`
+  (EC key in Secure Enclave), `DeviceValidator` (Zero-Trust / jailbreak),
+  `JWT` decoder, plus the existing AES-256-GCM / Keychain / TLS pinning.
+- **Monitoring** — `PerformanceMonitor` (FPS + memory), `CrashLogger`,
+  `Telemetry`/`ConsoleAnalytics`, `NetworkStatsTracker`, `DiagnosticsView`.
+- **Session** — `SessionCoordinator` (multi-session, resume, timeout, recovery).
+- **Redirection** — `RedirectionManager` (camera/mic/speaker/printer/USB) as
+  open channels; `FileQueueManager` (queue + zlib compression + SHA-256).
+- **Input** — `GameControllerService` (MFi controllers), `PencilService`
+  (Apple Pencil), trackpad/keyboard/scroll via `InputManager`.
+- **Platform** — `MetalVideoView` (MTKView bridge), `AudioProcessingOptions`.
+- **UI** — Diagnostics screen, accessibility labels, light/dark automatic.
+- **Widgets/** — WidgetKit home-screen widget (separate extension target).
+- **Tooling** — `.swiftlint.yml`, `.swiftformat`, `Scripts/` (bootstrap/lint/
+  format/CI template), `RemoteDesktop.docc` DocC catalog.
+- **Tests** — unit tests (use cases, input, crypto, streaming, retry, JWT,
+  cache, packetizer, integration) + a UI smoke test target.
+
+Some advanced items (QUIC listener, VideoToolbox/Metal decode, USB/printer
+redirect, file bytes, Live Activity rendering) are **interfaces + integration
+points** that require the matching Desktop Agent capability; each is commented.
+
+## Structure
+
+```
+App/ Presentation/ Domain/ Application/ Infrastructure/ Platform/ Shared/
+Resources/ Configuration/ Scripts/ Widgets/ UITests/ Tests/ RemoteDesktop.docc/
+```
+
 ## Swift version
 
 `project.yml` sets `SWIFT_VERSION = 5.0` for reliable compilation. The code uses

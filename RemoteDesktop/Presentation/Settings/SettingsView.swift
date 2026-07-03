@@ -23,6 +23,11 @@ struct SettingsView: View {
                 Section("Diagnostics") {
                     LabeledContent("Version", value: vm.appVersion)
                     LabeledContent("Server", value: vm.serverURL)
+                    NavigationLink {
+                        DiagnosticsView()
+                    } label: {
+                        Label("Performance & Logs", systemImage: "waveform.path.ecg")
+                    }
                 }
             }
             .navigationTitle("Settings")
