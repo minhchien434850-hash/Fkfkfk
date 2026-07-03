@@ -136,21 +136,8 @@ struct AdminView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
-                // "Giọng chào toàn cục" đã GỘP vào Cài đặt → Lời chào khi mở app (chỉ admin thấy).
-
-                // ============ Thông báo & Lời chào (chuyển từ Cửa hàng sang) ============
-                Section {
-                    NavigationLink {
-                        AppNoticesEditor()
-                    } label: {
-                        Label(store.t("Thông báo & Lời chào", "Notices & Welcome"),
-                              systemImage: "bell.badge.fill")
-                    }
-                } footer: {
-                    Text(store.t("Thông báo cập nhật phiên bản mới + Lời chào toàn cục (popup) cho MỌI người dùng. (Cài đặt của app — không phải cửa hàng.)",
-                                 "New-version update notice + global welcome popup for ALL users. (App setting — not the store.)"))
-                        .font(.caption2)
-                }
+                // "Giọng chào toàn cục", "Lời chào popup" và "Thông báo cập nhật phiên bản"
+                // đã GỘP HẾT vào Cài đặt → "Lời chào khi mở app" (block admin) cho dễ dùng.
 
                 // ("Duyệt rút tiền người bán" đã gỡ theo yêu cầu — cùng với cửa hàng người bán.)
 

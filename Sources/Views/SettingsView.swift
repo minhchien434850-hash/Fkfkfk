@@ -353,6 +353,13 @@ struct WelcomeGreetingView: View {
     @State private var gSaving = false
     @State private var gMessage: String?
     @State private var gIsError = false
+    // ===== Gộp thêm: Lời chào POPUP (chữ) + Thông báo cập nhật phiên bản (admin) =====
+    @State private var gPopupEnabled = false
+    @State private var gPopupTitle = ""
+    @State private var gPopupText = ""
+    @State private var gVersion = ""
+    @State private var gUpdateUrl = ""
+    @State private var gUpdateMsg = ""
 
     private let templates = [
         "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!",
@@ -480,13 +487,46 @@ struct WelcomeGreetingView: View {
                     }
                 }
 
+                // ===== Lời chào POPUP (chữ) toàn cục =====
+                Section {
+                    Toggle(store.t("Bật lời chào popup (chữ)", "Enable welcome popup (text)"), isOn: $gPopupEnabled)
+                    if gPopupEnabled {
+                        TextField(store.t("Tiêu đề (vd: Chào mừng!)", "Title (e.g. Welcome!)"), text: $gPopupTitle)
+                        TextField(store.t("Nội dung popup cho mọi khách", "Popup text for all users"),
+                                  text: $gPopupText, axis: .vertical).lineLimit(2...5)
+                    }
+                } header: {
+                    Text(store.t("💬 Lời chào popup — Admin", "💬 Welcome popup — Admin"))
+                } footer: {
+                    Text(store.t("Popup chữ hiện 1 lần khi MỌI người mở app (khác giọng nói ở trên).",
+                                 "Text popup shown once when EVERY user opens the app (separate from the voice above)."))
+                        .font(.caption2)
+                }
+
+                // ===== Thông báo cập nhật phiên bản =====
+                Section {
+                    TextField(store.t("Phiên bản mới nhất (vd 3.1)", "Latest version (e.g. 3.1)"), text: $gVersion)
+                        .keyboardType(.decimalPad)
+                    TextField(store.t("Link tải/cập nhật (https://...)", "Update link (https://...)"), text: $gUpdateUrl)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField(store.t("Lời nhắn cập nhật (tuỳ chọn)", "Update message (optional)"),
+                              text: $gUpdateMsg, axis: .vertical).lineLimit(1...3)
+                } header: {
+                    Text(store.t("🆕 Thông báo cập nhật phiên bản — Admin", "🆕 Version update notice — Admin"))
+                } footer: {
+                    Text(store.t("Bản mới > phiên bản đang cài → mọi user thấy popup 'Cập nhật ngay' mở link. Để trống Phiên bản để tắt.",
+                                 "When newer than installed → all users see an 'Update now' popup. Leave version empty to disable."))
+                        .font(.caption2)
+                }
+
                 Section {
                     Button {
                         Task { await saveGlobal() }
                     } label: {
                         HStack {
                             if gSaving { ProgressView().padding(.trailing, 4) }
-                            Text(store.t("Lưu giọng chào toàn cục", "Save global welcome voice"))
+                            Text(store.t("Lưu cài đặt toàn cục (giọng · popup · cập nhật)",
+                                         "Save global settings (voice · popup · update)"))
                         }
                     }
                     .disabled(!gLoaded || gSaving)
@@ -517,6 +557,12 @@ struct WelcomeGreetingView: View {
         gRate = Double(c.welcomeVoiceRate ?? 0.5)
         gLogoName = c.logoName; gLogoUrl = c.logoUrl
         gBannerType = c.bannerType; gBannerUrl = c.bannerUrl
+        gPopupEnabled = c.welcomePopupEnabled ?? false
+        gPopupTitle = c.welcomePopupTitle ?? ""
+        gPopupText = c.welcomePopupText ?? ""
+        gVersion = c.latestVersion ?? ""
+        gUpdateUrl = c.updateUrl ?? ""
+        gUpdateMsg = c.updateMessage ?? ""
         gLoaded = true
     }
 
@@ -530,7 +576,12 @@ struct WelcomeGreetingView: View {
                 bannerType: gBannerType, bannerUrl: gBannerUrl,
                 welcomeVoiceEnabled: gEnabled,
                 welcomeVoiceText: gText,
-                welcomeVoiceRate: Float(gRate))
+                welcomeVoiceRate: Float(gRate),
+                welcomePopupEnabled: gPopupEnabled,
+                welcomePopupTitle: gPopupTitle,
+                welcomePopupText: gPopupText,
+                latestVersion: gVersion, updateUrl: gUpdateUrl,
+                updateMessage: gUpdateMsg)
             gIsError = false; gMessage = r.message
         } catch {
             gIsError = true; gMessage = error.localizedDescription
