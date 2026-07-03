@@ -7,11 +7,43 @@ import UIKit
 //  PC, đăng nhập cùng tài khoản → máy tự hiện ở đây để điều khiển. Có cả bản Web.
 // ============================================================================
 
+// Kết nối PC đã lưu (kiểu "Add PC" của Microsoft): tên + địa chỉ + tài khoản KENIOS.
+// Kết nối qua hệ thống agent KENIOS (đăng nhập tài khoản để lấy máy online của tài khoản đó).
+struct SavedPC: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var friendlyName: String = ""   // Friendly Name (tuỳ chọn)
+    var host: String = ""           // Hostname / IP (nhãn · lọc đúng máy)
+    var account: String = ""        // Tài khoản KENIOS mà pc-agent đăng nhập
+    var password: String = ""       // Mật khẩu KENIOS (để lấy máy online của tài khoản)
+    var adminMode: Bool = false
+    var swapMouse: Bool = false
+    var title: String { friendlyName.isEmpty ? (host.isEmpty ? account : host) : friendlyName }
+}
+
+enum SavedPCStore {
+    private static let key = "kenios_saved_pcs"
+    static func load() -> [SavedPC] {
+        guard let d = UserDefaults.standard.data(forKey: key),
+              let arr = try? JSONDecoder().decode([SavedPC].self, from: d) else { return [] }
+        return arr
+    }
+    static func save(_ arr: [SavedPC]) {
+        if let d = try? JSONEncoder().encode(arr) { UserDefaults.standard.set(d, forKey: key) }
+    }
+}
+
 struct RemotePCView: View {
     @EnvironmentObject var store: AppStore
     @State private var pcs: [PCAgent] = []
     @State private var loading = true
     @State private var openPC: PCAgent?
+    @State private var openAPI: APIClient?          // token tài khoản đã lưu (nil = tài khoản hiện tại)
+    // Add PC (máy đã lưu)
+    @State private var savedPCs: [SavedPC] = SavedPCStore.load()
+    @State private var showAddPC = false
+    @State private var editingPC: SavedPC?
+    @State private var connecting = false
+    @State private var connectMsg: String?
 
     private var webURL: String {
         var s = store.baseURL.trimmingCharacters(in: .whitespaces)
@@ -68,6 +100,43 @@ struct RemotePCView: View {
                     }
                 }
 
+                // Add PC — máy đã lưu (đăng nhập bằng tài khoản như app Microsoft)
+                Section {
+                    if connecting { HStack { ProgressView(); Text(store.t("Đang kết nối…", "Connecting…")).font(.caption) } }
+                    if let connectMsg { Text(connectMsg).font(.caption).foregroundStyle(.red) }
+                    ForEach(savedPCs) { s in
+                        Button { connectSaved(s) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "desktopcomputer")
+                                    .font(.title3).foregroundStyle(.white)
+                                    .frame(width: 40, height: 40)
+                                    .background(Theme.purple).clipShape(RoundedRectangle(cornerRadius: 10))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(s.title).font(.subheadline.bold()).foregroundStyle(.primary)
+                                    Text(s.account.isEmpty ? store.t("Tài khoản hiện tại", "Current account") : s.account)
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) { removeSaved(s) } label: { Image(systemName: "trash") }
+                            Button { editingPC = s } label: { Image(systemName: "pencil") }.tint(.blue)
+                        }
+                    }
+                    Button { showAddPC = true } label: {
+                        Label(store.t("Thêm PC (Add PC)", "Add PC"), systemImage: "plus.circle.fill")
+                            .font(.subheadline.bold())
+                    }
+                } header: {
+                    Text(store.t("Máy đã lưu (Add PC)", "Saved PCs (Add PC)"))
+                } footer: {
+                    Text(store.t("Nhập tên máy + tài khoản KENIOS mà PC đã đăng nhập. Bấm để đăng nhập và điều khiển máy online của tài khoản đó.",
+                                 "Enter the PC name + the KENIOS account the PC signed in with. Tap to log in and control that account's online PC."))
+                        .font(.caption2)
+                }
+
                 Section(store.t("Dùng trên Web", "Use on Web")) {
                     HStack {
                         Image(systemName: "globe").foregroundStyle(Theme.accent)
@@ -98,11 +167,26 @@ struct RemotePCView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAddPC = true } label: { Image(systemName: "plus") }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }
                 }
             }
             .fullScreenCover(item: $openPC) { p in
-                PCControllerView(agent: p).environmentObject(store)
+                PCControllerView(agent: p, apiOverride: openAPI).environmentObject(store)
+            }
+            .sheet(isPresented: $showAddPC) {
+                AddRemotePCView { newPC in
+                    savedPCs.append(newPC); SavedPCStore.save(savedPCs)
+                }.environmentObject(store)
+            }
+            .sheet(item: $editingPC) { pc in
+                AddRemotePCView(existing: pc) { updated in
+                    if let i = savedPCs.firstIndex(where: { $0.id == updated.id }) {
+                        savedPCs[i] = updated; SavedPCStore.save(savedPCs)
+                    }
+                }.environmentObject(store)
             }
             .task { await reload() }
         }
@@ -111,6 +195,41 @@ struct RemotePCView: View {
     private func reload() async {
         loading = true; defer { loading = false }
         pcs = (try? await store.api.pcMine()) ?? []
+    }
+
+    private func removeSaved(_ s: SavedPC) {
+        savedPCs.removeAll { $0.id == s.id }; SavedPCStore.save(savedPCs)
+    }
+
+    // Đăng nhập tài khoản đã lưu → lấy máy online của tài khoản đó → mở màn điều khiển.
+    private func connectSaved(_ s: SavedPC) {
+        connecting = true; connectMsg = nil
+        Task {
+            defer { connecting = false }
+            do {
+                let api: APIClient
+                if s.account.isEmpty {
+                    api = store.api   // dùng tài khoản đang đăng nhập
+                } else {
+                    let auth = try await store.api.login(s.account, s.password)
+                    api = APIClient(baseURL: store.baseURL, token: auth.token)
+                }
+                let list = (try? await api.pcMine()) ?? []
+                let online = list.filter { $0.online }
+                // Ưu tiên máy trùng tên/host đã đặt; nếu không, lấy máy online đầu tiên.
+                let target = online.first(where: { $0.name.caseInsensitiveCompare(s.host) == .orderedSame })
+                    ?? online.first
+                guard let agent = target else {
+                    connectMsg = store.t("Chưa thấy máy online cho tài khoản này. Hãy chạy pc-agent trên PC bằng đúng tài khoản rồi thử lại.",
+                                         "No online PC for this account yet. Run pc-agent on the PC with this account, then retry.")
+                    return
+                }
+                openAPI = (s.account.isEmpty ? nil : api)
+                openPC = agent
+            } catch {
+                connectMsg = store.t("Đăng nhập thất bại: ", "Login failed: ") + error.localizedDescription
+            }
+        }
     }
 }
 
@@ -186,6 +305,7 @@ struct PCControllerView: View {
     @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) private var dismiss
     let agent: PCAgent
+    var apiOverride: APIClient? = nil   // token tài khoản đã lưu (nil = tài khoản hiện tại)
 
     @StateObject private var eng: PCEngine
     @State private var lastTrans: CGSize?
@@ -193,9 +313,10 @@ struct PCControllerView: View {
     @FocusState private var kbFocused: Bool
     @State private var fullscreen = false
 
-    init(agent: PCAgent) {
+    init(agent: PCAgent, apiOverride: APIClient? = nil) {
         self.agent = agent
-        // api dựng tạm; sẽ được cấp lại từ store trong onAppear nếu cần
+        self.apiOverride = apiOverride
+        // api dựng tạm; sẽ được cấp lại trong onAppear.
         _eng = StateObject(wrappedValue: PCEngine(api: APIClient(baseURL: "", token: nil), agentId: agent.agentId))
     }
 
@@ -226,7 +347,7 @@ struct PCControllerView: View {
                 }
         }
         .onAppear {
-            eng.rebind(api: store.api)   // dùng đúng máy chủ + token đã đăng nhập
+            eng.rebind(api: apiOverride ?? store.api)   // token tài khoản đã lưu, hoặc tài khoản hiện tại
             eng.start()
         }
         .onDisappear { eng.stop() }
@@ -469,5 +590,152 @@ struct WinAppArchitectureDetail: View {
     }
     private var down: some View {
         Image(systemName: "arrow.down").font(.caption.bold()).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Add PC (giao diện giống Microsoft Remote Desktop, kết nối qua agent KENIOS)
+struct AddRemotePCView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    var existing: SavedPC? = nil
+    var onSave: (SavedPC) -> Void
+
+    @State private var host = ""
+    @State private var friendly = ""
+    @State private var account = ""
+    @State private var password = ""
+    @State private var adminMode = false
+    @State private var swapMouse = false
+    @State private var showCreds = false
+
+    init(existing: SavedPC? = nil, onSave: @escaping (SavedPC) -> Void) {
+        self.existing = existing
+        self.onSave = onSave
+        _host = State(initialValue: existing?.host ?? "")
+        _friendly = State(initialValue: existing?.friendlyName ?? "")
+        _account = State(initialValue: existing?.account ?? "")
+        _password = State(initialValue: existing?.password ?? "")
+        _adminMode = State(initialValue: existing?.adminMode ?? false)
+        _swapMouse = State(initialValue: existing?.swapMouse ?? false)
+    }
+
+    private var credsSummary: String {
+        account.isEmpty ? store.t("Hỏi khi cần", "Ask When Required") : account
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Text(store.t("Tên PC", "PC Name"))
+                        Spacer()
+                        TextField(store.t("Hostname hoặc IP", "Hostname or IP"), text: $host)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    }
+                    Button { showCreds = true } label: {
+                        HStack {
+                            Text(store.t("Thông tin đăng nhập", "Credentials")).foregroundStyle(.primary)
+                            Spacer()
+                            Text(credsSummary).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Section(store.t("CHUNG", "GENERAL")) {
+                    HStack {
+                        Text(store.t("Tên gợi nhớ", "Friendly Name"))
+                        Spacer()
+                        TextField(store.t("Tuỳ chọn", "Optional"), text: $friendly)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Toggle(store.t("Chế độ quản trị", "Admin Mode"), isOn: $adminMode)
+                    Toggle(store.t("Đảo nút chuột", "Swap Mouse Buttons"), isOn: $swapMouse)
+                }
+                Section {
+                    Text(store.t("Kết nối qua KENIOS: PC phải chạy pc-agent và đăng nhập đúng tài khoản ở trên. Không cần mở cổng/VPS.",
+                                 "Connect via KENIOS: the PC must run pc-agent signed in with the account above. No port/VPS needed."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(store.t("Thêm PC", "Add PC"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(store.t("Lưu", "Save")) { save() }.bold()
+                        .disabled(host.trimmingCharacters(in: .whitespaces).isEmpty
+                                  && friendly.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .sheet(isPresented: $showCreds) {
+                CredentialsEntryView(account: $account, password: $password).environmentObject(store)
+            }
+        }
+    }
+
+    private func save() {
+        var pc = existing ?? SavedPC()
+        pc.host = host.trimmingCharacters(in: .whitespaces)
+        pc.friendlyName = friendly.trimmingCharacters(in: .whitespaces)
+        pc.account = account.trimmingCharacters(in: .whitespaces)
+        pc.password = password
+        pc.adminMode = adminMode
+        pc.swapMouse = swapMouse
+        onSave(pc)
+        dismiss()
+    }
+}
+
+// Hộp "Nhập thông tin đăng nhập" (giống ảnh 2 — Enter Your Credentials)
+struct CredentialsEntryView: View {
+    @EnvironmentObject var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @Binding var account: String
+    @Binding var password: String
+    @State private var a = ""
+    @State private var p = ""
+
+    var body: some View {
+        VStack(spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(store.t("Nhập thông tin đăng nhập", "Enter Your Credentials")).font(.headline)
+                Text(store.t("Thông tin này dùng để kết nối tới PC từ xa.",
+                             "These credentials will be used to connect to a remote PC."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(spacing: 0) {
+                TextField(store.t("Tài khoản KENIOS", "KENIOS account"), text: $a)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.username)
+                    .padding(12)
+                Divider()
+                SecureField(store.t("Mật khẩu", "Password"), text: $p)
+                    .textContentType(.password).padding(12)
+            }
+            .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 12))
+
+            HStack(spacing: 12) {
+                Button(role: .cancel) { dismiss() } label: {
+                    Text(store.t("Huỷ", "Cancel")).foregroundStyle(.red)
+                        .frame(maxWidth: .infinity).padding()
+                        .background(Color(.secondarySystemBackground)).clipShape(Capsule())
+                }
+                Button {
+                    account = a.trimmingCharacters(in: .whitespaces); password = p; dismiss()
+                } label: {
+                    Text(store.t("Tiếp tục", "Continue")).bold().foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).padding()
+                        .background(Theme.accent).clipShape(Capsule())
+                }
+            }
+            Spacer()
+        }
+        .padding()
+        .onAppear { a = account; p = password }
+        .presentationDetents([.height(300)])
     }
 }
