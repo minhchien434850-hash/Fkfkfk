@@ -117,17 +117,18 @@ final class CertificateStore: ObservableObject {
             if SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess, let cert = certRef {
                 info.certSubject = SecCertificateCopySubjectSummary(cert) as String?
             }
-        } else if status == errSecDecode {
-            info.passwordValid = false   // hỏng thật (không giải mã được cấu trúc ASN.1)
-            info.p12Unverified = false
-            info.certSubject = nil
         } else {
-            // errSecAuthFailed (-25293) và các lỗi khác: KHÔNG kết luận sai chắc chắn —
-            // iOS trả lỗi này cho CẢ mật khẩu sai LẪN .p12 mã hoá kiểu mới (OpenSSL 3:
-            // AES-256 + MAC SHA-256) mà iOS không đọc được. Mật khẩu vẫn đã lưu (Keychain)
-            // để eSign (OpenSSL đầy đủ) tự xác minh khi ký.
-            info.passwordValid = nil
-            info.p12Unverified = true
+            // errSecAuthFailed (-25293), errSecDecode (-26275) và các lỗi khác: KHÔNG kết
+            // luận "hỏng" — iOS trả các mã này cho CẢ mật khẩu sai LẪN .p12 mã hoá kiểu mới
+            // (OpenSSL 3: PBES2/AES-256 + MAC SHA-256) mà iOS không đọc được dù file tốt.
+            // Chỉ coi là hỏng khi file không phải cấu trúc PKCS#12 (ASN.1 phải bắt đầu 0x30).
+            if data.first == 0x30, data.count > 100 {
+                info.passwordValid = nil
+                info.p12Unverified = true   // đã lưu mật khẩu; eSign/máy ký (OpenSSL đầy đủ) xác minh khi ký
+            } else {
+                info.passwordValid = false  // không phải file .p12 (tải hỏng / sai file)
+                info.p12Unverified = false
+            }
             info.certSubject = nil
         }
     }
@@ -243,9 +244,15 @@ struct CertificateImportView: View {
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                         } else if certs.info.passwordValid == false {
-                            Label(store.t("File .p12 hỏng hoặc không đọc được", "The .p12 file is corrupt or unreadable"),
-                                  systemImage: "xmark.circle.fill")
-                                .font(.caption.bold()).foregroundStyle(.red)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(store.t("File này không phải .p12 (tải hỏng hoặc chọn nhầm file)",
+                                              "This is not a valid .p12 (corrupt download or wrong file)"),
+                                      systemImage: "xmark.circle.fill")
+                                    .font(.caption.bold()).foregroundStyle(.red)
+                                Text(store.t("Hãy tải lại file .p12 gốc rồi nhập lại ở bước 1.",
+                                             "Re-download the original .p12 and import it again in step 1."))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     } header: {
                         Text("3. Mật khẩu chứng chỉ")
