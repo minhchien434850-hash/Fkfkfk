@@ -278,11 +278,9 @@ struct MainTabView: View {
         guard latest.id > lastSeenNotifId else { return }
         let firstRun = (lastSeenNotifId == 0)
         lastSeenNotifId = latest.id
-        // Lần đầu cài: chỉ hiện nếu thông báo còn mới (trong 24h), tránh bung thông báo cũ.
-        if firstRun {
-            let age = Int(Date().timeIntervalSince1970) - (latest.createdAt ?? 0)
-            if age > 86_400 { return }
-        }
+        // Lần đầu cài / cài lại app: CHỈ ghi mốc, KHÔNG báo lại thông báo cũ.
+        // Chỉ báo khi admin thêm sản phẩm MỚI sau mốc này (id lớn hơn ở lần kiểm tra sau).
+        if firstRun { return }
         // Hiện BANNER hệ thống (kèm ẢNH sản phẩm nếu có) cho MỌI người dùng — kể cả khi thu nhỏ app.
         store.postProductNotification(body: latest.body.isEmpty ? latest.title : latest.body,
                                       imageURL: latest.image)
