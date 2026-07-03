@@ -524,8 +524,22 @@ struct VideoEditorView: View {
 
     // Gắn lại bộ lọc/hiệu ứng vào khung xem trước để thấy KẾT QUẢ THẬT ngay.
     private func refreshPreview() {
-        guard let item = player?.currentItem, let asset = item.asset as? AVURLAsset else { return }
+        guard let player, let item = player.currentItem,
+              let asset = item.asset as? AVURLAsset else { return }
         item.videoComposition = makeComposition(asset)
+        // QUAN TRỌNG: khi player ĐANG TẠM DỪNG, gán videoComposition mới KHÔNG tự vẽ lại
+        // khung hình đang hiển thị → người dùng tưởng "hiệu ứng không ăn". Phải seek lại đúng
+        // khung hiện tại (zero-tolerance) để iOS render lại qua bộ lọc mới. Đang phát (rate≠0)
+        // thì khung kế tiếp tự cập nhật nên không cần seek (tránh giật).
+        if player.rate == 0 {
+            let cur = player.currentTime().seconds
+            let base = cur.isFinite ? cur : trimStart
+            // Nhích 1 nhịp khung rồi seek zero-tolerance: seek về ĐÚNG chỗ cũ đôi khi bị iOS
+            // coi là "không đổi" và bỏ qua → phải lệch tối thiểu để chắc chắn vẽ lại.
+            let nudged = (base + 0.001 <= duration) ? base + 0.001 : max(0, base - 0.001)
+            player.seek(to: CMTime(seconds: nudged, preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .zero)
+        }
     }
     // Gộp thay đổi liên tục (kéo thanh) rồi mới dựng lại → mượt, không giật.
     private func schedulePreviewRefresh() {
