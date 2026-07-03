@@ -574,12 +574,12 @@ struct WelcomeGreetingView: View {
             let r = try await store.api.adminStoreSetConfig(
                 logoName: gLogoName, logoUrl: gLogoUrl,
                 bannerType: gBannerType, bannerUrl: gBannerUrl,
-                welcomeVoiceEnabled: gEnabled,
-                welcomeVoiceText: gText,
-                welcomeVoiceRate: Float(gRate),
                 welcomePopupEnabled: gPopupEnabled,
                 welcomePopupTitle: gPopupTitle,
                 welcomePopupText: gPopupText,
+                welcomeVoiceEnabled: gEnabled,
+                welcomeVoiceText: gText,
+                welcomeVoiceRate: Float(gRate),
                 latestVersion: gVersion, updateUrl: gUpdateUrl,
                 updateMessage: gUpdateMsg)
             gIsError = false; gMessage = r.message
