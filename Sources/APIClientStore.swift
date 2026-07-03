@@ -3,7 +3,8 @@ import Foundation
 extension APIClient {
     // §IPA — Ký IPA ở máy chủ (zsign) rồi trả link cài OTA. Upload multipart qua file tạm
     // để chịu được IPA lớn (không nạp hết vào RAM).
-    func signIPAOnServer(ipa: URL, p12: URL, password: String, provision: URL) async throws -> IPASignResult {
+    func signIPAOnServer(ipa: URL, p12: URL, password: String, provision: URL,
+                         publish: Bool = false) async throws -> IPASignResult {
         let boundary = "KeniosBoundary-\(UUID().uuidString)"
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("ipaup_\(UUID().uuidString).bin")
         FileManager.default.createFile(atPath: tmp.path, contents: nil)
@@ -21,6 +22,7 @@ extension APIClient {
             try putFile("p12", "cert.p12", p12, "application/x-pkcs12")
             try putFile("provision", "cert.mobileprovision", provision, "application/octet-stream")
             try put("--\(boundary)\r\nContent-Disposition: form-data; name=\"password\"\r\n\r\n\(password)\r\n")
+            try put("--\(boundary)\r\nContent-Disposition: form-data; name=\"publish\"\r\n\r\n\(publish ? "1" : "0")\r\n")
             try put("--\(boundary)--\r\n")
             try? out.close()
         } catch { try? out.close(); try? FileManager.default.removeItem(at: tmp); throw error }
@@ -46,6 +48,13 @@ extension APIClient {
     }
     func adminSetIpaBase(_ base: String) async throws -> IPABaseStatus {
         try decode(try await send("/admin/ipa/base", method: "POST", json: ["base": base]))
+    }
+    // Trạng thái bản cài đang phát hành công khai (trang /install)
+    func adminGetPublishedIPA() async throws -> IPAPublishedStatus {
+        try decode(try await send("/admin/ipa/published"))
+    }
+    func adminUnpublishIPA() async throws {
+        _ = try await send("/admin/ipa/unpublish", method: "POST")
     }
 
     // -- Admin: danh mục / thư mục / sản phẩm --

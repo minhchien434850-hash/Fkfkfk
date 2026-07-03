@@ -6752,6 +6752,7 @@ async def ipa_sign(ipa: UploadFile = FastAPIFile(...),
                    p12: UploadFile = FastAPIFile(...),
                    provision: UploadFile = FastAPIFile(...),
                    password: str = Form(""),
+                   publish: str = Form(""),
                    user=Depends(get_user)) -> dict[str, Any]:
     if not shutil.which("zsign"):
         raise HTTPException(status_code=503, detail="Máy chủ chưa cài zsign. Chạy lại capnhat-vps.sh trên VPS.")
@@ -6789,9 +6790,193 @@ async def ipa_sign(ipa: UploadFile = FastAPIFile(...),
     with open(os.path.join(_IPA_DIR, f"{token}.plist"), "w") as f:
         f.write(_ipa_manifest(base, token, meta))
     manifest_url = f"{base}/ipa/dl/{token}.plist"
+    published = False
+    if str(publish).strip().lower() in ("1", "true", "yes", "on"):
+        # Phát hành: đặt bản này làm bản cài công khai ở trang /install cho khách.
+        set_setting("published_ipa_token", token)
+        set_setting("published_ipa_meta", json.dumps(meta))
+        set_setting("published_ipa_at", str(int(time.time())))
+        published = True
     return {"install_url": f"itms-services://?action=download-manifest&url={manifest_url}",
             "ipa_url": f"{base}/ipa/dl/{token}.ipa", "manifest_url": manifest_url,
-            "title": meta.get("title", "App"), "bundle_id": meta.get("bundle_id", "")}
+            "title": meta.get("title", "App"), "bundle_id": meta.get("bundle_id", ""),
+            "published": published, "public_url": f"{base}/install"}
+
+
+def _published_ipa() -> Optional[dict]:
+    """Bản cài đang phát hành công khai (hoặc None nếu chưa phát hành / file đã mất)."""
+    token = (get_setting("published_ipa_token", "") or "").strip()
+    if not token:
+        return None
+    ipa_path = os.path.join(_IPA_DIR, f"{token}.ipa")
+    plist_path = os.path.join(_IPA_DIR, f"{token}.plist")
+    if not (os.path.exists(ipa_path) and os.path.exists(plist_path)):
+        return None
+    try:
+        meta = json.loads(get_setting("published_ipa_meta", "") or "{}")
+    except Exception:
+        meta = {}
+    return {"token": token, "meta": meta,
+            "at": int(get_setting("published_ipa_at", "0") or "0")}
+
+
+@app.get("/admin/ipa/published")
+def admin_get_published(admin=Depends(get_admin)) -> dict[str, Any]:
+    p = _published_ipa()
+    base = _ipa_base_url()
+    return {"published": bool(p), "public_url": f"{base}/install",
+            "title": (p or {}).get("meta", {}).get("title", ""),
+            "version": (p or {}).get("meta", {}).get("version", ""),
+            "at": (p or {}).get("at", 0)}
+
+
+@app.post("/admin/ipa/unpublish")
+def admin_unpublish(admin=Depends(get_admin)) -> dict[str, Any]:
+    set_setting("published_ipa_token", "")
+    return {"ok": True}
+
+
+@app.get("/install", response_class=HTMLResponse)
+def install_page():
+    """Trang cài đặt công khai — khách mở link, bấm 1 nút là app hiện lên màn hình chính."""
+    base = _ipa_base_url()
+    p = _published_ipa()
+    app_name = get_setting("app_display_name", "") or "KENIOS"
+    if not p:
+        body = ('<div class="card"><div class="logo">K</div>'
+                f'<h1>{app_name}</h1>'
+                '<p class="muted">Chưa có bản cài. Quản trị viên chưa phát hành ứng dụng.</p>'
+                '</div>')
+        return HTMLResponse(_install_html(app_name, body))
+    meta = p["meta"]
+    title = meta.get("title", app_name)
+    version = meta.get("version", "")
+    manifest_url = f"{base}/ipa/dl/{p['token']}.plist"
+    install_link = f"itms-services://?action=download-manifest&url={manifest_url}"
+    ver_txt = f"Phiên bản {version}" if version else "Bản mới nhất"
+    body = (
+        '<div class="card">'
+        '<div class="logo">K</div>'
+        f'<h1>{title}</h1>'
+        f'<p class="muted">{ver_txt}</p>'
+
+        # CÁCH 1 — cài app đầy đủ (OTA)
+        '<div class="tag">Cách 1 · App đầy đủ</div>'
+        f'<a class="btn" href="{install_link}">📲 Cài đặt lên màn hình chính</a>'
+        '<div class="steps">'
+        '<div class="step"><b>1.</b> Bấm <b>Cài đặt</b> ở trên → chọn <b>Cài đặt</b> khi iPhone hỏi.</div>'
+        '<div class="step"><b>2.</b> Về màn hình chính, chờ app tải xong.</div>'
+        '<div class="step"><b>3.</b> Nếu báo <b>"Chưa tin cậy"</b>: vào <b>Cài đặt → Cài đặt chung → '
+        'VPN & Quản lý thiết bị</b> → chọn hồ sơ → <b>Tin cậy</b>.</div>'
+        '</div>'
+
+        # CÁCH 2 — không cần cài, thêm nhanh vào màn hình chính (web-clip)
+        '<div class="tag alt">Cách 2 · Không cần cài đặt</div>'
+        '<div class="steps">'
+        '<div class="step">Thêm nhanh biểu tượng KENIOS vào màn hình chính (mở toàn màn hình như app):</div>'
+        '<div class="step"><b>1.</b> Bấm nút <b>Chia sẻ</b> ⬆️ ở thanh dưới Safari.</div>'
+        '<div class="step"><b>2.</b> Chọn <b>“Thêm vào MH chính” (Add to Home Screen)</b>.</div>'
+        '<div class="step"><b>3.</b> Bấm <b>Thêm</b> — biểu tượng KENIOS hiện ngay trên màn hình chính.</div>'
+        '</div>'
+
+        '<p class="tip">Chỉ hỗ trợ iPhone/iPad. Hãy mở link này bằng <b>Safari</b>.</p>'
+        '</div>')
+    return HTMLResponse(_install_html(title, body))
+
+
+_ICON_PNG_CACHE: Optional[bytes] = None
+
+def _kenios_icon_png(W: int = 180) -> bytes:
+    """Tạo icon KENIOS (gradient + chữ K) bằng Python thuần — không cần thư viện ngoài."""
+    global _ICON_PNG_CACHE
+    if _ICON_PNG_CACHE is not None:
+        return _ICON_PNG_CACHE
+    import zlib as _zl, struct as _st, math as _m
+
+    def seg_dist(px, py, ax, ay, bx, by):
+        dx, dy = bx - ax, by - ay
+        if dx == 0 and dy == 0:
+            return _m.hypot(px - ax, py - ay)
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+        return _m.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+    stroke = W * 0.11
+    x0, top, bot, mid = W * 0.30, W * 0.26, W * 0.74, W * 0.50
+    segs = [(x0, top, x0, bot), (x0, mid, W * 0.70, top), (x0, mid, W * 0.70, bot)]
+    edge = stroke / 2
+    raw = bytearray()
+    for y in range(W):
+        raw.append(0)
+        for x in range(W):
+            t = (x + y) / (2 * W)
+            r = int(0x2f + (0x9a - 0x2f) * t)
+            g = int(0x7b + (0x5b - 0x7b) * t)
+            b = 0xff
+            d = min(seg_dist(x, y, *s) for s in segs)
+            if d <= edge:
+                r = g = b = 255
+            elif d <= edge + 1.2:
+                k = (edge + 1.2 - d) / 1.2
+                r, g, b = int(r + (255 - r) * k), int(g + (255 - g) * k), int(b + (255 - b) * k)
+            raw += bytes((r, g, b))
+
+    def chunk(typ, data):
+        return (_st.pack(">I", len(data)) + typ + data
+                + _st.pack(">I", _zl.crc32(typ + data) & 0xffffffff))
+
+    ihdr = _st.pack(">IIBBBBB", W, W, 8, 2, 0, 0, 0)
+    _ICON_PNG_CACHE = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+                       + chunk(b"IDAT", _zl.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
+    return _ICON_PNG_CACHE
+
+
+@app.get("/install/icon.png")
+def install_icon():
+    return Response(content=_kenios_icon_png(), media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+def _install_html(title: str, body: str) -> str:
+    base = _ipa_base_url()
+    return (
+        '<!doctype html><html lang="vi"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+        f'<title>Cài {title}</title>'
+        # PWA / Web-clip: thêm vào Màn hình chính là có icon KENIOS, mở toàn màn hình.
+        '<meta name="apple-mobile-web-app-capable" content="yes">'
+        '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
+        f'<meta name="apple-mobile-web-app-title" content="{title}">'
+        '<meta name="theme-color" content="#131c33">'
+        f'<link rel="apple-touch-icon" href="{base}/install/icon.png">'
+        f'<link rel="icon" href="{base}/install/icon.png">'
+        '<style>'
+        '*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}'
+        'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;'
+        'min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;'
+        'background:linear-gradient(160deg,#0b1220 0%,#131c33 45%,#241844 100%);color:#fff}'
+        '.card{width:100%;max-width:420px;background:rgba(255,255,255,.06);border:1px solid '
+        'rgba(255,255,255,.12);border-radius:26px;padding:34px 26px;text-align:center;'
+        'backdrop-filter:blur(14px);box-shadow:0 20px 60px rgba(0,0,0,.45)}'
+        '.logo{width:92px;height:92px;margin:0 auto 18px;border-radius:22px;display:flex;'
+        'align-items:center;justify-content:center;font-size:46px;font-weight:900;color:#fff;'
+        'background:linear-gradient(135deg,#5b8cff,#9a5bff);box-shadow:0 10px 30px rgba(90,120,255,.5)}'
+        'h1{font-size:26px;font-weight:800;margin-bottom:6px}'
+        '.muted{color:#aab3c5;font-size:15px;margin-bottom:22px}'
+        '.tag{display:inline-block;margin:6px 0 12px;padding:5px 12px;border-radius:999px;'
+        'font-size:12.5px;font-weight:700;color:#cfe0ff;background:rgba(90,140,255,.16);'
+        'border:1px solid rgba(120,150,255,.32)}'
+        '.tag.alt{color:#d7cbff;background:rgba(150,90,255,.16);border-color:rgba(170,120,255,.34);'
+        'margin-top:26px}'
+        '.btn{display:block;width:100%;padding:17px;border-radius:16px;font-size:18px;font-weight:800;'
+        'text-decoration:none;color:#fff;background:linear-gradient(135deg,#2f7bff,#7a3cff);'
+        'box-shadow:0 10px 26px rgba(60,110,255,.5)}'
+        '.btn:active{transform:scale(.98)}'
+        '.steps{text-align:left;margin-top:24px;display:flex;flex-direction:column;gap:12px}'
+        '.step{background:rgba(255,255,255,.05);border-radius:12px;padding:12px 14px;'
+        'font-size:14px;line-height:1.5;color:#dfe4ee}'
+        '.step b{color:#fff}'
+        '.tip{margin-top:18px;font-size:12.5px;color:#8892a6}'
+        '</style></head><body>' + body + '</body></html>')
 
 @app.get("/ipa/dl/{name}")
 def ipa_download(name: str):

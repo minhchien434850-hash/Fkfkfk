@@ -876,6 +876,15 @@ struct IPASignResult: Decodable {
     let ipaUrl: String
     let title: String
     let bundleId: String
+    let published: Bool?      // đã đặt làm bản cài công khai (/install) chưa
+    let publicUrl: String?    // link trang cài công khai để gửi khách
+}
+// Trạng thái bản cài đang phát hành công khai
+struct IPAPublishedStatus: Decodable {
+    let published: Bool
+    let publicUrl: String
+    let title: String?
+    let version: String?
 }
 struct IPABaseStatus: Decodable {
     let base: String

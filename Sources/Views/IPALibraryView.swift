@@ -122,6 +122,11 @@ struct IPALibraryView: View {
     @State private var hasZsign = false
     @State private var savingBase = false
     @State private var baseMsg: String?
+    // §Phát hành: đặt bản ký làm bản cài công khai (trang /install cho khách)
+    @State private var publishNext = true
+    @State private var published: IPAPublishedStatus?
+    @State private var lastPublicLink: String?
+    @State private var linkCopied = false
 
     // Chứng chỉ đã nhập (ở màn "Chứng chỉ ký") — cùng app, cùng Documents.
     private var certDocs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
@@ -191,6 +196,45 @@ struct IPALibraryView: View {
                     } footer: {
                         Text(store.t("Cài OTA BẮT BUỘC domain HTTPS có chứng chỉ TLS thật (vd Let's Encrypt) trỏ về máy chủ KENIOS. IP thường không dùng được.",
                                      "OTA install REQUIRES an HTTPS domain with a real TLS cert (e.g. Let's Encrypt) pointing to the KENIOS server. A bare IP won't work."))
+                            .font(.caption2)
+                    }
+
+                    // Phát hành cho khách — trang cài công khai /install
+                    Section {
+                        Toggle(isOn: $publishNext) {
+                            Label(store.t("Phát hành cho khách khi ký", "Publish to customers when signing"),
+                                  systemImage: "megaphone.fill")
+                        }.tint(.green)
+                        if let p = published, p.published {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(store.t("Đang phát hành", "Live"))
+                                        .font(.caption.bold()).foregroundStyle(.green)
+                                    if let t = p.title, !t.isEmpty {
+                                        Text(t + (p.version.map { " · \($0)" } ?? ""))
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            linkRow(p.publicUrl)
+                            Button(role: .destructive) {
+                                Task { try? await store.api.adminUnpublishIPA(); published = try? await store.api.adminGetPublishedIPA() }
+                            } label: {
+                                Label(store.t("Gỡ phát hành", "Unpublish"), systemImage: "xmark.circle")
+                            }
+                        } else if let link = lastPublicLink {
+                            linkRow(link)
+                        } else {
+                            Text(store.t("Chưa phát hành bản nào. Bật công tắc rồi bấm 'Ký & cài trên máy chủ' ở một IPA để phát hành.",
+                                         "Nothing published yet. Turn on the switch, then tap 'Sign & install on server' on an IPA to publish."))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text(store.t("Trang cài cho khách (Admin)", "Customer install page (Admin)"))
+                    } footer: {
+                        Text(store.t("Gửi link này cho khách — mở bằng Safari là cài được app lên màn hình chính, không cần App Store.",
+                                     "Send this link to customers — open in Safari to install the app to the home screen, no App Store needed."))
                             .font(.caption2)
                     }
                 }
@@ -282,6 +326,7 @@ struct IPALibraryView: View {
                 if store.isAdmin, let s = try? await store.api.adminGetIpaBase() {
                     ipaBase = s.base; hasZsign = s.hasZsign
                 }
+                if store.isAdmin { published = try? await store.api.adminGetPublishedIPA() }
             }
             // Dùng DocumentPicker (UIKit) thay .fileImporter: .fileImporter hay bị "Mở" mờ,
             // chọn được file nhưng bấm Mở không lên. DocumentPicker asCopy hiện nút Mở dùng được.
@@ -325,6 +370,29 @@ struct IPALibraryView: View {
         } catch { baseMsg = error.localizedDescription }
     }
 
+    // Một hàng hiện link trang cài công khai + nút Sao chép / Mở.
+    @ViewBuilder private func linkRow(_ link: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(link).font(.caption.monospaced()).foregroundStyle(.blue).lineLimit(2)
+            HStack(spacing: 10) {
+                Button {
+                    UIPasteboard.general.string = link
+                    linkCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { linkCopied = false }
+                } label: {
+                    Label(linkCopied ? store.t("Đã sao chép ✓", "Copied ✓") : store.t("Sao chép link", "Copy link"),
+                          systemImage: "doc.on.doc")
+                        .font(.caption.bold())
+                }.buttonStyle(.bordered)
+                if let u = URL(string: link) {
+                    ShareLink(item: u) {
+                        Label(store.t("Gửi khách", "Share"), systemImage: "square.and.arrow.up").font(.caption.bold())
+                    }.buttonStyle(.bordered)
+                }
+            }
+        }
+    }
+
     // Ký IPA ở máy chủ (dùng chứng chỉ đã nhập) → mở link cài OTA.
     private func signOnServer(_ item: IPAFile) async {
         guard certReady else {
@@ -336,12 +404,18 @@ struct IPALibraryView: View {
         defer { signingId = nil }
         do {
             let r = try await store.api.signIPAOnServer(
-                ipa: item.url, p12: certP12, password: certPassword, provision: certProvision)
-            signMsg = store.t("Ký xong: \(r.title). Đang mở cài đặt...", "Signed: \(r.title). Opening install...")
+                ipa: item.url, p12: certP12, password: certPassword, provision: certProvision,
+                publish: store.isAdmin && publishNext)
+            if let pub = r.publicUrl, r.published == true {
+                lastPublicLink = pub
+                published = try? await store.api.adminGetPublishedIPA()
+                signMsg = store.t("Ký xong & ĐÃ PHÁT HÀNH: \(r.title). Gửi link cho khách để cài.",
+                                  "Signed & PUBLISHED: \(r.title). Share the link with customers.")
+            } else {
+                signMsg = store.t("Ký xong: \(r.title). Đang mở cài đặt...", "Signed: \(r.title). Opening install...")
+            }
             if let u = URL(string: r.installUrl) {
                 await MainActor.run { UIApplication.shared.open(u) }
-            } else {
-                signMsg = store.t("Link cài không hợp lệ.", "Invalid install link.")
             }
         } catch {
             signMsg = store.t("Ký thất bại: ", "Sign failed: ") + error.localizedDescription
