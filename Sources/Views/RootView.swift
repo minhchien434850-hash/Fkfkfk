@@ -139,14 +139,6 @@ struct MainTabView: View {
             StoreView() // App bán hàng (sản phẩm · key · tải game)
                 .tabItem { Label(store.t("Cửa hàng", "Store"), systemImage: "bag.fill") }
                 .tag(15)
-            // §7 — Tab "Shop của tôi": chỉ hiện khi người dùng đã tạo cửa hàng cá nhân.
-            if let sid = store.myStoreId {
-                NavigationStack {
-                    VendorStorefrontView(sid: sid, isOwner: true).environmentObject(store)
-                }
-                .tabItem { Label(store.t("Shop của tôi", "My Shop"), systemImage: "storefront.fill") }
-                .tag(20)
-            }
             FriendsView()
                 .tabItem { Label(store.t("Bạn bè", "Friends"), systemImage: "person.2.fill") }
                 .tag(4)
@@ -159,7 +151,7 @@ struct MainTabView: View {
             if !didInitTab {
                 didInitTab = true
                 store.tab = [2, 14, 15, 4, 16].contains(defaultLaunchTab) ? defaultLaunchTab : 2
-            } else if ![2, 14, 15, 4, 16, 20].contains(store.tab) {
+            } else if ![2, 14, 15, 4, 16].contains(store.tab) {
                 store.tab = 2
             }
             // Giọng chào: nếu cấu hình TOÀN CỤC (server) đang tải → chờ .task phát cho MỌI người;
@@ -181,7 +173,6 @@ struct MainTabView: View {
             await store.loadProviders()
             await store.refreshCredits()
             await store.refreshMe()
-            await store.refreshMyStore()   // §7 — biết có shop chưa để hiện tab "Shop của tôi"
             // §1.3 + §1.2 — Lấy config server 1 lần: lời chào toàn cục + kiểm tra phiên bản mới
             if !welcomeChecked {
                 welcomeChecked = true

@@ -5,7 +5,7 @@ import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, myStore, winApp, remoteDesktop, remoteServer
+    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, winApp, remoteDesktop, remoteServer
     var id: String { rawValue }
 
     var title: String {
@@ -25,7 +25,6 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Nhắn tin"
         case .certImport:     return "Chứng chỉ ký"
         case .ipaLibrary:     return "Kho IPA"
-        case .myStore:        return "Cửa hàng của tôi"
         case .winApp:         return "Windows App"
         case .remoteDesktop:  return "Remote Desktop"
         case .remoteServer:   return "Remote Server"
@@ -48,7 +47,6 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Thủ công · Tự động Web"
         case .certImport:     return "Nhập .p12 · .mobileprovision"
         case .ipaLibrary:     return "Gom IPA · Ký & cài qua ESign"
-        case .myStore:        return "Mở shop riêng · bán hàng"
         case .winApp:         return "Điều khiển PC Windows (RDP)"
         case .remoteDesktop:  return "Bảng điều khiển · máy thuê IP · agent"
         case .remoteServer:   return "SSH · SFTP · Chạy script VPS"
@@ -71,7 +69,6 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Messaging"
         case .certImport:     return "Signing Cert"
         case .ipaLibrary:     return "IPA Library"
-        case .myStore:        return "My Store"
         case .winApp:         return "Windows App"
         case .remoteDesktop:  return "Remote Desktop"
         case .remoteServer:   return "Remote Server"
@@ -94,7 +91,6 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "Manual · Auto Web"
         case .certImport:     return "Import .p12 · .mobileprovision"
         case .ipaLibrary:     return "Collect IPAs · Sign via ESign"
-        case .myStore:        return "Your own shop · sell"
         case .winApp:         return "Control a Windows PC (RDP)"
         case .remoteDesktop:  return "Dashboard · rented IP · agent"
         case .remoteServer:   return "SSH · SFTP · Run VPS scripts"
@@ -117,7 +113,6 @@ enum HubDest: String, Identifiable {
         case .messenger:      return "bubble.left.and.bubble.right.fill"
         case .certImport:     return "checkmark.seal.fill"
         case .ipaLibrary:     return "shippingbox.fill"
-        case .myStore:        return "storefront.fill"
         case .winApp:         return "pc"
         case .remoteDesktop:  return "display"
         case .remoteServer:   return "terminal.fill"
@@ -140,7 +135,6 @@ enum HubDest: String, Identifiable {
         case .messenger:      return [Color(red: 0.05, green: 0.7, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.75)]
         case .certImport:     return [Color(red: 0.2, green: 0.7, blue: 0.4), Color(red: 0.1, green: 0.5, blue: 0.35)]
         case .ipaLibrary:     return [Color(red: 0.55, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.3, blue: 0.85)]
-        case .myStore:        return [Color(red: 0.0, green: 0.72, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.7)]
         case .winApp:         return [Color(red: 0.0, green: 0.47, blue: 0.84), Color(red: 0.0, green: 0.28, blue: 0.6)]
         case .remoteDesktop:  return [Color(red: 0.0, green: 0.47, blue: 0.84), Color(red: 0.35, green: 0.15, blue: 0.7)]
         case .remoteServer:   return [Color(red: 0.1, green: 0.5, blue: 0.3), Color(red: 0.05, green: 0.3, blue: 0.5)]
@@ -157,7 +151,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .myStore, .winApp, .remoteDesktop, .remoteServer, .certImport, .ipaLibrary, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .winApp, .remoteDesktop, .remoteServer, .certImport, .ipaLibrary, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -229,8 +223,6 @@ struct ExploreHubView: View {
             CertificateImportView()
         case .ipaLibrary:
             IPALibraryView()
-        case .myStore:
-            MyStoreView()
         case .winApp:
             RemotePCView()
         case .remoteDesktop:
