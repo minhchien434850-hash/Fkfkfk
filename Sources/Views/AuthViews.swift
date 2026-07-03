@@ -12,6 +12,10 @@ struct LoginView: View {
     @State private var didAutoTry = false
     @State private var googleClientId = ""   // lấy từ máy chủ; rỗng = ẩn nút Google
     @State private var googleLoading = false
+    // Hiệu ứng logo APP (đặt ở Cài đặt) → màn đăng nhập đổi theo cho khớp.
+    @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
+    @AppStorage("appLogoFont") private var appLogoFont = "rounded"
+    @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
 
     var body: some View {
         NavigationStack {
@@ -31,7 +35,8 @@ struct LoginView: View {
                         .shadow(color: Theme.purple.opacity(0.55), radius: 26, y: 12)
                         .padding(.top, 52)
 
-                    RainbowText(text: "KENIOS", size: 40)
+                    AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
+                                      fontStyle: appLogoFont, anim: appLogoAnim, size: 40)
                     Text(store.t("Mạng xã hội · Video · Giải trí · Công cụ", "Social · Video · Entertainment · Tools"))
                         .font(.subheadline).foregroundStyle(.secondary)
 
