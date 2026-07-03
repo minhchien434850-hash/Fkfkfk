@@ -38,7 +38,22 @@ KEYMAP = {
     "enter": "enter", "backspace": "backspace", "space": "space", "tab": "tab",
     "esc": "esc", "up": "up", "down": "down", "left": "left", "right": "right",
     "delete": "delete", "home": "home", "end": "end",
+    "pageup": "pageup", "pagedown": "pagedown", "insert": "insert",
+    "capslock": "capslock", "printscreen": "printscreen",
+    "ctrl": "ctrl", "alt": "alt", "shift": "shift",
+    "win": "winleft", "cmd": "command", "option": "option",
+    "f1": "f1", "f2": "f2", "f3": "f3", "f4": "f4", "f5": "f5", "f6": "f6",
+    "f7": "f7", "f8": "f8", "f9": "f9", "f10": "f10", "f11": "f11", "f12": "f12",
 }
+# Cấu hình chất lượng/fps màn hình (đổi bằng biến môi trường nếu muốn).
+SCR_MAXW = int(os.environ.get("KENIOS_MAXW", "1280"))     # bề rộng tối đa khung gửi
+SCR_QUALITY = int(os.environ.get("KENIOS_QUALITY", "60"))  # chất lượng JPEG 1..95
+SCR_FPS = float(os.environ.get("KENIOS_FPS", "7"))         # số khung/giây mục tiêu
+
+try:
+    import pyperclip   # đồng bộ clipboard (tuỳ chọn)
+except Exception:
+    pyperclip = None
 MEDIA = {
     "playpause": "playpause", "next": "nexttrack", "prev": "prevtrack",
     "mute": "volumemute", "volup": "volumeup", "voldown": "volumedown",
@@ -76,11 +91,18 @@ def do(cmd: dict):
     try:
         if t == "move":
             pyautogui.moveRel(int(cmd.get("dx", 0)), int(cmd.get("dy", 0)), duration=0)
+        elif t == "moveto":
+            # Di chuyển tuyệt đối theo tỉ lệ 0..1 của màn hình (điều khiển chính xác).
+            w, h = pyautogui.size()
+            pyautogui.moveTo(int(float(cmd.get("x", 0)) * w), int(float(cmd.get("y", 0)) * h), duration=0)
         elif t == "click":
             b = cmd.get("b", "left")
             if b == "double": pyautogui.doubleClick()
             elif b == "right": pyautogui.click(button="right")
             else: pyautogui.click()
+        elif t == "drag":
+            # Kéo thả từ điểm hiện tại theo delta (giữ chuột trái).
+            pyautogui.dragRel(int(cmd.get("dx", 0)), int(cmd.get("dy", 0)), duration=0.1, button="left")
         elif t == "scroll":
             pyautogui.scroll(-int(cmd.get("dy", 0)) * 60)
         elif t == "text":
@@ -88,6 +110,18 @@ def do(cmd: dict):
         elif t == "key":
             k = KEYMAP.get(cmd.get("k", ""))
             if k: pyautogui.press(k)
+        elif t == "hotkey":
+            # Tổ hợp phím, ví dụ ["ctrl","c"] / ["alt","tab"] / ["ctrl","shift","esc"].
+            keys = [KEYMAP.get(x, x) for x in cmd.get("keys", []) if x]
+            if keys: pyautogui.hotkey(*keys)
+        elif t == "clip":
+            # Dán văn bản từ điện thoại vào clipboard PC rồi Ctrl/Cmd+V.
+            s = str(cmd.get("s", ""))
+            if pyperclip is not None:
+                pyperclip.copy(s)
+                pyautogui.hotkey("command" if OS_NAME == "Darwin" else "ctrl", "v")
+            else:
+                pyautogui.write(s, interval=0)
         elif t == "media":
             m = MEDIA.get(cmd.get("a", ""))
             if m: pyautogui.press(m)
@@ -107,45 +141,73 @@ def do(cmd: dict):
         print("Lỗi lệnh", t, e)
 
 
-def control_loop(token: str, aid: str):
-    hdr = {"Authorization": f"Bearer {token}"}
+# Token dùng chung giữa 2 luồng; tự làm mới khi hết hạn (401) để agent chạy mãi.
+_AUTH = {"token": ""}
+
+def _refresh_token():
+    try:
+        _AUTH["token"] = login()
+        print("↻ Đã đăng nhập lại (token mới).")
+    except SystemExit:
+        raise
+    except Exception as e:
+        print("Làm mới token lỗi:", e); time.sleep(3)
+
+
+def control_loop(aid: str):
+    delay = 1.0 / 15.0   # hỏi lệnh ~15 lần/giây → phản hồi nhanh
     while True:
         try:
+            hdr = {"Authorization": f"Bearer {_AUTH['token']}"}
             r = requests.post(f"{SERVER}/pc/heartbeat", headers=hdr, json={"agent_id": aid}, timeout=10)
+            if r.status_code == 401:
+                _refresh_token(); continue
             if r.status_code == 200:
                 for cmd in r.json().get("commands", []):
                     do(cmd)
-            time.sleep(0.06)
+            time.sleep(delay)
         except Exception:
             time.sleep(1)
 
 
-def screen_loop(token: str, aid: str):
-    hdr = {"Authorization": f"Bearer {token}"}
+def screen_loop(aid: str):
+    interval = 1.0 / max(1.0, SCR_FPS)
+    idle = 0
+    last_sig = None
     with mss.mss() as sct:
         mon = sct.monitors[1]
         while True:
             try:
                 img = sct.grab(mon)
                 pil = Image.frombytes("RGB", img.size, img.rgb)
-                pil.thumbnail((900, 560))
-                buf = io.BytesIO(); pil.save(buf, format="JPEG", quality=45)
+                if pil.width > SCR_MAXW:
+                    pil = pil.resize((SCR_MAXW, int(pil.height * SCR_MAXW / pil.width)), Image.BILINEAR)
+                # Bỏ qua khung TRÙNG (không đổi) → đỡ băng thông, giảm giật.
+                sig = hash(pil.resize((48, 27)).tobytes())
+                if sig == last_sig:
+                    idle = min(idle + 1, 8)          # màn hình đứng yên → giãn nhịp gửi
+                    time.sleep(interval * (1 + idle * 0.5)); continue
+                last_sig = sig; idle = 0
+                buf = io.BytesIO(); pil.save(buf, format="JPEG", quality=SCR_QUALITY)
                 b64 = base64.b64encode(buf.getvalue()).decode()
-                requests.post(f"{SERVER}/pc/frame", headers=hdr,
-                              json={"agent_id": aid, "jpg": b64}, timeout=15)
+                hdr = {"Authorization": f"Bearer {_AUTH['token']}"}
+                rr = requests.post(f"{SERVER}/pc/frame", headers=hdr,
+                                   json={"agent_id": aid, "jpg": b64}, timeout=15)
+                if rr.status_code == 401:
+                    _refresh_token()
             except Exception:
                 pass
-            time.sleep(0.6)
+            time.sleep(interval)
 
 
 def main():
     print(f"KENIOS PC Agent → {SERVER}")
-    token = login()
-    aid = register(token)
+    _AUTH["token"] = login()
+    aid = register(_AUTH["token"])
     print(f"✓ Đã đăng ký máy '{PC_NAME}'. Mở app KENIOS (Windows App) hoặc {SERVER}/pc để điều khiển.")
-    print("  Đang chạy... (Ctrl+C để thoát)")
-    threading.Thread(target=screen_loop, args=(token, aid), daemon=True).start()
-    control_loop(token, aid)
+    print(f"  Màn hình: {SCR_MAXW}px · chất lượng {SCR_QUALITY} · ~{int(SCR_FPS)} fps. (Ctrl+C để thoát)")
+    threading.Thread(target=screen_loop, args=(aid,), daemon=True).start()
+    control_loop(aid)
 
 
 if __name__ == "__main__":

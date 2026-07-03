@@ -32,6 +32,14 @@ macOS: cấp quyền **Trợ năng (Accessibility)** + **Ghi màn hình** cho Te
 | `KENIOS_SERVER` | Địa chỉ máy chủ KENIOS | `http://103.131.56.11` |
 | `KENIOS_USER` / `KENIOS_PASS` | Đăng nhập sẵn (khỏi gõ) | (hỏi khi chạy) |
 | `KENIOS_PC_NAME` | Tên máy hiển thị trong app | tên máy tính |
+| `KENIOS_MAXW` | Bề rộng khung gửi (px) — cao hơn = nét hơn | `1280` |
+| `KENIOS_QUALITY` | Chất lượng JPEG 1–95 | `60` |
+| `KENIOS_FPS` | Số khung/giây mục tiêu | `7` |
+
+Muốn **nét hơn** (mạng khỏe): `KENIOS_MAXW=1600 KENIOS_QUALITY=70 KENIOS_FPS=10 python3 pc_remote.py`.
+Muốn **nhẹ mạng**: giảm xuống `KENIOS_MAXW=960 KENIOS_QUALITY=45 KENIOS_FPS=4`.
+Cài thêm `pyperclip` để **dán văn bản từ điện thoại vào PC**. Agent **tự đăng nhập lại**
+khi token hết hạn nên chạy được lâu dài.
 
 > Bảo mật: agent chỉ nhận lệnh từ **đúng tài khoản KENIOS** đã đăng nhập; máy chủ
 > kiểm tra chủ sở hữu trước mỗi lệnh. Không mở cổng ra Internet nên không lộ máy.

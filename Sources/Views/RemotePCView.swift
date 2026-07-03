@@ -284,7 +284,8 @@ final class PCEngine: ObservableObject {
                     screen = img
                 }
             }
-            try? await Task.sleep(nanoseconds: 600_000_000)
+            // Nhận khung ~7 fps cho khớp agent (mượt hơn nhiều so với 0.6s cũ).
+            try? await Task.sleep(nanoseconds: 150_000_000)
         }
     }
 
