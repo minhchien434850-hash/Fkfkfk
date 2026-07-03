@@ -372,12 +372,23 @@ struct WelcomeGreetingView: View {
 
     var body: some View {
         Form {
+            // 1 công tắc DUY NHẤT: admin = áp cho MỌI người; người thường = lời chào cá nhân.
             Section {
-                Toggle(store.t("Bật lời chào tự động khi mở app", "Auto-greeting on app open"), isOn: Binding(
+                Toggle(store.isAdmin
+                       ? store.t("Bật lời chào khi mở app (áp cho MỌI người)",
+                                 "Greeting on app open (ALL users)")
+                       : store.t("Bật lời chào tự động khi mở app", "Auto-greeting on app open"),
+                       isOn: Binding(
                     get: { store.welcomeEnabled },
-                    set: { store.setWelcomeEnabled($0) }))
-                Text(store.t("Khi bật, app sẽ đọc lời chào bằng giọng nói mỗi khi bạn mở app lên.",
-                             "When on, the app reads a spoken greeting each time you open it."))
+                    set: { on in
+                        store.setWelcomeEnabled(on)
+                        if store.isAdmin { gEnabled = on }
+                    }))
+                Text(store.isAdmin
+                     ? store.t("Khi bật, MỌI người dùng đều nghe lời chào này mỗi khi mở app. Nhớ bấm Lưu ở cuối để áp dụng cho mọi người.",
+                               "When on, EVERY user hears this greeting on app open. Tap Save below to apply to everyone.")
+                     : store.t("Khi bật, app sẽ đọc lời chào bằng giọng nói mỗi khi bạn mở app lên.",
+                               "When on, the app reads a spoken greeting each time you open it."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -385,7 +396,10 @@ struct WelcomeGreetingView: View {
                 Section(store.t("Nội dung lời chào", "Greeting text")) {
                     TextEditor(text: Binding(
                         get: { store.welcomeText },
-                        set: { store.setWelcomeText($0) }))
+                        set: { s in
+                            store.setWelcomeText(s)
+                            if store.isAdmin { gText = s }
+                        }))
                         .frame(minHeight: 72)
                 }
 
@@ -393,6 +407,7 @@ struct WelcomeGreetingView: View {
                     ForEach(templates, id: \.self) { t in
                         Button {
                             store.setWelcomeText(t)
+                            if store.isAdmin { gText = t }
                         } label: {
                             Text(t).font(.caption).foregroundStyle(.primary)
                                 .multilineTextAlignment(.leading)
@@ -422,7 +437,10 @@ struct WelcomeGreetingView: View {
                     HStack(spacing: 10) {
                         Text("🐢").font(.caption)
                         Slider(value: $rateBinding, in: 0.3...0.65, step: 0.025)
-                            .onChange(of: rateBinding) { store.setWelcomeRate(Float($0)) }
+                            .onChange(of: rateBinding) {
+                                store.setWelcomeRate(Float($0))
+                                if store.isAdmin { gRate = $0 }
+                            }
                         Text("🐇").font(.caption)
                     }
                     Text(store.t("Tốc độ", "Speed") + ": \(Int(rateBinding * 100))%  ·  " + store.t("(mặc định 50%)", "(default 50%)"))
@@ -447,46 +465,8 @@ struct WelcomeGreetingView: View {
                 }
             }
 
-            // ===== GIỌNG CHÀO TOÀN CỤC (chỉ admin) — gộp từ mục Quản trị =====
+            // ===== Khu vực Admin (giọng chào toàn cục đã GỘP vào công tắc ở trên) =====
             if store.isAdmin {
-                Section {
-                    Toggle(store.t("Bật giọng chào toàn cục (áp cho MỌI người)",
-                                   "Enable global welcome voice (ALL users)"), isOn: $gEnabled)
-                } header: {
-                    Text(store.t("🔊 Giọng chào toàn cục — Admin", "🔊 Global welcome voice — Admin"))
-                } footer: {
-                    Text(store.t("Khi bật, MỌI người dùng đều nghe giọng chào này khi mở app. (Khác với lời chào cá nhân ở trên.)",
-                                 "When on, EVERY user hears this greeting on app open. (Separate from your personal greeting above.)"))
-                        .font(.caption2)
-                }
-
-                if gEnabled {
-                    Section(store.t("Nội dung giọng chào cho mọi khách", "Voice greeting for all users")) {
-                        TextField(store.t("Nhập lời chào...", "Enter greeting..."),
-                                  text: $gText, axis: .vertical).lineLimit(2...6)
-                    }
-                    Section(store.t("Tốc độ đọc (toàn cục)", "Reading speed (global)")) {
-                        HStack(spacing: 10) {
-                            Text("🐢").font(.caption)
-                            Slider(value: $gRate, in: 0.3...0.65, step: 0.025)
-                            Text("🐇").font(.caption)
-                        }
-                        Text(store.t("Tốc độ", "Speed") + ": \(Int(gRate * 100))%")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Section(store.t("Thử giọng toàn cục", "Test global voice")) {
-                        Button {
-                            WelcomeVoice.shared.testSpeak(text: gText, voiceId: "", rate: Float(gRate))
-                        } label: {
-                            Label(store.t("▶  Phát thử", "▶  Play"), systemImage: "play.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                        Button(role: .destructive) { WelcomeVoice.shared.stop() } label: {
-                            Label(store.t("■  Dừng", "■  Stop"), systemImage: "stop.circle")
-                        }
-                    }
-                }
-
                 // ===== Lời chào POPUP (chữ) toàn cục =====
                 Section {
                     Toggle(store.t("Bật lời chào popup (chữ)", "Enable welcome popup (text)"), isOn: $gPopupEnabled)
@@ -525,8 +505,7 @@ struct WelcomeGreetingView: View {
                     } label: {
                         HStack {
                             if gSaving { ProgressView().padding(.trailing, 4) }
-                            Text(store.t("Lưu cài đặt toàn cục (giọng · popup · cập nhật)",
-                                         "Save global settings (voice · popup · update)"))
+                            Text(store.t("Lưu — áp dụng cho MỌI người", "Save — apply to ALL users")).bold()
                         }
                     }
                     .disabled(!gLoaded || gSaving)
@@ -537,6 +516,10 @@ struct WelcomeGreetingView: View {
                     if let gMessage {
                         Text(gMessage).font(.footnote).foregroundStyle(gIsError ? .red : .green)
                     }
+                } footer: {
+                    Text(store.t("Bạn là admin: lời chào, tốc độ và công tắc ở trên là CHUNG cho mọi người dùng. Bấm Lưu để phát cho tất cả khi họ mở app.",
+                                 "You are admin: the greeting, speed and toggle above are GLOBAL. Tap Save to apply for everyone."))
+                        .font(.caption2)
                 }
             }
         }
@@ -549,7 +532,7 @@ struct WelcomeGreetingView: View {
         }
     }
 
-    // MARK: - Giọng chào toàn cục (admin)
+    // MARK: - Giọng chào toàn cục (admin) — đồng bộ vào giao diện CHUNG ở trên
     private func loadGlobal() async {
         guard let c = try? await store.api.storeConfig() else { return }
         gEnabled = c.welcomeVoiceEnabled ?? true
@@ -563,6 +546,11 @@ struct WelcomeGreetingView: View {
         gVersion = c.latestVersion ?? ""
         gUpdateUrl = c.updateUrl ?? ""
         gUpdateMsg = c.updateMessage ?? ""
+        // Admin chỉ có 1 lời chào duy nhất → hiển thị giá trị toàn cục lên giao diện chung.
+        store.setWelcomeEnabled(gEnabled)
+        if !gText.isEmpty { store.setWelcomeText(gText) }
+        store.setWelcomeRate(Float(gRate))
+        rateBinding = gRate
         gLoaded = true
     }
 
@@ -570,6 +558,10 @@ struct WelcomeGreetingView: View {
         guard gLoaded else { return }
         gSaving = true; gMessage = nil
         defer { gSaving = false }
+        // Lấy đúng giá trị đang hiển thị trên giao diện chung.
+        gEnabled = store.welcomeEnabled
+        gText = store.welcomeText
+        gRate = rateBinding
         do {
             let r = try await store.api.adminStoreSetConfig(
                 logoName: gLogoName, logoUrl: gLogoUrl,
