@@ -5691,9 +5691,22 @@ _VN_DEM = ["Văn", "Thị", "Hữu", "Đức", "Minh", "Quang", "Thanh", "Ngọc
 _VN_TEN = ["An", "Bình", "Cường", "Dũng", "Giang", "Hà", "Hải", "Hùng", "Huy", "Khoa",
            "Lâm", "Linh", "Long", "Mai", "Nam", "Nga", "Ngọc", "Phong", "Phúc", "Quân",
            "Sơn", "Tâm", "Thảo", "Trang", "Trung", "Tú", "Vy", "Đạt", "Khang", "Duy"]
-_FAKE_PRODUCTS = ["Tài khoản Premium", "Key bản quyền 1 năm", "Gói VIP 1 tháng", "Nâng cấp Pro",
-                  "Tài khoản Netflix", "Key Windows 11", "Gói ULTRA", "Tài khoản ChatGPT Plus",
-                  "Key Office 365", "Gói MAX 3 tháng", "Tài khoản Spotify", "Key Capcut Pro"]
+# Sản phẩm + gói/giá cho feed "Giao dịch gần đây" (khớp cửa hàng thật).
+_FAKE_PRODUCT_TIERS = [
+    ("💎 VNHAX",              [("1 Tháng", 600000), ("1 Tuần", 300000)]),
+    ("💎 VNHAX MOD SKIN VN",  [("1 Tháng", 450000), ("1 Tuần", 225000)]),
+    ("💎 OASIS VIP",          [("1 Tháng", 800000), ("1 Tuần", 400000)]),
+    ("💎 KING",               [("1 Tháng", 900000), ("1 Tuần", 450000)]),
+    ("💎 TIMO VIP",           [("1 Tháng", 500000), ("1 Tuần", 250000), ("1 Ngày", 50000)]),
+    ("💎 VINGODL",            [("1 Tháng", 550000), ("1 Tuần", 250000)]),
+    ("💰 ZOLO",               [("1 Tháng", 500000), ("1 Tuần", 250000)]),
+    ("💰 MG",                 [("1 Tháng", 500000), ("1 Tuần", 250000)]),
+    ("💰 VNB",                [("1 Tháng", 500000), ("1 Tuần", 250000)]),
+    ("💰 ROOT",               [("1 Tháng", 650000)]),
+    ("⚔️ LIÊN QUÂN",          [("1 Tháng", 250000), ("1 Tuần", 120000)]),
+    ("🔥 HYPER",              [("1 Tháng", 350000), ("1 Tuần", 150000)]),
+    ("🔥 HYPER CHỐNG TỐ",     [("1 Tháng", 650000)]),
+]
 
 
 def _fake_showcase(n_orders: int, n_topups: int, now: int):
@@ -5711,11 +5724,13 @@ def _fake_showcase(n_orders: int, n_topups: int, now: int):
 
     orders = []
     for _ in range(max(0, n_orders)):
+        prod, tiers = random.choice(_FAKE_PRODUCT_TIERS)
+        label, amount = random.choice(tiers)   # gói + giá khớp đúng sản phẩm
         orders.append({
             "user": _mask_name(_name()),
-            "product": random.choice(_FAKE_PRODUCTS),
-            "label": random.choice(["1 tháng", "3 tháng", "6 tháng", "1 năm", "Vĩnh viễn"]),
-            "amount": random.choice([20000, 35000, 50000, 79000, 99000, 120000, 150000, 199000, 250000, 299000]),
+            "product": prod,
+            "label": label,
+            "amount": amount,
             "at": now - random.randint(40, 6 * 3600),
         })
     orders.sort(key=lambda x: x["at"], reverse=True)
