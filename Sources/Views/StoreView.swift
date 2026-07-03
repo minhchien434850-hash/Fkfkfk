@@ -1191,7 +1191,8 @@ struct StoreView: View {
         .frame(maxWidth: .infinity).padding(.top, 40)
     }
 
-    // Icon liên hệ nhanh: hiện tối đa 3 icon preview + badge số còn lại, bấm mở sheet danh sách
+    // Liên hệ: CHỈ 1 icon duy nhất (bấm để mở danh sách đầy đủ trong sheet),
+    // dù admin thêm bao nhiêu mạng xã hội cũng chỉ hiện 1 nút cho gọn.
     @ViewBuilder private var headerContactIcons: some View {
         let enabled = (contacts?.contact ?? []).filter {
             $0.enabled && !$0.url.trimmingCharacters(in: .whitespaces).isEmpty
