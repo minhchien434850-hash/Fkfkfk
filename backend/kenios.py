@@ -8768,6 +8768,7 @@ _email_notif_last: dict[int, float] = {}
 def _notif_email_html(subject: str, body: str) -> str:
     import html as _html
     s = _html.escape(subject); b = _html.escape(body)
+    base = _ipa_base_url()
     return (
         '<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:480px;margin:0 auto;padding:16px">'
         '<div style="background:linear-gradient(135deg,#0095F6,#8b5cf6);color:#fff;padding:16px 20px;border-radius:14px 14px 0 0">'
@@ -8776,7 +8777,10 @@ def _notif_email_html(subject: str, body: str) -> str:
         f'<div style="font-size:16px;font-weight:700;color:#111">{s}</div>'
         f'<div style="font-size:15px;color:#444;margin-top:8px;line-height:1.5">{b}</div>'
         '<div style="margin-top:16px;font-size:12px;color:#999">Bạn nhận email này vì có hoạt động mới trên KENIOS. '
-        'Mở app KENIOS để xem chi tiết.</div></div></div>'
+        'Mở app KENIOS để xem chi tiết.<br>'
+        f'<a href="{base}/terms" style="color:#0095F6;text-decoration:none">Điều khoản sử dụng</a> · '
+        f'<a href="{base}/privacy" style="color:#0095F6;text-decoration:none">Chính sách bảo mật</a>'
+        '</div></div></div>'
     )
 
 def _notify_user_email(uid: int, subject: str, body: str) -> None:
@@ -8906,6 +8910,92 @@ def admin_set_email_notify(body: dict = Body(...), admin=Depends(get_admin)) -> 
         out["test_ok"] = (r == "external")
         return out
     return _email_notify_status()
+
+
+# ===================== Trang Pháp lý công khai (Điều khoản & Chính sách) =====================
+# Chính sách RIÊNG của KENIOS (không phải của Apple), có link công khai để dùng trong email/Gmail…
+_LEGAL_TERMS = [
+    ("Chấp nhận điều khoản", "Khi tạo tài khoản hoặc sử dụng ứng dụng KENIOS, bạn đồng ý tuân theo các điều khoản này. Nếu không đồng ý, vui lòng ngừng sử dụng."),
+    ("Tài khoản", "Bạn chịu trách nhiệm bảo mật tài khoản và mật khẩu của mình, cũng như mọi hoạt động phát sinh từ tài khoản. Không chia sẻ tài khoản cho người khác."),
+    ("Sử dụng hợp lệ", "Bạn không được dùng ứng dụng để: vi phạm pháp luật; phát tán nội dung độc hại, lừa đảo, spam; xâm phạm quyền riêng tư hay tài sản của người khác; can thiệp/làm gián đoạn hệ thống."),
+    ("Mua hàng & Ví", "Sản phẩm số (key/tài khoản/bản tải) được giao tự động sau khi thanh toán thành công. Số dư ví dùng để mua hàng trong ứng dụng. Vui lòng kiểm tra kỹ trước khi mua; chính sách đổi/hoàn theo thông báo của cửa hàng."),
+    ("Nội dung người dùng", "Bạn giữ quyền với nội dung mình đăng (video, bài viết) nhưng cấp cho KENIOS quyền lưu trữ và hiển thị nội dung đó trong ứng dụng. Bạn chịu trách nhiệm về nội dung mình đăng tải."),
+    ("Gói PRO", "Một số tính năng nâng cao yêu cầu gói PRO. Quyền lợi gói có thể thay đổi; chúng tôi sẽ thông báo khi có cập nhật quan trọng."),
+    ("Giới hạn trách nhiệm", "Ứng dụng cung cấp \"nguyên trạng\". Trong phạm vi pháp luật cho phép, KENIOS không chịu trách nhiệm cho thiệt hại gián tiếp phát sinh từ việc sử dụng."),
+    ("Thay đổi", "Chúng tôi có thể cập nhật điều khoản theo thời gian. Việc tiếp tục sử dụng đồng nghĩa bạn chấp nhận điều khoản mới."),
+    ("Liên hệ", "Mọi thắc mắc xin liên hệ admin qua mục Liên hệ trong cửa hàng."),
+]
+_LEGAL_PRIVACY = [
+    ("Dữ liệu chúng tôi thu thập", "Thông tin tài khoản (tên đăng nhập, email/số điện thoại nếu bạn cung cấp); nội dung bạn tạo (bài đăng, video, file tải lên, tin nhắn); dữ liệu giao dịch (lịch sử mua hàng, nạp ví); dữ liệu kỹ thuật (token thiết bị để gửi thông báo, nhật ký lỗi)."),
+    ("Mục đích sử dụng", "Để cung cấp và vận hành dịch vụ: đăng nhập, giao hàng số, ví, thông báo, hỗ trợ và cải thiện ứng dụng."),
+    ("Lưu trữ", "Dữ liệu được lưu trên máy chủ do quản trị viên vận hành. Mật khẩu được băm (hash), không lưu dạng văn bản thường. Token đăng nhập lưu an toàn trong Keychain của thiết bị."),
+    ("Chia sẻ", "Chúng tôi KHÔNG bán dữ liệu cá nhân. Chỉ chia sẻ khi pháp luật yêu cầu hoặc để vận hành dịch vụ (vd: cổng thanh toán, dịch vụ email/thông báo)."),
+    ("Quyền trên thiết bị", "Ứng dụng có thể xin quyền: Ảnh/Camera (đính kèm, lưu video/ảnh về máy, gọi video), Micro (ghi âm, gọi thoại), Thông báo. Bạn có thể tắt trong Cài đặt iOS bất cứ lúc nào."),
+    ("Thông báo qua email", "Khi bạn có tin nhắn/cuộc gọi mà đang tắt app, chúng tôi có thể gửi email thông báo tới địa chỉ bạn cung cấp. Bạn có thể tắt bằng cách xoá email khỏi hồ sơ hoặc liên hệ admin."),
+    ("Quyền của bạn", "Bạn có thể xem/sửa thông tin tài khoản, xoá nội dung đã đăng, hoặc yêu cầu xoá tài khoản qua admin."),
+    ("Trẻ em", "Ứng dụng không hướng tới trẻ em dưới 13 tuổi."),
+    ("Liên hệ", "Liên hệ admin qua mục Liên hệ trong cửa hàng để được hỗ trợ về quyền riêng tư."),
+]
+
+def _legal_page_html(title: str, sections: list) -> str:
+    import html as _html
+    rows = ""
+    for i, (h, b) in enumerate(sections, 1):
+        rows += (
+            '<div class="sec">'
+            f'<div class="num">{i}</div>'
+            f'<div><div class="h">{_html.escape(h)}</div>'
+            f'<div class="b">{_html.escape(b)}</div></div></div>'
+        )
+    return (
+        '<!doctype html><html lang="vi"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>{_html.escape(title)} — KENIOS</title><style>'
+        '*{box-sizing:border-box}body{margin:0;background:#0b1020;color:#e7ecf5;'
+        'font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.55}'
+        '.wrap{max-width:680px;margin:0 auto;padding:24px 16px 60px}'
+        '.hero{text-align:center;padding:26px 0 10px}'
+        '.brand{font-size:26px;font-weight:900;letter-spacing:2px;'
+        'background:linear-gradient(135deg,#39a0ff,#8b5cf6,#e879f9);-webkit-background-clip:text;'
+        'background-clip:text;color:transparent}'
+        '.title{font-size:20px;font-weight:800;margin-top:6px}'
+        '.badge{display:inline-block;margin-top:8px;font-size:12px;font-weight:700;color:#39a0ff;'
+        'background:rgba(57,160,255,.14);padding:4px 12px;border-radius:999px}'
+        '.sec{display:flex;gap:12px;background:#131a2e;border:1px solid #1e2740;border-radius:16px;'
+        'padding:14px 16px;margin-top:12px}'
+        '.num{flex:none;width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#39a0ff,#8b5cf6);'
+        'color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center}'
+        '.h{font-weight:700;font-size:16px}.b{color:#aab4c8;margin-top:4px;font-size:14.5px}'
+        '.foot{text-align:center;color:#6b7690;font-size:12px;margin-top:22px}'
+        '.foot a{color:#39a0ff;text-decoration:none}'
+        '</style></head><body><div class="wrap">'
+        '<div class="hero"><div class="brand">KENIOS</div>'
+        f'<div class="title">{_html.escape(title)}</div>'
+        '<div class="badge">Cập nhật lần cuối: 2026</div></div>'
+        f'{rows}'
+        '<div class="foot">© 2026 KENIOS. Bảo lưu mọi quyền.<br>'
+        '<a href="/terms">Điều khoản sử dụng</a> · <a href="/privacy">Chính sách bảo mật</a></div>'
+        '</div></body></html>'
+    )
+
+@app.get("/terms", response_class=HTMLResponse)
+def terms_page():
+    return HTMLResponse(_legal_page_html("Điều khoản sử dụng", _LEGAL_TERMS))
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy_page():
+    return HTMLResponse(_legal_page_html("Chính sách bảo mật", _LEGAL_PRIVACY))
+
+@app.get("/legal", response_class=HTMLResponse)
+def legal_index():
+    return HTMLResponse(
+        '<!doctype html><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Pháp lý — KENIOS</title>'
+        '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:40px auto;'
+        'padding:0 16px;color:#111"><h2 style="text-align:center">KENIOS — Pháp lý</h2>'
+        '<p style="text-align:center"><a href="/terms">Điều khoản sử dụng</a> · '
+        '<a href="/privacy">Chính sách bảo mật</a></p></div>')
 
 
 # ==================== §11 — Điều khiển PC từ xa (relay qua KENIOS, không cần VPS riêng) ====================
