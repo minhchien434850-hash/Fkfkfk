@@ -5295,6 +5295,8 @@ _TG_FUN_CMDS = {
     "cuoi", "joke", "cakhia", "khen", "triethly", "thotinh", "noinguoc", "thatha", "thachthuc",
     "ghep", "lucky", "boi", "tinhduyen", "hoi", "danhgia",
     "tinh", "qr", "thoitiet", "giacoin", "tygia", "dich", "nhacnho", "binhchon", "poll", "gio", "dem", "password",
+    # 🃏 game bài + 🧠 đố vui có điểm
+    "dovui", "goiy", "boqua", "dungdo", "diemdo", "baicao", "xidach", "rut", "dan", "baucua",
 }
 
 def _tg_fun_command(token, chat_id, msg, cmd, args) -> bool:
@@ -5471,6 +5473,452 @@ def _tg_fun_command(token, chat_id, msg, cmd, args) -> bool:
         chars = _st.ascii_letters + _st.digits + "!@#$%^&*"
         pw = "".join(secrets.choice(chars) for _ in range(ln))
         _tg_send(token, chat_id, f"🔐 Mật khẩu mạnh ({ln} ký tự):\n<code>{pw}</code>"); return True
+    return _tg_game_command(token, chat_id, msg, cmd, args)
+
+# ============================================================================
+#  🃏 GAME BÀI & 🧠 ĐỐ VUI CÓ ĐIỂM (~700 câu, 7 thể loại)
+#  Trả lời đúng: +10 điểm + lời chúc mừng · /diemdo — bảng vàng
+# ============================================================================
+_TG_CONGRATS = [
+    "🎉 CHÍNH XÁC! {name} quá đỉnh!", "🏆 Tuyệt vời {name}! Chuẩn không cần chỉnh!",
+    "👏👏 {name} thông minh quá trời!", "🌟 Xuất sắc {name}! IQ vô cực!",
+    "🥳 Đúng rồi! {name} là thánh đố vui!", "💯 {name} trả lời đúng! Cả nhóm vỗ tay nào!",
+    "🎊 Quá giỏi luôn {name} ơi!", "🚀 {name} nhanh như chớp, chính xác tuyệt đối!",
+    "🧠 Bộ não thiên tài gọi tên {name}!", "🔥 {name} cân luôn câu khó!",
+]
+_TG_QUIZ: dict = {}     # chat_id -> {"q","a","auto"} câu đố đang chờ trả lời
+_TG_XIDACH: dict = {}   # (chat_id, uid) -> {"p": bài người chơi, "d": bài nhà cái}
+_TG_QUIZ_BANK: list = []
+
+def _tg_norm_ans(s: str) -> str:
+    """Chuẩn hoá đáp án: thường, bỏ dấu tiếng Việt, gọn khoảng trắng."""
+    import unicodedata
+    s = (s or "").lower().strip()
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn").replace("đ", "d")
+    for pre in ("dap an la ", "dap an ", "ket qua la ", "ket qua ", "la "):
+        if s.startswith(pre):
+            s = s[len(pre):]
+    return " ".join(s.split())
+
+def _tg_ans_ok(user: str, answers: list) -> bool:
+    u = _tg_norm_ans(user)
+    u2 = u.replace(".", "").replace(",", "").replace(" ", "")
+    for a in answers:
+        na = _tg_norm_ans(a)
+        if u == na or (u2 and u2 == na.replace(".", "").replace(",", "").replace(" ", "")):
+            return True
+    return False
+
+def _tg_quiz_bank() -> list:
+    """Ngân hàng ~700 câu đố (tạo 1 lần): thủ đô, cờ, toán, dãy số, kiến thức, mẹo, tục ngữ."""
+    global _TG_QUIZ_BANK
+    if _TG_QUIZ_BANK:
+        return _TG_QUIZ_BANK
+    B = []
+    def add(q, *a): B.append((q, list(a)))
+    # ---- 1) Thủ đô thế giới (~72 câu) ----
+    caps = {"Việt Nam": ["Hà Nội"], "Lào": ["Viêng Chăn", "Vientiane"], "Campuchia": ["Phnôm Pênh", "Phnom Penh"],
+        "Thái Lan": ["Bangkok", "Băng Cốc"], "Malaysia": ["Kuala Lumpur"], "Singapore": ["Singapore"],
+        "Indonesia": ["Jakarta"], "Philippines": ["Manila"], "Myanmar": ["Naypyidaw"], "Brunei": ["Bandar Seri Begawan"],
+        "Trung Quốc": ["Bắc Kinh", "Beijing"], "Nhật Bản": ["Tokyo"], "Hàn Quốc": ["Seoul"], "Triều Tiên": ["Bình Nhưỡng", "Pyongyang"],
+        "Mông Cổ": ["Ulaanbaatar", "Ulan Bato"], "Ấn Độ": ["New Delhi", "Niu Đê Li"], "Pakistan": ["Islamabad"],
+        "Bangladesh": ["Dhaka"], "Nepal": ["Kathmandu"], "Sri Lanka": ["Colombo"], "Kazakhstan": ["Astana"],
+        "Uzbekistan": ["Tashkent"], "Afghanistan": ["Kabul"], "Iran": ["Tehran"], "Iraq": ["Baghdad"],
+        "Ả Rập Xê Út": ["Riyadh"], "UAE": ["Abu Dhabi"], "Qatar": ["Doha"], "Israel": ["Jerusalem"], "Thổ Nhĩ Kỳ": ["Ankara"],
+        "Nga": ["Moscow", "Mát-xcơ-va", "Matxcova"], "Anh": ["London", "Luân Đôn"], "Pháp": ["Paris"],
+        "Đức": ["Berlin"], "Ý": ["Rome", "Roma"], "Tây Ban Nha": ["Madrid"], "Bồ Đào Nha": ["Lisbon"],
+        "Hà Lan": ["Amsterdam"], "Bỉ": ["Brussels"], "Thụy Sĩ": ["Bern"], "Áo": ["Vienna", "Viên"],
+        "Thụy Điển": ["Stockholm"], "Na Uy": ["Oslo"], "Đan Mạch": ["Copenhagen"], "Phần Lan": ["Helsinki"],
+        "Ba Lan": ["Warsaw", "Vác-sa-va", "Vacsava"], "Séc": ["Praha", "Prague"], "Hungary": ["Budapest"],
+        "Hy Lạp": ["Athens", "A-ten"], "Ukraine": ["Kyiv", "Kiev"], "Belarus": ["Minsk"], "Romania": ["Bucharest"],
+        "Bulgaria": ["Sofia"], "Serbia": ["Belgrade"], "Croatia": ["Zagreb"], "Iceland": ["Reykjavik"], "Ireland": ["Dublin"],
+        "Ai Cập": ["Cairo"], "Nam Phi": ["Pretoria"], "Nigeria": ["Abuja"], "Kenya": ["Nairobi"], "Ma-rốc": ["Rabat"],
+        "Algeria": ["Algiers"], "Ethiopia": ["Addis Ababa"], "Ghana": ["Accra"],
+        "Mỹ": ["Washington", "Washington DC"], "Canada": ["Ottawa"], "Mexico": ["Mexico City"], "Cuba": ["Havana", "La Habana"],
+        "Brazil": ["Brasilia"], "Argentina": ["Buenos Aires"], "Chile": ["Santiago"], "Peru": ["Lima"],
+        "Colombia": ["Bogota"], "Venezuela": ["Caracas"], "Uruguay": ["Montevideo"],
+        "Úc": ["Canberra"], "New Zealand": ["Wellington"]}
+    for c, a in caps.items():
+        add(f"🌍 Thủ đô của {c} là gì?", *a)
+    # ---- 2) Cờ nước nào (~60 câu) ----
+    flags = [("🇻🇳", "Việt Nam"), ("🇯🇵", ["Nhật Bản", "Nhật"]), ("🇰🇷", "Hàn Quốc"), ("🇨🇳", "Trung Quốc"),
+        ("🇹🇭", "Thái Lan"), ("🇱🇦", "Lào"), ("🇰🇭", "Campuchia"), ("🇲🇾", "Malaysia"), ("🇸🇬", "Singapore"),
+        ("🇮🇩", "Indonesia"), ("🇵🇭", "Philippines"), ("🇮🇳", "Ấn Độ"), ("🇷🇺", "Nga"), ("🇬🇧", "Anh"),
+        ("🇫🇷", "Pháp"), ("🇩🇪", "Đức"), ("🇮🇹", ["Ý", "Italia"]), ("🇪🇸", "Tây Ban Nha"), ("🇵🇹", "Bồ Đào Nha"),
+        ("🇳🇱", "Hà Lan"), ("🇧🇪", "Bỉ"), ("🇨🇭", "Thụy Sĩ"), ("🇦🇹", "Áo"), ("🇸🇪", "Thụy Điển"),
+        ("🇳🇴", "Na Uy"), ("🇩🇰", "Đan Mạch"), ("🇫🇮", "Phần Lan"), ("🇵🇱", "Ba Lan"), ("🇨🇿", ["Séc", "Czech"]),
+        ("🇭🇺", "Hungary"), ("🇬🇷", "Hy Lạp"), ("🇹🇷", "Thổ Nhĩ Kỳ"), ("🇪🇬", "Ai Cập"), ("🇿🇦", "Nam Phi"),
+        ("🇺🇸", ["Mỹ", "Hoa Kỳ"]), ("🇨🇦", "Canada"), ("🇲🇽", "Mexico"), ("🇧🇷", "Brazil"), ("🇦🇷", "Argentina"),
+        ("🇨🇱", "Chile"), ("🇦🇺", ["Úc", "Australia"]), ("🇳🇿", "New Zealand"), ("🇮🇷", "Iran"), ("🇮🇶", "Iraq"),
+        ("🇸🇦", "Ả Rập Xê Út"), ("🇦🇪", "UAE"), ("🇶🇦", "Qatar"), ("🇺🇦", "Ukraine"), ("🇷🇴", "Romania"),
+        ("🇧🇬", "Bulgaria"), ("🇮🇸", "Iceland"), ("🇮🇪", "Ireland"), ("🇰🇿", "Kazakhstan"), ("🇺🇿", "Uzbekistan"),
+        ("🇲🇳", "Mông Cổ"), ("🇲🇲", "Myanmar"), ("🇧🇩", "Bangladesh"), ("🇳🇵", "Nepal"), ("🇱🇰", "Sri Lanka"), ("🇨🇺", "Cuba")]
+    for f, c in flags:
+        add(f"🏳️ Lá cờ {f} là của nước nào?", *(c if isinstance(c, list) else [c]))
+    # ---- 3) Toán nhanh (300 câu, sinh cố định) ----
+    import random as _r
+    rr = _r.Random(20260704)
+    seen = set()
+    while len(seen) < 300:
+        sym = rr.choice(["+", "-", "×"])
+        if sym == "×":
+            a, b = rr.randint(2, 12), rr.randint(3, 99)
+        else:
+            a, b = rr.randint(11, 999), rr.randint(11, 999)
+        if sym == "-" and a < b:
+            a, b = b, a
+        if (sym, a, b) in seen:
+            continue
+        seen.add((sym, a, b))
+        v = a + b if sym == "+" else (a - b if sym == "-" else a * b)
+        add(f"🧮 Tính nhanh: {a} {sym} {b} = ?", str(v))
+    # ---- 4) Dãy số (60 câu, sinh cố định) ----
+    seen2 = set()
+    while len(seen2) < 60:
+        if rr.random() < 0.7:
+            s, d = rr.randint(1, 60), rr.randint(2, 19)
+            seq = [s + i * d for i in range(5)]
+        else:
+            s, q = rr.randint(1, 6), rr.choice([2, 3])
+            seq = [s * q ** i for i in range(5)]
+        if tuple(seq) in seen2 or seq[4] > 99999:
+            continue
+        seen2.add(tuple(seq))
+        add("🔢 Số tiếp theo của dãy: " + ", ".join(map(str, seq[:4])) + ", ... ?", str(seq[4]))
+    # ---- 5) Kiến thức chung (~112 câu) ----
+    for q, *a in [
+        ("Con vật nào cao nhất thế giới?", "hươu cao cổ"), ("Động vật nào lớn nhất hành tinh?", "cá voi xanh", "cá voi"),
+        ("Chúa sơn lâm là con gì?", "hổ", "con hổ", "cọp"), ("Loài chim nào chạy nhanh nhất và không biết bay?", "đà điểu"),
+        ("Con vật nào ngủ đứng?", "ngựa", "con ngựa"), ("Loài vật nào có vòi dài nhất?", "voi", "con voi"),
+        ("Con gì nhả tơ làm kén?", "tằm", "con tằm"), ("Loài chim nào là biểu tượng hoà bình?", "bồ câu", "chim bồ câu"),
+        ("Con gì chậm chạp, mang 'nhà' trên lưng, để lại vệt nhớt?", "ốc sên"), ("Chuột túi là biểu tượng nước nào?", "úc", "australia"),
+        ("Gấu trúc là biểu tượng của nước nào?", "trung quốc"), ("Loài cá nào bơi ngược dòng để đẻ trứng?", "cá hồi"),
+        ("Con gì kêu ộp ộp bên ao?", "ếch", "con ếch"), ("Loài vật nào đổi màu da theo môi trường?", "tắc kè hoa", "tắc kè"),
+        ("Nhện thường có bao nhiêu chân?", "8", "tám"), ("Con ong làm ra thứ gì ngọt?", "mật", "mật ong"),
+        ("Động vật nhanh nhất trên cạn?", "báo", "báo săn", "báo gêpa"), ("Con gì có bướu trên lưng, đi được sa mạc?", "lạc đà"),
+        ("Hành tinh nào gần Mặt Trời nhất?", "sao thủy", "thủy tinh"), ("Hành tinh nào lớn nhất hệ Mặt Trời?", "sao mộc", "mộc tinh"),
+        ("Hành tinh nào được gọi là hành tinh đỏ?", "sao hỏa", "hỏa tinh"), ("Trái Đất quay quanh thiên thể nào?", "mặt trời"),
+        ("Nước sôi ở bao nhiêu độ C?", "100"), ("Nước đóng băng ở bao nhiêu độ C?", "0"),
+        ("Công thức hóa học của nước là gì?", "h2o"), ("Con người hít khí gì để sống?", "oxy", "oxi", "o2"),
+        ("Cây xanh quang hợp nhả ra khí gì?", "oxy", "oxi", "o2"), ("Một năm không nhuận có bao nhiêu ngày?", "365"),
+        ("Một tuần có bao nhiêu ngày?", "7", "bảy"), ("Kim loại nào ở thể lỏng trong nhiệt độ thường?", "thủy ngân"),
+        ("Thứ gì nhanh nhất vũ trụ?", "ánh sáng"), ("Vệ tinh tự nhiên của Trái Đất tên gì?", "mặt trăng"),
+        ("Ai phát minh bóng đèn sợi đốt?", "edison"), ("Ai là cha đẻ thuyết tương đối?", "einstein", "anhxtanh"),
+        ("Nhà bác học nào gắn với giai thoại quả táo rơi?", "newton", "niuton"), ("Một giờ có bao nhiêu phút?", "60"),
+        ("Hình có 3 cạnh gọi là hình gì?", "tam giác"), ("Số pi làm tròn 2 chữ số thập phân là?", "3.14", "3,14"),
+        ("Cơ quan nào bơm máu đi khắp cơ thể?", "tim", "trái tim"), ("Bộ phận nào điều khiển suy nghĩ con người?", "não", "bộ não"),
+        ("Thành phố nào đông dân nhất Việt Nam?", "tphcm", "sài gòn", "hồ chí minh", "tp hồ chí minh", "thành phố hồ chí minh"),
+        ("Ngọn núi cao nhất Việt Nam?", "fansipan", "phan xi păng", "phanxipang"), ("Vịnh nào của VN là kỳ quan thiên nhiên?", "hạ long", "vịnh hạ long"),
+        ("Sông nào chảy qua Hà Nội?", "sông hồng"), ("Dòng sông nào gắn liền với xứ Huế?", "sông hương"),
+        ("Cây cầu nào ở Đà Nẵng biết phun lửa?", "cầu rồng"), ("Hòn đảo lớn nhất Việt Nam?", "phú quốc"),
+        ("Việt Nam từng có bao nhiêu tỉnh thành?", "63"), ("Đồng bằng sông Cửu Long ở miền nào?", "miền nam", "nam bộ", "miền tây"),
+        ("Cà phê Việt Nam trồng nhiều nhất ở vùng nào?", "tây nguyên"), ("Quốc hoa của Việt Nam?", "hoa sen", "sen"),
+        ("Hang động lớn nhất thế giới (ở Quảng Bình)?", "sơn đoòng", "son doong"), ("Đà Lạt thuộc tỉnh nào?", "lâm đồng"),
+        ("Phố cổ nổi tiếng ở Quảng Nam?", "hội an"), ("Vùng biển phía đông Việt Nam tên gì?", "biển đông"),
+        ("Ai đọc Tuyên ngôn Độc lập ngày 2/9/1945?", "bác hồ", "hồ chí minh", "chủ tịch hồ chí minh"),
+        ("Vị vua nào dời đô về Thăng Long năm 1010?", "lý thái tổ", "lý công uẩn"),
+        ("Vị tướng nào 3 lần đại phá quân Nguyên Mông?", "trần hưng đạo", "trần quốc tuấn"),
+        ("Chiến thắng 'chấn động địa cầu' năm 1954?", "điện biên phủ"), ("Trang phục truyền thống của phụ nữ Việt?", "áo dài"),
+        ("Tết cổ truyền của Việt Nam gọi là gì?", "tết nguyên đán", "nguyên đán"), ("Bánh vuông truyền thống ngày Tết?", "bánh chưng"),
+        ("Truyện Kiều là tác phẩm của ai?", "nguyễn du"), ("Vị nữ tướng nào cùng em gái phất cờ khởi nghĩa?", "trưng trắc", "hai bà trưng", "bà trưng"),
+        ("Nhạc sĩ nào sáng tác Quốc ca Việt Nam?", "văn cao"), ("Món nước nổi tiếng nhất Việt Nam?", "phở"),
+        ("Vị đại tướng chỉ huy trận Điện Biên Phủ?", "võ nguyên giáp", "tướng giáp"),
+        ("Tháp Eiffel ở thành phố nào?", "paris"), ("Vạn Lý Trường Thành ở nước nào?", "trung quốc"),
+        ("Kim tự tháp Giza ở nước nào?", "ai cập"), ("Tượng Nữ thần Tự do ở thành phố nào?", "new york"),
+        ("Đại dương nào lớn nhất thế giới?", "thái bình dương"), ("Châu lục nào lớn nhất?", "châu á"),
+        ("Sa mạc nóng lớn nhất thế giới?", "sahara"), ("Con sông nào dài nhất thế giới?", "nin", "sông nin", "nile"),
+        ("Đỉnh núi cao nhất thế giới?", "everest"), ("Nước nào hiện đông dân nhất thế giới?", "ấn độ"),
+        ("Quốc gia nào rộng nhất thế giới?", "nga"), ("Đồng tiền của Nhật Bản?", "yên", "yen"),
+        ("Đồng tiền chung châu Âu?", "euro"), ("Nước nào nổi tiếng với sushi?", "nhật bản", "nhật"),
+        ("Nước nào nổi tiếng với kim chi?", "hàn quốc"), ("Lễ hội té nước Songkran của nước nào?", "thái lan"),
+        ("Kinh đô điện ảnh Hollywood ở nước nào?", "mỹ", "hoa kỳ"),
+        ("Môn thể thao nào là 'môn thể thao vua'?", "bóng đá"), ("Trận bóng đá chính thức dài bao nhiêu phút?", "90"),
+        ("Mỗi đội bóng đá có mấy cầu thủ trên sân?", "11"), ("Messi là người nước nào?", "argentina"),
+        ("Ronaldo CR7 là người nước nào?", "bồ đào nha"), ("World Cup tổ chức mấy năm 1 lần?", "4"),
+        ("Môn võ quốc gia của Hàn Quốc?", "taekwondo"), ("Môn thể thao đánh cầu bằng vợt qua lưới, cầu có lông?", "cầu lông"),
+        ("'Kình ngư' là vận động viên môn gì?", "bơi", "bơi lội"), ("Bàn cờ vua có bao nhiêu ô?", "64"),
+        ("Chú mèo máy đến từ tương lai tên gì?", "doraemon", "đô rê mon"), ("Cậu bé phù thủy có sẹo hình tia chớp?", "harry potter", "harry"),
+        ("Chú chuột nổi tiếng nhất của Disney?", "mickey", "chuột mickey"), ("'Đi khắp thế gian không ai tốt bằng' ai?", "mẹ"),
+        ("Ông già tặng quà đêm Giáng sinh?", "ông già noel", "santa", "noel"), ("Nàng tiên cá của Disney tên gì?", "ariel"),
+        ("Vua sư tử của Disney tên gì?", "simba"), ("Thám tử nhí lừng danh trong truyện tranh Nhật?", "conan"),
+        ("Ai được mệnh danh 'vua nhạc pop'?", "michael jackson"), ("Người khổng lồ xanh của Marvel?", "hulk"),
+        ("'Người dơi' tiếng Anh là gì?", "batman"), ("'Người nhện' tiếng Anh là gì?", "spiderman", "spider man"),
+        ("Một năm có bao nhiêu tháng?", "12"), ("Mặt trời mọc ở hướng nào?", "đông", "hướng đông"),
+        ("Mặt trời lặn ở hướng nào?", "tây", "hướng tây"), ("Cầu vồng có bao nhiêu màu?", "7", "bảy"),
+        ("Đèn giao thông có mấy màu?", "3", "ba"), ("Đèn giao thông màu gì thì phải dừng lại?", "đỏ", "màu đỏ"),
+    ]:
+        add("💡 " + q, *a)
+    # ---- 6) Đố mẹo (~44 câu) ----
+    for q, *a in [
+        ("Con gì đầu dê mình ốc?", "con dốc", "dốc"), ("Cái gì luôn ở phía trước mà bạn không bao giờ thấy?", "tương lai"),
+        ("Cái gì càng lấy đi càng lớn?", "cái hố", "hố", "lỗ"), ("Cái gì của bạn nhưng người khác dùng nhiều hơn?", "tên", "cái tên"),
+        ("Cái gì đi khắp nơi mà vẫn nằm một chỗ?", "con đường", "đường"), ("Con gì càng to càng nhỏ?", "con cua", "cua"),
+        ("Cái gì có cổ mà không có đầu?", "cái áo", "áo", "chai"), ("Cái gì có răng mà không cắn được?", "cái lược", "lược"),
+        ("Quả gì có nhiều mắt nhất?", "dứa", "quả dứa", "na", "khóm", "thơm"), ("Cái gì đầy lỗ mà vẫn giữ được nước?", "bọt biển", "miếng xốp", "mút"),
+        ("Tháng nào có 28 ngày?", "tháng nào cũng có", "tất cả", "tháng nào cũng"), ("Cái gì phải đập vỡ trước khi dùng?", "trứng", "quả trứng"),
+        ("Cái gì càng lau càng bẩn?", "khăn", "khăn lau", "giẻ lau"), ("Cái gì chỉ tăng mà không bao giờ giảm?", "tuổi", "tuổi tác"),
+        ("Con gì mỏ bẹt màu vàng, kêu cạp cạp?", "vịt", "con vịt"), ("Bánh gì trong trắng ngoài xanh, ăn vào ngày Tết?", "bánh chưng"),
+        ("Vừa bằng hạt đỗ, ăn giỗ cả làng — con gì?", "ruồi", "con ruồi"), ("Đánh cha, đánh má, đánh cả anh chị mỗi sáng mà không bị la — làm gì?", "đánh răng"),
+        ("Con đường dài nhất là đường nào?", "đường đời"), ("Quần gì rộng nhất?", "quần đảo"),
+        ("Cái gì khi gọi tên nó thì nó biến mất?", "im lặng", "sự im lặng"), ("Bệnh gì mà bác sĩ phải bó tay?", "gãy tay", "bó tay"),
+        ("Xã đông người nhất là xã nào?", "xã hội"), ("Cái gì có 4 chân mà không đi được?", "cái bàn", "bàn", "ghế", "cái ghế"),
+        ("Con gì 'ăn' lửa, uống nước, chở được cả trăm người?", "tàu hỏa", "xe lửa", "tàu"),
+        ("2 con vịt đi trước 2 con vịt, 2 con vịt đi sau 2 con vịt, 2 con vịt đi giữa 2 con vịt. Có mấy con vịt?", "4", "bốn"),
+        ("Cái gì bằng cái vung, vùng xuống ao, đào chẳng thấy, lấy chẳng được?", "mặt trăng", "bóng trăng", "trăng"),
+        ("Hạt gì rơi xuống mà không mọc thành cây?", "hạt mưa", "mưa"), ("Nhà nào lạnh nhất?", "nhà băng", "băng"),
+        ("Con gì chở nổi khúc gỗ lớn nhưng không chở nổi hòn sỏi?", "sông", "con sông", "dòng sông"),
+        ("3 con gà đẻ 3 quả trứng trong 3 ngày. 9 con gà đẻ bao nhiêu quả trong 9 ngày?", "27"),
+        ("Cái gì tay trái cầm được mà tay phải không bao giờ cầm được?", "tay phải", "khuỷu tay phải"),
+        ("Trên nhấp dưới giật — đang làm gì?", "câu cá", "cần câu"), ("Cái gì đập thì sống, không đập thì chết?", "tim", "trái tim", "con tim"),
+        ("Cái gì người mua biết, người bán biết, người dùng không bao giờ biết?", "quan tài", "áo quan"),
+        ("Cái gì cầm một lúc thì chảy nước, trời nóng chảy càng nhanh?", "kem", "que kem", "cà rem", "đá"),
+        ("Quả gì to nhất mà không ăn được?", "quả đất", "trái đất", "đất"), ("Cửa gì mở không được, đóng không xong?", "cửa biển", "cửa sông"),
+        ("Bàn gì mà đá được?", "bàn thắng"), ("Nước gì không thể uống được?", "nước mắt", "nước hoa", "nước biển", "nước sơn"),
+        ("Cái gì có mũi mà không có miệng?", "kim", "cái kim", "mũi tên", "thuyền"), ("Núi nào bị 'thái' ra từng khúc?", "thái sơn", "núi thái sơn"),
+        ("Cái gì càng 'thắng' xe càng chậm?", "phanh", "thắng xe", "phanh xe"), ("Môn gì càng đông người chơi vòng tròn càng vui, hát 'nu na nu nống'?", "nu na nu nống"),
+    ]:
+        add("🤪 Đố mẹo: " + q, *a)
+    # ---- 7) Điền tục ngữ (~40 câu) ----
+    for q, *a in [
+        ("Có công mài sắt, có ngày nên ...", "kim"), ("Ăn quả nhớ kẻ trồng ...", "cây"),
+        ("Uống nước nhớ ...", "nguồn"), ("Gần mực thì đen, gần đèn thì ...", "sáng", "rạng"),
+        ("Một cây làm chẳng nên non, ba cây chụm lại nên hòn núi ...", "cao"), ("Đi một ngày đàng, học một sàng ...", "khôn"),
+        ("Thương người như thể thương ...", "thân"), ("Lá lành đùm lá ...", "rách"),
+        ("Đói cho sạch, rách cho ...", "thơm"), ("Cái nết đánh chết cái ...", "đẹp"),
+        ("Tốt gỗ hơn tốt nước ...", "sơn"), ("Học thầy không tày học ...", "bạn"),
+        ("Không thầy đố mày làm ...", "nên"), ("Con hơn cha là nhà có ...", "phúc"),
+        ("Cá không ăn muối cá ...", "ươn"), ("Máu chảy ruột ...", "mềm"),
+        ("Môi hở răng ...", "lạnh"), ("Nước chảy đá ...", "mòn"),
+        ("Kiến tha lâu cũng đầy ...", "tổ"), ("Tay làm hàm nhai, tay quai miệng ...", "trễ"),
+        ("Ăn cây nào rào cây ...", "nấy", "ấy"), ("Gieo gió gặt ...", "bão"),
+        ("Ở hiền gặp ...", "lành"), ("Chị ngã em ...", "nâng"),
+        ("Anh em như thể tay ...", "chân"), ("Nghĩa mẹ như nước trong nguồn chảy ...", "ra"),
+        ("Một con ngựa đau, cả tàu bỏ ...", "cỏ"), ("Ăn trông nồi, ngồi trông ...", "hướng"),
+        ("Lựa lời mà nói cho vừa lòng ...", "nhau"), ("Cây ngay không sợ chết ...", "đứng"),
+        ("Đèn nhà ai nấy ...", "rạng", "sáng"), ("Nhập gia tùy ...", "tục"),
+        ("Nói có sách, mách có ...", "chứng"), ("Được voi đòi ...", "tiên"),
+        ("Tham thì ...", "thâm"), ("Trèo cao ngã ...", "đau"),
+        ("Nồi nào úp vung ...", "nấy", "đó"), ("Xa mặt cách ...", "lòng"),
+        ("Yêu nhau lắm, cắn nhau ...", "đau"), ("Có chí thì ...", "nên"),
+    ]:
+        add("📜 Điền từ còn thiếu: " + q, *a)
+    _TG_QUIZ_BANK = B
+    return B
+
+def _tg_pts_add(chat_id, uid, name, pts: int) -> int:
+    """Cộng điểm vui, trả về tổng điểm mới."""
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_fun_points(chat_id TEXT,user_id INTEGER,name TEXT,"
+                  "points INTEGER DEFAULT 0,PRIMARY KEY(chat_id,user_id))")
+        c.execute("INSERT INTO tg_fun_points(chat_id,user_id,name,points) VALUES(?,?,?,?) "
+                  "ON CONFLICT(chat_id,user_id) DO UPDATE SET points=points+excluded.points, name=excluded.name",
+                  (str(chat_id), uid, name, pts))
+        r = c.execute("SELECT points FROM tg_fun_points WHERE chat_id=? AND user_id=?", (str(chat_id), uid)).fetchone()
+        return r["points"] if r else pts
+
+def _tg_pts_top(chat_id, n=10) -> list:
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_fun_points(chat_id TEXT,user_id INTEGER,name TEXT,"
+                  "points INTEGER DEFAULT 0,PRIMARY KEY(chat_id,user_id))")
+        return [(r["name"], r["points"]) for r in c.execute(
+            "SELECT name,points FROM tg_fun_points WHERE chat_id=? ORDER BY points DESC LIMIT ?", (str(chat_id), n)).fetchall()]
+
+def _tg_quiz_post(token, chat_id, auto=True) -> None:
+    """Ra 1 câu đố ngẫu nhiên cho nhóm."""
+    import random as _rd
+    q, a = _rd.choice(_tg_quiz_bank())
+    _TG_QUIZ[chat_id] = {"q": q, "a": a, "auto": auto}
+    _tg_send(token, chat_id, f"🧠 <b>CÂU ĐỐ</b> (+10 điểm cho người trả lời đúng đầu tiên):\n\n{q}\n\n"
+                             "💡 /goiy — gợi ý · /boqua — đáp án & câu mới · /dungdo — dừng")
+
+def _tg_quiz_try(token, chat_id, msg, text) -> bool:
+    """Kiểm tra đáp án đố vui. Trả True nếu ĐÚNG (đã xử lý + ra câu mới)."""
+    import html as _h
+    qz = _TG_QUIZ.get(chat_id)
+    if not qz or not _tg_ans_ok(text, qz["a"]):
+        return False
+    import random as _rd
+    frm = msg.get("from", {}) or {}
+    total = _tg_pts_add(chat_id, frm.get("id") or 0, _tg_name(frm), 10)
+    congrat = _rd.choice(_TG_CONGRATS).format(name=_tg_mention(frm))
+    _tg_send(token, chat_id, f"{congrat}\n✅ Đáp án: <b>{_h.escape(qz['a'][0])}</b>\n"
+                             f"💎 <b>+10 điểm</b> → tổng <b>{total}</b> điểm · 📊 /diemdo — bảng vàng")
+    auto = qz.get("auto", True)
+    del _TG_QUIZ[chat_id]
+    if auto:
+        _tg_quiz_post(token, chat_id, auto=True)
+    return True
+
+# ---- Bộ bài & game bài ----
+_CARD_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+_CARD_SUITS = ["♠️", "♥️", "♦️", "♣️"]
+
+def _tg_deck_draw(n: int) -> list:
+    import random as _rd
+    deck = [(r, s) for r in _CARD_RANKS for s in _CARD_SUITS]
+    return _rd.sample(deck, n)
+
+def _card_show(cards: list) -> str:
+    return "  ".join(f"[{r}{s}]" for r, s in cards)
+
+def _baicao_point(cards: list) -> tuple:
+    """Điểm bài cào: (điểm mod 10, có phải 3 tây không)."""
+    vals = []
+    for r, _ in cards:
+        vals.append(1 if r == "A" else (10 if r in ("10", "J", "Q", "K") else int(r)))
+    tay = all(r in ("J", "Q", "K") for r, _ in cards)
+    return sum(vals) % 10, tay
+
+def _xidach_val(cards: list) -> int:
+    """Điểm xì dách: A = 1 hoặc 11 (chọn tốt nhất), J/Q/K = 10."""
+    total, aces = 0, 0
+    for r, _ in cards:
+        if r == "A":
+            aces += 1; total += 1
+        elif r in ("10", "J", "Q", "K"):
+            total += 10
+        else:
+            total += int(r)
+    while aces > 0 and total + 10 <= 21:
+        total += 10; aces -= 1
+    return total
+
+def _tg_game_command(token, chat_id, msg, cmd, args) -> bool:
+    """🃏 Game bài + 🧠 đố vui có điểm. Trả True nếu đã xử lý."""
+    import html as _h, random as _rd
+    frm = msg.get("from", {}) or {}
+    uid = frm.get("id") or 0
+    who = _tg_mention(frm)
+
+    # ---------- 🧠 ĐỐ VUI CÓ ĐIỂM ----------
+    if cmd == "dovui":
+        _tg_quiz_post(token, chat_id, auto=True)
+        return True
+    if cmd == "goiy":
+        qz = _TG_QUIZ.get(chat_id)
+        if not qz:
+            _tg_send(token, chat_id, "Chưa có câu đố nào — gõ /dovui để bắt đầu!"); return True
+        ans = qz["a"][0]
+        words = ans.split()
+        _tg_send(token, chat_id, f"💡 Gợi ý: <b>{len(words)}</b> từ, <b>{len(ans)}</b> ký tự, "
+                                 f"bắt đầu bằng \"<b>{_h.escape(ans[0].upper())}</b>\"")
+        return True
+    if cmd == "boqua":
+        qz = _TG_QUIZ.get(chat_id)
+        if not qz:
+            _tg_send(token, chat_id, "Chưa có câu đố nào — gõ /dovui để bắt đầu!"); return True
+        _tg_send(token, chat_id, f"⏭️ Đáp án là: <b>{_h.escape(qz['a'][0])}</b>")
+        auto = qz.get("auto", True)
+        del _TG_QUIZ[chat_id]
+        if auto:
+            _tg_quiz_post(token, chat_id, auto=True)
+        return True
+    if cmd == "dungdo":
+        if chat_id in _TG_QUIZ:
+            del _TG_QUIZ[chat_id]
+            _tg_send(token, chat_id, "🛑 Đã dừng đố vui. Gõ /dovui để chơi lại — 📊 /diemdo xem bảng vàng.")
+        else:
+            _tg_send(token, chat_id, "Không có ván đố nào đang chạy.")
+        return True
+    if cmd == "diemdo":
+        rows = _tg_pts_top(chat_id, 10)
+        if not rows:
+            _tg_send(token, chat_id, "🏅 Chưa ai có điểm — gõ /dovui để bắt đầu kiếm điểm!"); return True
+        medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 7
+        lst = "\n".join(f"{medals[i]} {_h.escape(n)}: <b>{p}</b> điểm" for i, (n, p) in enumerate(rows))
+        _tg_send(token, chat_id, f"🏆 <b>BẢNG VÀNG ĐIỂM VUI</b>\n{lst}\n\n🧠 /dovui — đố vui (+10đ) · 🃏 /baicao /xidach /baucua (+5đ khi thắng)")
+        return True
+
+    # ---------- 🃏 BÀI CÀO 3 CÂY ----------
+    if cmd == "baicao":
+        six = _tg_deck_draw(6)
+        p, b = six[:3], six[3:]
+        pp, ptay = _baicao_point(p)
+        bp, btay = _baicao_point(b)
+        if ptay and not btay: kq, win = "🎉 BA TÂY — BẠN THẮNG!", True
+        elif btay and not ptay: kq, win = "😎 Bot ba tây — BOT THẮNG!", False
+        elif pp > bp: kq, win = "🎉 BẠN THẮNG!", True
+        elif pp < bp: kq, win = "😎 BOT THẮNG!", False
+        else: kq, win = "🤝 HOÀ!", False
+        extra = ""
+        if win:
+            total = _tg_pts_add(chat_id, uid, _tg_name(frm), 5)
+            extra = f"\n💎 +5 điểm → tổng <b>{total}</b> điểm"
+        _tg_send(token, chat_id,
+                 f"🃏 <b>BÀI CÀO 3 CÂY</b> — {who}\n"
+                 f"Bạn: {_card_show(p)} → <b>{'BA TÂY' if ptay else str(pp) + ' điểm'}</b>\n"
+                 f"Bot: {_card_show(b)} → <b>{'BA TÂY' if btay else str(bp) + ' điểm'}</b>\n{kq}{extra}")
+        return True
+
+    # ---------- 🃏 XÌ DÁCH (Blackjack) ----------
+    if cmd == "xidach":
+        four = _tg_deck_draw(4)
+        st = {"p": four[:2], "d": four[2:]}
+        _TG_XIDACH[(chat_id, uid)] = st
+        pv = _xidach_val(st["p"])
+        if pv == 21:
+            del _TG_XIDACH[(chat_id, uid)]
+            total = _tg_pts_add(chat_id, uid, _tg_name(frm), 8)
+            _tg_send(token, chat_id, f"🃏 {who}: {_card_show(st['p'])} = <b>21</b>\n"
+                                     f"🎊 <b>XÌ DÁCH!</b> Thắng luôn ván này! 💎 +8 điểm → tổng <b>{total}</b>")
+            return True
+        _tg_send(token, chat_id,
+                 f"🃏 <b>XÌ DÁCH</b> — {who}\nBài của bạn: {_card_show(st['p'])} = <b>{pv}</b>\n"
+                 f"Nhà cái: {_card_show(st['d'][:1])} [❓]\n\n👉 /rut — rút thêm · /dan — dằn (so bài)")
+        return True
+    if cmd in ("rut", "dan"):
+        st = _TG_XIDACH.get((chat_id, uid))
+        if not st:
+            _tg_send(token, chat_id, "Bạn chưa có ván xì dách — gõ /xidach để chia bài!"); return True
+        if cmd == "rut":
+            used = set(st["p"] + st["d"])
+            card = next(c for c in _tg_deck_draw(52) if c not in used)
+            st["p"].append(card)
+            pv = _xidach_val(st["p"])
+            if pv > 21:
+                del _TG_XIDACH[(chat_id, uid)]
+                _tg_send(token, chat_id, f"🃏 {who} rút: {_card_show(st['p'])} = <b>{pv}</b>\n💥 <b>QUẮC!</b> (quá 21) — thua ván này 😢 /xidach chơi lại")
+            else:
+                _tg_send(token, chat_id, f"🃏 {who}: {_card_show(st['p'])} = <b>{pv}</b>\n👉 /rut tiếp hoặc /dan để so bài")
+            return True
+        # /dan — nhà cái rút tới 17+
+        pv = _xidach_val(st["p"])
+        used = set(st["p"] + st["d"])
+        while _xidach_val(st["d"]) < 17:
+            card = next(c for c in _tg_deck_draw(52) if c not in used)
+            st["d"].append(card); used.add(card)
+        dv = _xidach_val(st["d"])
+        del _TG_XIDACH[(chat_id, uid)]
+        if dv > 21 or pv > dv: kq, win = "🎉 BẠN THẮNG!", True
+        elif pv < dv: kq, win = "😎 NHÀ CÁI THẮNG!", False
+        else: kq, win = "🤝 HOÀ!", False
+        extra = ""
+        if win:
+            total = _tg_pts_add(chat_id, uid, _tg_name(frm), 5)
+            extra = f"\n💎 +5 điểm → tổng <b>{total}</b> điểm"
+        _tg_send(token, chat_id, f"🃏 <b>SO BÀI</b> — {who}\nBạn: {_card_show(st['p'])} = <b>{pv}</b>\n"
+                                 f"Nhà cái: {_card_show(st['d'])} = <b>{dv}</b>\n{kq}{extra}")
+        return True
+
+    # ---------- 🎲 BẦU CUA ----------
+    if cmd == "baucua":
+        syms = {"bầu": "🍐", "cua": "🦀", "tôm": "🦐", "cá": "🐟", "gà": "🐓", "nai": "🦌"}
+        alias = {"bau": "bầu", "tom": "tôm", "ca": "cá", "ga": "gà"}
+        a = args.strip().lower()
+        a = alias.get(a, a)
+        if a not in syms:
+            _tg_send(token, chat_id, "🎲 <b>Bầu cua:</b> <code>/baucua bầu</code> (bầu · cua · tôm · cá · gà · nai)"); return True
+        roll = [_rd.choice(list(syms)) for _ in range(3)]
+        hit = roll.count(a)
+        show = "  ".join(syms[x] for x in roll)
+        if hit:
+            total = _tg_pts_add(chat_id, uid, _tg_name(frm), 3 * hit)
+            kq = f"🎉 Trúng <b>x{hit}</b>! 💎 +{3 * hit} điểm → tổng <b>{total}</b> điểm"
+        else:
+            kq = "😢 Trượt rồi, thử lại nào!"
+        _tg_send(token, chat_id, f"🎲 <b>BẦU CUA</b> — {who} đặt {syms[a]} <b>{a.upper()}</b>\nXúc: {show}\n{kq}")
+        return True
     return False
 
 # ---------- Đếm người dùng bot mỗi tháng ----------
@@ -5570,6 +6018,7 @@ _TG_RESERVED = {
     "thotinh", "noinguoc", "thatha", "thachthuc", "ghep", "lucky", "boi", "tinhduyen", "hoi",
     "danhgia", "tinh", "qr", "thoitiet", "giacoin", "tygia", "dich", "nhacnho", "binhchon",
     "poll", "gio", "dem", "password",
+    "dovui", "goiy", "boqua", "dungdo", "diemdo", "baicao", "xidach", "rut", "dan", "baucua",
 }
 
 def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
@@ -5720,6 +6169,17 @@ _TG_FEAT = {
                     "/tungxu — tung đồng xu · /oantuti kéo|búa|bao — đấu với bot\n"
                     "/doanso — đoán số 1–100 (đoán bằng /doan 50)\n"
                     "/random 1 100 · /chon trà sữa | cà phê · /xoso — quay số may mắn"),
+    "🃏 Game bài": ("🃏 <b>Game bài</b> (thắng +5 điểm vui):\n"
+                    "/baicao — bài cào 3 cây đấu bot (ba tây ăn tất!)\n"
+                    "/xidach — xì dách 21 điểm: /rut — rút bài · /dan — so bài (xì dách +8đ)\n"
+                    "/baucua bầu — bầu cua tôm cá gà nai (trúng +3đ/con)\n"
+                    "📊 /diemdo — bảng vàng điểm vui"),
+    "🧠 Đố vui": ("🧠 <b>Đố vui CÓ ĐIỂM</b> — ~700 câu, 7 thể loại (thủ đô, cờ các nước, toán nhanh,\n"
+                  "dãy số, kiến thức, đố mẹo, tục ngữ):\n"
+                  "/dovui — ra câu đố, AI TRẢ LỜI ĐÚNG ĐẦU TIÊN +10 điểm + lời chúc mừng 🎉\n"
+                  "(trả lời đúng xong bot tự ra câu tiếp — đấu liên tục cả nhóm)\n"
+                  "/goiy — gợi ý · /boqua — hiện đáp án, câu mới · /dungdo — dừng\n"
+                  "📊 /diemdo — BẢNG VÀNG xếp hạng điểm"),
     "😂 Giải trí": ("😂 <b>Giải trí</b>:\n"
                     "/cuoi — chuyện cười · /cakhia (reply) — cà khịa vui · /khen (reply) — khen ai đó\n"
                     "/thatha — nói thật · /thachthuc — thử thách · /ghep — ghép đôi ngẫu nhiên\n"
@@ -5746,7 +6206,7 @@ _TG_FEAT = {
 # Nút CÔNG KHAI — thành viên thường thấy; các nút còn lại (quản trị) CHỈ ADMIN thấy.
 _TG_PUBLIC_BTNS = {"✅ Điểm danh", "🏆 Xếp hạng", "🚨 Báo cáo", "🆔 ID", "💤 AFK", "🔗 Liên kết",
                    "📖 Tất cả lệnh", "🎵 Lấy nhạc", "📊 Thống kê", "ℹ️ Giới thiệu", "💬 Hỗ trợ",
-                   "🎮 Trò chơi", "😂 Giải trí", "🔮 Bói vui", "🧰 Tiện ích"}
+                   "🎮 Trò chơi", "🃏 Game bài", "🧠 Đố vui", "😂 Giải trí", "🔮 Bói vui", "🧰 Tiện ích"}
 
 def _tg_full_menu(admin: bool = False) -> dict:
     labels = [b for b in _TG_FEAT.keys() if admin or b in _TG_PUBLIC_BTNS]
@@ -6293,7 +6753,8 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
 
         if _tg_in_night() and _kill("", warn=False): return
         if _slowmode_hit(chat_id, uid) and _kill("", warn=False): return
-        if _tg_flood_hit(chat_id, uid) and _kill("gửi tin dồn dập (flood)"): return
+        # Đang chơi ĐỐ VUI → miễn antiflood (mọi người đua nhau trả lời nhanh)
+        if chat_id not in _TG_QUIZ and _tg_flood_hit(chat_id, uid) and _kill("gửi tin dồn dập (flood)"): return
         if not is_cmd:   # lệnh bot không bị xét từ cấm/link/media
             bl = _tg_blacklist()
             if bl and any(w in low for w in bl) and _kill("dùng từ cấm"): return
@@ -6308,6 +6769,11 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
             if "all" in locks and _kill("", warn=False): return
 
     # ============ 2) Tin đã "sạch" → tiện ích, menu, lệnh ============
+    # 🧠 ĐỐ VUI: nhóm đang có câu đố → kiểm tra đáp án (trả lời đúng = +10 điểm)
+    if text and not text.startswith("/") and chat_id in _TG_QUIZ:
+        if _tg_quiz_try(token, chat_id, msg, text):
+            return
+
     # AFK: người đang AFK nhắn lại → chào trở lại
     if uid in _tg_afk and not low.startswith("/afk"):
         _tg_afk.pop(uid, None)
@@ -6486,6 +6952,11 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     if _tg_menu_click(token, chat_id, text, name,
                       admin=bool(admin_chat) and chat_id == str(admin_chat)):
         return
+    # 🧠 ĐỐ VUI trong chat riêng: đang có câu đố → coi tin nhắn là đáp án
+    if text and not text.startswith("/") and chat_id in _TG_QUIZ:
+        if not _tg_quiz_try(token, chat_id, msg, text):
+            _tg_send(token, chat_id, "❌ Chưa đúng, thử lại nào! (/goiy — gợi ý · /boqua — bỏ qua)")
+        return
     # 🎮 Lệnh GIẢI TRÍ & TIỆN ÍCH — dùng được cả trong chat riêng
     if text.startswith("/"):
         _fc = text.split()[0].lstrip("/").split("@")[0].lower()
@@ -6607,6 +7078,11 @@ def _tg_register_commands(token: str) -> None:
         ("giacoin", "💰 Giá coin"), ("tygia", "💵 Tỷ giá USD→VND"), ("dich", "🌐 Dịch sang tiếng Việt"),
         ("nhacnho", "⏰ Hẹn nhắc việc"), ("binhchon", "🗳️ Tạo bình chọn"),
         ("gio", "🕐 Giờ thế giới"), ("password", "🔐 Tạo mật khẩu mạnh"),
+        # 🃏 Game bài + 🧠 đố vui có điểm
+        ("dovui", "🧠 Đố vui +10đ (~700 câu)"), ("diemdo", "🏆 Bảng vàng điểm vui"),
+        ("goiy", "💡 Gợi ý câu đố"), ("boqua", "⏭️ Bỏ qua câu đố"),
+        ("baicao", "🃏 Bài cào 3 cây"), ("xidach", "🃏 Xì dách 21 điểm"),
+        ("baucua", "🎲 Bầu cua tôm cá"),
     ]
     # Lệnh QUẢN TRỊ — CHỈ admin nhóm (và admin bot) thấy
     adm = pub + [
@@ -6644,6 +7120,8 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
     greet = (f"👋 Chào {_h.escape(name)}, tôi là <b>{_h.escape(bot)}</b>.\n\n" if name
              else f"👋 Xin chào, tôi là <b>{_h.escape(bot)}</b>.\n\n")
     pub = ("🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
+           "🧠 <b>Đố vui CÓ ĐIỂM:</b> /dovui (+10đ/câu đúng, ~700 câu) · /goiy · /boqua · /dungdo · 🏆 /diemdo\n"
+           "🃏 <b>Game bài:</b> /baicao · /xidach (/rut /dan) · /baucua bầu — thắng +5 điểm\n"
            "🎮 <b>Trò chơi:</b> /xucxac /slot /phitieu /bongda /bongro /bowling /tungxu /oantuti /doanso /random /chon /xoso\n"
            "😂 <b>Giải trí:</b> /cuoi /cakhia /khen /thatha /thachthuc /ghep /lucky /triethly /thotinh /noinguoc\n"
            "🔮 <b>Bói vui:</b> /boi /tinhduyen /hoi /danhgia\n"
