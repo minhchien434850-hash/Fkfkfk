@@ -127,6 +127,11 @@ struct MainTabView: View {
     static var appBuild: Int {
         Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
     }
+    // Quy số build (run_number) → số phiên bản hiển thị, ĐỒNG BỘ công thức CI: 3.(build − 810).
+    // Nhờ vậy popup cập nhật hiện "3.16" thay vì "build 826".
+    static func versionFromBuild(_ build: Int) -> String {
+        "3.\(max(1, build - 810))"
+    }
 
     // Tự dò bản mới trên GitHub Release (repo công khai, không cần khoá).
     // Duyệt danh sách release ĐÃ PHÁT HÀNH, lấy số build cao nhất (tag "build-<số>") có kèm .ipa.
@@ -224,7 +229,7 @@ struct MainTabView: View {
                    (ota.bundleId ?? "") == (Bundle.main.bundleIdentifier ?? "com.kenios.codebox"),
                    (ota.build ?? 0) > Self.appBuild {
                     updateLink = otaLink
-                    updateVersion = ota.version.map { "v\($0)" } ?? "build \(ota.build ?? 0)"
+                    updateVersion = ota.version ?? Self.versionFromBuild(ota.build ?? 0)
                     updateMsg = store.t("Đã có bản cập nhật mới — bấm để cài trực tiếp (không cần ESign).",
                                         "A new update is available — tap to install directly (no ESign).")
                     showUpdate = true
@@ -242,7 +247,7 @@ struct MainTabView: View {
                     // TỰ ĐỘNG: nếu chưa có nguồn nào → tự dò bản mới trên GitHub Release (bản chưa ký, qua ESign).
                     if !showUpdate, let up = await Self.checkGitHubUpdate(), up.build > Self.appBuild {
                         updateLink = up.ipaURL
-                        updateVersion = "build \(up.build)"
+                        updateVersion = Self.versionFromBuild(up.build)
                         updateMsg = ""
                         showUpdate = true
                     }
