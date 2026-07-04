@@ -5032,7 +5032,7 @@ def _tg_send_menu(token, chat_id, text, photo_first=False) -> None:
     _tg_call(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
              disable_web_page_preview=True, reply_markup=kb)
 
-def _tg_menu_click(token, chat_id, text) -> bool:
+def _tg_menu_click(token, chat_id, text, name="") -> bool:
     """Xử lý khi bấm nút trên menu (reply keyboard). Trả True nếu đã xử lý."""
     t = (text or "").strip()
     if t in ("🏠 Menu", "/menu", "menu"):
@@ -5046,7 +5046,7 @@ def _tg_menu_click(token, chat_id, text) -> bool:
     if t == "📊 Thống kê":
         _tg_send(token, chat_id, f"👥 <b>{_tg_monthly():,}</b> người dùng bot trong 30 ngày.".replace(",", ".")); return True
     if t == "📚 Hướng dẫn đầy đủ":
-        _tg_send(token, chat_id, _tg_help_text()); return True
+        _tg_send(token, chat_id, _tg_help_text(name)); return True
     if t == "🛡️ Quản trị nhóm":
         _tg_send(token, chat_id, "🛡️ <b>Quản trị nhóm</b> (dùng TRONG NHÓM, bot là admin):\n"
                  "/ban · /kick · /mute [phút] · /unmute · /warn · /warns · /pin · /unpin · /del · /purge · /info\n"
@@ -5508,7 +5508,7 @@ def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, fr
         t = (msg.get("reply_to_message", {}).get("from") or {}).get("id")
         _tg_send(token, chat_id, f"Chat ID: <code>{chat_id}</code>" + (f"\nUser: <code>{t}</code>" if t else "")); return
     if cmd == "help" or cmd == "start" or cmd == "menu":
-        _tg_send(token, chat_id, _tg_help_text()); return
+        _tg_send(token, chat_id, _tg_help_text(_tg_name(msg.get("from", {})))); return
     _tg_admin_command(token, chat_id, msg, cmd, args)
 
 def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
@@ -5566,7 +5566,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     name = _tg_name(frm)
     _tg_track(frm)   # đếm người dùng bot mỗi tháng
     # Bấm nút trên menu (reply keyboard) → xử lý ngay
-    if _tg_menu_click(token, chat_id, text):
+    if _tg_menu_click(token, chat_id, text, name):
         return
     # Lệnh QUẢN LÝ NHÓM gõ trong chat riêng → nhắc: chỉ chạy trong nhóm (tránh "im lặng tưởng lỗi").
     _GROUP_CMDS = {"/ban", "/kick", "/mute", "/unmute", "/warn", "/unwarn", "/warns", "/pin", "/unpin",
@@ -5590,7 +5590,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
             _tg_send(token, m.group(1), f"👨‍💼 <b>Hỗ trợ KENIOS:</b>\n{text}")
             _tg_send(token, admin_chat, "✅ Đã gửi trả lời tới khách.")
         elif text.startswith("/help") or text.startswith("/menu"):
-            _tg_send(token, admin_chat, _tg_help_text())
+            _tg_send(token, admin_chat, _tg_help_text(name))
         elif text.startswith("/config"):
             _tg_send(token, admin_chat,
                      "⚙️ <b>Cấu hình bot</b>\n"
@@ -5664,8 +5664,12 @@ def _tg_register_commands(token: str) -> None:
     ]
     _tg_call(token, "setMyCommands", commands=[{"command": c, "description": d} for c, d in cmds])
 
-def _tg_help_text() -> str:
-    return ("🤖 <b>KENIOS Bot quản lý nhóm</b>\n"
+def _tg_help_text(name: str = "") -> str:
+    import html as _h
+    bot = get_setting("tg_bot_name", "TRẦN MINH CHIẾN")
+    greet = (f"👋 Chào {_h.escape(name)}, tôi là <b>{_h.escape(bot)}</b>.\n\n" if name
+             else f"👋 Xin chào, tôi là <b>{_h.escape(bot)}</b>.\n\n")
+    return (greet +
             "<b>Quản trị (reply):</b> /ban /kick /mute [phút] /unmute /warn /unwarn /warns /pin /unpin /del /purge /info\n"
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
