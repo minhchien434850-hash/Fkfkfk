@@ -5552,7 +5552,7 @@ def _tg_in_night() -> bool:
     return (s <= h < e) if s < e else (h >= s or h < e)
 def _tg_flood_hit(chat_id: str, uid) -> bool:
     if get_setting("tg_antiflood_on", "1") != "1": return False
-    mx = int(get_setting("tg_antiflood_max", "6") or 6)
+    mx = int(get_setting("tg_antiflood_max", "4") or 4)
     win = int(get_setting("tg_antiflood_window", "7") or 7)
     now = time.time(); key = (chat_id, uid)
     arr = [t for t in _tg_flood.get(key, []) if now - t < win]
@@ -5789,16 +5789,18 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
         if cmd == "antiflood" and args.strip().split() and args.strip().split()[0].isdigit():
             mx = max(2, min(30, int(args.strip().split()[0])))
             set_setting("tg_antiflood_max", str(mx)); set_setting("tg_antiflood_on", "1")
+            set_setting("tg_mod_enabled", "1")   # bật luôn công tắc tổng — antiflood cần nó mới chạy
             _tg_send(token, chat_id,
                      f"🌊 Antiflood: BẬT — quá <b>{mx}</b> tin/7 giây sẽ bị xoá + cảnh báo.\n"
-                     "(Admin/chủ nhóm được MIỄN — thử bằng tài khoản thành viên thường.)")
+                     "(Admin/chủ nhóm được MIỄN — thử bằng tài khoản thành viên, hoặc /modadmin on.)")
         elif cmd in keymap:
             k, d = keymap[cmd]
             cur = get_setting(k, d) == "1"; set_setting(k, "0" if cur else "1")
             extra = ""
             if cmd == "antiflood" and not cur:
-                extra = (f" — quá <b>{get_setting('tg_antiflood_max', '6')}</b> tin/7 giây sẽ bị xoá + cảnh báo.\n"
-                         "Đổi mức: <code>/antiflood 4</code>. (Admin được MIỄN — thử bằng tài khoản thành viên.)")
+                set_setting("tg_mod_enabled", "1")   # bật luôn công tắc tổng
+                extra = (f" — quá <b>{get_setting('tg_antiflood_max', '4')}</b> tin/7 giây sẽ bị xoá + cảnh báo.\n"
+                         "Đổi mức: <code>/antiflood 4</code>. (Admin được MIỄN — thử bằng tài khoản thành viên, hoặc /modadmin on.)")
             _tg_send(token, chat_id, f"{cmd}: {'TẮT' if cur else 'BẬT'}{extra}")
         else:
             set_setting("tg_mod_enabled", "1" if cmd == "modon" else "0")
