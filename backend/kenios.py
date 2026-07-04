@@ -4997,6 +4997,170 @@ def _tg_monthly() -> int:
     except Exception:
         return 0
 
+# ---------- NÚT LIÊN KẾT (inline URL) — admin thêm bao nhiêu nút link cũng được ----------
+def _tg_link_buttons() -> list:
+    """Dựng lưới nút LIÊN KẾT (mở link) từ cấu hình tg_links.
+    Mỗi dòng 1 nút, dạng:  Nhãn | https://link  (2 nút/hàng).
+    Chưa cấu hình thì mặc định gợi ý Cửa hàng web + Cài ứng dụng."""
+    raw = get_setting("tg_links", "").strip()
+    if not raw:
+        base = (_ipa_base_url() or "https://app.kenios.store").rstrip("/")
+        raw = f"🛒 Cửa hàng | {base}/shop\n📲 Cài ứng dụng | {base}/install"
+    rows, cur = [], []
+    for line in raw.splitlines():
+        if "|" not in line:
+            continue
+        label, url = line.split("|", 1)
+        label, url = label.strip(), url.strip()
+        if not label or not url:
+            continue
+        if not url.lower().startswith(("http://", "https://", "tg://")):
+            url = "https://" + url
+        cur.append({"text": label[:40], "url": url})
+        if len(cur) == 2:
+            rows.append(cur); cur = []
+    if cur:
+        rows.append(cur)
+    return rows
+
+# ---------- LỆNH TÙY BIẾN — admin tự thêm/sửa/xoá lệnh bot, không cần code ----------
+def _tg_cc_set(cmd: str, resp) -> None:
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_custom_cmds(cmd TEXT PRIMARY KEY, response TEXT, updated INTEGER)")
+        if resp is None:
+            c.execute("DELETE FROM tg_custom_cmds WHERE cmd=?", (cmd,))
+        else:
+            c.execute("INSERT INTO tg_custom_cmds(cmd,response,updated) VALUES(?,?,?) "
+                      "ON CONFLICT(cmd) DO UPDATE SET response=excluded.response, updated=excluded.updated",
+                      (cmd, resp, int(time.time())))
+
+def _tg_cc_get(cmd: str):
+    try:
+        with db() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS tg_custom_cmds(cmd TEXT PRIMARY KEY, response TEXT, updated INTEGER)")
+            r = c.execute("SELECT response FROM tg_custom_cmds WHERE cmd=?", (cmd,)).fetchone()
+            return r["response"] if r else None
+    except Exception:
+        return None
+
+def _tg_cc_list() -> list:
+    try:
+        with db() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS tg_custom_cmds(cmd TEXT PRIMARY KEY, response TEXT, updated INTEGER)")
+            return [r["cmd"] for r in c.execute("SELECT cmd FROM tg_custom_cmds ORDER BY cmd").fetchall()]
+    except Exception:
+        return []
+
+# Tên lệnh KHÔNG cho phép đặt trùng (lệnh hệ thống) khi tạo lệnh tùy biến.
+_TG_RESERVED = {
+    "start", "help", "menu", "config", "stats", "nhac", "music", "id", "afk", "get",
+    "addcmd", "delcmd", "cmds", "setlinks", "links", "broadcast",
+    "ban", "kick", "mute", "unmute", "warn", "unwarn", "warns", "pin", "unpin", "del",
+    "purge", "info", "lock", "unlock", "locks", "addbl", "rmbl", "blacklist", "filter",
+    "stop", "filters", "save", "clear", "notes", "setrules", "rules", "clean", "nightmode",
+    "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
+}
+
+def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
+    """Gửi 1 thông báo tới TẤT CẢ người đã từng nhắn bot (loa phường)."""
+    import html as _h
+    ids = []
+    try:
+        with db() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS tg_bot_users(user_id INTEGER PRIMARY KEY, last_seen INTEGER)")
+            ids = [r["user_id"] for r in c.execute("SELECT user_id FROM tg_bot_users").fetchall()]
+    except Exception:
+        pass
+    body = "📣 <b>Thông báo</b>\n\n" + text
+    lb = _tg_link_buttons()
+    params0 = {"text": body, "parse_mode": "HTML", "disable_web_page_preview": True}
+    if lb:
+        params0["reply_markup"] = {"inline_keyboard": lb}
+    ok = 0
+    for uid in ids:
+        try:
+            r = _tg_call(token, "sendMessage", chat_id=uid, **params0)
+            if r.get("ok"):
+                ok += 1
+        except Exception:
+            pass
+        time.sleep(0.05)
+    _tg_send(token, admin_chat, f"✅ Đã gửi tới <b>{ok}/{len(ids)}</b> người dùng.")
+
+def _tg_manage_command(token: str, chat_id, text: str, is_admin: bool) -> bool:
+    """Xử lý nhóm lệnh QUẢN LÝ NỘI DUNG BOT (link + lệnh tùy biến + loa phường).
+    Trả True nếu đã xử lý. /links và /cmds công khai; còn lại chỉ admin."""
+    import re as _re, threading as _th
+    sp = text.split(None, 1)
+    cmd = sp[0].lstrip("/").split("@")[0].lower()
+    rest = sp[1].strip() if len(sp) > 1 else ""
+
+    if cmd == "links":   # công khai — xem nút liên kết
+        btns = _tg_link_buttons()
+        if btns:
+            _tg_send(token, chat_id, "🔗 <b>Liên kết nhanh:</b>", buttons=btns)
+        else:
+            _tg_send(token, chat_id, "Chưa có liên kết nào. Admin dùng /setlinks để thêm.")
+        return True
+    if cmd == "cmds":    # công khai — xem danh sách lệnh tùy biến
+        lst = _tg_cc_list()
+        _tg_send(token, chat_id,
+                 ("📋 <b>Lệnh riêng đang có:</b>\n" + "  ".join("/" + x for x in lst)) if lst
+                 else "Chưa có lệnh riêng nào. Admin dùng <code>/addcmd</code> để thêm.")
+        return True
+
+    if cmd not in ("addcmd", "delcmd", "setlinks", "broadcast"):
+        return False
+    if not is_admin:
+        _tg_send(token, chat_id, "🔒 Chỉ <b>ADMIN</b> mới dùng được lệnh này."); return True
+
+    if cmd == "addcmd":
+        a = rest.split(None, 1)
+        if len(a) < 2:
+            _tg_send(token, chat_id,
+                     "➕ <b>Thêm lệnh riêng</b>\nCú pháp: <code>/addcmd &lt;tên&gt; &lt;nội dung trả lời&gt;</code>\n"
+                     "VD: <code>/addcmd giá Bảng giá dịch vụ: … liên hệ admin nhé!</code>\n"
+                     "Sau đó ai gõ <code>/giá</code> bot sẽ tự trả lời nội dung trên (kèm nút liên kết).")
+            return True
+        name = a[0].lstrip("/").lower()
+        if not _re.match(r"^[a-z0-9_]{1,32}$", name):
+            _tg_send(token, chat_id, "Tên lệnh chỉ gồm chữ thường/số/gạch dưới (a–z 0–9 _), tối đa 32 ký tự."); return True
+        if name in _TG_RESERVED:
+            _tg_send(token, chat_id, f"⚠️ <code>/{name}</code> là lệnh hệ thống, không thể ghi đè. Chọn tên khác nhé."); return True
+        _tg_cc_set(name, a[1])
+        _tg_send(token, chat_id, f"✅ Đã lưu lệnh <code>/{name}</code>. Gõ <code>/{name}</code> để dùng.")
+        return True
+    if cmd == "delcmd":
+        if not rest:
+            _tg_send(token, chat_id, "Cú pháp: <code>/delcmd &lt;tên&gt;</code>"); return True
+        name = rest.split()[0].lstrip("/").lower()
+        _tg_cc_set(name, None)
+        _tg_send(token, chat_id, f"🗑️ Đã xoá lệnh <code>/{name}</code>.")
+        return True
+    if cmd == "setlinks":
+        if not rest:
+            base = (_ipa_base_url() or "https://app.kenios.store").rstrip("/")
+            _tg_send(token, chat_id,
+                     "🔗 <b>Đặt nút liên kết</b> — mỗi dòng 1 nút, dạng <code>Nhãn | https://link</code>\nVD:\n"
+                     f"<code>/setlinks 🛒 Cửa hàng | {base}/shop\n📲 Cài app | {base}/install\n"
+                     "📢 Kênh Telegram | https://t.me/kenios</code>\n\nGõ <code>/setlinks xoa</code> để xoá hết.")
+            return True
+        if rest.strip().lower() in ("xoa", "xóa", "clear", "off"):
+            set_setting("tg_links", "")
+            _tg_send(token, chat_id, "🗑️ Đã xoá toàn bộ nút liên kết (dùng lại mặc định).")
+            return True
+        set_setting("tg_links", rest)
+        n = len(_tg_link_buttons())
+        _tg_send(token, chat_id, f"✅ Đã lưu <b>{n}</b> nút liên kết. Gõ /links để xem.", buttons=(_tg_link_buttons() or None))
+        return True
+    if cmd == "broadcast":
+        if not rest:
+            _tg_send(token, chat_id, "📣 Cú pháp: <code>/broadcast &lt;nội dung&gt;</code> — gửi tới TẤT CẢ người dùng bot."); return True
+        _th.Thread(target=_tg_broadcast_task, args=(token, chat_id, rest), daemon=True).start()
+        _tg_send(token, chat_id, "📣 Đang gửi thông báo tới tất cả người dùng…")
+        return True
+    return False
+
 def _tg_send_photo_or_text(token: str, chat_id, text: str, buttons=None) -> None:
     """Gửi lời chào KÈM ẢNH bot nếu admin đã đặt ảnh (tg_welcome_photo), không thì gửi chữ."""
     photo = get_setting("tg_welcome_photo", "").strip()
@@ -5029,6 +5193,8 @@ _TG_FEAT = {
     "🏆 Xếp hạng": "🏆 <b>Xếp hạng</b>: /top — thành viên tích cực nhất.",
     "🚨 Báo cáo": "🚨 <b>Báo cáo</b>: /report (reply) — báo admin xử lý.",
     "🆔 ID": "🆔 <b>/id</b> — xem Chat ID / User ID (reply để lấy ID người khác).",
+    "🔗 Liên kết": None,        # → nút mở link (web, cài app, kênh…)
+    "➕ Lệnh riêng": None,       # → hướng dẫn tự thêm lệnh bot
     "📖 Tất cả lệnh": None,     # → hiện danh sách lệnh dạng chữ
     "🎵 Lấy nhạc": None,        # → hướng dẫn /nhac
     "📊 Thống kê": None,        # → số người dùng
@@ -5061,6 +5227,26 @@ def _tg_menu_click(token, chat_id, text, name="") -> bool:
     if t == "❌ Đóng":
         _tg_call(token, "sendMessage", chat_id=chat_id, text="Đã đóng menu. Gõ /menu để mở lại.",
                  reply_markup={"remove_keyboard": True}); return True
+    if t == "🔗 Liên kết":
+        btns = _tg_link_buttons()
+        if btns:
+            _tg_send(token, chat_id, "🔗 <b>Liên kết nhanh:</b>", buttons=btns)
+        else:
+            _tg_send(token, chat_id, "Chưa có liên kết. Admin dùng /setlinks để thêm.")
+        return True
+    if t == "➕ Lệnh riêng":
+        lst = _tg_cc_list()
+        info = ("➕ <b>Lệnh riêng của bot</b> (admin tạo — ai cũng gọi được):\n"
+                "• <code>/addcmd &lt;tên&gt; &lt;nội dung&gt;</code> — thêm/sửa lệnh\n"
+                "• <code>/delcmd &lt;tên&gt;</code> — xoá lệnh\n"
+                "• <code>/cmds</code> — xem tất cả lệnh riêng\n\n"
+                "🔗 <b>Nút liên kết</b> (mỗi dòng 1 nút):\n"
+                "• <code>/setlinks Nhãn | https://link</code>\n"
+                "• <code>/links</code> — xem nút\n\n"
+                "📣 <b>Loa phường</b>: <code>/broadcast &lt;nội dung&gt;</code> — gửi tới mọi người dùng.")
+        if lst:
+            info += "\n\n📋 Đang có: " + "  ".join("/" + x for x in lst)
+        _tg_send(token, chat_id, info); return True
     if t == "📖 Tất cả lệnh":
         _tg_send(token, chat_id, _tg_help_text(name)); return True
     if t == "🎵 Lấy nhạc":
@@ -5556,6 +5742,22 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         _tg_start_music(token, chat_id, _p[1] if len(_p) > 1 else "")
         return
 
+    # 🔗 Lệnh QUẢN LÝ NỘI DUNG BOT & ⚙️ LỆNH TÙY BIẾN — chạy ở cả nhóm & chat riêng.
+    if _tgtxt.startswith("/"):
+        _c0 = _tgtxt.split()[0].lstrip("/").split("@")[0].lower()
+        _ufrom = (msg.get("from") or {}).get("id")
+        _mng_admin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
+            ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _ufrom))
+        if _c0 in ("links", "cmds", "addcmd", "delcmd", "setlinks", "broadcast"):
+            if _tg_manage_command(token, chat_id, _tgtxt, _mng_admin):
+                return
+        # Lệnh do admin tự tạo (không trùng lệnh hệ thống) → trả lời kèm nút liên kết.
+        if _c0 not in _TG_RESERVED:
+            _ccresp = _tg_cc_get(_c0)
+            if _ccresp is not None:
+                _tg_send(token, chat_id, _ccresp, buttons=(_tg_link_buttons() or None))
+                return
+
     # NHÓM: thành viên mới (captcha/chào mừng) · rời nhóm (tạm biệt) · quản lý
     if msg.get("new_chat_members"):
         _tg_on_join(token, chat, msg); return
@@ -5622,6 +5824,9 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         wel = wel.replace("{name}", name).replace("{botname}", botname)
         wel += f"\n\n👥 <b>{_tg_monthly():,}</b> người dùng mỗi tháng".replace(",", ".")
         _tg_send_menu(token, chat_id, wel, photo_first=True)
+        _lb = _tg_link_buttons()
+        if _lb:
+            _tg_send(token, chat_id, "🔗 <b>Liên kết nhanh:</b>", buttons=_lb)
         return
     if admin_chat:
         _tg_send(token, admin_chat,
@@ -5668,6 +5873,9 @@ def _tg_register_commands(token: str) -> None:
         ("slowmode", "Giãn cách gửi tin"), ("autoreact", "Tự thả cảm xúc"),
         ("report", "Báo cáo admin (reply)"),
         ("nhac", "Lấy nhạc YouTube/TikTok"),
+        ("links", "🔗 Liên kết nhanh"), ("cmds", "Xem lệnh riêng"),
+        ("addcmd", "Thêm lệnh riêng (admin)"), ("delcmd", "Xoá lệnh riêng (admin)"),
+        ("setlinks", "Đặt nút liên kết (admin)"), ("broadcast", "Loa phường (admin)"),
     ]
     _tg_call(token, "setMyCommands", commands=[{"command": c, "description": d} for c, d in cmds])
 
@@ -5682,6 +5890,7 @@ def _tg_help_text(name: str = "") -> str:
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /log · /config\n"
             "🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
+            "🔗 <b>Liên kết & lệnh riêng:</b> /links · /cmds · /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast\n"
             "<b>Công khai:</b> /diemdanh · /top · /report · /id")
 
 def start_telegram_bot() -> None:
