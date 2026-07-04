@@ -5497,14 +5497,14 @@ async def _acb_fetch_and_confirm() -> int:
 
 
 async def _acb_autopay_loop() -> None:
-    """Vòng lặp nền: cứ ~20 giây kiểm tra giao dịch ACB mới để tự cộng tiền / cấp key."""
+    """Vòng lặp nền: cứ ~5 giây kiểm tra giao dịch ACB mới để tự cộng tiền / cấp key."""
     while True:
         try:
             if get_setting("acb_api_token", "").strip():
                 await _acb_fetch_and_confirm()
         except Exception as e:
             log.error("ACB autopay loop lỗi: %s", e)
-        await asyncio.sleep(20)
+        await asyncio.sleep(5)
 
 
 @app.get("/payment/history")
