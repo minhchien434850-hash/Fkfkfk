@@ -6775,9 +6775,11 @@ async def ipa_sign(ipa: UploadFile = FastAPIFile(...),
                     if not chunk: break
                     f.write(chunk)
         try:
+            # -z 1: nén nhanh (file game lớn vốn đã nén sẵn, nén 9 chỉ tốn thời gian);
+            # timeout 3600s để đủ ký IPA tới 10GB.
             r = subprocess.run(["zsign", "-k", p12_path, "-p", password, "-m", prov_path,
-                                "-o", out_ipa, "-z", "9", in_ipa],
-                               capture_output=True, text=True, timeout=900)
+                                "-o", out_ipa, "-z", "1", in_ipa],
+                               capture_output=True, text=True, timeout=3600)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Chạy zsign lỗi: {e}")
         if not os.path.exists(out_ipa) or os.path.getsize(out_ipa) < 1000:

@@ -76,6 +76,34 @@ else
   echo "    ✓ Công cụ RDP đã sẵn sàng."
 fi
 
+# Nâng giới hạn tải lên nginx: ký IPA file lớn tới 10GB (sửa lỗi 413) + chờ ký lâu.
+echo "==> Nâng giới hạn nginx (file tới 10GB, sửa lỗi 413)..."
+if [ -d /etc/nginx ]; then
+  # Nâng giới hạn cũ (vd 4096M) trong mọi site đang có (kể cả site HTTPS app.kenios.store)
+  sed -i -E 's/client_max_body_size[[:space:]]+[0-9]+[mMgG];/client_max_body_size 10240M;/g' \
+      /etc/nginx/sites-available/* /etc/nginx/conf.d/*.conf 2>/dev/null || true
+  sed -i -E 's/proxy_(read|send)_timeout[[:space:]]+[0-9]+s;/proxy_\1_timeout 3600s;/g' \
+      /etc/nginx/sites-available/* 2>/dev/null || true
+  # Mặc định chung cho server nào chưa đặt + stream thẳng lên backend (không đệm 10GB ra đĩa)
+  cat > /etc/nginx/conf.d/kenios-upload.conf <<'NGINX'
+# KENIOS — cho phép tải file lớn (ký IPA tới 10GB) & chờ ký lâu
+client_max_body_size 10240M;
+client_body_timeout 3600s;
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+send_timeout 3600s;
+proxy_request_buffering off;
+NGINX
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx && echo "    ✓ nginx đã nhận file tới 10GB (reload xong)."
+  else
+    rm -f /etc/nginx/conf.d/kenios-upload.conf
+    echo "    ⚠️ nginx -t báo lỗi — đã gỡ file mới. Kiểm tra: nginx -t"
+  fi
+else
+  echo "    (Không thấy nginx — bỏ qua.)"
+fi
+
 # Xoá cache bytecode cũ (lý do hay gặp: restart nhưng vẫn chạy code cũ)
 echo "==> Xoá cache Python cũ..."
 rm -rf "$WORK/__pycache__" 2>/dev/null || true

@@ -30,7 +30,7 @@ extension APIClient {
 
         var req = URLRequest(url: try makeURL("/ipa/sign"))
         req.httpMethod = "POST"
-        req.timeoutInterval = 1200
+        req.timeoutInterval = 3600   // file lớn (tới 10GB): tải lâu + chờ máy chủ ký
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let (data, resp) = try await URLSession.shared.upload(for: req, fromFile: tmp)
