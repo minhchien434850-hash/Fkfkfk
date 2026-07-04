@@ -24,6 +24,8 @@ struct TelegramBotView: View {
     @State private var welcomeGroup = "👋 Chào mừng {name} đã vào {group}!"
     @State private var welcomeBtnText = ""
     @State private var welcomeBtnUrl = ""
+    @State private var welcomeBtns = ""      // NHIỀU nút link: mỗi dòng "Tên nút | https://link"
+    @State private var welcomePhoto = ""     // ảnh kèm lời chào (tuỳ chọn)
     @State private var goodbyeOn = true
     @State private var goodbye = "👋 Tạm biệt {name}, hẹn gặp lại!"
 
@@ -116,15 +118,19 @@ struct TelegramBotView: View {
                 if welcomeOn {
                     TextField(store.t("Lời chào (dùng {name}, {group})", "Welcome ({name}, {group})"),
                               text: $welcomeGroup, axis: .vertical).lineLimit(2...5)
-                    TextField(store.t("Chữ nút link (tuỳ chọn)", "Link button text (optional)"), text: $welcomeBtnText)
-                    TextField("https://... (link nút)", text: $welcomeBtnUrl)
+                    TextField(store.t("Nút link — mỗi dòng 1 nút:\nTên nút | https://link", "Link buttons — one per line:\nLabel | https://link"),
+                              text: $welcomeBtns, axis: .vertical)
+                        .lineLimit(2...8)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .font(.system(.footnote, design: .monospaced))
+                    TextField(store.t("Link ảnh kèm lời chào (tuỳ chọn)", "Welcome photo URL (optional)"), text: $welcomePhoto)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 }
             } header: {
                 Text(store.t("👋 Chào mừng", "👋 Welcome"))
             } footer: {
-                Text(store.t("Có thể NHÚNG nút bấm liên kết vào lời chào (điền chữ nút + link). {name} = tên, {group} = tên nhóm.",
-                             "You can embed a link button in the welcome (button text + URL). {name}, {group} placeholders."))
+                Text(store.t("NHÚNG BAO NHIÊU NÚT LINK CŨNG ĐƯỢC: mỗi dòng 1 nút dạng “Tên nút | https://link” (hiện 2 nút/hàng dưới lời chào). {name} = tên, {group} = tên nhóm. VD:\n🛒 Cửa hàng | https://app.kenios.store/shop\n📢 Kênh | https://t.me/kenios",
+                             "Add ANY number of link buttons: one per line as “Label | https://link” (2 per row under the welcome). {name}, {group} placeholders."))
                     .font(.caption2)
             }
             Section(store.t("👋 Tạm biệt", "👋 Goodbye")) {
@@ -227,6 +233,12 @@ struct TelegramBotView: View {
         if let w = s.welcomeGroup, !w.isEmpty { welcomeGroup = w }
         welcomeBtnText = s.welcomeBtnText ?? ""
         welcomeBtnUrl = s.welcomeBtnUrl ?? ""
+        welcomeBtns = s.welcomeBtns ?? ""
+        // Chuyển cấu hình 1 nút cũ sang ô nhiều nút (nếu ô mới còn trống)
+        if welcomeBtns.isEmpty, !welcomeBtnText.isEmpty, !welcomeBtnUrl.isEmpty {
+            welcomeBtns = "\(welcomeBtnText) | \(welcomeBtnUrl)"
+        }
+        welcomePhoto = s.welcomeGroupPhoto ?? ""
         goodbyeOn = s.goodbyeOn ?? true
         if let g = s.goodbye, !g.isEmpty { goodbye = g }
         antifloodOn = s.antifloodOn ?? false
@@ -252,7 +264,9 @@ struct TelegramBotView: View {
             "mod_enabled": modEnabled, "del_links": delLinks, "del_stickers": delStickers,
             "del_photos": delPhotos, "warn_limit": warnLimit, "warn_action": warnBan ? "ban" : "mute",
             "welcome_on": welcomeOn, "welcome_group": welcomeGroup,
-            "welcome_btn_text": welcomeBtnText, "welcome_btn_url": welcomeBtnUrl,
+            // Nhiều nút link (mỗi dòng "Tên | link") — xoá cấu hình 1 nút cũ để tránh trùng
+            "welcome_btns": welcomeBtns, "welcome_btn_text": "", "welcome_btn_url": "",
+            "welcome_group_photo": welcomePhoto,
             "goodbye_on": goodbyeOn, "goodbye": goodbye,
             "antiflood_on": antifloodOn, "antiflood_max": antifloodMax,
             "clean_service": cleanService, "captcha_on": captchaOn,

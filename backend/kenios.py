@@ -10293,6 +10293,8 @@ def _tg_bot_status() -> dict[str, Any]:
         "welcome_group": get_setting("tg_welcome_group", "👋 Chào mừng {name} đã vào {group}!"),
         "welcome_btn_text": get_setting("tg_welcome_btn_text", ""),
         "welcome_btn_url": get_setting("tg_welcome_btn_url", ""),
+        "welcome_btns": get_setting("tg_welcome_btns", ""),
+        "welcome_group_photo": get_setting("tg_welcome_group_photo", ""),
         "goodbye_on": get_setting("tg_goodbye_on", "1") == "1",
         "goodbye": get_setting("tg_goodbye", "👋 Tạm biệt {name}, hẹn gặp lại!"),
         # Module nâng cao
@@ -10336,6 +10338,8 @@ def admin_set_tg_bot(body: dict = Body(...), admin=Depends(get_admin)) -> dict[s
     if body.get("welcome_group") is not None:    set_setting("tg_welcome_group", str(body["welcome_group"])[:1500])
     if body.get("welcome_btn_text") is not None: set_setting("tg_welcome_btn_text", str(body["welcome_btn_text"])[:60])
     if body.get("welcome_btn_url") is not None:  set_setting("tg_welcome_btn_url", str(body["welcome_btn_url"]).strip()[:300])
+    if body.get("welcome_btns") is not None:     set_setting("tg_welcome_btns", str(body["welcome_btns"])[:2000])
+    if body.get("welcome_group_photo") is not None: set_setting("tg_welcome_group_photo", str(body["welcome_group_photo"]).strip()[:300])
     if "goodbye_on" in body:    set_setting("tg_goodbye_on", "1" if body.get("goodbye_on") else "0")
     if body.get("goodbye") is not None:          set_setting("tg_goodbye", str(body["goodbye"])[:1500])
     # Module nâng cao

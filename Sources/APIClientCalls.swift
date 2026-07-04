@@ -33,6 +33,8 @@ struct TelegramBotStatus: Decodable {
     let welcomeGroup: String?
     let welcomeBtnText: String?
     let welcomeBtnUrl: String?
+    let welcomeBtns: String?         // nhiều nút link: mỗi dòng "Tên | https://link"
+    let welcomeGroupPhoto: String?   // ảnh kèm lời chào nhóm
     let goodbyeOn: Bool?
     let goodbye: String?
     // Module nâng cao
