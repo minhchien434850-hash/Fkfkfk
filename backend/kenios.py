@@ -5730,7 +5730,8 @@ def _tg_quiz_post(token, chat_id, auto=True) -> None:
     q, a = _rd.choice(_tg_quiz_bank())
     _TG_QUIZ[chat_id] = {"q": q, "a": a, "auto": auto}
     _tg_send(token, chat_id, f"🧠 <b>CÂU ĐỐ</b> (+10 điểm cho người trả lời đúng đầu tiên):\n\n{q}\n\n"
-                             "💡 /goiy — gợi ý · /boqua — đáp án & câu mới · /dungdo — dừng")
+                             "✍️ <b>Gõ thẳng đáp án vào khung chat</b> để trả lời — KHÔNG cần lệnh!\n"
+                             "💡 /goiy — gợi ý · /boqua — đáp án &amp; câu mới · /dungdo — dừng")
 
 def _tg_quiz_try(token, chat_id, msg, text) -> bool:
     """Kiểm tra đáp án đố vui. Trả True nếu ĐÚNG (đã xử lý + ra câu mới)."""
