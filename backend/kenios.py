@@ -5505,6 +5505,19 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     text = msg.get("text", "") or msg.get("caption", "") or "[media]"
     frm = msg.get("from", {})
     name = _tg_name(frm)
+    # Lệnh QUẢN LÝ NHÓM gõ trong chat riêng → nhắc: chỉ chạy trong nhóm (tránh "im lặng tưởng lỗi").
+    _GROUP_CMDS = {"/ban", "/kick", "/mute", "/unmute", "/warn", "/unwarn", "/warns", "/pin", "/unpin",
+                   "/del", "/purge", "/info", "/lock", "/unlock", "/locks", "/addbl", "/rmbl", "/blacklist",
+                   "/filter", "/stop", "/filters", "/setrules", "/rules", "/clean", "/nightmode", "/antiflood",
+                   "/captcha", "/autoreact", "/slowmode", "/log", "/diemdanh", "/top", "/report", "/save",
+                   "/clear", "/notes", "/id"}
+    if text.startswith("/") and text.split("@")[0].split()[0].lower() in _GROUP_CMDS:
+        _tg_send(token, chat_id,
+                 "🔧 Lệnh này dùng trong <b>NHÓM</b>, không chạy khi nhắn riêng bot.\n\n"
+                 "👉 Cách dùng: <b>thêm bot vào nhóm</b> của bạn → cấp quyền <b>Quản trị viên</b> → "
+                 "gõ lệnh trong nhóm (nhiều lệnh cần <b>reply</b> vào tin của thành viên, vd reply rồi gõ /ban).\n\n"
+                 "💬 Trong chat riêng, bot hỗ trợ: /start · /help · <b>/nhac</b> &lt;bài hát&gt;.")
+        return
     if admin_chat and chat_id == str(admin_chat):
         reply = msg.get("reply_to_message", {})
         rtext = reply.get("text", "") if reply else ""
