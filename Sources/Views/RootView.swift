@@ -265,9 +265,12 @@ struct MainTabView: View {
                     // Mặc định server bật (welcome_voice_enabled=1); chỉ tắt khi admin đặt = false.
                     if cfg.welcomeVoiceEnabled != false {
                         let vt = (cfg.welcomeVoiceText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        // GIỌNG đồng bộ: admin đổi giọng → mọi người nghe giọng đó;
+                        // chưa đặt thì mặc định "chị Google" (online).
+                        let gvid = (cfg.welcomeVoiceId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                         WelcomeVoice.shared.playOnce(
                             text: vt.isEmpty ? store.welcomeText : vt,
-                            voiceId: store.welcomeVoiceId,
+                            voiceId: gvid.isEmpty ? store.welcomeVoiceId : gvid,
                             rate: cfg.welcomeVoiceRate ?? store.welcomeRate)
                     }
                 }

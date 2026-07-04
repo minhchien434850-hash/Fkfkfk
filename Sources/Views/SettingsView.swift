@@ -428,8 +428,11 @@ struct WelcomeGreetingView: View {
                         }
                     }
                     .pickerStyle(.navigationLink)
-                    Text(store.t("Giọng ✦ là giọng Enhanced (rõ, tự nhiên hơn). Cài thêm giọng trong iOS Settings > Accessibility > Spoken Content > Voices.",
-                                 "✦ voices are Enhanced (clearer, more natural). Add more in iOS Settings > Accessibility > Spoken Content > Voices."))
+                    Text(store.isAdmin
+                         ? store.t("Bạn là ADMIN: giọng chọn ở đây sẽ ĐỒNG BỘ cho MỌI người dùng khi bấm Lưu ở cuối (mặc định: Chị Google). Giọng ✦ là Enhanced.",
+                                   "You are ADMIN: this voice SYNCS to ALL users after Save (default: Google voice). ✦ = Enhanced.")
+                         : store.t("Giọng ✦ là giọng Enhanced (rõ, tự nhiên hơn). Cài thêm giọng trong iOS Settings > Accessibility > Spoken Content > Voices.",
+                                   "✦ voices are Enhanced (clearer, more natural). Add more in iOS Settings > Accessibility > Spoken Content > Voices."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
@@ -540,6 +543,8 @@ struct WelcomeGreetingView: View {
         gRate = Double(c.welcomeVoiceRate ?? 0.5)
         gLogoName = c.logoName; gLogoUrl = c.logoUrl
         gBannerType = c.bannerType; gBannerUrl = c.bannerUrl
+        // Giọng toàn cục admin đã đặt → hiện đúng trên picker
+        if let vid = c.welcomeVoiceId, !vid.isEmpty { store.setWelcomeVoiceId(vid) }
         gPopupEnabled = c.welcomePopupEnabled ?? false
         gPopupTitle = c.welcomePopupTitle ?? ""
         gPopupText = c.welcomePopupText ?? ""
@@ -572,6 +577,7 @@ struct WelcomeGreetingView: View {
                 welcomeVoiceEnabled: gEnabled,
                 welcomeVoiceText: gText,
                 welcomeVoiceRate: Float(gRate),
+                welcomeVoiceId: store.welcomeVoiceId,
                 latestVersion: gVersion, updateUrl: gUpdateUrl,
                 updateMessage: gUpdateMsg)
             gIsError = false; gMessage = r.message

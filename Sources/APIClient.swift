@@ -545,7 +545,7 @@ struct APIClient {
                              welcomePopupEnabled: Bool? = nil, welcomePopupTitle: String? = nil,
                              welcomePopupText: String? = nil,
                              welcomeVoiceEnabled: Bool? = nil, welcomeVoiceText: String? = nil,
-                             welcomeVoiceRate: Float? = nil,
+                             welcomeVoiceRate: Float? = nil, welcomeVoiceId: String? = nil,
                              latestVersion: String? = nil, updateUrl: String? = nil,
                              updateMessage: String? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
@@ -596,6 +596,7 @@ struct APIClient {
         if let welcomeVoiceEnabled { body["welcome_voice_enabled"] = welcomeVoiceEnabled }
         if let welcomeVoiceText { body["welcome_voice_text"] = welcomeVoiceText }
         if let welcomeVoiceRate { body["welcome_voice_rate"] = welcomeVoiceRate }
+        if let welcomeVoiceId { body["welcome_voice_id"] = welcomeVoiceId }
         if let latestVersion { body["latest_version"] = latestVersion }
         if let updateUrl { body["update_url"] = updateUrl }
         if let updateMessage { body["update_message"] = updateMessage }

@@ -134,7 +134,8 @@ final class AppStore: ObservableObject {
         logoAnimated = d.bool(forKey: "logoAnimated")
         welcomeEnabled = d.bool(forKey: "welcomeEnabled")
         welcomeText = d.string(forKey: "welcomeText") ?? "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"
-        welcomeVoiceId = d.string(forKey: "welcomeVoiceId") ?? ""
+        // Mặc định "chị Google" (online) cho mọi thành viên; admin đổi giọng thì đồng bộ qua server.
+        welcomeVoiceId = d.string(forKey: "welcomeVoiceId") ?? "google"
         welcomeRate = d.object(forKey: "welcomeRate") as? Float ?? 0.5
         if let data = d.data(forKey: "profiles"),
            let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
