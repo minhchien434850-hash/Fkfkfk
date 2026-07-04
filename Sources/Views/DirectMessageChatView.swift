@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct DirectMessageChatView: View {
     let friend: FriendItem
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject var calls: CallCoordinator
     @State private var messageText = ""
     @State private var timer: Timer? = nil
     @State private var isSending = false
@@ -93,6 +94,17 @@ struct DirectMessageChatView: View {
                 HStack(spacing: 8) {
                     avatarCircle(url: friendAvatarURL, size: 30, fallback: friend.username)
                     Text(friend.username).font(.headline)
+                }
+            }
+            // Gọi thoại + gọi video cho bạn bè
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { calls.placeCall(to: friend, video: false) } label: {
+                    Image(systemName: "phone.fill").foregroundStyle(Theme.accent)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { calls.placeCall(to: friend, video: true) } label: {
+                    Image(systemName: "video.fill").foregroundStyle(Theme.accent)
                 }
             }
             // §4.2 — Avatar của tôi: bấm để đổi ảnh ngay trong màn nhắn tin

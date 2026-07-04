@@ -8744,6 +8744,129 @@ def recent_incoming_dms(after_id: int = 0, user=Depends(get_user)) -> list[dict[
 
 
 
+# ======================== Gọi thoại / video giữa bạn bè (relay khung hình + âm thanh qua máy chủ) ========================
+# Không cần WebRTC/TURN: mỗi bên tải khung hình JPEG (đã áp bộ lọc làm đẹp) + gói âm thanh
+# lên máy chủ, bên kia poll về hiển thị. Chạy qua HTTPS nên xuyên mọi NAT/mạng di động.
+import threading as _threading_calls
+_calls_lock = _threading_calls.Lock()
+_calls: dict[str, dict] = {}   # call_id -> trạng thái + bộ đệm khung hình/âm thanh mỗi người
+
+def _call_cleanup(now: float) -> None:
+    for k in list(_calls.keys()):
+        cl = _calls.get(k)
+        if not cl: continue
+        # Xoá cuộc gọi quá cũ (1 giờ) hoặc đã kết thúc > 30s
+        if now - cl["created"] > 3600 or (cl["state"] in ("ended", "declined") and now - cl.get("ended_at", now) > 30):
+            _calls.pop(k, None)
+
+def _call_other(cl: dict, uid: int) -> int:
+    return cl["to"] if cl["from"] == uid else cl["from"]
+
+def _call_guard(cid: str, uid: int) -> dict:
+    cl = _calls.get(cid)
+    if not cl or uid not in (cl["from"], cl["to"]):
+        raise HTTPException(status_code=404, detail="Cuộc gọi không tồn tại.")
+    return cl
+
+class CallStartIn(BaseModel):
+    to: int
+    video: bool = True
+
+class CallFrameIn(BaseModel):
+    jpg: str
+
+class CallAudioIn(BaseModel):
+    pcm: str        # Int16 PCM 16kHz mono, base64
+
+@app.post("/calls/start")
+def call_start(b: CallStartIn, user=Depends(get_user)) -> dict[str, Any]:
+    with db() as c:
+        fr = c.execute(
+            "SELECT id FROM friendships WHERE ((user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)) AND status='accepted'",
+            (user["id"], b.to, b.to, user["id"])).fetchone()
+    if not fr:
+        raise HTTPException(status_code=403, detail="Bạn phải là bạn bè để gọi cho người này.")
+    now = time.time()
+    cid = secrets.token_hex(8)
+    with _calls_lock:
+        _call_cleanup(now)
+        _calls[cid] = {"from": user["id"], "from_name": user["username"], "to": b.to,
+                       "video": bool(b.video), "state": "ringing", "created": now,
+                       "frames": {}, "audio": {}, "aseq": 0}
+    return {"call_id": cid}
+
+@app.get("/calls/incoming")
+def call_incoming(user=Depends(get_user)) -> dict[str, Any]:
+    now = time.time()
+    with _calls_lock:
+        _call_cleanup(now)
+        for cid, cl in _calls.items():
+            if cl["to"] == user["id"] and cl["state"] == "ringing" and now - cl["created"] < 60:
+                return {"call_id": cid, "from": cl["from"], "from_name": cl.get("from_name", ""),
+                        "video": cl["video"]}
+    return {}
+
+@app.post("/calls/{cid}/answer")
+def call_answer(cid: str, accept: bool = True, user=Depends(get_user)) -> dict[str, Any]:
+    with _calls_lock:
+        cl = _call_guard(cid, user["id"])
+        if cl["state"] == "ringing":
+            cl["state"] = "active" if accept else "declined"
+            if not accept: cl["ended_at"] = time.time()
+    return {"state": cl["state"]}
+
+@app.post("/calls/{cid}/end")
+def call_end(cid: str, user=Depends(get_user)) -> dict[str, Any]:
+    with _calls_lock:
+        cl = _calls.get(cid)
+        if cl and user["id"] in (cl["from"], cl["to"]):
+            cl["state"] = "ended"; cl["ended_at"] = time.time()
+    return {"ok": True}
+
+@app.get("/calls/{cid}/state")
+def call_state(cid: str, user=Depends(get_user)) -> dict[str, Any]:
+    with _calls_lock:
+        cl = _calls.get(cid)
+        if not cl or user["id"] not in (cl["from"], cl["to"]):
+            return {"state": "ended"}
+        return {"state": cl["state"], "video": cl["video"]}
+
+@app.post("/calls/{cid}/frame")
+def call_frame_put(cid: str, b: CallFrameIn, user=Depends(get_user)) -> dict[str, Any]:
+    with _calls_lock:
+        cl = _call_guard(cid, user["id"])
+        cl["frames"][user["id"]] = (time.time(), b.jpg)
+    return {"ok": True}
+
+@app.get("/calls/{cid}/frame")
+def call_frame_get(cid: str, user=Depends(get_user)) -> dict[str, Any]:
+    with _calls_lock:
+        cl = _call_guard(cid, user["id"])
+        other = _call_other(cl, user["id"])
+        f = cl["frames"].get(other)
+    if not f: return {"jpg": ""}
+    return {"jpg": f[1], "ts": f[0]}
+
+@app.post("/calls/{cid}/audio")
+def call_audio_put(cid: str, b: CallAudioIn, user=Depends(get_user)) -> dict[str, Any]:
+    with _calls_lock:
+        cl = _call_guard(cid, user["id"])
+        cl["aseq"] += 1
+        buf = cl["audio"].setdefault(user["id"], [])
+        buf.append((cl["aseq"], b.pcm))
+        if len(buf) > 40: del buf[:-40]   # giữ tối đa 40 gói gần nhất
+    return {"ok": True}
+
+@app.get("/calls/{cid}/audio")
+def call_audio_get(cid: str, after: int = 0, user=Depends(get_user)) -> dict[str, Any]:
+    with _calls_lock:
+        cl = _call_guard(cid, user["id"])
+        other = _call_other(cl, user["id"])
+        buf = cl["audio"].get(other, [])
+        out = [{"seq": s, "pcm": p} for (s, p) in buf if s > after]
+    return {"chunks": out}
+
+
 # ======================== Search ========================
 @app.get("/search")
 def search_messages(q: str, user=Depends(get_user)) -> list[dict[str, Any]]:

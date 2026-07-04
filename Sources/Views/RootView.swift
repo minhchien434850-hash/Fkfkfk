@@ -3,6 +3,7 @@ import UIKit
 
 struct RootView: View {
     @EnvironmentObject var store: AppStore
+    @StateObject private var calls = CallCoordinator()
 
     var body: some View {
         Group {
@@ -18,8 +19,15 @@ struct RootView: View {
                     }
                     // Màn giới thiệu gói PRO/Free hiện sau khi đăng nhập
                     .sheet(isPresented: $store.showPlanIntro) { PlanIntroView() }
+                    // Cuộc gọi thoại/video giữa bạn bè (đến & đi)
+                    .fullScreenCover(item: $calls.active) { call in
+                        CallScreen(call: call, api: store.api) { calls.close() }
+                    }
+                    .onAppear { calls.configure(api: store.api); calls.startPolling() }
+                    .onDisappear { calls.stopPolling() }
             }
         }
+        .environmentObject(calls)
         .tint(store.accentColor)
         .preferredColorScheme(store.preferredScheme)
         .buttonStyle(PressableButtonStyle())   // hiệu ứng chạm iOS 26 toàn app
