@@ -37,6 +37,11 @@ struct TelegramBotView: View {
     @State private var nightEnd = 6
     @State private var rules = ""
     @State private var blacklist = ""
+    @State private var botName = "TRẦN MINH CHIẾN"
+    @State private var autoreactOn = false
+    @State private var autoreactEmoji = "👍"
+    @State private var slowmode = 0
+    @State private var logChat = ""
 
     @State private var saving = false
     @State private var message: String?
@@ -130,6 +135,24 @@ struct TelegramBotView: View {
                 }
             }
 
+            // ---- Tương tác nhóm ----
+            Section {
+                Toggle(store.t("AutoReact (tự thả cảm xúc vào tin)", "AutoReact"), isOn: $autoreactOn)
+                if autoreactOn {
+                    TextField(store.t("Biểu tượng cảm xúc", "Emoji"), text: $autoreactEmoji)
+                }
+                Stepper(store.t("Slow mode: ", "Slow mode: ") + (slowmode > 0 ? "\(slowmode)s" : store.t("tắt", "off")),
+                        value: $slowmode, in: 0...600, step: 5)
+                TextField(store.t("Chat ID kênh nhật ký (log)", "Log channel chat ID"), text: $logChat)
+                    .keyboardType(.numbersAndPunctuation).autocorrectionDisabled()
+            } header: {
+                Text(store.t("🎉 Tương tác & Nhật ký", "🎉 Engagement & Log"))
+            } footer: {
+                Text(store.t("Thành viên dùng /diemdanh (điểm danh streak), /top (bảng xếp hạng năng động), /report. Log ghi hành động (ban/mute/warn) vào kênh bạn nhập.",
+                             "Members use /diemdanh, /top, /report. Log records actions (ban/mute/warn) to the channel you set."))
+                    .font(.caption2)
+            }
+
             // ---- Nâng cao ----
             Section {
                 Toggle(store.t("Antiflood (chống gửi dồn dập)", "Antiflood"), isOn: $antifloodOn)
@@ -158,9 +181,17 @@ struct TelegramBotView: View {
             }
 
             // ---- Hỗ trợ chat riêng ----
-            Section(store.t("Hỗ trợ chat riêng", "Private support")) {
-                TextField(store.t("Lời chào /start", "Welcome /start"), text: $welcome, axis: .vertical).lineLimit(2...5)
+            Section {
+                TextField(store.t("Tên bot (hiện trong lời chào)", "Bot name (in welcome)"), text: $botName)
+                TextField(store.t("Lời chào /start (dùng {name}, {botname})", "Welcome /start ({name}, {botname})"),
+                          text: $welcome, axis: .vertical).lineLimit(3...6)
                 TextField(store.t("Giới thiệu (nút ℹ️)", "About (ℹ️)"), text: $about, axis: .vertical).lineLimit(2...4)
+            } header: {
+                Text(store.t("Hỗ trợ chat riêng", "Private support"))
+            } footer: {
+                Text(store.t("Khi khách mở bot gõ /start: bot chào theo tên. {name} = tên khách, {botname} = tên bot. Vd: \"Chào {name}, tôi là TRẦN MINH CHIẾN.\"",
+                             "On /start the bot greets by name. {name} = user, {botname} = bot name."))
+                    .font(.caption2)
             }
 
             // ---- Lưu / Thử ----
@@ -207,6 +238,11 @@ struct TelegramBotView: View {
         nightEnd = s.nightEnd ?? 6
         rules = s.rules ?? ""
         blacklist = s.blacklist ?? ""
+        if let b = s.botName, !b.isEmpty { botName = b }
+        autoreactOn = s.autoreactOn ?? false
+        if let e = s.autoreactEmoji, !e.isEmpty { autoreactEmoji = e }
+        slowmode = s.slowmode ?? 0
+        logChat = s.logChat ?? ""
     }
 
     private func save() async {
@@ -222,6 +258,8 @@ struct TelegramBotView: View {
             "clean_service": cleanService, "captcha_on": captchaOn,
             "nightmode_on": nightmodeOn, "night_start": nightStart, "night_end": nightEnd,
             "rules": rules, "blacklist": blacklist,
+            "bot_name": botName, "autoreact_on": autoreactOn, "autoreact_emoji": autoreactEmoji,
+            "slowmode": slowmode, "log_chat": logChat,
         ]
         if !token.isEmpty { body["token"] = token }
         do {

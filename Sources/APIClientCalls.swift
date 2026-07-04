@@ -46,6 +46,11 @@ struct TelegramBotStatus: Decodable {
     let rules: String?
     let locks: String?
     let blacklist: String?
+    let botName: String?
+    let autoreactOn: Bool?
+    let autoreactEmoji: String?
+    let slowmode: Int?
+    let logChat: String?
 }
 
 // ======================== Model cập nhật OTA (bản đã ký) ========================

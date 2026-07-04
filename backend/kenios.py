@@ -4968,12 +4968,15 @@ def _tg_warn(token: str, chat_id: str, frm: dict, reason: str) -> None:
         if get_setting("tg_warn_action", "mute") == "ban":
             _tg_call(token, "banChatMember", chat_id=chat_id, user_id=uid)
             _tg_send(token, chat_id, f"🚫 Đã CẤM {_tg_mention(frm)} (đủ {limit} cảnh báo).")
+            _tg_log(token, f"BAN {_tg_name(frm)} tại {chat_id} (đủ {limit} cảnh báo).")
         else:
             _tg_call(token, "restrictChatMember", chat_id=chat_id, user_id=uid,
                      permissions={"can_send_messages": False}, until_date=int(time.time()) + 3600)
             _tg_send(token, chat_id, f"🔇 Đã CẤM CHAT {_tg_mention(frm)} 1 giờ (đủ {limit} cảnh báo).")
+            _tg_log(token, f"MUTE {_tg_name(frm)} tại {chat_id} 1 giờ (đủ {limit} cảnh báo).")
     else:
         _tg_send(token, chat_id, f"⚠️ {_tg_mention(frm)} bị cảnh báo ({n}/{limit}) — {reason}. Tin đã bị xoá.")
+        _tg_log(token, f"WARN {_tg_name(frm)} ({n}/{limit}) tại {chat_id}: {reason}.")
 
 def _tg_welcome_members(token: str, chat: dict, members: list) -> None:
     if get_setting("tg_welcome_on", "1") != "1": return
@@ -5038,6 +5041,51 @@ def _tg_has_mention(msg: dict) -> bool:
     for e in (msg.get("entities") or []) + (msg.get("caption_entities") or []):
         if e.get("type") in ("mention", "text_mention"): return True
     return False
+
+# ---- FameRank (đếm tin) · Điểm danh · Slow mode · Log ----
+_tg_lastmsg: dict = {}
+
+def _msgcount_inc(chat_id, uid, name) -> None:
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_msgcount(chat_id TEXT,user_id INTEGER,name TEXT,count INTEGER DEFAULT 0,PRIMARY KEY(chat_id,user_id))")
+        if c.execute("SELECT 1 FROM tg_msgcount WHERE chat_id=? AND user_id=?", (str(chat_id), uid)).fetchone():
+            c.execute("UPDATE tg_msgcount SET count=count+1, name=? WHERE chat_id=? AND user_id=?", (name, str(chat_id), uid))
+        else:
+            c.execute("INSERT INTO tg_msgcount(chat_id,user_id,name,count) VALUES(?,?,?,1)", (str(chat_id), uid, name))
+
+def _msgcount_top(chat_id, n=10) -> list:
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_msgcount(chat_id TEXT,user_id INTEGER,name TEXT,count INTEGER DEFAULT 0,PRIMARY KEY(chat_id,user_id))")
+        rows = c.execute("SELECT name,count FROM tg_msgcount WHERE chat_id=? ORDER BY count DESC LIMIT ?", (str(chat_id), n)).fetchall()
+        total = c.execute("SELECT COALESCE(SUM(count),0) s, COUNT(*) u FROM tg_msgcount WHERE chat_id=?", (str(chat_id),)).fetchone()
+    return [(r["name"], r["count"]) for r in rows], (total["s"], total["u"])
+
+def _checkin(chat_id, uid):
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    yday = (_dt.date.today() - _dt.timedelta(days=1)).isoformat()
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_checkin(chat_id TEXT,user_id INTEGER,last_day TEXT,streak INTEGER DEFAULT 0,total INTEGER DEFAULT 0,PRIMARY KEY(chat_id,user_id))")
+        r = c.execute("SELECT last_day,streak,total FROM tg_checkin WHERE chat_id=? AND user_id=?", (str(chat_id), uid)).fetchone()
+        if r and r["last_day"] == today:
+            return None
+        streak = (r["streak"] + 1) if (r and r["last_day"] == yday) else 1
+        total = (r["total"] + 1) if r else 1
+        if r: c.execute("UPDATE tg_checkin SET last_day=?,streak=?,total=? WHERE chat_id=? AND user_id=?", (today, streak, total, str(chat_id), uid))
+        else: c.execute("INSERT INTO tg_checkin(chat_id,user_id,last_day,streak,total) VALUES(?,?,?,?,?)", (str(chat_id), uid, today, streak, total))
+    return (streak, total)
+
+def _slowmode_hit(chat_id, uid) -> bool:
+    sec = int(get_setting("tg_slowmode", "0") or 0)
+    if sec <= 0: return False
+    now = time.time(); key = (chat_id, uid)
+    hit = (now - _tg_lastmsg.get(key, 0)) < sec
+    _tg_lastmsg[key] = now
+    return hit
+
+def _tg_log(token: str, text: str) -> None:
+    lc = get_setting("tg_log_chat", "").strip()
+    if lc: _tg_send(token, lc, "📋 " + text)
 
 def _tg_kv_set(table: str, chat_id, key: str, val: str) -> None:
     cid = str(chat_id); k = key.lower()
@@ -5165,6 +5213,22 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
         else:
             set_setting("tg_mod_enabled", "1" if cmd == "modon" else "0")
             _tg_send(token, chat_id, "Quản lý nhóm: " + ("BẬT" if cmd == "modon" else "TẮT"))
+    elif cmd == "stats":
+        _, tot = _msgcount_top(chat_id, 1)
+        mc = _tg_call(token, "getChatMemberCount", chat_id=chat_id)
+        members = mc.get("result", "?") if mc.get("ok") else "?"
+        _tg_send(token, chat_id, f"📊 <b>Thống kê nhóm</b>\nThành viên: {members}\nTổng tin đã đếm: {tot[0]}\nĐang hoạt động: {tot[1]} người")
+    elif cmd in ("autoreact", "slowmode", "log"):
+        if cmd == "autoreact":
+            cur = get_setting("tg_autoreact_on", "0") == "1"; set_setting("tg_autoreact_on", "0" if cur else "1")
+            _tg_send(token, chat_id, f"AutoReact: {'TẮT' if cur else 'BẬT'}")
+        elif cmd == "slowmode":
+            sec = int(args.split()[0]) if args.split() and args.split()[0].isdigit() else 0
+            set_setting("tg_slowmode", str(sec))
+            _tg_send(token, chat_id, f"⏱️ Slow mode: {sec} giây/tin" if sec else "⏱️ Đã tắt slow mode.")
+        else:
+            set_setting("tg_log_chat", args.strip())
+            _tg_send(token, chat_id, "📋 Đã đặt kênh nhật ký." if args.strip() else "📋 Đã tắt nhật ký.")
     elif cmd == "config":
         _tg_send(token, chat_id,
                  "⚙️ <b>Cấu hình</b>\n"
@@ -5198,6 +5262,12 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
         _tg_dispatch_command(token, chat_id, msg, text, uid, frm); return
 
     low = text.lower()
+    # FameRank: đếm tin nhắn · AutoReact: tự thả cảm xúc
+    if uid:
+        _msgcount_inc(chat_id, uid, _tg_name(frm))
+    if get_setting("tg_autoreact_on", "0") == "1" and mid:
+        _tg_call(token, "setMessageReaction", chat_id=chat_id, message_id=mid,
+                 reaction=[{"type": "emoji", "emoji": get_setting("tg_autoreact_emoji", "👍")}])
     # Bộ lọc auto-reply (mọi người)
     if text:
         for trig, rep in _tg_kv_all("tg_filters", chat_id):
@@ -5206,6 +5276,9 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
     # Tự động lọc — admin/chủ nhóm/Channel của nhóm được MIỄN (được gửi link, media…)
     if get_setting("tg_mod_enabled", "0") != "1": return
     if _tg_is_privileged(token, chat_id, msg): return
+    # Slow mode: xoá tin gửi quá nhanh (giãn cách tối thiểu)
+    if _slowmode_hit(chat_id, uid):
+        _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid); return
     locks = _tg_locks()
 
     def _kill(reason):
@@ -5227,7 +5300,29 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
     if "all" in locks: _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid); return
 
 def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, frm: dict) -> None:
-    # TẤT CẢ lệnh chỉ ADMIN (hoặc admin ẩn danh / Channel của nhóm) mới dùng được.
+    cmd0 = text.split()[0].lstrip("/#").split("@")[0].lower() if text.split() else ""
+    # ---- Công khai (engagement) — MỌI thành viên dùng được ----
+    if cmd0 in ("diemdanh", "checkin", "diem"):
+        res = _checkin(chat_id, uid)
+        if res is None:
+            _tg_send(token, chat_id, f"✅ {_tg_mention(frm)} hôm nay đã điểm danh rồi!")
+        else:
+            _tg_send(token, chat_id, f"📅 {_tg_mention(frm)} điểm danh thành công!\n🔥 Chuỗi: {res[0]} ngày · Tổng: {res[1]} lần")
+        return
+    if cmd0 in ("top", "rank", "bxh"):
+        rows, tot = _msgcount_top(chat_id, 10)
+        if not rows:
+            _tg_send(token, chat_id, "Chưa có dữ liệu xếp hạng."); return
+        medals = ["🥇", "🥈", "🥉"] + ["🔹"] * 7
+        lst = "\n".join(f"{medals[i]} {n}: <b>{c}</b> tin" for i, (n, c) in enumerate(rows))
+        _tg_send(token, chat_id, f"🏆 <b>Bảng xếp hạng năng động</b>\n{lst}\n\nTổng: {tot[0]} tin · {tot[1]} thành viên")
+        return
+    if cmd0 == "report":
+        ac = get_setting("tg_admin_chat", "").strip()
+        title = msg.get("chat", {}).get("title", "nhóm")
+        if ac: _tg_send(token, ac, f"⚠️ Báo cáo từ nhóm <b>{title}</b> bởi {_tg_mention(frm)}.")
+        _tg_send(token, chat_id, "⚠️ Đã báo cáo tới quản trị viên."); return
+    # ---- Còn lại: chỉ ADMIN (hoặc admin ẩn danh / Channel của nhóm) ----
     if not _tg_is_privileged(token, chat_id, msg):
         return
     # Ghi chú: #tên
@@ -5250,8 +5345,8 @@ def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, fr
     if cmd == "id":
         t = (msg.get("reply_to_message", {}).get("from") or {}).get("id")
         _tg_send(token, chat_id, f"Chat ID: <code>{chat_id}</code>" + (f"\nUser: <code>{t}</code>" if t else "")); return
-    if cmd == "help" or cmd == "start":
-        _tg_send(token, chat_id, "🤖 <b>KENIOS Bot quản lý nhóm</b>\nLệnh (chỉ admin): /ban /kick /mute /unmute /warn /warns /pin /purge /del /lock /unlock /locks /addbl /rmbl /filter /stop /save /clear /notes /setrules /rules /afk /get /id /clean /nightmode /antiflood /captcha /config"); return
+    if cmd == "help" or cmd == "start" or cmd == "menu":
+        _tg_send(token, chat_id, _tg_help_text()); return
     _tg_admin_command(token, chat_id, msg, cmd, args)
 
 def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
@@ -5308,11 +5403,29 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         if m and text and not text.startswith("/"):
             _tg_send(token, m.group(1), f"👨‍💼 <b>Hỗ trợ KENIOS:</b>\n{text}")
             _tg_send(token, admin_chat, "✅ Đã gửi trả lời tới khách.")
+        elif text.startswith("/help") or text.startswith("/menu"):
+            _tg_send(token, admin_chat, _tg_help_text())
+        elif text.startswith("/config"):
+            _tg_send(token, admin_chat,
+                     "⚙️ <b>Cấu hình bot</b>\n"
+                     f"Quản lý nhóm: {'BẬT' if get_setting('tg_mod_enabled','0')=='1' else 'tắt'}\n"
+                     f"Chống link: {'✓' if get_setting('tg_del_links','0')=='1' else '✗'} · "
+                     f"Antiflood: {'✓' if get_setting('tg_antiflood_on','0')=='1' else '✗'} · "
+                     f"Captcha: {'✓' if get_setting('tg_captcha_on','0')=='1' else '✗'}\n"
+                     f"AutoReact: {'✓' if get_setting('tg_autoreact_on','0')=='1' else '✗'} · "
+                     f"Slowmode: {get_setting('tg_slowmode','0')}s · "
+                     f"NightMode: {'✓' if get_setting('tg_nightmode_on','0')=='1' else '✗'}\n"
+                     "Chỉnh chi tiết trong app KENIOS → Quản trị → Bot Telegram, hoặc dùng lệnh trong nhóm.")
         elif text.startswith("/start"):
-            _tg_send(token, admin_chat, "Bạn là ADMIN. Khi khách nhắn bot, tin sẽ hiện ở đây — hãy REPLY vào tin đó để trả lời khách.")
+            _tg_send(token, admin_chat, "Bạn là ADMIN. Khi khách nhắn bot, tin sẽ hiện ở đây — hãy REPLY vào tin đó để trả lời khách. Gõ /help để xem lệnh quản lý nhóm.")
         return
     if text.startswith("/start"):
-        wel = get_setting("tg_welcome", "👋 Chào mừng bạn đến với hỗ trợ KENIOS!\nBấm nút bên dưới hoặc nhắn nội dung cần hỗ trợ.")
+        botname = get_setting("tg_bot_name", "TRẦN MINH CHIẾN")
+        default_wel = ("👋 Chào {name}, tôi là <b>{botname}</b>.\n\n"
+                       "Tôi có nhiều công cụ hữu ích. Gõ /help để xem lệnh, hoặc nhắn nội dung cần hỗ trợ.\n"
+                       "Tôi hỗ trợ Tiếng Việt 🇻🇳 và English 🇺🇸")
+        wel = get_setting("tg_welcome", default_wel)
+        wel = wel.replace("{name}", name).replace("{botname}", botname)
         _tg_send(token, chat_id, wel, buttons=_tg_menu_buttons())
         return
     if admin_chat:
@@ -5320,8 +5433,10 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                  f"💬 <b>{name}</b> [cid:{chat_id}]\n{text}\n\n<i>Reply tin này để trả lời khách.</i>")
         _tg_send(token, chat_id, "✅ Đã gửi tới đội ngũ hỗ trợ. Vui lòng chờ phản hồi nhé!")
 
+_tg_cmds_done = ""
+
 def _tg_loop() -> None:
-    global _tg_offset
+    global _tg_offset, _tg_cmds_done
     import httpx
     while True:
         try:
@@ -5329,6 +5444,8 @@ def _tg_loop() -> None:
             enabled = get_setting("tg_bot_enabled", "0") == "1"
             if not token or not enabled:
                 time.sleep(5); continue
+            if _tg_cmds_done != token:   # đăng ký menu lệnh 1 lần cho token này
+                _tg_register_commands(token); _tg_cmds_done = token
             admin_chat = (get_setting("tg_admin_chat", "") or os.getenv("TELEGRAM_ADMIN_CHAT", "")).strip()
             r = httpx.get(f"https://api.telegram.org/bot{token}/getUpdates",
                           params={"offset": _tg_offset + 1, "timeout": 25}, timeout=35)
@@ -5340,6 +5457,31 @@ def _tg_loop() -> None:
                     log.warning("tg handle update lỗi: %s", e)
         except Exception:
             time.sleep(3)
+
+def _tg_register_commands(token: str) -> None:
+    """Đăng ký MENU LỆNH để người dùng bấm '/' thấy danh sách (như bot chuyên nghiệp)."""
+    cmds = [
+        ("help", "Danh sách lệnh"), ("config", "Xem cấu hình"),
+        ("ban", "Cấm (reply)"), ("kick", "Đá khỏi nhóm (reply)"),
+        ("mute", "Cấm chat (reply) [phút]"), ("unmute", "Mở chat (reply)"),
+        ("warn", "Cảnh báo (reply)"), ("warns", "Xem cảnh báo (reply)"),
+        ("pin", "Ghim (reply)"), ("purge", "Xoá hàng loạt (reply)"), ("del", "Xoá tin (reply)"),
+        ("lock", "Khoá nội dung"), ("unlock", "Mở khoá"), ("locks", "Xem khoá"),
+        ("addbl", "Thêm từ cấm"), ("filter", "Trả lời tự động"), ("save", "Lưu ghi chú"),
+        ("setrules", "Đặt nội quy"), ("rules", "Xem nội quy"),
+        ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"), ("stats", "Thống kê"),
+        ("slowmode", "Giãn cách gửi tin"), ("autoreact", "Tự thả cảm xúc"),
+        ("report", "Báo cáo admin (reply)"),
+    ]
+    _tg_call(token, "setMyCommands", commands=[{"command": c, "description": d} for c, d in cmds])
+
+def _tg_help_text() -> str:
+    return ("🤖 <b>KENIOS Bot quản lý nhóm</b>\n"
+            "<b>Quản trị (reply):</b> /ban /kick /mute [phút] /unmute /warn /unwarn /warns /pin /unpin /del /purge /info\n"
+            "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
+            "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
+            "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /log · /config\n"
+            "<b>Công khai:</b> /diemdanh · /top · /report · /id")
 
 def start_telegram_bot() -> None:
     """Khởi động bot Telegram hỗ trợ (long-polling) trong 1 thread nền."""
@@ -9432,6 +9574,11 @@ def _tg_bot_status() -> dict[str, Any]:
         "rules": get_setting("tg_rules", ""),
         "locks": get_setting("tg_locks", ""),
         "blacklist": get_setting("tg_blacklist", ""),
+        "bot_name": get_setting("tg_bot_name", "TRẦN MINH CHIẾN"),
+        "autoreact_on": get_setting("tg_autoreact_on", "0") == "1",
+        "autoreact_emoji": get_setting("tg_autoreact_emoji", "👍"),
+        "slowmode": int(get_setting("tg_slowmode", "0") or 0),
+        "log_chat": get_setting("tg_log_chat", ""),
     }
 
 @app.get("/admin/telegram-bot")
@@ -9470,7 +9617,12 @@ def admin_set_tg_bot(body: dict = Body(...), admin=Depends(get_admin)) -> dict[s
     if body.get("rules") is not None:          set_setting("tg_rules", str(body["rules"])[:2000])
     if body.get("blacklist") is not None:      set_setting("tg_blacklist", str(body["blacklist"])[:2000])
     if body.get("locks") is not None:          set_setting("tg_locks", str(body["locks"])[:200])
-    # Xác minh token + lấy @username của bot (getMe) để hiển thị/kiểm tra
+    if body.get("bot_name") is not None:       set_setting("tg_bot_name", str(body["bot_name"])[:60])
+    if "autoreact_on" in body:  set_setting("tg_autoreact_on", "1" if body.get("autoreact_on") else "0")
+    if body.get("autoreact_emoji"):            set_setting("tg_autoreact_emoji", str(body["autoreact_emoji"])[:8])
+    if body.get("slowmode") is not None:       set_setting("tg_slowmode", str(max(0, min(int(body["slowmode"]), 3600))))
+    if body.get("log_chat") is not None:       set_setting("tg_log_chat", str(body["log_chat"]).strip())
+    # Xác minh token + lấy @username của bot (getMe) + đăng ký MENU LỆNH (setMyCommands)
     token = get_setting("tg_bot_token", "").strip()
     ok = False; uname = ""
     if token:
@@ -9479,6 +9631,7 @@ def admin_set_tg_bot(body: dict = Body(...), admin=Depends(get_admin)) -> dict[s
             ok = True
             uname = me.get("result", {}).get("username", "")
             set_setting("tg_bot_username", uname)
+            _tg_register_commands(token)
     start_telegram_bot()   # đảm bảo thread đang chạy
     out = _tg_bot_status(); out["token_ok"] = ok; out["username"] = uname
     return out
