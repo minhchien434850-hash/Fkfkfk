@@ -7601,6 +7601,7 @@ async function renderWallet(){
       +'<div style="font-size:30px;font-weight:900;color:#ffd54a">'+money(w.balance)+'</div>'
       +(w.bonus_percent?'<div class="stock ok" style="margin-top:8px">Nạp tặng thêm '+w.bonus_percent+'%</div>':'')
       +'<button class="btn" onclick="topupSheet('+ (w.bonus_percent||0) +')">Nạp tiền</button>'
+      +'<button class="btn sec" onclick="doTopupCheck(this)">🔄 Kiểm tra nạp tiền</button>'
       +'<button class="btn sec" onclick="logout()">Đăng xuất</button></div>';
     html+='<h2>Lịch sử</h2><div class="card">';
     if(!(w.tx||[]).length) html+='<div class="pdesc">Chưa có giao dịch.</div>';
@@ -7621,10 +7622,21 @@ function topupSheet(bonus){
     try{ const r=await api('/store/wallet/topup',{method:'POST',body:JSON.stringify({amount:amt})});
       let img=r.qr_url?'<img src="'+r.qr_url+'" style="width:100%;max-width:240px;border-radius:12px;display:block;margin:12px auto;background:#fff">':'';
       openSheet('<h3>Chuyển khoản để nạp</h3><p style="white-space:pre-wrap">'+h(r.message||'')+'</p>'+img
-        +'<p class="muted">Sau khi chuyển khoản đúng nội dung, ví sẽ tự cộng trong ít phút. Kéo lại tab Ví để kiểm tra.</p>'
-        +'<button class="btn sec" onclick="closeSheet();renderWallet()">Đã hiểu</button>');
+        +'<p class="muted">Sau khi chuyển khoản, bấm "Kiểm tra nạp tiền" để hệ thống dò ngay.</p>'
+        +'<button class="btn g" onclick="doTopupCheck(this)">🔄 Kiểm tra nạp tiền</button>'
+        +'<button class="btn sec" onclick="closeSheet();renderWallet()">Đóng</button>');
     }catch(e){ b.textContent='Tạo lệnh nạp'; b.disabled=false; toast(e.message) }
   };
+}
+// Bấm kiểm tra: dò giao dịch ngân hàng NGAY, cộng ví nếu tiền đã vào.
+async function doTopupCheck(btn){
+  const old=btn?btn.textContent:''; if(btn){btn.textContent='Đang kiểm tra...';btn.disabled=true;}
+  try{
+    const r=await api('/store/wallet/topup/check',{method:'POST'});
+    setBal(r.balance); toast(r.message||'Đã kiểm tra');
+    if(r.confirmed){ setTimeout(()=>{closeSheet(); renderWallet();}, 900); }
+    else if(btn){ btn.textContent=old; btn.disabled=false; }
+  }catch(e){ toast(e.message); if(btn){btn.textContent=old;btn.disabled=false;} }
 }
 
 /* ---------- Đơn của tôi ---------- */
@@ -7730,6 +7742,35 @@ def store_wallet_topup(b: TopupIn, user=Depends(get_user)) -> dict[str, Any]:
                     f"Ví sẽ được cộng {credited:,}đ" + (f" (thưởng {pct}%)" if pct else "") + ".").replace(",", "."),
         "bank_info": bank, "qr_url": bank["qr_url"],
     }
+
+
+@app.post("/store/wallet/topup/check")
+async def store_topup_check(user=Depends(get_user)) -> dict[str, Any]:
+    """Khách bấm 'Kiểm tra nạp tiền' → dò giao dịch ngân hàng NGAY (không đợi vòng lặp 20s),
+    rồi trả về số dư mới + có xác nhận được đơn nạp nào không."""
+    def _snap():
+        with db() as c:
+            bal = _wallet_balance(c, user["id"])
+            pend = c.execute("SELECT COUNT(*) n FROM store_topups WHERE user_id=? AND status='pending'",
+                             (user["id"],)).fetchone()["n"]
+        return bal, pend
+    before, pend_before = _snap()
+    try:
+        await _acb_fetch_and_confirm()   # dò ngân hàng ngay lập tức
+    except Exception as e:
+        log.warning("topup_check dò ngân hàng lỗi: %s", e)
+    after, pend_after = _snap()
+    added = after - before
+    confirmed = added > 0 or pend_after < pend_before
+    if confirmed:
+        msg = (f"✅ Đã cộng {added:,}đ vào ví!".replace(",", ".") if added > 0
+               else "✅ Đã ghi nhận nạp tiền!")
+    elif pend_after > 0:
+        msg = "Chưa thấy tiền vào. Nếu vừa chuyển khoản, đợi 1–2 phút rồi bấm kiểm tra lại."
+    else:
+        msg = "Không có lệnh nạp nào đang chờ."
+    return {"balance": after, "confirmed": confirmed, "added": added,
+            "pending": pend_after, "message": msg}
 
 
 def _finalize_topup_row(c, t) -> bool:
