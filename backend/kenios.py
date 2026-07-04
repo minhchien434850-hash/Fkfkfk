@@ -5283,14 +5283,18 @@ _TG_FEAT = {
     "💬 Hỗ trợ": None,          # → nhắn hỗ trợ
 }
 
-def _tg_full_menu() -> dict:
-    labels = list(_TG_FEAT.keys())
+# Nút CÔNG KHAI — thành viên thường thấy; các nút còn lại (quản trị) CHỈ ADMIN thấy.
+_TG_PUBLIC_BTNS = {"✅ Điểm danh", "🏆 Xếp hạng", "🚨 Báo cáo", "🆔 ID", "💤 AFK", "🔗 Liên kết",
+                   "📖 Tất cả lệnh", "🎵 Lấy nhạc", "📊 Thống kê", "ℹ️ Giới thiệu", "💬 Hỗ trợ"}
+
+def _tg_full_menu(admin: bool = False) -> dict:
+    labels = [b for b in _TG_FEAT.keys() if admin or b in _TG_PUBLIC_BTNS]
     rows = [labels[i:i + 3] for i in range(0, len(labels), 3)]
     rows.append(["🏠 Menu", "❌ Đóng"])
     return {"keyboard": [[{"text": b} for b in r] for r in rows], "resize_keyboard": True}
 
-def _tg_send_menu(token, chat_id, text, photo_first=False) -> None:
-    kb = _tg_full_menu()
+def _tg_send_menu(token, chat_id, text, photo_first=False, admin=False) -> None:
+    kb = _tg_full_menu(admin)
     photo = get_setting("tg_welcome_photo", "").strip()
     if photo_first and photo:
         r = _tg_call(token, "sendPhoto", chat_id=chat_id, photo=photo, caption=text,
@@ -5300,14 +5304,17 @@ def _tg_send_menu(token, chat_id, text, photo_first=False) -> None:
     _tg_call(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
              disable_web_page_preview=True, reply_markup=kb)
 
-def _tg_menu_click(token, chat_id, text, name="") -> bool:
+def _tg_menu_click(token, chat_id, text, name="", admin=False) -> bool:
     """Xử lý khi bấm nút menu (reply keyboard). Trả True nếu đã xử lý."""
     t = (text or "").strip()
     if t in ("🏠 Menu", "/menu", "menu", "/help", "📚 Hướng dẫn đầy đủ"):
-        _tg_send_menu(token, chat_id, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇"); return True
+        _tg_send_menu(token, chat_id, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇", admin=admin); return True
     if t == "❌ Đóng":
         _tg_call(token, "sendMessage", chat_id=chat_id, text="Đã đóng menu. Gõ /menu để mở lại.",
                  reply_markup={"remove_keyboard": True}); return True
+    # Nút QUẢN TRỊ gõ bởi thành viên thường → báo quyền (menu của họ vốn không có nút này).
+    if t in _TG_FEAT and t not in _TG_PUBLIC_BTNS and not admin:
+        _tg_send(token, chat_id, "🔒 Chức năng này chỉ dành cho <b>quản trị viên</b>."); return True
     if t == "🔗 Liên kết":
         btns = _tg_link_buttons()
         if btns:
@@ -5346,7 +5353,7 @@ def _tg_menu_click(token, chat_id, text, name="") -> bool:
             info += "\n\n📋 Đang có: " + "  ".join("/" + x for x in lst)
         _tg_send(token, chat_id, info); return True
     if t == "📖 Tất cả lệnh":
-        _tg_send(token, chat_id, _tg_help_text(name)); return True
+        _tg_send(token, chat_id, _tg_help_text(name, admin)); return True
     if t == "🎵 Lấy nhạc":
         _tg_send(token, chat_id, "🎵 Gửi: <code>/nhac &lt;tên bài hoặc link YouTube/TikTok&gt;</code>\nVD: <code>/nhac Sơn Tùng</code>"); return True
     if t == "📊 Thống kê":
@@ -5778,9 +5785,10 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
         reason = _tg_afk[rt["id"]][0]
         _tg_send(token, chat_id, f"💤 {_tg_mention(rt)} đang AFK{': ' + reason if reason else ''}.")
 
-    # Nút menu (lưới nút) bấm trong NHÓM cũng chạy như chat riêng
+    # Nút menu (lưới nút) bấm trong NHÓM cũng chạy như chat riêng (menu theo quyền)
     if text.strip() in _TG_FEAT or text.strip() in ("🏠 Menu", "❌ Đóng", "📚 Hướng dẫn đầy đủ"):
-        if _tg_menu_click(token, chat_id, text, _tg_name(frm)):
+        if _tg_menu_click(token, chat_id, text, _tg_name(frm),
+                          admin=_tg_is_privileged(token, chat_id, msg)):
             return
 
     # Lệnh (/... hoặc #ghichú)
@@ -5850,7 +5858,8 @@ def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, fr
         if ac: _tg_send(token, ac, f"⚠️ Báo cáo từ nhóm <b>{title}</b> bởi {_tg_mention(frm)}.")
         _tg_send(token, chat_id, "⚠️ Đã báo cáo tới quản trị viên."); return
     if cmd0 in ("help", "start", "menu"):
-        _tg_send_menu(token, chat_id, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇"); return
+        _tg_send_menu(token, chat_id, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇",
+                      admin=_tg_is_privileged(token, chat_id, msg)); return
     if cmd0 in ("rules", "luat"):
         _tg_send(token, chat_id, get_setting("tg_rules", "Nhóm chưa đặt nội quy. Admin dùng /setrules để đặt.")); return
     if cmd0 == "afk":
@@ -5949,8 +5958,9 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     frm = msg.get("from", {})
     name = _tg_name(frm)
     _tg_track(frm)   # đếm người dùng bot mỗi tháng
-    # Bấm nút trên menu (reply keyboard) → xử lý ngay
-    if _tg_menu_click(token, chat_id, text, name):
+    # Bấm nút trên menu (reply keyboard) → xử lý ngay (admin bot thấy menu đầy đủ)
+    if _tg_menu_click(token, chat_id, text, name,
+                      admin=bool(admin_chat) and chat_id == str(admin_chat)):
         return
     # Lệnh QUẢN LÝ NHÓM gõ trong chat riêng → nhắc: chỉ chạy trong nhóm (tránh "im lặng tưởng lỗi").
     _GROUP_CMDS = {"/ban", "/kick", "/mute", "/unmute", "/warn", "/unwarn", "/warns", "/pin", "/unpin",
@@ -5975,7 +5985,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
             _tg_send(token, m.group(1), f"👨‍💼 <b>Hỗ trợ KENIOS:</b>\n{text}")
             _tg_send(token, admin_chat, "✅ Đã gửi trả lời tới khách.")
         elif text.startswith("/help") or text.startswith("/menu"):
-            _tg_send_menu(token, admin_chat, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇")
+            _tg_send_menu(token, admin_chat, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇", admin=True)
         elif text.startswith("/config"):
             _tg_send(token, admin_chat,
                      "⚙️ <b>Cấu hình bot</b>\n"
@@ -5994,7 +6004,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                           f"👋 Chào {name}, tôi là <b>{botname}</b>.\n\n"
                           "👑 Bạn là <b>ADMIN</b>. Khi khách nhắn bot, tin sẽ hiện ở đây — REPLY vào tin đó để trả lời khách.\n"
                           f"\n👥 <b>{_cnt}</b> người dùng mỗi tháng"
-                          "\n\n📋 Chọn chức năng ở lưới nút bên dưới 👇", photo_first=True)
+                          "\n\n📋 Chọn chức năng ở lưới nút bên dưới 👇", photo_first=True, admin=True)
             _lb = _tg_link_buttons()
             if _lb:
                 _tg_send(token, admin_chat, "🔗 <b>Liên kết nhanh:</b>", buttons=_lb)
@@ -6029,9 +6039,9 @@ def _tg_loop() -> None:
             enabled = get_setting("tg_bot_enabled", "0") == "1"
             if not token or not enabled:
                 time.sleep(5); continue
-            if _tg_cmds_done != token:   # đăng ký menu lệnh 1 lần cho token này
-                _tg_register_commands(token); _tg_cmds_done = token
             admin_chat = (get_setting("tg_admin_chat", "") or os.getenv("TELEGRAM_ADMIN_CHAT", "")).strip()
+            if _tg_cmds_done != token + "|" + admin_chat:   # đăng ký menu lệnh khi đổi token/admin
+                _tg_register_commands(token); _tg_cmds_done = token + "|" + admin_chat
             r = httpx.get(f"https://api.telegram.org/bot{token}/getUpdates",
                           params={"offset": _tg_offset + 1, "timeout": 25}, timeout=35)
             for upd in r.json().get("result", []):
@@ -6045,43 +6055,60 @@ def _tg_loop() -> None:
 
 def _tg_register_commands(token: str) -> None:
     """Đăng ký MENU LỆNH để người dùng bấm '/' thấy danh sách (như bot chuyên nghiệp)."""
-    cmds = [
-        ("help", "Danh sách lệnh"), ("config", "Xem cấu hình"),
+    # Lệnh CÔNG KHAI — mọi người thấy khi bấm "/"
+    pub = [
+        ("help", "Menu & danh sách lệnh"), ("menu", "Mở menu nút bấm"),
+        ("nhac", "Lấy nhạc YouTube/TikTok"),
+        ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"),
+        ("report", "Báo cáo admin (reply)"), ("rules", "Xem nội quy"),
+        ("afk", "Báo bận"), ("id", "Xem Chat/User ID"),
+        ("links", "🔗 Liên kết nhanh"), ("cmds", "Xem lệnh riêng"),
+    ]
+    # Lệnh QUẢN TRỊ — CHỈ admin nhóm (và admin bot) thấy
+    adm = pub + [
+        ("config", "Xem cấu hình"),
         ("ban", "Cấm (reply)"), ("kick", "Đá khỏi nhóm (reply)"),
         ("mute", "Cấm chat (reply) [phút]"), ("unmute", "Mở chat (reply)"),
         ("warn", "Cảnh báo (reply)"), ("warns", "Xem cảnh báo (reply)"),
         ("pin", "Ghim (reply)"), ("purge", "Xoá hàng loạt (reply)"), ("del", "Xoá tin (reply)"),
         ("lock", "Khoá nội dung"), ("unlock", "Mở khoá"), ("locks", "Xem khoá"),
         ("addbl", "Thêm từ cấm"), ("filter", "Trả lời tự động"), ("save", "Lưu ghi chú"),
-        ("setrules", "Đặt nội quy"), ("rules", "Xem nội quy"),
+        ("setrules", "Đặt nội quy"),
         ("setwelcome", "Sửa lời chào TV mới"), ("welcome", "Bật/tắt chào mừng"),
         ("setwelcomebtn", "Nút link lời chào"), ("setwelcomephoto", "Ảnh lời chào"),
         ("setgoodbye", "Lời tạm biệt"), ("testwelcome", "Xem thử lời chào"),
         ("modon", "BẬT kiểm duyệt nhóm"), ("modoff", "TẮT kiểm duyệt nhóm"),
-        ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"), ("stats", "Thống kê"),
+        ("stats", "Thống kê nhóm"),
         ("slowmode", "Giãn cách gửi tin"), ("autoreact", "Tự thả cảm xúc"),
-        ("report", "Báo cáo admin (reply)"),
-        ("nhac", "Lấy nhạc YouTube/TikTok"),
-        ("links", "🔗 Liên kết nhanh"), ("cmds", "Xem lệnh riêng"),
-        ("addcmd", "Thêm lệnh riêng (admin)"), ("delcmd", "Xoá lệnh riêng (admin)"),
-        ("setlinks", "Đặt nút liên kết (admin)"), ("broadcast", "Loa phường (admin)"),
+        ("addcmd", "Thêm lệnh riêng"), ("delcmd", "Xoá lệnh riêng"),
+        ("setlinks", "Đặt nút liên kết"), ("broadcast", "📣 Loa phường"),
     ]
-    _tg_call(token, "setMyCommands", commands=[{"command": c, "description": d} for c, d in cmds])
+    def _cl(lst):
+        return [{"command": c, "description": d} for c, d in lst]
+    _tg_call(token, "setMyCommands", commands=_cl(pub), scope={"type": "default"})
+    _tg_call(token, "setMyCommands", commands=_cl(adm), scope={"type": "all_chat_administrators"})
+    # Admin bot (chat riêng) cũng thấy đủ lệnh
+    ac = (get_setting("tg_admin_chat", "") or "").strip()
+    if ac.lstrip("-").isdigit():
+        _tg_call(token, "setMyCommands", commands=_cl(adm), scope={"type": "chat", "chat_id": int(ac)})
 
-def _tg_help_text(name: str = "") -> str:
+def _tg_help_text(name: str = "", admin: bool = False) -> str:
     import html as _h
     bot = get_setting("tg_bot_name", "TRẦN MINH CHIẾN")
     greet = (f"👋 Chào {_h.escape(name)}, tôi là <b>{_h.escape(bot)}</b>.\n\n" if name
              else f"👋 Xin chào, tôi là <b>{_h.escape(bot)}</b>.\n\n")
-    return (greet +
+    pub = ("🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
+           "🔗 /links — liên kết nhanh · /cmds — lệnh riêng\n"
+           "<b>Trong nhóm:</b> /diemdanh · /top · /report (reply) · /rules · /afk [lý do] · /id")
+    if not admin:
+        return greet + pub
+    return (greet + pub + "\n\n👑 <b>LỆNH QUẢN TRỊ</b>\n"
             "<b>Quản trị (reply):</b> /ban /kick /mute [phút] /unmute /warn /unwarn /warns /pin /unpin /del /purge /info\n"
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
             "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /log · /modon /modoff · /config\n"
-            "🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
-            "🔗 <b>Liên kết & lệnh riêng:</b> /links · /cmds · /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast\n"
-            "<b>Công khai:</b> /diemdanh · /top · /report · /id")
+            "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
 def start_telegram_bot() -> None:
     """Khởi động bot Telegram hỗ trợ (long-polling) trong 1 thread nền."""
