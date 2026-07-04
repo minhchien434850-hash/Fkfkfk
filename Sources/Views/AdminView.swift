@@ -7,6 +7,7 @@ struct AdminView: View {
     @State private var message: String?
     @State private var pwUser: AdminUser?
     @State private var walletUser: AdminUser?
+    @State private var deleteUser: AdminUser?
     @State private var paymentId = ""
     @State private var showBank = false
     @State private var showErrors = false
@@ -228,6 +229,12 @@ struct AdminView: View {
                                     }
                                     Button(store.t("Đổi mật khẩu giúp", "Reset password")) { pwUser = u }
                                     Button(store.t("Cộng / Trừ tiền ví", "Adjust wallet")) { walletUser = u }
+                                    if u.isAdmin != true {
+                                        Divider()
+                                        Button(store.t("Xóa tài khoản", "Delete account"), role: .destructive) {
+                                            deleteUser = u
+                                        }
+                                    }
                                 }
                                 .font(.caption)
                             }
@@ -268,7 +275,26 @@ struct AdminView: View {
             .alert("Lỗi", isPresented: .constant(error != nil)) {
                 Button("OK") { error = nil }
             } message: { Text(error ?? "") }
+            .alert(store.t("Xóa tài khoản?", "Delete account?"),
+                   isPresented: Binding(get: { deleteUser != nil }, set: { if !$0 { deleteUser = nil } })) {
+                Button(store.t("Hủy", "Cancel"), role: .cancel) { deleteUser = nil }
+                Button(store.t("Xóa vĩnh viễn", "Delete permanently"), role: .destructive) {
+                    if let u = deleteUser { Task { await deleteAccount(u) } }
+                }
+            } message: {
+                Text(store.t("Xóa VĨNH VIỄN tài khoản đăng nhập \"\(deleteUser?.username ?? "")\" và dữ liệu liên quan (tin nhắn, bạn bè). Không thể hoàn tác.",
+                             "Permanently delete the login account \"\(deleteUser?.username ?? "")\" and related data (messages, friends). This cannot be undone."))
+            }
         }
+    }
+
+    private func deleteAccount(_ u: AdminUser) async {
+        deleteUser = nil; error = nil
+        do {
+            let r = try await store.api.adminDeleteUser(u.id)
+            message = r.message
+            await reload()
+        } catch { self.error = error.localizedDescription }
     }
 
     // Thời gian hoạt động gần nhất (tương đối)

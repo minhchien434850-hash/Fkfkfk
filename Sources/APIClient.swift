@@ -235,6 +235,9 @@ struct APIClient {
     func adminUnsuspend(_ uid: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/users/\(uid)/unsuspend", method: "POST"))
     }
+    func adminDeleteUser(_ uid: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/users/\(uid)", method: "DELETE"))
+    }
     func adminSetMaintenance(on: Bool, message: String) async throws -> MessageResponse {
         try decode(try await send("/admin/maintenance", method: "POST",
                                   json: ["on": on, "message": message]))

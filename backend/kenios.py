@@ -8973,6 +8973,33 @@ def admin_unsuspend(uid: int, admin=Depends(get_admin)) -> dict[str, Any]:
     return {"message": "Đã mở lại tài khoản."}
 
 
+@app.delete("/admin/users/{uid}")
+def admin_delete_user(uid: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    """Xóa VĨNH VIỄN tài khoản đăng nhập của người dùng (kèm dữ liệu liên quan)."""
+    if uid == admin["id"]:
+        raise HTTPException(status_code=400, detail="Không thể tự xóa chính mình.")
+    with db() as c:
+        row = c.execute("SELECT id, username, is_admin FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
+        if row["is_admin"]:
+            raise HTTPException(status_code=400, detail="Không thể xóa tài khoản admin khác.")
+        uname = row["username"]
+        # Dọn dữ liệu liên quan (best-effort — bảng nào không có thì bỏ qua) rồi xóa tài khoản.
+        for stmt, params in [
+            ("DELETE FROM direct_messages WHERE sender_id=? OR receiver_id=?", (uid, uid)),
+            ("DELETE FROM friendships WHERE user_id=? OR friend_id=?", (uid, uid)),
+            ("DELETE FROM device_tokens WHERE user_id=?", (uid,)),
+            ("DELETE FROM notifications WHERE user_id=?", (uid,)),
+        ]:
+            try:
+                c.execute(stmt, params)
+            except Exception:
+                pass
+        c.execute("DELETE FROM users WHERE id=?", (uid,))
+    return {"message": f"Đã xóa vĩnh viễn tài khoản '{uname}'."}
+
+
 # ---- Người dùng: lấy hồ sơ mới nhất + nhịp hoạt động ----
 @app.get("/me")
 def get_me(user=Depends(get_user)) -> dict[str, Any]:
