@@ -58,6 +58,7 @@ jobs:
             -sdk iphoneos \
             -derivedDataPath build \
             -destination "generic/platform=iOS" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -95,5 +96,8 @@ jobs:
           name: KENIOS build ${{ github.run_number }}
           files: KENIOS.ipa
           body: "Bản build tự động KENIOS (IPA chưa ký). Tải KENIOS.ipa để sideload."
+          draft: false
+          prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

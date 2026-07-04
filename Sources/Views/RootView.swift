@@ -123,6 +123,39 @@ struct MainTabView: View {
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
+    // Số build (tăng dần mỗi lần CI build) — dùng để tự phát hiện bản mới trên GitHub Release.
+    static var appBuild: Int {
+        Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
+    }
+
+    // Tự dò bản mới trên GitHub Release (repo công khai, không cần khoá).
+    // Duyệt danh sách release ĐÃ PHÁT HÀNH, lấy số build cao nhất (tag "build-<số>") có kèm .ipa.
+    static func checkGitHubUpdate() async -> (build: Int, ipaURL: String, pageURL: String)? {
+        let api = "https://api.github.com/repos/minhchien434850-hash/Fkfkfk/releases?per_page=30"
+        guard let url = URL(string: api) else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = 12
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
+        var best: (build: Int, ipaURL: String, pageURL: String)? = nil
+        for rel in arr {
+            if (rel["draft"] as? Bool) == true { continue }
+            guard let tag = rel["tag_name"] as? String, tag.lowercased().hasPrefix("build-"),
+                  let n = Int(tag.drop { !$0.isNumber }), n > 0 else { continue }
+            if let cur = best, n <= cur.build { continue }
+            let page = (rel["html_url"] as? String) ?? "https://github.com/minhchien434850-hash/Fkfkfk/releases"
+            var ipa = page
+            if let assets = rel["assets"] as? [[String: Any]] {
+                for a in assets where (a["name"] as? String)?.lowercased().hasSuffix(".ipa") == true {
+                    if let dl = a["browser_download_url"] as? String { ipa = dl; break }
+                }
+            }
+            best = (n, ipa, page)
+        }
+        return best
+    }
     // So sánh phiên bản dạng "3.1.2" — trả true nếu `a` mới hơn `b`.
     static func isNewer(_ a: String, than b: String) -> Bool {
         let pa = a.split(separator: ".").map { Int($0) ?? 0 }
@@ -192,6 +225,13 @@ struct MainTabView: View {
                         updateLink = link
                         updateMsg = (cfg.updateMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                         updateVersion = latest
+                        showUpdate = true
+                    }
+                    // TỰ ĐỘNG: nếu admin không đặt phiên bản thủ công → tự dò bản mới trên GitHub Release.
+                    if !showUpdate, let up = await Self.checkGitHubUpdate(), up.build > Self.appBuild {
+                        updateLink = up.ipaURL
+                        updateVersion = "build \(up.build)"
+                        updateMsg = ""
                         showUpdate = true
                     }
                     // §1.3 — Lời chào toàn cục cho MỌI người

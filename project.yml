@@ -18,7 +18,7 @@ targets:
         CFBundleDisplayName: KENIOS
         CFBundleName: KENIOS
         CFBundleShortVersionString: "3.0"
-        CFBundleVersion: "1"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSRequiresIPhoneOS: true
         UIBackgroundModes:
           - audio
