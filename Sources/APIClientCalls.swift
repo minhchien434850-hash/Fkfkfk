@@ -1,5 +1,15 @@
 import Foundation
 
+// ======================== Model cập nhật OTA (bản đã ký) ========================
+struct AppOTAUpdate: Decodable {
+    let available: Bool
+    let installUrl: String?
+    let bundleId: String?
+    let version: String?
+    let build: Int?
+    let title: String?
+}
+
 // ======================== Model cuộc gọi ========================
 struct CallStartResult: Decodable { let callId: String }
 struct IncomingCall: Decodable {

@@ -217,17 +217,29 @@ struct MainTabView: View {
             // §1.3 + §1.2 — Lấy config server 1 lần: lời chào toàn cục + kiểm tra phiên bản mới
             if !welcomeChecked {
                 welcomeChecked = true
+                // ƯU TIÊN 1 — Bản KENIOS ĐÃ KÝ cài OTA 1 chạm (không cần ESign).
+                // Chỉ nhận khi đúng là bản KENIOS (cùng bundle id) và số build cao hơn.
+                if let ota = try? await store.api.appOTAUpdate(), ota.available,
+                   let otaLink = ota.installUrl, !otaLink.isEmpty,
+                   (ota.bundleId ?? "") == (Bundle.main.bundleIdentifier ?? "com.kenios.codebox"),
+                   (ota.build ?? 0) > Self.appBuild {
+                    updateLink = otaLink
+                    updateVersion = ota.version.map { "v\($0)" } ?? "build \(ota.build ?? 0)"
+                    updateMsg = store.t("Đã có bản cập nhật mới — bấm để cài trực tiếp (không cần ESign).",
+                                        "A new update is available — tap to install directly (no ESign).")
+                    showUpdate = true
+                }
                 if let cfg = try? await store.api.storeConfig() {
-                    // §1.2 — Có phiên bản mới hơn bản đang cài → hiện thông báo cập nhật
+                    // §1.2 — Admin đặt phiên bản thủ công (nếu OTA chưa kích hoạt)
                     let latest = (cfg.latestVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     let link = (cfg.updateUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !latest.isEmpty, !link.isEmpty, Self.isNewer(latest, than: Self.appVersion) {
+                    if !showUpdate, !latest.isEmpty, !link.isEmpty, Self.isNewer(latest, than: Self.appVersion) {
                         updateLink = link
                         updateMsg = (cfg.updateMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                         updateVersion = latest
                         showUpdate = true
                     }
-                    // TỰ ĐỘNG: nếu admin không đặt phiên bản thủ công → tự dò bản mới trên GitHub Release.
+                    // TỰ ĐỘNG: nếu chưa có nguồn nào → tự dò bản mới trên GitHub Release (bản chưa ký, qua ESign).
                     if !showUpdate, let up = await Self.checkGitHubUpdate(), up.build > Self.appBuild {
                         updateLink = up.ipaURL
                         updateVersion = "build \(up.build)"

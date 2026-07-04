@@ -62,6 +62,10 @@ struct APIClient {
     func getConfig() async throws -> ServerConfig {
         try decode(try await send("/config", auth: false))
     }
+    // Bản KENIOS đã ký đang phát hành để cài OTA 1 chạm (không cần ESign)
+    func appOTAUpdate() async throws -> AppOTAUpdate {
+        try decode(try await send("/app/ota", auth: false))
+    }
     func getProviders() async throws -> [Provider] {
         try decode(try await send("/providers", auth: false))
     }

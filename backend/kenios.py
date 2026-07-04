@@ -6726,8 +6726,11 @@ def _extract_ipa_meta(ipa_path: str) -> dict:
             if not info_name:
                 return {}
             pl = plistlib.loads(z.read(info_name))
+            try: build = int(str(pl.get("CFBundleVersion", "0")).split(".")[0])
+            except Exception: build = 0
             return {"bundle_id": pl.get("CFBundleIdentifier", ""),
                     "version": pl.get("CFBundleShortVersionString", "1.0"),
+                    "build": build,
                     "title": pl.get("CFBundleDisplayName") or pl.get("CFBundleName") or "App"}
     except Exception:
         return {}
@@ -6844,6 +6847,26 @@ def admin_get_published(admin=Depends(get_admin)) -> dict[str, Any]:
 def admin_unpublish(admin=Depends(get_admin)) -> dict[str, Any]:
     set_setting("published_ipa_token", "")
     return {"ok": True}
+
+
+@app.get("/app/ota")
+def app_ota_update() -> dict[str, Any]:
+    """Bản KENIOS ĐÃ KÝ đang phát hành để cài OTA 1 chạm (app tự so số build để nhắc cập nhật)."""
+    p = _published_ipa()
+    if not p:
+        return {"available": False}
+    base = _ipa_base_url()
+    token = p["token"]
+    meta = p.get("meta", {})
+    manifest = f"{base}/ipa/dl/{token}.plist"
+    return {
+        "available": True,
+        "install_url": f"itms-services://?action=download-manifest&url={manifest}",
+        "bundle_id": meta.get("bundle_id", ""),
+        "version": meta.get("version", ""),
+        "build": int(meta.get("build", 0) or 0),
+        "title": meta.get("title", ""),
+    }
 
 
 @app.get("/install", response_class=HTMLResponse)
