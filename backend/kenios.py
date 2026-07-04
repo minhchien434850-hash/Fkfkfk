@@ -7150,6 +7150,9 @@ h2{font-size:16px;margin:16px 4px 8px;font-weight:800}
 .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#111a30;border:1px solid var(--line);
   color:#fff;padding:12px 18px;border-radius:12px;font-size:13.5px;z-index:99;opacity:0;transition:.25s;max-width:90%;text-align:center}
 .toast.show{opacity:1}
+.authtabs{display:flex;gap:5px;background:var(--card2);border-radius:12px;padding:4px;margin:12px 0}
+.authtabs button{flex:1;background:none;border:0;color:var(--mut);padding:9px 4px;border-radius:9px;font-weight:700;font-size:13px}
+.authtabs button.on{background:var(--accent);color:#fff}
 .tx{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
 .tx b{font-weight:800}
 .plus{color:#7ee2a8}.minus{color:#ff9b9b}
@@ -7276,32 +7279,73 @@ function buy(pid,priceId){
 }
 function copy(t){navigator.clipboard.writeText(t).then(()=>toast('Đã sao chép ✓'))}
 
-/* ---------- Đăng nhập (OTP qua email) ---------- */
-function loginSheet(){
-  openSheet('<h3>Đăng nhập</h3><p>Nhập Gmail để nhận mã đăng nhập (không cần mật khẩu).</p>'
-    +'<input class="inp" id="lemail" type="email" placeholder="email@gmail.com" autocapitalize="off">'
-    +'<button class="btn" id="sendbtn">Gửi mã</button>'
-    +'<div id="codebox" style="display:none">'
-    +'<input class="inp" id="lcode" inputmode="numeric" placeholder="Nhập mã 6 số">'
-    +'<button class="btn g" id="verbtn">Đăng nhập</button></div>');
-  document.getElementById('sendbtn').onclick=async()=>{
-    const em=document.getElementById('lemail').value.trim();
-    if(!em){toast('Nhập Gmail đã');return}
-    const b=document.getElementById('sendbtn'); b.textContent='Đang gửi...'; b.disabled=true;
-    try{ await api('/auth/send-otp',{method:'POST',body:JSON.stringify({email:em,purpose:'login'})});
-      document.getElementById('codebox').style.display='block'; b.textContent='Gửi lại mã'; b.disabled=false;
-      toast('Đã gửi mã tới '+em);
-    }catch(e){ b.textContent='Gửi mã'; b.disabled=false; toast(e.message) }
+/* ---------- Tài khoản: Đăng nhập · Đăng ký · OTP (đầy đủ như app) ---------- */
+let AUTHTAB='login';
+function loginSheet(){ AUTHTAB='login'; renderAuth(); document.getElementById('mask').classList.add('show'); }
+function authTab(t){ AUTHTAB=t; renderAuth(); }
+function idPayload(v){ v=(v||'').trim(); return v.includes('@')?{email:v}:{phone:v}; }
+function saveAuth(r){ TOKEN=r.token; localStorage.setItem('kenios_token',TOKEN); closeSheet();
+  toast('Xin chào '+((r.user&&r.user.username)||'')); refreshWallet(); go(TAB); }
+function renderAuth(){
+  let html='<h3>Tài khoản KENIOS</h3><div class="authtabs">'
+    +'<button class="'+(AUTHTAB==='login'?'on':'')+'" onclick="authTab(\'login\')">Đăng nhập</button>'
+    +'<button class="'+(AUTHTAB==='register'?'on':'')+'" onclick="authTab(\'register\')">Đăng ký</button>'
+    +'<button class="'+(AUTHTAB==='otp'?'on':'')+'" onclick="authTab(\'otp\')">Mã OTP</button></div>';
+  if(AUTHTAB==='login'){
+    html+='<p>Đăng nhập bằng tài khoản & mật khẩu (chung với app).</p>'
+      +'<input class="inp" id="au_user" placeholder="Tên đăng nhập" autocapitalize="off" autocorrect="off">'
+      +'<input class="inp" id="au_pass" type="password" placeholder="Mật khẩu">'
+      +'<button class="btn" id="au_go">Đăng nhập</button>'
+      +'<p class="muted" onclick="authTab(\'otp\')" style="cursor:pointer">Quên mật khẩu? Đăng nhập bằng mã OTP →</p>';
+  } else if(AUTHTAB==='register'){
+    html+='<p>Tạo tài khoản mới (dùng chung với app).</p>'
+      +'<input class="inp" id="au_user" placeholder="Tên đăng nhập (≥3 ký tự)" autocapitalize="off" autocorrect="off">'
+      +'<input class="inp" id="au_pass" type="password" placeholder="Mật khẩu (≥6 ký tự)">'
+      +'<input class="inp" id="au_id" placeholder="Gmail hoặc số điện thoại" autocapitalize="off" autocorrect="off">'
+      +'<button class="btn sec" id="au_send">Gửi mã xác nhận</button>'
+      +'<div id="au_codebox" style="display:none">'
+      +'<input class="inp" id="au_code" inputmode="numeric" placeholder="Nhập mã 6 số">'
+      +'<button class="btn g" id="au_go">Đăng ký</button></div>';
+  } else {
+    html+='<p>Đăng nhập nhanh bằng mã OTP — không cần mật khẩu.</p>'
+      +'<input class="inp" id="au_id" placeholder="Gmail hoặc số điện thoại" autocapitalize="off" autocorrect="off">'
+      +'<button class="btn sec" id="au_send">Gửi mã</button>'
+      +'<div id="au_codebox" style="display:none">'
+      +'<input class="inp" id="au_code" inputmode="numeric" placeholder="Nhập mã 6 số">'
+      +'<button class="btn g" id="au_go">Đăng nhập</button></div>';
+  }
+  document.getElementById('sheet').innerHTML=html;
+  const send=document.getElementById('au_send');
+  if(send) send.onclick=async()=>{
+    const id=(document.getElementById('au_id').value||'').trim();
+    if(!id){toast('Nhập Gmail hoặc SĐT đã');return}
+    send.textContent='Đang gửi...'; send.disabled=true;
+    try{ await api('/auth/send-otp',{method:'POST',body:JSON.stringify(Object.assign(idPayload(id),{purpose:AUTHTAB==='register'?'register':'login'}))});
+      document.getElementById('au_codebox').style.display='block'; send.textContent='Gửi lại mã'; send.disabled=false; toast('Đã gửi mã tới '+id);
+    }catch(e){ send.textContent='Gửi mã'; send.disabled=false; toast(e.message) }
   };
-  document.getElementById('verbtn').onclick=async()=>{
-    const em=document.getElementById('lemail').value.trim();
-    const cd=document.getElementById('lcode').value.trim();
-    if(!cd){toast('Nhập mã đã');return}
-    const b=document.getElementById('verbtn'); b.textContent='Đang vào...'; b.disabled=true;
-    try{ const r=await api('/auth/login-otp',{method:'POST',body:JSON.stringify({email:em,code:cd})});
-      TOKEN=r.token; localStorage.setItem('kenios_token',TOKEN);
-      closeSheet(); toast('Xin chào '+(r.user&&r.user.username||'')); refreshWallet();
-    }catch(e){ b.textContent='Đăng nhập'; b.disabled=false; toast(e.message) }
+  const gobtn=document.getElementById('au_go');
+  if(gobtn) gobtn.onclick=async()=>{
+    const old=gobtn.textContent; gobtn.disabled=true; gobtn.textContent='Đang xử lý...';
+    function fail(m){ gobtn.disabled=false; gobtn.textContent=old; if(m)toast(m); }
+    try{
+      let r;
+      if(AUTHTAB==='login'){
+        const u=(document.getElementById('au_user').value||'').trim(), p=document.getElementById('au_pass').value||'';
+        if(!u||!p){ return fail('Nhập tài khoản & mật khẩu'); }
+        r=await api('/auth/login',{method:'POST',body:JSON.stringify({username:u,password:p})});
+      } else if(AUTHTAB==='register'){
+        const u=(document.getElementById('au_user').value||'').trim(), p=document.getElementById('au_pass').value||'';
+        const id=(document.getElementById('au_id').value||'').trim(), cd=(document.getElementById('au_code').value||'').trim();
+        if(!u||!p||!id||!cd){ return fail('Điền đủ thông tin & mã'); }
+        r=await api('/auth/register',{method:'POST',body:JSON.stringify(Object.assign({username:u,password:p,code:cd},idPayload(id)))});
+      } else {
+        const id=(document.getElementById('au_id').value||'').trim(), cd=(document.getElementById('au_code').value||'').trim();
+        if(!cd){ return fail('Nhập mã đã'); }
+        r=await api('/auth/login-otp',{method:'POST',body:JSON.stringify(Object.assign({code:cd},idPayload(id)))});
+      }
+      saveAuth(r);
+    }catch(e){ fail(e.message); }
   };
 }
 function logout(){TOKEN='';localStorage.removeItem('kenios_token');setBal(null);toast('Đã đăng xuất');go('shop')}
