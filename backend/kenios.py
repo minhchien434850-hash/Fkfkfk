@@ -5064,16 +5064,10 @@ def _tg_monthly() -> int:
         return 0
 
 # ---------- NÚT LIÊN KẾT (inline URL) — admin thêm bao nhiêu nút link cũng được ----------
-def _tg_link_buttons() -> list:
-    """Dựng lưới nút LIÊN KẾT (mở link) từ cấu hình tg_links.
-    Mỗi dòng 1 nút, dạng:  Nhãn | https://link  (2 nút/hàng).
-    Chưa cấu hình thì mặc định gợi ý Cửa hàng web + Cài ứng dụng."""
-    raw = get_setting("tg_links", "").strip()
-    if not raw:
-        base = (_ipa_base_url() or "https://app.kenios.store").rstrip("/")
-        raw = f"🛒 Cửa hàng | {base}/shop\n📲 Cài ứng dụng | {base}/install"
+def _tg_parse_btns(raw: str) -> list:
+    """Phân tích các dòng 'Nhãn | https://link' thành lưới nút inline (2 nút/hàng)."""
     rows, cur = [], []
-    for line in raw.splitlines():
+    for line in (raw or "").splitlines():
         if "|" not in line:
             continue
         label, url = line.split("|", 1)
@@ -5088,6 +5082,16 @@ def _tg_link_buttons() -> list:
     if cur:
         rows.append(cur)
     return rows
+
+def _tg_link_buttons() -> list:
+    """Dựng lưới nút LIÊN KẾT (mở link) từ cấu hình tg_links.
+    Mỗi dòng 1 nút, dạng:  Nhãn | https://link  (2 nút/hàng).
+    Chưa cấu hình thì mặc định gợi ý Cửa hàng web + Cài ứng dụng."""
+    raw = get_setting("tg_links", "").strip()
+    if not raw:
+        base = (_ipa_base_url() or "https://app.kenios.store").rstrip("/")
+        raw = f"🛒 Cửa hàng | {base}/shop\n📲 Cài ứng dụng | {base}/install"
+    return _tg_parse_btns(raw)
 
 # ---------- LỆNH TÙY BIẾN — admin tự thêm/sửa/xoá lệnh bot, không cần code ----------
 def _tg_cc_set(cmd: str, resp) -> None:
@@ -5125,6 +5129,8 @@ _TG_RESERVED = {
     "purge", "info", "lock", "unlock", "locks", "addbl", "rmbl", "blacklist", "filter",
     "stop", "filters", "save", "clear", "notes", "setrules", "rules", "clean", "nightmode",
     "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
+    "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
+    "modon", "modoff",
 }
 
 def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
@@ -5251,7 +5257,11 @@ _TG_FEAT = {
     "🐢 Slowmode": "🐢 <b>Slowmode</b>: /slowmode &lt;giây&gt; — giãn cách gửi tin.",
     "🤖 Captcha": "🤖 <b>Captcha</b>: /captcha — bắt thành viên mới xác minh chống bot.",
     "🧹 Dọn dịch vụ": "🧹 <b>CleanService</b>: /clean — tự xoá tin 'đã vào/rời nhóm'.",
-    "🎉 Chào nhóm": "🎉 <b>Chào nhóm</b> — lời chào thành viên MỚI vào nhóm.\nSoạn lời chào (kèm ảnh) trong app: Quản trị → Bot Telegram → Chào nhóm.",
+    "🎉 Chào nhóm": ("🎉 <b>Chào thành viên mới</b> (gõ trong nhóm, admin):\n"
+                     "• /setwelcome &lt;nội dung&gt; — sửa lời chào ({name}, {group}, nhúng link &lt;a href&gt;)\n"
+                     "• /setwelcomebtn Nhãn | link — nút link dưới lời chào (nhiều dòng = nhiều nút)\n"
+                     "• /setwelcomephoto &lt;link ảnh&gt; — ảnh kèm lời chào\n"
+                     "• /setgoodbye &lt;nội dung&gt; — lời tạm biệt · /welcome on|off · /testwelcome — xem thử"),
     "📜 Nội quy": "📜 <b>Nội quy</b>: /setrules &lt;nội dung&gt; · /rules",
     "🔎 Bộ lọc": "🔎 <b>Bộ lọc (Filter)</b>: /filter &lt;từ&gt; &lt;trả lời&gt; · /stop &lt;từ&gt; · /filters",
     "📝 Ghi chú": "📝 <b>Ghi chú (Notes)</b>: /save #tên &lt;nội dung&gt; · /get #tên · /clear · /notes",
@@ -5313,9 +5323,9 @@ def _tg_menu_click(token, chat_id, text, name="") -> bool:
     if t == "⚙️ Cấu hình":
         _tg_send(token, chat_id,
                  "⚙️ <b>Cấu hình bot</b>\n"
-                 f"Quản lý nhóm: {'BẬT' if get_setting('tg_mod_enabled','0')=='1' else 'tắt'}\n"
-                 f"Chống link: {'✓' if get_setting('tg_del_links','0')=='1' else '✗'} · "
-                 f"Antiflood: {'✓' if get_setting('tg_antiflood_on','0')=='1' else '✗'} · "
+                 f"Quản lý nhóm: {'BẬT' if get_setting('tg_mod_enabled','1')=='1' else 'tắt'}\n"
+                 f"Chống link: {'✓' if get_setting('tg_del_links','1')=='1' else '✗'} · "
+                 f"Antiflood: {'✓' if get_setting('tg_antiflood_on','1')=='1' else '✗'} · "
                  f"Captcha: {'✓' if get_setting('tg_captcha_on','0')=='1' else '✗'}\n"
                  f"AutoReact: {'✓' if get_setting('tg_autoreact_on','0')=='1' else '✗'} · "
                  f"Slowmode: {get_setting('tg_slowmode','0')}s · "
@@ -5424,12 +5434,23 @@ def _tg_warn(token: str, chat_id: str, frm: dict, reason: str) -> None:
 def _tg_welcome_members(token: str, chat: dict, members: list) -> None:
     if get_setting("tg_welcome_on", "1") != "1": return
     tmpl = get_setting("tg_welcome_group", "👋 Chào mừng {name} đã vào {group}!")
-    bt, bu = get_setting("tg_welcome_btn_text", ""), get_setting("tg_welcome_btn_url", "")
-    buttons = [[{"text": bt, "url": bu}]] if bt and bu else None
+    # Nút link dưới lời chào: NHIỀU nút (tg_welcome_btns, mỗi dòng 'Nhãn | link'),
+    # tương thích cấu hình cũ 1 nút (tg_welcome_btn_text/url).
+    buttons = _tg_parse_btns(get_setting("tg_welcome_btns", ""))
+    if not buttons:
+        bt, bu = get_setting("tg_welcome_btn_text", ""), get_setting("tg_welcome_btn_url", "")
+        buttons = [[{"text": bt, "url": bu}]] if bt and bu else None
+    photo = get_setting("tg_welcome_group_photo", "").strip()
     gname = chat.get("title", "nhóm")
     for m in members:
         if m.get("is_bot"): continue
         txt = tmpl.replace("{name}", _tg_mention(m)).replace("{group}", gname)
+        if photo:
+            params = {"chat_id": str(chat.get("id")), "photo": photo, "caption": txt, "parse_mode": "HTML"}
+            if buttons:
+                params["reply_markup"] = {"inline_keyboard": buttons}
+            if _tg_call(token, "sendPhoto", **params).get("ok"):
+                continue
         _tg_send(token, str(chat.get("id")), txt, buttons=buttons)
 
 def _tg_goodbye_member(token: str, chat: dict, m: dict) -> None:
@@ -5473,7 +5494,7 @@ def _tg_in_night() -> bool:
     if s == e: return False
     return (s <= h < e) if s < e else (h >= s or h < e)
 def _tg_flood_hit(chat_id: str, uid) -> bool:
-    if get_setting("tg_antiflood_on", "0") != "1": return False
+    if get_setting("tg_antiflood_on", "1") != "1": return False
     mx = int(get_setting("tg_antiflood_max", "6") or 6)
     win = int(get_setting("tg_antiflood_window", "7") or 7)
     now = time.time(); key = (chat_id, uid)
@@ -5647,6 +5668,63 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
         _tg_send(token, chat_id, "🗒️ Ghi chú: " + (", ".join("#" + k for k in ks) if ks else "không có"))
     elif cmd == "setrules":
         set_setting("tg_rules", args.strip()[:2000]); _tg_send(token, chat_id, "📜 Đã đặt nội quy.")
+    # ---- CHÀO MỪNG thành viên mới: sửa lời chào / nút link / ảnh / bật-tắt / thử ----
+    elif cmd in ("setwelcome", "setchao"):
+        if not args.strip():
+            _tg_send(token, chat_id,
+                     "🎉 <b>Đặt lời chào thành viên mới</b>\n"
+                     "Cú pháp: <code>/setwelcome &lt;nội dung&gt;</code>\n"
+                     "• <code>{name}</code> = tên thành viên · <code>{group}</code> = tên nhóm\n"
+                     "• Nhúng link vào chữ: <code>&lt;a href=\"https://link\"&gt;chữ&lt;/a&gt;</code>\n"
+                     "VD: <code>/setwelcome 🎉 Chào {name} đến với {group}! Ghé &lt;a href=\"https://app.kenios.store/shop\"&gt;cửa hàng&lt;/a&gt; nhé.</code>")
+        else:
+            set_setting("tg_welcome_group", args.strip()[:2000]); set_setting("tg_welcome_on", "1")
+            _tg_send(token, chat_id, "🎉 Đã đặt lời chào mới (đã BẬT chào mừng). Gõ /testwelcome để xem thử.")
+    elif cmd in ("welcome", "chao"):
+        a = args.strip().lower()
+        if a in ("on", "bat", "bật", "1"):
+            set_setting("tg_welcome_on", "1"); _tg_send(token, chat_id, "🎉 Chào mừng thành viên mới: BẬT")
+        elif a in ("off", "tat", "tắt", "0"):
+            set_setting("tg_welcome_on", "0"); _tg_send(token, chat_id, "🎉 Chào mừng thành viên mới: TẮT")
+        else:
+            _tg_send(token, chat_id,
+                     f"🎉 <b>Chào mừng</b>: {'BẬT' if get_setting('tg_welcome_on','1')=='1' else 'TẮT'}\n"
+                     f"Lời chào: {get_setting('tg_welcome_group', '👋 Chào mừng {name} đã vào {group}!')}\n\n"
+                     "• /welcome on|off — bật/tắt\n• /setwelcome &lt;nội dung&gt; — sửa lời chào\n"
+                     "• /setwelcomebtn — nút link dưới lời chào\n• /setwelcomephoto &lt;link ảnh&gt; — ảnh kèm lời chào\n"
+                     "• /setgoodbye &lt;nội dung&gt; — lời tạm biệt\n• /testwelcome — xem thử")
+    elif cmd in ("setwelcomebtn", "setchaobtn"):
+        if not args.strip():
+            _tg_send(token, chat_id,
+                     "🔗 <b>Nút link dưới lời chào</b> — mỗi dòng 1 nút, dạng <code>Nhãn | https://link</code>\nVD:\n"
+                     "<code>/setwelcomebtn 📜 Nội quy | https://t.me/kenios\n🛒 Cửa hàng | https://app.kenios.store/shop</code>\n"
+                     "Gõ <code>/setwelcomebtn xoa</code> để bỏ nút.")
+        elif args.strip().lower() in ("xoa", "xóa", "off", "clear"):
+            set_setting("tg_welcome_btns", ""); set_setting("tg_welcome_btn_text", ""); set_setting("tg_welcome_btn_url", "")
+            _tg_send(token, chat_id, "🗑️ Đã bỏ nút link khỏi lời chào.")
+        else:
+            set_setting("tg_welcome_btns", args.strip())
+            n = sum(len(r) for r in _tg_parse_btns(args.strip()))
+            _tg_send(token, chat_id, f"✅ Đã đặt <b>{n}</b> nút link dưới lời chào. Gõ /testwelcome để xem thử.")
+    elif cmd == "setwelcomephoto":
+        a = args.strip()
+        if a.lower() in ("xoa", "xóa", "off", "clear"):
+            set_setting("tg_welcome_group_photo", ""); _tg_send(token, chat_id, "🗑️ Đã bỏ ảnh khỏi lời chào.")
+        elif a:
+            set_setting("tg_welcome_group_photo", a); _tg_send(token, chat_id, "🖼️ Đã đặt ảnh lời chào. Gõ /testwelcome để xem thử.")
+        else:
+            _tg_send(token, chat_id, "Cú pháp: <code>/setwelcomephoto &lt;link ảnh&gt;</code> (hoặc <code>xoa</code> để bỏ).")
+    elif cmd in ("setgoodbye", "settambiet"):
+        if args.strip():
+            set_setting("tg_goodbye", args.strip()[:1000]); set_setting("tg_goodbye_on", "1")
+            _tg_send(token, chat_id, "👋 Đã đặt lời tạm biệt.")
+        else:
+            _tg_send(token, chat_id, "Cú pháp: <code>/setgoodbye &lt;nội dung&gt;</code> ({name} = tên người rời nhóm).")
+    elif cmd == "testwelcome":
+        if get_setting("tg_welcome_on", "1") != "1":
+            _tg_send(token, chat_id, "🎉 Chào mừng đang TẮT — bật bằng <code>/welcome on</code>.")
+        else:
+            _tg_welcome_members(token, msg.get("chat", {}), [msg.get("from", {})])
     elif cmd in ("clean", "nightmode", "antiflood", "captcha", "modon", "modoff"):
         keymap = {"clean": "tg_clean_service", "nightmode": "tg_nightmode_on",
                   "antiflood": "tg_antiflood_on", "captcha": "tg_captcha_on"}
@@ -5675,9 +5753,9 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
     elif cmd == "config":
         _tg_send(token, chat_id,
                  "⚙️ <b>Cấu hình</b>\n"
-                 f"Quản lý: {'BẬT' if get_setting('tg_mod_enabled','0')=='1' else 'tắt'}\n"
-                 f"Chống link: {'✓' if get_setting('tg_del_links','0')=='1' else '✗'} · "
-                 f"Antiflood: {'✓' if get_setting('tg_antiflood_on','0')=='1' else '✗'} · "
+                 f"Quản lý: {'BẬT' if get_setting('tg_mod_enabled','1')=='1' else 'tắt'}\n"
+                 f"Chống link: {'✓' if get_setting('tg_del_links','1')=='1' else '✗'} · "
+                 f"Antiflood: {'✓' if get_setting('tg_antiflood_on','1')=='1' else '✗'} · "
                  f"Captcha: {'✓' if get_setting('tg_captcha_on','0')=='1' else '✗'} · "
                  f"NightMode: {'✓' if get_setting('tg_nightmode_on','0')=='1' else '✗'}\n"
                  f"Khoá: {', '.join(sorted(_tg_locks())) or 'không'}\n"
@@ -5700,6 +5778,11 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
         reason = _tg_afk[rt["id"]][0]
         _tg_send(token, chat_id, f"💤 {_tg_mention(rt)} đang AFK{': ' + reason if reason else ''}.")
 
+    # Nút menu (lưới nút) bấm trong NHÓM cũng chạy như chat riêng
+    if text.strip() in _TG_FEAT or text.strip() in ("🏠 Menu", "❌ Đóng", "📚 Hướng dẫn đầy đủ"):
+        if _tg_menu_click(token, chat_id, text, _tg_name(frm)):
+            return
+
     # Lệnh (/... hoặc #ghichú)
     if text.startswith("/") or text.startswith("#"):
         _tg_dispatch_command(token, chat_id, msg, text, uid, frm); return
@@ -5717,7 +5800,8 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
             if trig in low: _tg_send(token, chat_id, rep); break
 
     # Tự động lọc — admin/chủ nhóm/Channel của nhóm được MIỄN (được gửi link, media…)
-    if get_setting("tg_mod_enabled", "0") != "1": return
+    # MẶC ĐỊNH BẬT (tắt bằng /modoff) — xoá vi phạm NGAY LẬP TỨC (~1 giây).
+    if get_setting("tg_mod_enabled", "1") != "1": return
     if _tg_is_privileged(token, chat_id, msg): return
     # Slow mode: xoá tin gửi quá nhanh (giãn cách tối thiểu)
     if _slowmode_hit(chat_id, uid):
@@ -5733,7 +5817,7 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
     if _tg_flood_hit(chat_id, uid): _kill("gửi tin dồn dập (flood)"); return
     bl = _tg_blacklist()
     if bl and any(w in low for w in bl): _kill("dùng từ cấm"); return
-    if (get_setting("tg_del_links", "0") == "1" or "link" in locks) and _tg_has_link(msg): _kill("gửi liên kết/spam"); return
+    if (get_setting("tg_del_links", "1") == "1" or "link" in locks) and _tg_has_link(msg): _kill("gửi liên kết/spam"); return
     if (get_setting("tg_del_stickers", "0") == "1" or "sticker" in locks) and msg.get("sticker"): _kill("gửi sticker"); return
     if (get_setting("tg_del_stickers", "0") == "1" or "gif" in locks) and msg.get("animation"): _kill("gửi ảnh động"); return
     if (get_setting("tg_del_photos", "0") == "1" or "photo" in locks) and msg.get("photo"): _kill("gửi hình ảnh"); return
@@ -5765,8 +5849,21 @@ def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, fr
         title = msg.get("chat", {}).get("title", "nhóm")
         if ac: _tg_send(token, ac, f"⚠️ Báo cáo từ nhóm <b>{title}</b> bởi {_tg_mention(frm)}.")
         _tg_send(token, chat_id, "⚠️ Đã báo cáo tới quản trị viên."); return
+    if cmd0 in ("help", "start", "menu"):
+        _tg_send_menu(token, chat_id, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇"); return
+    if cmd0 in ("rules", "luat"):
+        _tg_send(token, chat_id, get_setting("tg_rules", "Nhóm chưa đặt nội quy. Admin dùng /setrules để đặt.")); return
+    if cmd0 == "afk":
+        _r = text.split(maxsplit=1)
+        _reason = _r[1].strip()[:100] if len(_r) > 1 else ""
+        _tg_afk[uid] = (_reason, time.time())
+        _tg_send(token, chat_id, f"💤 {_tg_mention(frm)} giờ đang AFK{': ' + _reason if _reason else ''}."); return
+    if cmd0 == "id":
+        t = (msg.get("reply_to_message", {}).get("from") or {}).get("id")
+        _tg_send(token, chat_id, f"Chat ID: <code>{chat_id}</code>" + (f"\nUser: <code>{t}</code>" if t else "")); return
     # ---- Còn lại: chỉ ADMIN (hoặc admin ẩn danh / Channel của nhóm) ----
     if not _tg_is_privileged(token, chat_id, msg):
+        _tg_send(token, chat_id, "🔒 Lệnh này chỉ dành cho <b>quản trị viên</b> nhóm.")
         return
     # Ghi chú: #tên
     if text.startswith("#"):
@@ -5778,18 +5875,8 @@ def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, fr
     sp = text.split(maxsplit=1)
     args = sp[1] if len(sp) > 1 else ""
     # (đã kiểm tra quyền admin ở trên)
-    if cmd == "afk":
-        _tg_afk[uid] = (args.strip()[:100], time.time())
-        _tg_send(token, chat_id, f"💤 {_tg_mention(frm)} giờ đang AFK{': ' + args.strip() if args.strip() else ''}."); return
-    if cmd in ("rules", "luat"):
-        _tg_send(token, chat_id, get_setting("tg_rules", "Nhóm chưa đặt nội quy. Admin dùng /setrules để đặt.")); return
     if cmd == "get":
         _tg_send(token, chat_id, _tg_kv_get("tg_notes", chat_id, args.strip()) or "Không có ghi chú này."); return
-    if cmd == "id":
-        t = (msg.get("reply_to_message", {}).get("from") or {}).get("id")
-        _tg_send(token, chat_id, f"Chat ID: <code>{chat_id}</code>" + (f"\nUser: <code>{t}</code>" if t else "")); return
-    if cmd == "help" or cmd == "start" or cmd == "menu":
-        _tg_send_menu(token, chat_id, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇"); return
     _tg_admin_command(token, chat_id, msg, cmd, args)
 
 def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
@@ -5870,7 +5957,8 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                    "/del", "/purge", "/info", "/lock", "/unlock", "/locks", "/addbl", "/rmbl", "/blacklist",
                    "/filter", "/stop", "/filters", "/setrules", "/rules", "/clean", "/nightmode", "/antiflood",
                    "/captcha", "/autoreact", "/slowmode", "/log", "/diemdanh", "/top", "/report", "/save",
-                   "/clear", "/notes", "/id"}
+                   "/clear", "/notes", "/id", "/setwelcome", "/welcome", "/setwelcomebtn", "/setwelcomephoto",
+                   "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats"}
     if text.startswith("/") and text.split("@")[0].split()[0].lower() in _GROUP_CMDS:
         _tg_send(token, chat_id,
                  "🔧 Lệnh này dùng trong <b>NHÓM</b>, không chạy khi nhắn riêng bot.\n\n"
@@ -5891,9 +5979,9 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         elif text.startswith("/config"):
             _tg_send(token, admin_chat,
                      "⚙️ <b>Cấu hình bot</b>\n"
-                     f"Quản lý nhóm: {'BẬT' if get_setting('tg_mod_enabled','0')=='1' else 'tắt'}\n"
-                     f"Chống link: {'✓' if get_setting('tg_del_links','0')=='1' else '✗'} · "
-                     f"Antiflood: {'✓' if get_setting('tg_antiflood_on','0')=='1' else '✗'} · "
+                     f"Quản lý nhóm: {'BẬT' if get_setting('tg_mod_enabled','1')=='1' else 'tắt'}\n"
+                     f"Chống link: {'✓' if get_setting('tg_del_links','1')=='1' else '✗'} · "
+                     f"Antiflood: {'✓' if get_setting('tg_antiflood_on','1')=='1' else '✗'} · "
                      f"Captcha: {'✓' if get_setting('tg_captcha_on','0')=='1' else '✗'}\n"
                      f"AutoReact: {'✓' if get_setting('tg_autoreact_on','0')=='1' else '✗'} · "
                      f"Slowmode: {get_setting('tg_slowmode','0')}s · "
@@ -5966,6 +6054,10 @@ def _tg_register_commands(token: str) -> None:
         ("lock", "Khoá nội dung"), ("unlock", "Mở khoá"), ("locks", "Xem khoá"),
         ("addbl", "Thêm từ cấm"), ("filter", "Trả lời tự động"), ("save", "Lưu ghi chú"),
         ("setrules", "Đặt nội quy"), ("rules", "Xem nội quy"),
+        ("setwelcome", "Sửa lời chào TV mới"), ("welcome", "Bật/tắt chào mừng"),
+        ("setwelcomebtn", "Nút link lời chào"), ("setwelcomephoto", "Ảnh lời chào"),
+        ("setgoodbye", "Lời tạm biệt"), ("testwelcome", "Xem thử lời chào"),
+        ("modon", "BẬT kiểm duyệt nhóm"), ("modoff", "TẮT kiểm duyệt nhóm"),
         ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"), ("stats", "Thống kê"),
         ("slowmode", "Giãn cách gửi tin"), ("autoreact", "Tự thả cảm xúc"),
         ("report", "Báo cáo admin (reply)"),
@@ -5985,7 +6077,8 @@ def _tg_help_text(name: str = "") -> str:
             "<b>Quản trị (reply):</b> /ban /kick /mute [phút] /unmute /warn /unwarn /warns /pin /unpin /del /purge /info\n"
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
-            "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /log · /config\n"
+            "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
+            "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /log · /modon /modoff · /config\n"
             "🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /links · /cmds · /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast\n"
             "<b>Công khai:</b> /diemdanh · /top · /report · /id")
@@ -10058,8 +10151,8 @@ def _tg_bot_status() -> dict[str, Any]:
         "about": get_setting("tg_about", ""),
         "username": get_setting("tg_bot_username", ""),
         # Quản lý nhóm
-        "mod_enabled": get_setting("tg_mod_enabled", "0") == "1",
-        "del_links": get_setting("tg_del_links", "0") == "1",
+        "mod_enabled": get_setting("tg_mod_enabled", "1") == "1",
+        "del_links": get_setting("tg_del_links", "1") == "1",
         "del_stickers": get_setting("tg_del_stickers", "0") == "1",
         "del_photos": get_setting("tg_del_photos", "0") == "1",
         "warn_limit": int(get_setting("tg_warn_limit", "3") or 3),
@@ -10071,7 +10164,7 @@ def _tg_bot_status() -> dict[str, Any]:
         "goodbye_on": get_setting("tg_goodbye_on", "1") == "1",
         "goodbye": get_setting("tg_goodbye", "👋 Tạm biệt {name}, hẹn gặp lại!"),
         # Module nâng cao
-        "antiflood_on": get_setting("tg_antiflood_on", "0") == "1",
+        "antiflood_on": get_setting("tg_antiflood_on", "1") == "1",
         "antiflood_max": int(get_setting("tg_antiflood_max", "6") or 6),
         "clean_service": get_setting("tg_clean_service", "0") == "1",
         "captcha_on": get_setting("tg_captcha_on", "0") == "1",
