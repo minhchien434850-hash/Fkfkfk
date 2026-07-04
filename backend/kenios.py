@@ -6479,6 +6479,76 @@ def _tg_log(token: str, text: str) -> None:
     lc = get_setting("tg_log_chat", "").strip()
     if lc: _tg_send(token, lc, "📋 " + text)
 
+def _tg_send_photo(token: str, chat_id, photo_url: str, caption: str, buttons: Optional[list] = None) -> None:
+    params = {"chat_id": chat_id, "photo": photo_url, "caption": caption, "parse_mode": "HTML"}
+    if buttons: params["reply_markup"] = {"inline_keyboard": buttons}
+    r = _tg_call(token, "sendPhoto", **params)
+    if not r.get("ok"):   # ảnh lỗi → gửi chữ để không mất lời chào
+        _tg_send(token, chat_id, caption, buttons=buttons)
+
+def _tg_users_touch(uid) -> None:
+    if not uid: return
+    now = int(time.time())
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_users(user_id INTEGER PRIMARY KEY,last_seen INTEGER)")
+        if c.execute("SELECT 1 FROM tg_users WHERE user_id=?", (uid,)).fetchone():
+            c.execute("UPDATE tg_users SET last_seen=? WHERE user_id=?", (now, uid))
+        else:
+            c.execute("INSERT INTO tg_users(user_id,last_seen) VALUES(?,?)", (uid, now))
+
+def _tg_users_month() -> int:
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_users(user_id INTEGER PRIMARY KEY,last_seen INTEGER)")
+        r = c.execute("SELECT COUNT(*) n FROM tg_users WHERE last_seen>?", (int(time.time()) - 30 * 86400,)).fetchone()
+    return r["n"] if r else 0
+
+def _tg_start_menu() -> list:
+    return [[{"text": "📚 Hướng dẫn đầy đủ", "callback_data": "guide"}],
+            [{"text": "🛡️ Lệnh quản lý", "callback_data": "cmds"},
+             {"text": "🎵 Lấy nhạc", "callback_data": "music"}],
+            [{"text": "💬 Hỗ trợ", "callback_data": "support"},
+             {"text": "ℹ️ Giới thiệu", "callback_data": "about"}]]
+
+def _tg_send_audio(token: str, chat_id, filepath: str, title: str = "") -> bool:
+    import httpx
+    try:
+        with open(filepath, "rb") as f:
+            r = httpx.post(f"https://api.telegram.org/bot{token}/sendAudio",
+                           data={"chat_id": str(chat_id), "title": title[:60], "caption": "🎵 KENIOS Bot"},
+                           files={"audio": (title or "audio.mp3", f, "audio/mpeg")}, timeout=600)
+        return r.json().get("ok", False)
+    except Exception as e:
+        log.warning("sendAudio lỗi: %s", e); return False
+
+def _tg_music(token: str, chat_id, url: str) -> None:
+    """Tải nhạc từ YouTube/TikTok (yt-dlp) rồi gửi dạng audio — Telegram phát nền khi thoát app."""
+    import subprocess, tempfile, shutil, glob
+    if not shutil.which("yt-dlp"):
+        _tg_send(token, chat_id, "Máy chủ chưa cài yt-dlp. Chạy lại capnhat-vps.sh."); return
+    if not (url.startswith("http://") or url.startswith("https://")):
+        _tg_send(token, chat_id, "Cú pháp: /nhac <link YouTube hoặc TikTok>"); return
+    _tg_send(token, chat_id, "⏬ Đang tải nhạc, chờ chút...")
+    d = tempfile.mkdtemp(prefix="tgmusic_")
+    try:
+        subprocess.run(["yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist",
+                        "--add-metadata", "-o", os.path.join(d, "a.%(ext)s"), url],
+                       capture_output=True, text=True, timeout=600)
+        files = glob.glob(os.path.join(d, "a.*"))
+        if not files:
+            _tg_send(token, chat_id, "Không tải được nhạc từ link này."); return
+        fp = files[0]
+        if os.path.getsize(fp) > 49 * 1024 * 1024:
+            _tg_send(token, chat_id, "🎵 Bài quá lớn (>50MB). Telegram Bot giới hạn 50MB/tệp — hãy chọn bài ngắn hơn."); return
+        title = os.path.splitext(os.path.basename(fp))[0]
+        if not _tg_send_audio(token, chat_id, fp, title):
+            _tg_send(token, chat_id, "Gửi nhạc thất bại.")
+    except subprocess.TimeoutExpired:
+        _tg_send(token, chat_id, "Tải nhạc quá lâu, đã dừng.")
+    except Exception:
+        _tg_send(token, chat_id, "Lỗi khi tải nhạc.")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
 def _tg_kv_set(table: str, chat_id, key: str, val: str) -> None:
     cid = str(chat_id); k = key.lower()
     with db() as c:
