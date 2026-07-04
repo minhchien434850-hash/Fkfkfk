@@ -7153,14 +7153,14 @@ h2{font-size:16px;margin:16px 4px 8px;font-weight:800}
 .chip .am{font-size:15px;font-weight:800;color:#fff}
 .chip:disabled{opacity:.45}
 .hero{border-radius:18px;overflow:hidden;margin:14px 0 4px;border:1px solid var(--line);background:linear-gradient(135deg,#243b7a,#3a2170)}
-.hero img.bn{width:100%;display:block;max-height:170px;object-fit:cover}
+.hero img,.hero video{width:100%;display:block;max-height:190px;object-fit:cover}
 .hero .hb{padding:18px 16px}
 .hero h1{font-size:22px;font-weight:900;margin-bottom:6px}
 .hero .hb p{font-size:13px;color:#dbe2f2}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:6px}
 .tile{position:relative;border-radius:15px;overflow:hidden;aspect-ratio:1/1;border:1px solid var(--line);padding:0;
   background:linear-gradient(135deg,var(--card),var(--card2));display:flex;align-items:flex-end;text-align:left}
-.tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.tile img,.tile video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .tile .nm{position:relative;width:100%;padding:10px 11px;font-weight:800;font-size:13.5px;z-index:2;color:#fff;
   background:linear-gradient(transparent,rgba(0,0,0,.82))}
 .tile .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:34px;opacity:.55}
@@ -7277,8 +7277,24 @@ async function loadStore(){
     applyBranding(cfg);
   }catch(e){}
 }
-function m1(m){return (m&&m.length&&m[0]&&m[0].url)||''}
+// Chuẩn hoá link media: đưa MỌI ảnh/video của máy chủ KENIOS về CÙNG origin HTTPS,
+// để trang HTTPS không bị chặn nội dung http:// (IP cũ 103.131.56.11 …) → ảnh/video hiện lại.
+function fixUrl(u){
+  if(!u) return '';
+  u=(''+u).trim();
+  if(!u || u.startsWith('/') || u.startsWith('data:') || u.startsWith('blob:')) return u;
+  try{
+    const p=new URL(u);
+    if(p.hostname==='103.131.56.11' || p.hostname.endsWith('kenios.store')
+       || p.pathname.startsWith('/media') || p.pathname.startsWith('/store') || p.pathname.startsWith('/uploads'))
+      return p.pathname + p.search;         // cùng máy chủ → dùng đường dẫn tương đối (HTTPS hiện tại)
+    if(p.protocol==='http:'){ p.protocol='https:'; return p.href; }   // ngoài: thử nâng HTTPS
+    return u;
+  }catch(e){ return u; }
+}
+function m1(m){return fixUrl((m&&m.length&&m[0]&&m[0].url)||'')}
 function mediaEl(url,type){
+  url=fixUrl(url);
   if(!url) return '';
   const vid=(type==='video')||/\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
   return vid?'<video src="'+h(url)+'" autoplay muted loop playsinline></video>':'<img src="'+h(url)+'">';
@@ -7305,14 +7321,21 @@ function statsHtml(){
     +'<div class="stat"><div class="n">'+f(s)+'</div><div class="l">Đã bán</div></div>'
     +'<div class="stat"><div class="n">'+f(r)+'</div><div class="l">Đánh giá</div></div></div>';
 }
+function mediaThumb(url,cls){
+  if(!url) return '';
+  const c=cls?(' class="'+cls+'"'):'';
+  const vid=/\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
+  return vid?'<video'+c+' src="'+h(url)+'" autoplay muted loop playsinline></video>'
+           :'<img'+c+' loading="lazy" src="'+h(url)+'">';
+}
 function tile(onclick,name,url,emoji){
-  const img=url?'<img loading="lazy" src="'+h(url)+'">':'<div class="ph">'+emoji+'</div>';
+  const img=url?mediaThumb(url):'<div class="ph">'+emoji+'</div>';
   return '<button class="tile" onclick="'+onclick+'">'+img+'<div class="nm">'+h(name)+'</div></button>';
 }
 function heroHtml(){
   const t=((CFG.hero_title||'').trim())||CFG.logo_name||'KENIOS Store';
   const s=((CFG.hero_subtitle||'').trim())||((CFG.slogan||'').trim())||'Cửa hàng sản phẩm số · key · tải về';
-  const bn=CFG.banner_url?'<img class="bn" src="'+h(CFG.banner_url)+'">':'';
+  const bn=CFG.banner_url?mediaEl(CFG.banner_url,CFG.banner_type):'';
   return '<div class="hero">'+bn+'<div class="hb"><h1>'+h(t)+'</h1><p>'+h(s)+'</p></div></div>';
 }
 function renderShop(){
@@ -7430,7 +7453,7 @@ function renderProds(){
 function backCat(){ NAV={lvl:'cat'}; renderCats(); }
 function backFolder(){ NAV={lvl:'folder',cat:NAV.cat}; renderFolders(); }
 function card(p){
-  const u=m1(p.media); const img=u?'<img class="pimg" loading="lazy" src="'+h(u)+'">':'';
+  const u=m1(p.media); const img=u?mediaThumb(u,'pimg'):'';
   const stock=p.available_keys>0?'<span class="stock ok">Còn '+p.available_keys+' key</span>':'<span class="stock no">Hết hàng</span>';
   let chips='<div class="prices">';
   (p.prices||[]).forEach(pr=>{
