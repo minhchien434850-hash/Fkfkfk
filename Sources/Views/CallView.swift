@@ -44,6 +44,18 @@ final class ScreenShareCapture {
     func markActive() { active = true }
 }
 
+// Nút hệ thống chọn chia sẻ TOÀN BỘ màn hình (mở Broadcast Extension của KENIOS).
+struct BroadcastPickerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
+        let v = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
+        v.preferredExtension = "com.kenios.codebox.broadcast"
+        v.showsMicrophoneButton = false
+        for sub in v.subviews { (sub as? UIButton)?.imageView?.tintColor = .white }
+        return v
+    }
+    func updateUIView(_ uiView: RPSystemBroadcastPickerView, context: Context) {}
+}
+
 // ============================================================================
 //  Gọi thoại / video giữa bạn bè — relay khung hình + âm thanh qua máy chủ.
 //  Video có BỘ LỌC LÀM ĐẸP (mịn da, sáng, hồng) + nhiều HIỆU ỨNG, áp trực tiếp
@@ -368,6 +380,7 @@ final class CallSession: ObservableObject {
         phase = .active
         statusText = ""
         startedAt = Date()
+        writeBroadcastConfig()   // để Broadcast Extension biết cuộc gọi nào mà đẩy khung hình
         if isVideo { startCamera() }
         startAudio()
         // Gửi/nhận khung hình (capture giá trị cục bộ vì closure chạy trên luồng camera)
@@ -465,9 +478,21 @@ final class CallSession: ObservableObject {
         ended = true
         stopRing()
         screenCap.stop()
+        clearBroadcastConfig()
         timers.forEach { $0.invalidate() }; timers.removeAll()
         camera.stop(); audio.stop()
         onClose()
+    }
+
+    // App Group: ghi/xoá cuộc gọi hiện hành để Broadcast Extension (chia sẻ toàn máy) dùng.
+    private func writeBroadcastConfig() {
+        guard let ud = UserDefaults(suiteName: "group.com.kenios.codebox") else { return }
+        ud.set(callId, forKey: "call_id")
+        ud.set(api.token ?? "", forKey: "token")
+        ud.set(api.root, forKey: "base")
+    }
+    private func clearBroadcastConfig() {
+        UserDefaults(suiteName: "group.com.kenios.codebox")?.removeObject(forKey: "call_id")
     }
 
     // MARK: - Chuông cuộc gọi (đổ chuông khi đang gọi / có cuộc gọi đến)
@@ -668,10 +693,15 @@ struct CallScreen: View {
                 ctrl(session.cameraOn ? "video.fill" : "video.slash.fill", .white) { session.toggleCamera() }
                 ctrl("arrow.triangle.2.circlepath.camera.fill", .white) { session.flipCamera() }
                 if session.phase == .active {
+                    // Chia sẻ màn hình app KENIOS
                     ctrl("rectangle.on.rectangle", session.screenSharing ? .green : .white,
                          bg: session.screenSharing ? Color.green.opacity(0.25) : .white.opacity(0.18)) {
                         session.toggleScreenShare()
                     }
+                    // Chia sẻ TOÀN BỘ màn hình máy (mọi app) — nút hệ thống
+                    BroadcastPickerView()
+                        .frame(width: 56, height: 56)
+                        .background(.white.opacity(0.18)).clipShape(Circle())
                 }
             }
             ctrl(session.speakerOn ? "speaker.wave.2.fill" : "speaker.fill", .white) { session.toggleSpeaker() }

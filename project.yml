@@ -62,4 +62,40 @@ targets:
         CODE_SIGNING_REQUIRED: NO
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGN_IDENTITY: ""
+    dependencies:
+      - target: KENIOSBroadcast
+        embed: true
+
+  # Broadcast Upload Extension — chia sẻ TOÀN BỘ màn hình máy khi gọi video
+  KENIOSBroadcast:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: BroadcastExtension
+    info:
+      path: BroadcastExtension/Info.plist
+      properties:
+        CFBundleDisplayName: KENIOS Screen
+        CFBundleName: KENIOSBroadcast
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).SampleHandler"
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
+    entitlements:
+      path: BroadcastExtension/Broadcast.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kenios.codebox.broadcast
+        MARKETING_VERSION: "3.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: NO
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGN_IDENTITY: ""
     dependencies: []
