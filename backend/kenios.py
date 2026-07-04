@@ -5009,6 +5009,63 @@ def _tg_send_photo_or_text(token: str, chat_id, text: str, buttons=None) -> None
             return
     _tg_send(token, chat_id, text, buttons=buttons)
 
+# ---------- Menu NÚT BẤM (reply keyboard) như Liễu Như Yên ----------
+def _tg_reply_menu() -> dict:
+    rows = [
+        ["🎵 Lấy nhạc", "📊 Thống kê"],
+        ["🛡️ Quản trị nhóm", "🔒 Khoá nội dung"],
+        ["🧹 Lọc & Chống spam", "🎉 Chào mừng"],
+        ["ℹ️ Giới thiệu", "💬 Hỗ trợ"],
+        ["📚 Hướng dẫn đầy đủ"],
+        ["🏠 Menu", "❌ Đóng"],
+    ]
+    return {"keyboard": [[{"text": b} for b in r] for r in rows], "resize_keyboard": True}
+
+def _tg_send_menu(token, chat_id, text, photo_first=False) -> None:
+    kb = _tg_reply_menu()
+    photo = get_setting("tg_welcome_photo", "").strip()
+    if photo_first and photo:
+        r = _tg_call(token, "sendPhoto", chat_id=chat_id, photo=photo, caption=text,
+                     parse_mode="HTML", reply_markup=kb)
+        if r.get("ok"):
+            return
+    _tg_call(token, "sendMessage", chat_id=chat_id, text=text, parse_mode="HTML",
+             disable_web_page_preview=True, reply_markup=kb)
+
+def _tg_menu_click(token, chat_id, text) -> bool:
+    """Xử lý khi bấm nút trên menu (reply keyboard). Trả True nếu đã xử lý."""
+    t = (text or "").strip()
+    if t in ("🏠 Menu", "/menu", "menu"):
+        _tg_send_menu(token, chat_id, "🏠 <b>MENU KENIOS</b> — chọn mục bên dưới 👇"); return True
+    if t == "❌ Đóng":
+        _tg_call(token, "sendMessage", chat_id=chat_id, text="Đã đóng menu. Gõ /menu để mở lại.",
+                 reply_markup={"remove_keyboard": True}); return True
+    if t == "🎵 Lấy nhạc":
+        _tg_send(token, chat_id, "🎵 Gửi: <code>/nhac &lt;tên bài hoặc link YouTube/TikTok&gt;</code>\n"
+                 "VD: <code>/nhac Sơn Tùng</code>"); return True
+    if t == "📊 Thống kê":
+        _tg_send(token, chat_id, f"👥 <b>{_tg_monthly():,}</b> người dùng bot trong 30 ngày.".replace(",", ".")); return True
+    if t == "📚 Hướng dẫn đầy đủ":
+        _tg_send(token, chat_id, _tg_help_text()); return True
+    if t == "🛡️ Quản trị nhóm":
+        _tg_send(token, chat_id, "🛡️ <b>Quản trị nhóm</b> (dùng TRONG NHÓM, bot là admin):\n"
+                 "/ban · /kick · /mute [phút] · /unmute · /warn · /warns · /pin · /unpin · /del · /purge · /info\n"
+                 "💡 Nhiều lệnh cần <b>reply</b> vào tin của thành viên rồi gõ lệnh."); return True
+    if t == "🔒 Khoá nội dung":
+        _tg_send(token, chat_id, "🔒 <b>Khoá nội dung</b> (trong nhóm):\n"
+                 "/lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks"); return True
+    if t == "🧹 Lọc & Chống spam":
+        _tg_send(token, chat_id, "🧹 <b>Lọc &amp; chống spam</b> (trong nhóm):\n"
+                 "/addbl · /rmbl · /blacklist · /filter · /filters · /antiflood · /slowmode [giây] · /captcha · /clean · /nightmode"); return True
+    if t == "🎉 Chào mừng":
+        _tg_send(token, chat_id, "🎉 <b>Chào mừng &amp; nội quy</b> (trong nhóm):\n"
+                 "/setrules · /rules. Bật lời chào thành viên mới trong app: Quản trị → Bot Telegram."); return True
+    if t == "ℹ️ Giới thiệu":
+        _tg_send(token, chat_id, get_setting("tg_about", "KENIOS — nền tảng ứng dụng & cửa hàng số. Gõ /start để mở menu.")); return True
+    if t == "💬 Hỗ trợ":
+        _tg_send(token, chat_id, "✍️ Bạn cứ nhắn nội dung cần hỗ trợ ngay đây, đội ngũ KENIOS sẽ trả lời sớm nhất."); return True
+    return False
+
 # ---------- Tiện ích quản lý nhóm ----------
 _tg_admins_cache: dict = {}   # chat_id -> (ts, set(user_id admin))
 
@@ -5505,6 +5562,10 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     text = msg.get("text", "") or msg.get("caption", "") or "[media]"
     frm = msg.get("from", {})
     name = _tg_name(frm)
+    _tg_track(frm)   # đếm người dùng bot mỗi tháng
+    # Bấm nút trên menu (reply keyboard) → xử lý ngay
+    if _tg_menu_click(token, chat_id, text):
+        return
     # Lệnh QUẢN LÝ NHÓM gõ trong chat riêng → nhắc: chỉ chạy trong nhóm (tránh "im lặng tưởng lỗi").
     _GROUP_CMDS = {"/ban", "/kick", "/mute", "/unmute", "/warn", "/unwarn", "/warns", "/pin", "/unpin",
                    "/del", "/purge", "/info", "/lock", "/unlock", "/locks", "/addbl", "/rmbl", "/blacklist",
@@ -5551,7 +5612,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         wel = get_setting("tg_welcome", default_wel)
         wel = wel.replace("{name}", name).replace("{botname}", botname)
         wel += f"\n\n👥 <b>{_tg_monthly():,}</b> người dùng mỗi tháng".replace(",", ".")
-        _tg_send_photo_or_text(token, chat_id, wel, buttons=_tg_menu_buttons())
+        _tg_send_menu(token, chat_id, wel, photo_first=True)
         return
     if admin_chat:
         _tg_send(token, admin_chat,
