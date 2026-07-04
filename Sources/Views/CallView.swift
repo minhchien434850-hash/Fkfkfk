@@ -272,6 +272,7 @@ final class CallSession: ObservableObject {
     private var lastAudioSeq = 0
     private var startedAt: Date?
     private var ended = false
+    private var ringPlayer: AVAudioPlayer?
 
     init(callId: String, peerName: String, isVideo: Bool, isCaller: Bool,
          api: APIClient, onClose: @escaping () -> Void) {
@@ -286,6 +287,7 @@ final class CallSession: ObservableObject {
     // Người gọi bắt đầu chờ máy; người nhận đợi bấm "Nghe".
     func begin() {
         if isVideo { startCamera() }
+        startRing()   // đổ chuông cuộc gọi (cả người gọi lẫn người nhận) đến khi nghe/kết thúc
         // Poll trạng thái để biết đối phương nghe/từ chối/kết thúc.
         addTimer(1.0) { [weak self] in Task { await self?.pollState() } }
         // Hết giờ đổ chuông (chỉ khi vẫn đang chờ máy)
@@ -320,6 +322,7 @@ final class CallSession: ObservableObject {
 
     private func goActive() {
         guard phase == .ringing else { return }
+        stopRing()   // ngừng chuông khi đã kết nối
         phase = .active
         statusText = ""
         startedAt = Date()
@@ -383,6 +386,7 @@ final class CallSession: ObservableObject {
 
     private func endLocalAndClose() {
         guard !ended else { return }
+        stopRing()
         phase = .ended
         // để người dùng thấy trạng thái 1 nhịp rồi đóng
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.close() }
@@ -391,9 +395,33 @@ final class CallSession: ObservableObject {
     private func close() {
         guard !ended else { return }
         ended = true
+        stopRing()
         timers.forEach { $0.invalidate() }; timers.removeAll()
         camera.stop(); audio.stop()
         onClose()
+    }
+
+    // MARK: - Chuông cuộc gọi (đổ chuông khi đang gọi / có cuộc gọi đến)
+    private func startRing() {
+        guard ringPlayer == nil else { return }
+        // Mẫu chuông: 2 nốt ngân rồi nghỉ, lặp lại.
+        let pattern: [(Double, Double)] = [(784, 0.25), (988, 0.28), (0, 0.15),
+                                           (784, 0.25), (988, 0.28), (0, 1.4)]
+        guard let data = NotifSoundSynth.makeWAV(pattern) else { return }
+        do {
+            try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+            try? AVAudioSession.sharedInstance().setActive(true)
+            let p = try AVAudioPlayer(data: data)
+            p.numberOfLoops = -1
+            p.volume = 1.0
+            p.prepareToPlay()
+            p.play()
+            ringPlayer = p
+        } catch { ringPlayer = nil }
+    }
+    private func stopRing() {
+        ringPlayer?.stop()
+        ringPlayer = nil
     }
 
     private func addTimer(_ interval: TimeInterval, _ block: @escaping @MainActor () -> Void) {
@@ -482,19 +510,27 @@ struct CallScreen: View {
         .background(Color.black.ignoresSafeArea())
     }
 
-    // Giao diện gọi thoại hoặc đang đổ chuông
+    // Giao diện gọi thoại hoặc đang đổ chuông (video → hiện CAMERA của mình làm nền)
     private var audioOrRinging: some View {
-        ZStack {
-            LinearGradient(colors: [Theme.accent.opacity(0.9), .purple.opacity(0.8), .black],
-                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
-            VStack(spacing: 18) {
-                Spacer()
+        let showCam = session.isVideo && session.cameraOn
+        return ZStack {
+            if showCam {
+                LocalPreview(camera: session.camera).ignoresSafeArea()
+                LinearGradient(colors: [.black.opacity(0.5), .clear, .black.opacity(0.55)],
+                               startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            } else {
+                LinearGradient(colors: [Theme.accent.opacity(0.9), .purple.opacity(0.8), .black],
+                               startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            }
+            VStack(spacing: 14) {
+                if showCam { Spacer().frame(height: 50) } else { Spacer() }
                 ZStack {
-                    Circle().fill(.white.opacity(0.15)).frame(width: 130, height: 130)
+                    Circle().fill(.white.opacity(0.15))
+                        .frame(width: showCam ? 84 : 130, height: showCam ? 84 : 130)
                     Text(String(session.peerName.prefix(1)).uppercased())
-                        .font(.system(size: 54, weight: .bold)).foregroundStyle(.white)
+                        .font(.system(size: showCam ? 36 : 54, weight: .bold)).foregroundStyle(.white)
                 }
-                Text(session.peerName).font(.title.bold()).foregroundStyle(.white)
+                Text(session.peerName).font(showCam ? .title2.bold() : .title.bold()).foregroundStyle(.white)
                 Text(session.phase == .active ? session.durationText
                      : (session.statusText.isEmpty ? (session.isVideo ? "Cuộc gọi video" : "Cuộc gọi thoại") : session.statusText))
                     .font(.headline).foregroundStyle(.white.opacity(0.9))
