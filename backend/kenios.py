@@ -5859,13 +5859,46 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
                  "Lệnh: /ban /kick /mute /unmute /warn /warns /pin /purge /del /lock /unlock /addbl /filter /save /setrules /clean /nightmode /antiflood /captcha")
 
 def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
+    import threading as _thr
     frm = msg.get("from", {}); uid = frm.get("id")
     text = msg.get("text", "") or ""
     mid = msg.get("message_id")
+    low = text.lower()
     _tg_groups.add(chat_id)
 
+    # ============ 1) KIỂM DUYỆT TRƯỚC TIÊN — xoá NGAY, không chờ gì khác ============
+    # (Trước đây bot thả cảm xúc/đếm tin TRƯỚC rồi mới kiểm duyệt → mỗi tin tốn thêm
+    #  1 lệnh API ~0,5s, spam dồn hàng đợi nên xoá trễ. Giờ xoá là việc ĐẦU TIÊN;
+    #  cảnh báo gửi ở thread nền để vòng lặp xử lý ngay tin kế tiếp.)
+    if get_setting("tg_mod_enabled", "1") == "1" and not (
+            _tg_is_privileged(token, chat_id, msg) and get_setting("tg_mod_admins", "0") != "1"):
+        is_cmd = text.startswith("/") or text.startswith("#")
+
+        def _kill(reason, warn=True):
+            _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid)
+            if warn:
+                _thr.Thread(target=_tg_warn, args=(token, chat_id, frm, reason), daemon=True).start()
+            return True
+
+        if _tg_in_night() and _kill("", warn=False): return
+        if _slowmode_hit(chat_id, uid) and _kill("", warn=False): return
+        if _tg_flood_hit(chat_id, uid) and _kill("gửi tin dồn dập (flood)"): return
+        if not is_cmd:   # lệnh bot không bị xét từ cấm/link/media
+            bl = _tg_blacklist()
+            if bl and any(w in low for w in bl) and _kill("dùng từ cấm"): return
+            locks = _tg_locks()
+            if (get_setting("tg_del_links", "1") == "1" or "link" in locks) and _tg_has_link(msg) and _kill("gửi liên kết/spam"): return
+            if (get_setting("tg_del_stickers", "0") == "1" or "sticker" in locks) and msg.get("sticker") and _kill("gửi sticker"): return
+            if (get_setting("tg_del_stickers", "0") == "1" or "gif" in locks) and msg.get("animation") and _kill("gửi ảnh động"): return
+            if (get_setting("tg_del_photos", "0") == "1" or "photo" in locks) and msg.get("photo") and _kill("gửi hình ảnh"): return
+            if "video" in locks and msg.get("video") and _kill("gửi video"): return
+            if "forward" in locks and (msg.get("forward_from") or msg.get("forward_origin") or msg.get("forward_sender_name")) and _kill("chuyển tiếp"): return
+            if "mention" in locks and _tg_has_mention(msg) and _kill("tag/mention"): return
+            if "all" in locks and _kill("", warn=False): return
+
+    # ============ 2) Tin đã "sạch" → tiện ích, menu, lệnh ============
     # AFK: người đang AFK nhắn lại → chào trở lại
-    if uid in _tg_afk and not text.lower().startswith("/afk"):
+    if uid in _tg_afk and not low.startswith("/afk"):
         _tg_afk.pop(uid, None)
         _tg_send(token, chat_id, f"🎉 {_tg_mention(frm)} đã quay lại!")
     reply = msg.get("reply_to_message") or {}
@@ -5886,46 +5919,18 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
                          lambda: _tg_dispatch_command(token, chat_id, msg, text, uid, frm))
         return
 
-    low = text.lower()
-    # FameRank: đếm tin nhắn · AutoReact: tự thả cảm xúc
+    # FameRank: đếm tin nhắn · AutoReact: thả cảm xúc (chạy NỀN — không chặn vòng lặp)
     if uid:
         _msgcount_inc(chat_id, uid, _tg_name(frm))
     if get_setting("tg_autoreact_on", "0") == "1" and mid:
-        _tg_call(token, "setMessageReaction", chat_id=chat_id, message_id=mid,
-                 reaction=[{"type": "emoji", "emoji": get_setting("tg_autoreact_emoji", "👍")}])
+        _thr.Thread(target=_tg_call, args=(token, "setMessageReaction"),
+                    kwargs={"chat_id": chat_id, "message_id": mid,
+                            "reaction": [{"type": "emoji", "emoji": get_setting("tg_autoreact_emoji", "👍")}]},
+                    daemon=True).start()
     # Bộ lọc auto-reply (mọi người)
     if text:
         for trig, rep in _tg_kv_all("tg_filters", chat_id):
             if trig in low: _tg_send(token, chat_id, rep); break
-
-    # Tự động lọc — admin/chủ nhóm/Channel của nhóm được MIỄN (được gửi link, media…)
-    # MẶC ĐỊNH BẬT (tắt bằng /modoff) — xoá vi phạm NGAY LẬP TỨC (~1 giây).
-    # /modadmin on → kiểm duyệt CẢ ADMIN (spam/link của admin cũng bị xoá).
-    if get_setting("tg_mod_enabled", "1") != "1": return
-    if _tg_is_privileged(token, chat_id, msg) and get_setting("tg_mod_admins", "0") != "1":
-        return
-    # Slow mode: xoá tin gửi quá nhanh (giãn cách tối thiểu)
-    if _slowmode_hit(chat_id, uid):
-        _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid); return
-    locks = _tg_locks()
-
-    def _kill(reason):
-        _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid)
-        _tg_warn(token, chat_id, frm, reason)
-
-    if _tg_in_night():
-        _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid); return
-    if _tg_flood_hit(chat_id, uid): _kill("gửi tin dồn dập (flood)"); return
-    bl = _tg_blacklist()
-    if bl and any(w in low for w in bl): _kill("dùng từ cấm"); return
-    if (get_setting("tg_del_links", "1") == "1" or "link" in locks) and _tg_has_link(msg): _kill("gửi liên kết/spam"); return
-    if (get_setting("tg_del_stickers", "0") == "1" or "sticker" in locks) and msg.get("sticker"): _kill("gửi sticker"); return
-    if (get_setting("tg_del_stickers", "0") == "1" or "gif" in locks) and msg.get("animation"): _kill("gửi ảnh động"); return
-    if (get_setting("tg_del_photos", "0") == "1" or "photo" in locks) and msg.get("photo"): _kill("gửi hình ảnh"); return
-    if "video" in locks and msg.get("video"): _kill("gửi video"); return
-    if "forward" in locks and (msg.get("forward_from") or msg.get("forward_origin") or msg.get("forward_sender_name")): _kill("chuyển tiếp"); return
-    if "mention" in locks and _tg_has_mention(msg): _kill("tag/mention"); return
-    if "all" in locks: _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid); return
 
 def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, frm: dict) -> None:
     cmd0 = text.split()[0].lstrip("/#").split("@")[0].lower() if text.split() else ""
