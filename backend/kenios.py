@@ -5476,7 +5476,7 @@ def _tg_fun_command(token, chat_id, msg, cmd, args) -> bool:
     return _tg_game_command(token, chat_id, msg, cmd, args)
 
 # ============================================================================
-#  🃏 GAME BÀI & 🧠 ĐỐ VUI CÓ ĐIỂM (~700 câu, 7 thể loại)
+#  🃏 GAME BÀI & 🧠 ĐỐ VUI CÓ ĐIỂM (~1080 câu, 20+ thể loại)
 #  Trả lời đúng: +10 điểm + lời chúc mừng · /diemdo — bảng vàng
 # ============================================================================
 _TG_CONGRATS = [
@@ -6454,7 +6454,216 @@ _TG_RESERVED = {
     "danhgia", "tinh", "qr", "thoitiet", "giacoin", "tygia", "dich", "nhacnho", "binhchon",
     "poll", "gio", "dem", "password",
     "dovui", "goiy", "boqua", "dungdo", "diemdo", "baicao", "xidach", "rut", "dan", "baucua",
+    # 🤖 Trợ lý AI
+    "ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp",
 }
+
+# ======================== 🤖 Trợ lý AI trong bot (bật/tắt bằng /ai) ========================
+def _ai_cfg():
+    """Trả về (provider, base_url, model, key). Tự đoán nhà cung cấp theo khoá nếu chưa đặt.
+    Mặc định dùng Groq (OpenAI-compatible, có bậc MIỄN PHÍ) — admin chỉ cần dán khoá."""
+    key = (get_setting("tg_ai_key", "") or os.getenv("AI_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
+           or os.getenv("OPENAI_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")).strip()
+    prov = (get_setting("tg_ai_provider", "") or "").strip().lower()
+    base = (get_setting("tg_ai_base", "") or "").strip().rstrip("/")
+    model = (get_setting("tg_ai_model", "") or "").strip()
+    if not prov:
+        prov = "anthropic" if key.startswith("sk-ant") else "openai"
+    if not base:
+        base = "https://api.anthropic.com/v1" if prov == "anthropic" else "https://api.groq.com/openai/v1"
+    if not model:
+        model = "claude-3-5-sonnet-latest" if prov == "anthropic" else "llama-3.3-70b-versatile"
+    return prov, base, model, key
+
+def _ai_answer(question: str) -> str:
+    """Gọi API AI trả lời 1 câu hỏi (chạy trong thread nền — KHÔNG chặn vòng lặp bot)."""
+    prov, base, model, key = _ai_cfg()
+    if not key:
+        return ("⚠️ Chưa cấu hình khoá AI.\n\n"
+                "Admin lấy khoá MIỄN PHÍ tại https://console.groq.com (Create API Key), rồi nhắn RIÊNG cho bot:\n"
+                "/aikey KHOÁ_CỦA_BẠN\n\n"
+                "Muốn dùng AI khác (OpenAI/DeepSeek/OpenRouter): /aiprovider openai · /aiurl <base> · /aimodel <model> · /aikey <key>")
+    q = (question or "").strip()[:4000]
+    if not q:
+        return "✍️ Bạn hãy nhập câu hỏi."
+    system = ("Bạn là trợ lý AI thông minh tên 'TRẦN MINH CHIẾN' trong nhóm Telegram. "
+              "Trả lời bằng TIẾNG VIỆT, chính xác, gọn gàng, dễ hiểu. Giải được toán khó, lập trình, "
+              "khoa học và kiến thức nâng cao. Với bài toán: trình bày ngắn gọn các bước rồi nêu ĐÁP SỐ rõ ràng. "
+              "Không bịa đặt. Trả lời trong khoảng 3000 ký tự.")
+    try:
+        import httpx as _hx
+        if prov == "anthropic":
+            r = _hx.post(base + "/messages", timeout=90,
+                         headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                         json={"model": model, "max_tokens": 1600, "system": system,
+                               "messages": [{"role": "user", "content": q}]})
+            if r.status_code >= 400:
+                return f"⚠️ AI báo lỗi {r.status_code}: {r.text[:300]}"
+            d = r.json()
+            return "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip() or "(AI không trả lời)"
+        r = _hx.post(base + "/chat/completions", timeout=90,
+                     headers={"Authorization": "Bearer " + key, "content-type": "application/json"},
+                     json={"model": model, "temperature": 0.4, "max_tokens": 1600,
+                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": q}]})
+        if r.status_code >= 400:
+            return f"⚠️ AI báo lỗi {r.status_code}: {r.text[:300]}"
+        d = r.json()
+        return ((d.get("choices") or [{}])[0].get("message", {}).get("content", "") or "").strip() or "(AI không trả lời)"
+    except Exception as e:
+        return f"⚠️ Không gọi được AI: {e}"
+
+def _ai_split(t: str, n: int = 3800) -> list:
+    """Chia câu trả lời dài theo giới hạn 4096 ký tự của Telegram."""
+    t = t or ""
+    out = []
+    while len(t) > n:
+        cut = t.rfind("\n", 0, n)
+        if cut < n // 2:
+            cut = n
+        out.append(t[:cut]); t = t[cut:]
+    if t:
+        out.append(t)
+    return out or ["(trống)"]
+
+def _tg_ai_is_on(chat_id) -> bool:
+    return get_setting("tg_ai_on_" + str(chat_id), "0") == "1"
+
+def _tg_ai_set(chat_id, on: bool) -> None:
+    set_setting("tg_ai_on_" + str(chat_id), "1" if on else "0")
+
+def _tg_ai_reply(token, chat_id, msg, question) -> None:
+    """Chạy nền: báo 'đang gõ…', gọi AI, gửi trả lời (reply vào tin người hỏi). Gửi PLAIN
+    text để không bao giờ vỡ do ký tự đặc biệt trong code/công thức."""
+    try:
+        _tg_call(token, "sendChatAction", chat_id=chat_id, action="typing")
+    except Exception:
+        pass
+    ans = _ai_answer(question)
+    mid = msg.get("message_id")
+    for i, chunk in enumerate(_ai_split(ans)):
+        _tg_call(token, "sendMessage", chat_id=chat_id, text=chunk,
+                 reply_to_message_id=(mid if i == 0 else None), disable_web_page_preview=True)
+
+def _tg_ai_wants(chat_id, msg, text, low) -> bool:
+    """Trong NHÓM: chỉ trả lời khi tin nhắn HỎI bot (reply vào bot / tag @bot / mở đầu
+    'ai …' / câu kết thúc bằng '?') — tránh chen ngang mọi cuộc trò chuyện."""
+    if not text or text.startswith("/") or not _tg_ai_is_on(chat_id):
+        return False
+    if chat_id in _TG_QUIZ:        # đang chơi đố vui → nhường cho đố vui
+        return False
+    rep = msg.get("reply_to_message") or {}
+    rfrom = rep.get("from") or {}
+    uname = (get_setting("tg_bot_username", "") or "").lower()
+    if rfrom.get("is_bot") and (not uname or (rfrom.get("username", "") or "").lower() == uname):
+        return True
+    if uname and ("@" + uname) in low:
+        return True
+    s = low.strip()
+    if s.startswith("ai ") or s.startswith("bot ") or s in ("ai", "bot"):
+        return True
+    st = text.strip()
+    if st.endswith("?") or st.endswith("？"):
+        return True
+    return False
+
+def _tg_ai_clean_q(text: str) -> str:
+    """Bỏ tiền tố gọi bot (@username, 'ai ', 'bot ') để lấy câu hỏi thực."""
+    import re as _re
+    q = (text or "").strip()
+    uname = (get_setting("tg_bot_username", "") or "")
+    if uname:
+        q = _re.sub("@" + _re.escape(uname), "", q, flags=_re.IGNORECASE).strip()
+    ll = q.lower()
+    for p in ("ai ", "bot "):
+        if ll.startswith(p):
+            return q[len(p):].strip() or q
+    return q
+
+def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -> None:
+    """/ai bật-tắt · /hoiai hỏi trực tiếp · /aikey /aimodel /aiprovider /aiurl cấu hình · /aiset xem."""
+    import threading
+    argl = args.strip().lower()
+    # 1) HỎI TRỰC TIẾP: /hoiai, /ask, hoặc /ai <nội dung khác on/off> — cần AI đang bật
+    ask_direct = cmd in ("hoiai", "ask") or (
+        cmd == "ai" and args.strip() and argl not in ("on", "off", "bat", "tat", "bật", "tắt", "status", "help", "?"))
+    if ask_direct:
+        if not _tg_ai_is_on(chat_id):
+            _tg_send(token, chat_id, "🤖 AI đang <b>TẮT</b> ở đây. Admin gõ <code>/ai on</code> để bật.")
+            return
+        threading.Thread(target=_tg_ai_reply, args=(token, chat_id, msg, args.strip()), daemon=True).start()
+        return
+    # 2) Xem cấu hình/hướng dẫn — ai cũng xem được
+    if cmd in ("aiset", "aihelp"):
+        prov, base, model, key = _ai_cfg()
+        _tg_send(token, chat_id,
+                 "🤖 <b>Trợ lý AI</b>\n"
+                 f"Trạng thái ở đây: <b>{'ĐANG BẬT ✅' if _tg_ai_is_on(chat_id) else 'ĐANG TẮT ✖️'}</b>\n"
+                 f"Khoá: <b>{'đã đặt' if key else 'CHƯA đặt'}</b> · Nhà cung cấp: <b>{prov}</b>\n"
+                 f"Model: <code>{model}</code>\nBase: <code>{base}</code>\n\n"
+                 "⚙️ <b>Bật trong 2 bước:</b>\n"
+                 "1️⃣ Lấy khoá MIỄN PHÍ ở https://console.groq.com → nhắn RIÊNG bot: <code>/aikey KHOÁ</code>\n"
+                 "2️⃣ Gõ <code>/ai on</code>\n\n"
+                 "💬 Khi đã bật, hỏi bằng cách: <b>reply</b> vào bot · tag <b>@bot</b> · mở đầu \"<b>ai …</b>\" · "
+                 "câu kết thúc \"<b>?</b>\" · hoặc <code>/hoiai câu hỏi</code>.\n\n"
+                 "Đổi sang AI khác: <code>/aiprovider openai</code> · <code>/aiurl https://api.openai.com/v1</code> · "
+                 "<code>/aimodel gpt-4o-mini</code> · <code>/aikey sk-...</code>")
+        return
+    # 3) Cấu hình KHOÁ/model/nhà cung cấp — CHỈ admin thật (khoá dùng chung cho cả bot)
+    if cmd in ("aikey", "aimodel", "aiprovider", "aiurl"):
+        if not is_admin:
+            _tg_send(token, chat_id, "🔒 Cấu hình AI chỉ dành cho <b>quản trị viên bot</b>.")
+            return
+        if cmd == "aikey":
+            if not args.strip():
+                _tg_send(token, chat_id, "🔑 Dùng: <code>/aikey KHOÁ_API</code> (nên nhắn RIÊNG cho bot để bảo mật).")
+                return
+            set_setting("tg_ai_key", args.strip())
+            try:
+                _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=msg.get("message_id"))
+            except Exception:
+                pass
+            prov, base, model, _ = _ai_cfg()
+            _tg_send(token, chat_id, f"✅ Đã lưu khoá AI (đã xoá tin chứa khoá cho an toàn).\n"
+                                     f"Nhà cung cấp: <b>{prov}</b> · Model: <code>{model}</code>\nGõ <code>/ai on</code> để bật.")
+        elif cmd == "aimodel":
+            set_setting("tg_ai_model", args.strip())
+            _tg_send(token, chat_id, f"✅ Model AI: <code>{args.strip() or '(mặc định)'}</code>")
+        elif cmd == "aiprovider":
+            p = argl if argl in ("openai", "anthropic") else ""
+            set_setting("tg_ai_provider", p)
+            _tg_send(token, chat_id, f"✅ Nhà cung cấp AI: <b>{p or '(tự đoán)'}</b> — chọn: openai | anthropic")
+        elif cmd == "aiurl":
+            set_setting("tg_ai_base", args.strip())
+            _tg_send(token, chat_id, f"✅ Base URL AI: <code>{args.strip() or '(mặc định)'}</code>")
+        return
+    # 4) BẬT/TẮT: nhóm → chỉ admin; chat riêng → ai cũng bật cho DM của mình
+    if not (is_admin or ctype == "private"):
+        _tg_send(token, chat_id, "🔒 Bật/tắt AI trong nhóm chỉ dành cho <b>quản trị viên</b>.")
+        return
+    if argl == "status":
+        _tg_send(token, chat_id, f"🤖 AI ở đây đang <b>{'BẬT' if _tg_ai_is_on(chat_id) else 'TẮT'}</b>. (/aiset xem cấu hình)")
+        return
+    if argl in ("on", "bat", "bật", "1"):
+        newon = True
+    elif argl in ("off", "tat", "tắt", "0"):
+        newon = False
+    else:
+        newon = not _tg_ai_is_on(chat_id)   # /ai không tham số → đảo trạng thái
+    _tg_ai_set(chat_id, newon)
+    if not newon:
+        _tg_send(token, chat_id, "🤖 Đã <b>TẮT</b> trợ lý AI ở đây. Bật lại: <code>/ai on</code>.")
+        return
+    _, _, _, key = _ai_cfg()
+    if not key:
+        _tg_send(token, chat_id,
+                 "🤖 Đã BẬT AI — nhưng <b>chưa có khoá</b>. Admin nhắn RIÊNG bot: <code>/aikey KHOÁ</code>.\n"
+                 "Lấy khoá miễn phí: https://console.groq.com · xem <code>/aiset</code>.")
+    else:
+        _tg_send(token, chat_id,
+                 "🤖 <b>Đã BẬT trợ lý AI!</b> Giờ tôi trả lời mọi câu hỏi khó, bài toán, lập trình, kiến thức nâng cao…\n\n"
+                 "💬 Cách hỏi trong nhóm: <b>reply</b> vào tin của tôi · tag <b>@bot</b> · mở đầu \"<b>ai …</b>\" · "
+                 "câu kết thúc bằng \"<b>?</b>\". Hoặc gõ thẳng <code>/hoiai câu hỏi</code>.\n"
+                 "Tắt: <code>/ai off</code>.")
 
 def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
     """Gửi 1 thông báo tới TẤT CẢ người đã từng nhắn bot (loa phường)."""
@@ -6609,7 +6818,7 @@ _TG_FEAT = {
                     "/xidach — xì dách 21 điểm: /rut — rút bài · /dan — so bài (xì dách +8đ)\n"
                     "/baucua bầu — bầu cua tôm cá gà nai (trúng +3đ/con)\n"
                     "📊 /diemdo — bảng vàng điểm vui"),
-    "🧠 Đố vui": ("🧠 <b>Đố vui CÓ ĐIỂM</b> — ~700 câu, 7 thể loại (thủ đô, cờ các nước, toán nhanh,\n"
+    "🧠 Đố vui": ("🧠 <b>Đố vui CÓ ĐIỂM</b> — ~1080 câu, 20+ thể loại (thủ đô, cờ các nước, toán nhanh,\n"
                   "dãy số, kiến thức, đố mẹo, tục ngữ):\n"
                   "/dovui — ra câu đố, AI TRẢ LỜI ĐÚNG ĐẦU TIÊN +10 điểm + lời chúc mừng 🎉\n"
                   "(trả lời đúng xong bot tự ra câu tiếp — đấu liên tục cả nhóm)\n"
@@ -7332,6 +7541,10 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
                     kwargs={"chat_id": chat_id, "message_id": mid,
                             "reaction": [{"type": "emoji", "emoji": get_setting("tg_autoreact_emoji", "👍")}]},
                     daemon=True).start()
+    # 🤖 AI: nếu BẬT ở nhóm và tin nhắn HỎI bot (reply/tag @bot / mở đầu "ai" / kết thúc "?") → trả lời
+    if _tg_ai_wants(chat_id, msg, text, low):
+        _thr.Thread(target=_tg_ai_reply, args=(token, chat_id, msg, _tg_ai_clean_q(text)), daemon=True).start()
+        return
     # Bộ lọc auto-reply (mọi người)
     if text:
         for trig, rep in _tg_kv_all("tg_filters", chat_id):
@@ -7434,6 +7647,23 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         _tg_start_music(token, chat_id, _p[1] if len(_p) > 1 else "")
         return
 
+    # 🤖 Trợ lý AI (/ai bật-tắt · /hoiai hỏi · /aikey /aimodel… cấu hình) — chạy ở nhóm & chat riêng.
+    if _tgtxt.startswith("/") and _tgtxt.split():
+        _aic = _tgtxt.split()[0].lstrip("/").split("@")[0].lower()
+        if _aic in ("ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp"):
+            _uid2 = (msg.get("from") or {}).get("id")
+            _aiadmin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
+                ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _uid2))
+            _asp = _tgtxt.split(maxsplit=1)
+            # /aion, /aioff → coi như /ai on, /ai off
+            _c, _a = _aic, (_asp[1] if len(_asp) > 1 else "")
+            if _aic == "aion":
+                _c, _a = "ai", "on"
+            elif _aic == "aioff":
+                _c, _a = "ai", "off"
+            _tg_ai_command(token, chat_id, msg, _c, _a, _aiadmin, ctype)
+            return
+
     # 🔗 Lệnh QUẢN LÝ NỘI DUNG BOT & ⚙️ LỆNH TÙY BIẾN — chạy ở cả nhóm & chat riêng.
     if _tgtxt.startswith("/"):
         _c0 = _tgtxt.split()[0].lstrip("/").split("@")[0].lower()
@@ -7480,6 +7710,13 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         if not _tg_quiz_try(token, chat_id, msg, text):
             _tg_send(token, chat_id, "❌ Chưa đúng, thử lại nào! (/goiy — gợi ý · /boqua — bỏ qua)")
         return
+    # 🤖 AI trong CHAT RIÊNG: nếu bật → trả lời thẳng mọi câu hỏi (trừ tin admin reply cho khách).
+    if _tg_ai_is_on(chat_id) and text and not text.startswith("/") and text != "[media]":
+        _reply_ai = msg.get("reply_to_message") or {}
+        if "[cid:" not in (_reply_ai.get("text", "") or ""):   # không nuốt tin admin đang trả lời khách
+            import threading as _thrp
+            _thrp.Thread(target=_tg_ai_reply, args=(token, chat_id, msg, text), daemon=True).start()
+            return
     # 🎮 Lệnh GIẢI TRÍ & TIỆN ÍCH — dùng được cả trong chat riêng
     if text.startswith("/"):
         _fc = text.split()[0].lstrip("/").split("@")[0].lower()
@@ -7583,6 +7820,7 @@ def _tg_register_commands(token: str) -> None:
     # Lệnh CÔNG KHAI — mọi người thấy khi bấm "/"
     pub = [
         ("help", "Menu & danh sách lệnh"), ("menu", "Mở menu nút bấm"),
+        ("hoiai", "🤖 Hỏi trợ lý AI"),
         ("nhac", "Lấy nhạc YouTube/TikTok"),
         ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"),
         ("report", "Báo cáo admin (reply)"), ("rules", "Xem nội quy"),
@@ -7602,13 +7840,14 @@ def _tg_register_commands(token: str) -> None:
         ("nhacnho", "⏰ Hẹn nhắc việc"), ("binhchon", "🗳️ Tạo bình chọn"),
         ("gio", "🕐 Giờ thế giới"), ("password", "🔐 Tạo mật khẩu mạnh"),
         # 🃏 Game bài + 🧠 đố vui có điểm
-        ("dovui", "🧠 Đố vui +10đ (~700 câu)"), ("diemdo", "🏆 Bảng vàng điểm vui"),
+        ("dovui", "🧠 Đố vui +10đ (~1080 câu)"), ("diemdo", "🏆 Bảng vàng điểm vui"),
         ("goiy", "💡 Gợi ý câu đố"), ("boqua", "⏭️ Bỏ qua câu đố"),
         ("baicao", "🃏 Bài cào 3 cây"), ("xidach", "🃏 Xì dách 21 điểm"),
         ("baucua", "🎲 Bầu cua tôm cá"),
     ]
     # Lệnh QUẢN TRỊ — CHỈ admin nhóm (và admin bot) thấy
     adm = pub + [
+        ("ai", "🤖 Bật/tắt trợ lý AI"), ("aiset", "🤖 Cấu hình/hướng dẫn AI"),
         ("config", "Xem cấu hình"),
         ("ban", "Cấm (reply)"), ("kick", "Đá khỏi nhóm (reply)"),
         ("mute", "Cấm chat (reply) [phút]"), ("unmute", "Mở chat (reply)"),
@@ -7642,8 +7881,9 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
     bot = get_setting("tg_bot_name", "TRẦN MINH CHIẾN")
     greet = (f"👋 Chào {_h.escape(name)}, tôi là <b>{_h.escape(bot)}</b>.\n\n" if name
              else f"👋 Xin chào, tôi là <b>{_h.escape(bot)}</b>.\n\n")
-    pub = ("🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
-           "🧠 <b>Đố vui CÓ ĐIỂM:</b> /dovui (+10đ/câu đúng, ~700 câu) · /goiy · /boqua · /dungdo · 🏆 /diemdo\n"
+    pub = ("🤖 <b>Trợ lý AI:</b> /hoiai &lt;câu hỏi&gt; — hỏi mọi câu khó, toán, lập trình (admin bật bằng /ai)\n"
+           "🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
+           "🧠 <b>Đố vui CÓ ĐIỂM:</b> /dovui (+10đ/câu đúng, ~1080 câu) · /goiy · /boqua · /dungdo · 🏆 /diemdo\n"
            "🃏 <b>Game bài:</b> /baicao · /xidach (/rut /dan) · /baucua bầu — thắng +5 điểm\n"
            "🎮 <b>Trò chơi:</b> /xucxac /slot /phitieu /bongda /bongro /bowling /tungxu /oantuti /doanso /random /chon /xoso\n"
            "😂 <b>Giải trí:</b> /cuoi /cakhia /khen /thatha /thachthuc /ghep /lucky /triethly /thotinh /noinguoc\n"
@@ -7658,6 +7898,7 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
+            "🤖 <b>Trợ lý AI:</b> /ai on|off (bật/tắt) · /aikey &lt;khoá&gt; · /aiprovider · /aiurl · /aimodel · /aiset (hướng dẫn)\n"
             "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /modadmin · /config\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
