@@ -7119,6 +7119,23 @@ h2{font-size:16px;margin:16px 4px 8px;font-weight:800}
 .chip .lb{font-size:11.5px;color:var(--mut);display:block}
 .chip .am{font-size:15px;font-weight:800;color:#fff}
 .chip:disabled{opacity:.45}
+.hero{border-radius:18px;overflow:hidden;margin:14px 0 4px;border:1px solid var(--line);background:linear-gradient(135deg,#243b7a,#3a2170)}
+.hero img.bn{width:100%;display:block;max-height:170px;object-fit:cover}
+.hero .hb{padding:18px 16px}
+.hero h1{font-size:22px;font-weight:900;margin-bottom:6px}
+.hero .hb p{font-size:13px;color:#dbe2f2}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:6px}
+.tile{position:relative;border-radius:15px;overflow:hidden;aspect-ratio:1/1;border:1px solid var(--line);padding:0;
+  background:linear-gradient(135deg,var(--card),var(--card2));display:flex;align-items:flex-end;text-align:left}
+.tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.tile .nm{position:relative;width:100%;padding:10px 11px;font-weight:800;font-size:13.5px;z-index:2;color:#fff;
+  background:linear-gradient(transparent,rgba(0,0,0,.82))}
+.tile .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:34px;opacity:.55}
+.tile:active{transform:scale(.98)}
+.back{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line);
+  color:var(--txt);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:700;margin:8px 0 2px}
+.crumb{font-size:12.5px;color:var(--mut);margin:8px 4px 0;font-weight:600}
+.pimg{width:100%;max-height:190px;object-fit:cover;border-radius:12px;margin-bottom:10px}
 .nav{position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;background:rgba(11,18,32,.92);
   backdrop-filter:blur(12px);border-top:1px solid var(--line);max-width:520px;margin:0 auto}
 .nav button{flex:1;background:none;border:0;color:var(--mut);padding:10px 4px 14px;font-size:11px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:3px}
@@ -7202,14 +7219,15 @@ document.getElementById('mask').addEventListener('click',e=>{if(e.target.id==='m
 function go(tab){
   TAB=tab;
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
-  if(tab==='shop') renderShop();
+  if(tab==='shop'){ NAV={lvl:'cat'}; renderShop(); }
   else if(tab==='wallet') renderWallet();
   else if(tab==='orders') renderOrders();
   else if(tab==='contact') renderContact();
   window.scrollTo(0,0);
 }
 
-/* ---------- Cửa hàng ---------- */
+/* ---------- Cửa hàng: Danh mục → Thư mục con → Sản phẩm (y hệt app) ---------- */
+let NAV={lvl:'cat'}, FOLD={}, FPROD={};
 async function loadStore(){
   try{
     const [cfg,cats,all]=await Promise.all([
@@ -7220,21 +7238,65 @@ async function loadStore(){
     document.title=(cfg.logo_name||'KENIOS')+' Store';
   }catch(e){}
 }
-function renderShop(){
-  const v=document.getElementById('view');
-  if(!CATS.length && !Object.keys(PRODS).length){v.innerHTML='<div class="spin"></div>';return}
-  let html='<h2>Sản phẩm</h2>';
-  const catName={}; CATS.forEach(c=>catName[c.id]=c.name);
-  const ids=Object.keys(PRODS);
-  if(!ids.length) html+='<div class="center">Chưa có sản phẩm nào.</div>';
-  ids.forEach(cid=>{
-    const list=PRODS[cid]||[]; if(!list.length) return;
-    html+='<div class="cat">'+h(catName[cid]||'Khác')+'</div>';
-    list.forEach(p=>html+=card(p));
-  });
-  v.innerHTML=html;
+function m1(m){return (m&&m.length&&m[0]&&m[0].url)||''}
+function tile(onclick,name,url,emoji){
+  const img=url?'<img loading="lazy" src="'+h(url)+'">':'<div class="ph">'+emoji+'</div>';
+  return '<button class="tile" onclick="'+onclick+'">'+img+'<div class="nm">'+h(name)+'</div></button>';
 }
+function heroHtml(){
+  const t=((CFG.hero_title||'').trim())||CFG.logo_name||'KENIOS Store';
+  const s=((CFG.hero_subtitle||'').trim())||((CFG.slogan||'').trim())||'Cửa hàng sản phẩm số · key · tải về';
+  const bn=CFG.banner_url?'<img class="bn" src="'+h(CFG.banner_url)+'">':'';
+  return '<div class="hero">'+bn+'<div class="hb"><h1>'+h(t)+'</h1><p>'+h(s)+'</p></div></div>';
+}
+function renderShop(){
+  if(NAV.lvl==='folder') return renderFolders();
+  if(NAV.lvl==='prod') return renderProds();
+  return renderCats();
+}
+function renderCats(){
+  const v=document.getElementById('view');
+  if(!CATS.length){ v.innerHTML=heroHtml()+'<div class="center">Chưa có danh mục nào.</div>'; return }
+  let html=heroHtml()+'<h2>Danh mục</h2><div class="grid">';
+  CATS.forEach(c=>html+=tile('openCat('+c.id+')',c.name,m1(c.media),'🎮'));
+  html+='</div>';
+  v.innerHTML=html; window.scrollTo(0,0);
+}
+async function openCat(id){
+  const c=CATS.find(x=>x.id===id)||{name:''};
+  NAV={lvl:'folder',cat:{id:id,name:c.name}};
+  document.getElementById('view').innerHTML='<div class="spin"></div>';
+  if(!FOLD[id]){ try{FOLD[id]=await api('/store/categories/'+id+'/folders')}catch(e){FOLD[id]=[]} }
+  renderFolders();
+}
+function renderFolders(){
+  const v=document.getElementById('view'), cat=NAV.cat, list=FOLD[cat.id]||[];
+  let html='<button class="back" onclick="backCat()">‹ Danh mục</button>'
+    +'<div class="crumb">'+h(cat.name)+'</div><h2>Thư mục</h2>';
+  if(!list.length) html+='<div class="center">Danh mục này chưa có thư mục.</div>';
+  else{ html+='<div class="grid">'; list.forEach(f=>html+=tile('openFolder('+f.id+')',f.name,m1(f.media),'📁')); html+='</div>'; }
+  v.innerHTML=html; window.scrollTo(0,0);
+}
+async function openFolder(id){
+  const list=FOLD[NAV.cat.id]||[]; const f=list.find(x=>x.id===id)||{name:''};
+  NAV={lvl:'prod',cat:NAV.cat,folder:{id:id,name:f.name}};
+  document.getElementById('view').innerHTML='<div class="spin"></div>';
+  if(!FPROD[id]){ try{FPROD[id]=await api('/store/folders/'+id+'/products')}catch(e){FPROD[id]=[]} }
+  (FPROD[id]||[]).forEach(p=>PMAP[p.id]=p);
+  renderProds();
+}
+function renderProds(){
+  const v=document.getElementById('view'), cat=NAV.cat, fol=NAV.folder, list=FPROD[fol.id]||[];
+  let html='<button class="back" onclick="backFolder()">‹ '+h(cat.name)+'</button>'
+    +'<div class="crumb">'+h(cat.name)+' › '+h(fol.name)+'</div><h2>Sản phẩm</h2>';
+  if(!list.length) html+='<div class="center">Thư mục này chưa có sản phẩm.</div>';
+  else list.forEach(p=>html+=card(p));
+  v.innerHTML=html; window.scrollTo(0,0);
+}
+function backCat(){ NAV={lvl:'cat'}; renderCats(); }
+function backFolder(){ NAV={lvl:'folder',cat:NAV.cat}; renderFolders(); }
 function card(p){
+  const u=m1(p.media); const img=u?'<img class="pimg" loading="lazy" src="'+h(u)+'">':'';
   const stock=p.available_keys>0?'<span class="stock ok">Còn '+p.available_keys+' key</span>':'<span class="stock no">Hết hàng</span>';
   let chips='<div class="prices">';
   (p.prices||[]).forEach(pr=>{
@@ -7244,7 +7306,7 @@ function card(p){
   });
   chips+='</div>';
   if(!(p.prices||[]).length) chips='<div class="pdesc">Chưa có giá bán.</div>';
-  return '<div class="card"><div class="pname">'+h(p.name)+'</div>'
+  return '<div class="card">'+img+'<div class="pname">'+h(p.name)+'</div>'
     +(p.description?'<div class="pdesc">'+h(p.description)+'</div>':'')
     +stock+chips+'</div>';
 }
@@ -7269,7 +7331,7 @@ function buy(pid,priceId){
         +'<div class="keybox">'+h(r.key||'')+'</div>'
         +(r.delivery?'<p style="white-space:pre-wrap">'+h(r.delivery)+'</p>':'')
         +'<button class="btn" onclick=\'copy('+JSON.stringify(r.key||'')+')\'>Sao chép key</button>'
-        +'<button class="btn sec" onclick="closeSheet();loadStore().then(renderShop)">Xong</button>');
+        +'<button class="btn sec" onclick="afterBuy()">Xong</button>');
     }catch(e){
       btn.textContent='Mua ngay'; btn.disabled=false;
       if((e.message||'').includes('ví không đủ')){ toast(e.message); go('wallet'); closeSheet(); }
@@ -7278,6 +7340,10 @@ function buy(pid,priceId){
   };
 }
 function copy(t){navigator.clipboard.writeText(t).then(()=>toast('Đã sao chép ✓'))}
+function afterBuy(){ closeSheet();
+  if(NAV.folder){ delete FPROD[NAV.folder.id]; openFolder(NAV.folder.id); }
+  else loadStore().then(renderShop);
+}
 
 /* ---------- Tài khoản: Đăng nhập · Đăng ký · OTP (đầy đủ như app) ---------- */
 let AUTHTAB='login';
