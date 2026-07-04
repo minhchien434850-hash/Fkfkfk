@@ -11633,6 +11633,287 @@ def run_sql(b: SQLIn, user=Depends(get_user)) -> dict[str, Any]:
 
 
 # ======================== Error handler ========================
+
+
+# ============================ BOT TELEGRAM (menu · chào kèm ảnh · nhạc · đếm người dùng) ============================
+_TG_API = "https://api.telegram.org"
+
+def _tg_token() -> str:
+    return (get_setting("tg_bot_token", "") or os.getenv("TG_BOT_TOKEN", "")).strip()
+
+def _hesc(s) -> str:
+    return (str(s or "")).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+async def _tg_call(method: str, payload: dict = None, files=None) -> dict:
+    token = _tg_token()
+    if not token:
+        return {}
+    url = f"{_TG_API}/bot{token}/{method}"
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            if files:
+                data = {k: str(v) for k, v in (payload or {}).items()}
+                r = await client.post(url, data=data, files=files)
+            else:
+                r = await client.post(url, json=payload or {})
+        return r.json()
+    except Exception as e:
+        log.warning("TG %s lỗi: %s", method, e)
+        return {}
+
+def _tg_ensure_db():
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_users("
+                  "user_id INTEGER PRIMARY KEY, username TEXT, name TEXT, "
+                  "first_seen INTEGER, last_seen INTEGER)")
+
+def _tg_track_user(u: dict):
+    if not u or not u.get("id"):
+        return
+    name = ((u.get("first_name", "") + " " + u.get("last_name", "")).strip()) or u.get("username", "")
+    now = int(time.time())
+    try:
+        with db() as c:
+            c.execute("INSERT INTO tg_users(user_id,username,name,first_seen,last_seen) "
+                      "VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET "
+                      "username=excluded.username,name=excluded.name,last_seen=excluded.last_seen",
+                      (u["id"], u.get("username", ""), name, now, now))
+    except Exception as e:
+        log.warning("tg_track lỗi: %s", e)
+
+def _tg_monthly_users() -> int:
+    cutoff = int(time.time()) - 30 * 86400
+    try:
+        with db() as c:
+            return c.execute("SELECT COUNT(*) n FROM tg_users WHERE last_seen>=?", (cutoff,)).fetchone()["n"]
+    except Exception:
+        return 0
+
+def _tg_menu_kb() -> dict:
+    rows = [
+        ["🎵 Lấy nhạc", "🔎 Tìm kiếm"],
+        ["🔗 Nhúng link", "📊 Thống kê"],
+        ["📚 Hướng dẫn đầy đủ"],
+        ["🏠 Menu", "❌ Đóng"],
+    ]
+    return {"keyboard": [[{"text": b} for b in row] for row in rows],
+            "resize_keyboard": True}
+
+def _tg_help_text() -> str:
+    return (
+        "📚 <b>HƯỚNG DẪN ĐẦY ĐỦ</b>\n\n"
+        "🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc từ YouTube/TikTok\n"
+        "   VD: <code>/nhac https://youtu.be/abc</code>\n"
+        "   VD: <code>/nhac Sơn Tùng MTP</code>\n\n"
+        "🔗 <b>/link</b> &lt;tên&gt; | &lt;url&gt; — nhúng thành chữ bấm được\n"
+        "   VD: <code>/link Kênh của mình | https://t.me/abc</code>\n\n"
+        "📊 <b>/thongke</b> — số người dùng trong 30 ngày\n"
+        "🏠 <b>/menu</b> — mở lại bảng menu\n"
+        "ℹ️ <b>/start</b> — lời chào\n\n"
+        "💡 Gửi bất kỳ đường link nào, bot sẽ tự nhúng thành liên kết bấm được."
+    )
+
+async def _tg_greeting(chat_id):
+    n = _tg_monthly_users()
+    photo = get_setting("tg_welcome_photo", "").strip()
+    name = get_setting("tg_bot_name", "") or "KENIOS Bot"
+    cap = (f"👋 <b>Xin chào! Mình là {_hesc(name)}</b>\n\n"
+           f"🇻🇳 Hỗ trợ Tiếng Việt &amp; 🇺🇸 English\n"
+           f"👥 <b>{n:,}</b> người dùng mỗi tháng\n\n".replace(",", ".") +
+           "Bấm nút bên dưới để dùng các tính năng 👇")
+    kb = _tg_menu_kb()
+    if photo:
+        r = await _tg_call("sendPhoto", {"chat_id": chat_id, "photo": photo, "caption": cap,
+                                         "parse_mode": "HTML", "reply_markup": kb})
+        if r.get("ok"):
+            return
+    await _tg_call("sendMessage", {"chat_id": chat_id, "text": cap,
+                                   "parse_mode": "HTML", "reply_markup": kb})
+
+def _yt_audio_download(query: str):
+    """Tải nhạc (mp3) từ YouTube/TikTok bằng yt-dlp. Trả (path, title, err)."""
+    if not shutil.which("yt-dlp"):
+        return None, "", "Máy chủ chưa cài yt-dlp"
+    import tempfile as _tf, glob as _glob
+    d = _tf.mkdtemp(prefix="tgm_")
+    src = query if query.lower().startswith("http") else f"ytsearch1:{query}"
+    out = os.path.join(d, "%(title).80s.%(ext)s")
+    cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+           "--no-playlist", "--no-warnings", "-o", out, src]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=420)
+    except Exception as e:
+        shutil.rmtree(d, ignore_errors=True)
+        return None, "", str(e)
+    files = _glob.glob(os.path.join(d, "*.mp3"))
+    if not files:
+        err = ((r.stderr or "") + (r.stdout or ""))[-300:]
+        shutil.rmtree(d, ignore_errors=True)
+        return None, "", err or "không tải được"
+    path = files[0]
+    title = os.path.splitext(os.path.basename(path))[0]
+    return path, title, ""
+
+async def _tg_music(chat_id, arg):
+    arg = (arg or "").strip()
+    if not arg:
+        await _tg_call("sendMessage", {"chat_id": chat_id,
+                       "text": "🎵 Gửi: <code>/nhac &lt;link YouTube/TikTok hoặc tên bài&gt;</code>",
+                       "parse_mode": "HTML"})
+        return
+    await _tg_call("sendChatAction", {"chat_id": chat_id, "action": "upload_voice"})
+    await _tg_call("sendMessage", {"chat_id": chat_id, "text": "🎧 Đang lấy nhạc, chờ chút…"})
+    loop = asyncio.get_event_loop()
+    path, title, err = await loop.run_in_executor(None, _yt_audio_download, arg)
+    if not path:
+        await _tg_call("sendMessage", {"chat_id": chat_id, "text": "❌ Không lấy được nhạc.\n" + _hesc(err)[:300]})
+        return
+    try:
+        size = os.path.getsize(path)
+        if size <= 49 * 1024 * 1024:
+            with open(path, "rb") as f:
+                await _tg_call("sendAudio", {"chat_id": chat_id, "title": title[:64], "caption": "🎵 " + title[:120]},
+                               files={"audio": (os.path.basename(path), f, "audio/mpeg")})
+        else:
+            # >50MB: Telegram bot không gửi trực tiếp được → cho link tải từ máy chủ
+            token = secrets.token_hex(8)
+            dst = os.path.join(_IPA_DIR, f"tgmusic_{token}.mp3")
+            shutil.copy(path, dst)
+            base = _ipa_base_url() or ""
+            await _tg_call("sendMessage", {"chat_id": chat_id,
+                           "text": f"🎵 <b>{_hesc(title)}</b>\nFile lớn (&gt;50MB) — tải tại:\n{base}/ipa/dl/tgmusic_{token}.mp3",
+                           "parse_mode": "HTML"})
+    finally:
+        try:
+            os.remove(path)
+            shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        except Exception:
+            pass
+
+async def _tg_link(chat_id, arg):
+    arg = (arg or "").strip()
+    if "|" in arg:
+        name, url = arg.split("|", 1)
+        name, url = name.strip(), url.strip()
+    else:
+        url = arg
+        name = arg
+    if not url.lower().startswith("http"):
+        await _tg_call("sendMessage", {"chat_id": chat_id,
+                       "text": "Dùng: <code>/link Tên | https://…</code>", "parse_mode": "HTML"})
+        return
+    await _tg_call("sendMessage", {"chat_id": chat_id,
+                   "text": f'🔗 <a href="{_hesc(url)}">{_hesc(name)}</a>', "parse_mode": "HTML"})
+
+async def _tg_handle_update(upd: dict):
+    msg = upd.get("message") or upd.get("edited_message")
+    if not msg:
+        return
+    chat_id = (msg.get("chat") or {}).get("id")
+    if chat_id is None:
+        return
+    text = (msg.get("text") or "").strip()
+    _tg_ensure_db()
+    _tg_track_user(msg.get("from") or {})
+    if not text:
+        return
+    low = text.lower()
+
+    def _arg():
+        p = text.split(None, 1)
+        return p[1].strip() if len(p) > 1 else ""
+
+    if low.startswith("/start") or low == "menu" or text == "🏠 Menu":
+        await _tg_greeting(chat_id); return
+    if low.startswith("/help") or low.startswith("/huongdan") or text.startswith("📚"):
+        await _tg_call("sendMessage", {"chat_id": chat_id, "text": _tg_help_text(), "parse_mode": "HTML"}); return
+    if low.startswith("/thongke") or low.startswith("/stats") or text.startswith("📊"):
+        n = _tg_monthly_users()
+        await _tg_call("sendMessage", {"chat_id": chat_id,
+                       "text": f"👥 <b>{n:,}</b> người dùng trong 30 ngày.".replace(",", "."), "parse_mode": "HTML"}); return
+    if low.startswith("/nhac") or low.startswith("/music") or text.startswith("🎵"):
+        a = _arg()
+        if text.startswith("🎵") and not a:
+            await _tg_call("sendMessage", {"chat_id": chat_id,
+                           "text": "🎵 Gửi: <code>/nhac &lt;link hoặc tên bài&gt;</code>", "parse_mode": "HTML"}); return
+        await _tg_music(chat_id, a); return
+    if low.startswith("/link") or text.startswith("🔗"):
+        await _tg_link(chat_id, _arg()); return
+    if text == "🔎 Tìm kiếm":
+        await _tg_call("sendMessage", {"chat_id": chat_id,
+                       "text": "🔎 Gõ <code>/nhac &lt;tên bài&gt;</code> để tìm &amp; tải nhạc.", "parse_mode": "HTML"}); return
+    if text == "❌ Đóng":
+        await _tg_call("sendMessage", {"chat_id": chat_id, "text": "Đã đóng menu. Gõ /menu để mở lại.",
+                       "reply_markup": {"remove_keyboard": True}}); return
+    # Tự nhúng link nếu tin nhắn chứa URL
+    m = re.search(r"https?://\S+", text)
+    if m:
+        url = m.group(0)
+        label = text if len(text) <= 60 else url
+        await _tg_call("sendMessage", {"chat_id": chat_id,
+                       "text": f'🔗 <a href="{_hesc(url)}">{_hesc(label)}</a>', "parse_mode": "HTML"}); return
+    # Mặc định: mở menu
+    await _tg_greeting(chat_id)
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    secret = get_setting("tg_webhook_secret", "")
+    if secret and request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != secret:
+        raise HTTPException(status_code=403, detail="forbidden")
+    try:
+        upd = await request.json()
+    except Exception:
+        return {"ok": True}
+    try:
+        await _tg_handle_update(upd)
+    except Exception as e:
+        log.warning("tg_handle lỗi: %s", e)
+    return {"ok": True}
+
+class TgSetupIn(BaseModel):
+    token: Optional[str] = None
+    bot_name: Optional[str] = None
+    welcome_photo: Optional[str] = None
+
+@app.get("/admin/telegram")
+def admin_tg_get(admin=Depends(get_admin)) -> dict[str, Any]:
+    _tg_ensure_db()
+    return {"has_token": bool(_tg_token()), "bot_name": get_setting("tg_bot_name", ""),
+            "welcome_photo": get_setting("tg_welcome_photo", ""),
+            "monthly_users": _tg_monthly_users()}
+
+@app.post("/admin/telegram")
+async def admin_tg_setup(b: TgSetupIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    """Lưu token bot + tự đăng ký webhook + đặt danh sách lệnh. Bot chạy ngay sau đó."""
+    if b.token is not None:
+        set_setting("tg_bot_token", b.token.strip())
+    if b.bot_name is not None:
+        set_setting("tg_bot_name", b.bot_name.strip()[:64])
+    if b.welcome_photo is not None:
+        set_setting("tg_welcome_photo", b.welcome_photo.strip())
+    token = _tg_token()
+    if not token:
+        return {"ok": False, "detail": "Chưa có token bot."}
+    secret = get_setting("tg_webhook_secret", "")
+    if not secret:
+        secret = secrets.token_hex(8); set_setting("tg_webhook_secret", secret)
+    base = _ipa_base_url() or "https://app.kenios.store"
+    wh = await _tg_call("setWebhook", {"url": f"{base}/telegram/webhook",
+                                       "secret_token": secret, "drop_pending_updates": True})
+    await _tg_call("setMyCommands", {"commands": [
+        {"command": "start", "description": "Lời chào & menu"},
+        {"command": "nhac", "description": "Lấy nhạc YouTube/TikTok"},
+        {"command": "link", "description": "Nhúng link thành chữ bấm được"},
+        {"command": "thongke", "description": "Số người dùng"},
+        {"command": "menu", "description": "Mở menu"},
+        {"command": "help", "description": "Hướng dẫn đầy đủ"},
+    ]})
+    me = await _tg_call("getMe", {})
+    uname = ((me.get("result") or {}).get("username")) if me.get("ok") else ""
+    return {"ok": bool(wh.get("ok")), "webhook": wh, "bot_username": uname,
+            "webhook_url": f"{base}/telegram/webhook"}
+
+
 @app.exception_handler(Exception)
 async def on_error(request: Request, exc: Exception):
     log.exception("Lỗi server: %s", exc)

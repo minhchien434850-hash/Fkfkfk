@@ -65,6 +65,16 @@ else
   pip install -q "pyjwt[crypto]>=2.8" "httpx[http2]>=0.27" 2>/dev/null || true
 fi
 
+# Cài / cập nhật yt-dlp (bot Telegram lấy nhạc YouTube/TikTok + tải video) — cập nhật mỗi lần cho chắc.
+echo "==> Đảm bảo yt-dlp (lấy nhạc/video)..."
+if [ -x "$WORK/venv/bin/pip" ]; then
+  "$WORK/venv/bin/pip" install -q -U yt-dlp 2>/dev/null || true
+fi
+pip install -q -U yt-dlp 2>/dev/null || pip3 install -q -U yt-dlp 2>/dev/null || true
+command -v yt-dlp >/dev/null 2>&1 \
+  && echo "    ✓ yt-dlp: $(yt-dlp --version 2>/dev/null)." \
+  || echo "    ⚠️ yt-dlp chưa cài được (lệnh /nhac sẽ báo tới khi cài)."
+
 # Cài công cụ CẦU NỐI RDP (điều khiển máy thuê chỉ bằng IP+user+pass) — thiếu thì cài.
 echo "==> Đảm bảo công cụ RDP (FreeRDP + Xvfb + ffmpeg + xdotool)..."
 if ! command -v xfreerdp >/dev/null 2>&1 || ! command -v Xvfb >/dev/null 2>&1 \
