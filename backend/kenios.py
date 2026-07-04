@@ -5449,9 +5449,13 @@ async def _acb_fetch_and_confirm() -> int:
         return 0
     url = f"https://thueapibank.vn/historyapiacb/{token}"
     confirmed = 0
+    # thueapibank chặn User-Agent lạ (trả 403) → giả trình duyệt thật.
+    _ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.get(url, headers={"User-Agent": "KENIOS-Server"})
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            r = await client.get(url, headers={"User-Agent": _ua,
+                                               "Accept": "application/json, text/plain, */*"})
         if r.status_code != 200:
             log.warning("ACB API trả về HTTP %d", r.status_code)
             return 0
