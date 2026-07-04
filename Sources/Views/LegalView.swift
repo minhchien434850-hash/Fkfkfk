@@ -4,28 +4,97 @@ import SwiftUI
 struct LegalView: View {
     @EnvironmentObject var store: AppStore
 
+    // Biểu tượng cho từng mục (khớp thứ tự 1..9 của nội dung) — cho bắt mắt, dễ đọc.
+    private let termsIcons = [
+        "checkmark.seal.fill", "person.crop.circle.fill", "hand.raised.fill",
+        "cart.fill", "square.and.pencil", "crown.fill",
+        "exclamationmark.shield.fill", "arrow.triangle.2.circlepath", "envelope.fill"
+    ]
+    private let privacyIcons = [
+        "tray.full.fill", "gearshape.fill", "externaldrive.fill",
+        "arrow.left.arrow.right", "iphone.gen3", "person.badge.key.fill",
+        "figure.child", "arrow.triangle.2.circlepath", "envelope.fill"
+    ]
+
     var body: some View {
-        List {
-            Section {
+        ScrollView {
+            VStack(spacing: 16) {
+                // Hero
+                VStack(spacing: 10) {
+                    ZStack {
+                        Circle().fill(Theme.accent.gradient).frame(width: 68, height: 68)
+                            .shadow(color: Theme.accent.opacity(0.4), radius: 10, y: 4)
+                        Image(systemName: "checkmark.shield.fill")
+                            .font(.system(size: 30, weight: .bold)).foregroundStyle(.white)
+                    }
+                    Text(store.t("Pháp lý & Minh bạch", "Legal & Transparency"))
+                        .font(.title3.bold())
+                    Text(store.t("Cam kết của KENIOS về quyền lợi và dữ liệu của bạn",
+                                 "KENIOS' commitment to your rights and data"))
+                        .font(.footnote).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.top, 8)
+
+                // 2 thẻ điều hướng
                 NavigationLink {
                     LegalDocView(title: store.t("Điều khoản sử dụng", "Terms of Use"),
-                                 content: LegalView.termsBody(store))
+                                 headerIcon: "doc.text.fill", accent: .blue,
+                                 content: LegalView.termsBody(store), icons: termsIcons)
                 } label: {
-                    Label(store.t("Điều khoản sử dụng", "Terms of Use"), systemImage: "doc.text")
-                }
+                    legalCard(icon: "doc.text.fill", tint: .blue,
+                              title: store.t("Điều khoản sử dụng", "Terms of Use"),
+                              subtitle: store.t("Quy định khi dùng KENIOS: tài khoản, mua hàng, nội dung.",
+                                                "Rules for using KENIOS: account, purchases, content."))
+                }.buttonStyle(.plain)
+
                 NavigationLink {
                     LegalDocView(title: store.t("Chính sách bảo mật", "Privacy Policy"),
-                                 content: LegalView.privacyBody(store))
+                                 headerIcon: "lock.shield.fill", accent: Theme.accent,
+                                 content: LegalView.privacyBody(store), icons: privacyIcons)
                 } label: {
-                    Label(store.t("Chính sách bảo mật", "Privacy Policy"), systemImage: "lock.shield")
+                    legalCard(icon: "lock.shield.fill", tint: Theme.accent,
+                              title: store.t("Chính sách bảo mật", "Privacy Policy"),
+                              subtitle: store.t("Cách chúng tôi thu thập, dùng và bảo vệ dữ liệu của bạn.",
+                                                "How we collect, use and protect your data."))
+                }.buttonStyle(.plain)
+
+                // Ghi chú đồng ý
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "info.circle.fill").foregroundStyle(Theme.accent).font(.caption)
+                    Text(store.t("Bằng việc dùng KENIOS, bạn đồng ý với Điều khoản & Chính sách bảo mật.",
+                                 "By using KENIOS, you agree to the Terms & Privacy Policy."))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-            } footer: {
-                Text(store.t("Bằng việc dùng KENIOS, bạn đồng ý với Điều khoản & Chính sách bảo mật.",
-                             "By using KENIOS, you agree to the Terms & Privacy Policy."))
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Theme.accent.opacity(0.08)))
             }
+            .padding(16)
         }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle(store.t("Pháp lý", "Legal"))
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // Thẻ điều hướng đẹp: icon gradient + tiêu đề + mô tả + chevron.
+    private func legalCard(icon: String, tint: Color, title: String, subtitle: String) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 13).fill(tint.gradient).frame(width: 48, height: 48)
+                    .shadow(color: tint.opacity(0.35), radius: 6, y: 3)
+                Image(systemName: icon).font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline).foregroundStyle(.primary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right").font(.footnote.bold()).foregroundStyle(.tertiary)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
     }
 
     static func termsBody(_ store: AppStore) -> String {
@@ -163,19 +232,134 @@ struct LegalView: View {
     }
 }
 
+// ======================== Màn nội dung: hiển thị từng mục thành thẻ đẹp ========================
 struct LegalDocView: View {
     let title: String
+    let headerIcon: String
+    let accent: Color
     let content: String
+    let icons: [String]
+
+    private struct Sec: Identifiable {
+        let id = UUID()
+        let num: String
+        let title: String
+        let body: String
+    }
+
+    // Tách nội dung: dòng "Cập nhật..." + các mục "N. TIÊU ĐỀ" kèm nội dung.
+    private var parsed: (updated: String, sections: [Sec]) {
+        var updated = ""
+        var out: [Sec] = []
+        for raw in content.components(separatedBy: "\n\n") {
+            let b = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if b.isEmpty { continue }
+            var lines = b.components(separatedBy: "\n")
+            let head = lines[0].trimmingCharacters(in: .whitespaces)
+            let low = head.lowercased()
+            if low.hasPrefix("cập nhật") || low.hasPrefix("last updated") {
+                updated = head; continue
+            }
+            var num = ""
+            var titleText = head
+            if let dot = head.firstIndex(of: ".") {
+                let prefix = String(head[head.startIndex..<dot]).trimmingCharacters(in: .whitespaces)
+                if Int(prefix) != nil {
+                    num = prefix
+                    titleText = String(head[head.index(after: dot)...]).trimmingCharacters(in: .whitespaces)
+                }
+            }
+            lines.removeFirst()
+            let body = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            out.append(Sec(num: num, title: titleText, body: body))
+        }
+        return (updated, out)
+    }
 
     var body: some View {
+        let data = parsed
         ScrollView {
-            Text(content)
-                .font(.callout)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-                .padding()
+            VStack(spacing: 14) {
+                // Hero
+                VStack(spacing: 8) {
+                    ZStack {
+                        Circle().fill(accent.gradient).frame(width: 62, height: 62)
+                            .shadow(color: accent.opacity(0.4), radius: 9, y: 4)
+                        Image(systemName: headerIcon)
+                            .font(.system(size: 27, weight: .bold)).foregroundStyle(.white)
+                    }
+                    Text(title).font(.title3.bold()).multilineTextAlignment(.center)
+                    if !data.updated.isEmpty {
+                        Text(data.updated)
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(Capsule().fill(accent.opacity(0.14)))
+                            .foregroundStyle(accent)
+                    }
+                }
+                .padding(.top, 6).padding(.bottom, 2)
+
+                ForEach(Array(data.sections.enumerated()), id: \.element.id) { idx, s in
+                    card(s, icon: idx < icons.count ? icons[idx] : "doc.text.fill")
+                }
+
+                Text("KENIOS")
+                    .font(.caption2.bold()).foregroundStyle(.tertiary)
+                    .padding(.top, 4)
+            }
+            .padding(16)
         }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // Thẻ 1 mục: icon gradient + số + tiêu đề + nội dung (hỗ trợ gạch đầu dòng).
+    private func card(_ s: Sec, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 11) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10).fill(accent.gradient).frame(width: 36, height: 36)
+                    Image(systemName: icon).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                }
+                Text(s.title)
+                    .font(.headline).foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if !s.num.isEmpty {
+                    Text(s.num)
+                        .font(.caption.bold().monospacedDigit()).foregroundStyle(accent)
+                        .frame(width: 24, height: 24)
+                        .background(Circle().fill(accent.opacity(0.12)))
+                }
+            }
+            bodyView(s.body)
+                .padding(.leading, 2)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+    }
+
+    @ViewBuilder private func bodyView(_ body: String) -> some View {
+        let lines = body.components(separatedBy: "\n")
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                let t = line.trimmingCharacters(in: .whitespaces)
+                if t.hasPrefix("- ") {
+                    HStack(alignment: .top, spacing: 9) {
+                        Circle().fill(accent).frame(width: 5, height: 5).padding(.top, 7)
+                        Text(String(t.dropFirst(2)))
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else if !t.isEmpty {
+                    Text(t)
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
     }
 }
