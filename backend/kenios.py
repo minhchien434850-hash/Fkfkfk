@@ -7244,13 +7244,15 @@ function go(tab){
 }
 
 /* ---------- Cửa hàng: Danh mục → Thư mục con → Sản phẩm (y hệt app) ---------- */
-let NAV={lvl:'cat'}, FOLD={}, FPROD={};
+let NAV={lvl:'cat'}, FOLD={}, FPROD={}, SHOW={}, DLS=[], CATNAME={};
 async function loadStore(){
   try{
-    const [cfg,cats,all]=await Promise.all([
-      api('/store/config'),api('/store/categories'),api('/store/all-products')]);
-    CFG=cfg; CATS=cats; PRODS=all.by_category||{};
-    PMAP={}; Object.keys(PRODS).forEach(cid=>(PRODS[cid]||[]).forEach(p=>PMAP[p.id]=p));
+    const [cfg,cats,all,show,dls]=await Promise.all([
+      api('/store/config'),api('/store/categories'),api('/store/all-products'),
+      api('/store/showcase').catch(()=>({})),api('/store/downloads').catch(()=>[])]);
+    CFG=cfg; CATS=cats; PRODS=all.by_category||{}; SHOW=show||{}; DLS=dls||[];
+    PMAP={}; CATNAME={}; CATS.forEach(c=>CATNAME[c.id]=c.name);
+    Object.keys(PRODS).forEach(cid=>(PRODS[cid]||[]).forEach(p=>PMAP[p.id]=p));
     document.getElementById('brand').textContent=cfg.logo_name||'KENIOS Store';
     document.title=(cfg.logo_name||'KENIOS')+' Store';
     applyBranding(cfg);
@@ -7301,11 +7303,79 @@ function renderShop(){
 }
 function renderCats(){
   const v=document.getElementById('view');
-  if(!CATS.length){ v.innerHTML=heroHtml()+'<div class="center">Chưa có danh mục nào.</div>'; return }
-  let html=heroHtml()+statsHtml()+'<h2>Danh mục</h2><div class="grid">';
-  CATS.forEach(c=>html+=tile('openCat('+c.id+')',c.name,m1(c.media),'🎮'));
+  let html=heroHtml()+flashHtml()+statsHtml()
+    +'<input class="inp" id="q" placeholder="🔍 Tìm sản phẩm..." oninput="doSearch()" autocapitalize="off" style="margin:12px 0 0">'
+    +'<div id="searchres"></div>';
+  if(CATS.length){
+    html+='<h2>Danh mục</h2><div class="grid">';
+    CATS.forEach(c=>html+=tile('openCat('+c.id+')',c.name,m1(c.media),'🎮'));
+    html+='</div>';
+  }
+  html+=gamecatHtml()+transactionsHtml()+downloadsHtml();
+  if(!CATS.length && !Object.keys(PRODS).length) html='<div class="spin"></div>';
+  v.innerHTML=html; startFlash(); window.scrollTo(0,0);
+}
+/* Flash sale (đếm ngược) */
+let _flashTimer=null;
+function flashHtml(){
+  if(!CFG.flash_enabled || !CFG.flash_product_id) return '';
+  const p=PMAP[CFG.flash_product_id]; if(!p) return '';
+  const end=CFG.flash_end||0;
+  return '<div class="card" style="border:1px solid #ff5a5a;background:linear-gradient(135deg,#3a1420,#2a1030)">'
+    +'<div class="pname" style="color:#ff9b9b">⚡ '+h(CFG.flash_title||'FLASH SALE')+(CFG.flash_discount?' −'+CFG.flash_discount+'%':'')+'</div>'
+    +'<div class="pdesc">'+h(p.name)+'</div>'
+    +(end?'<div id="flashcd" data-end="'+end+'" class="stock ok" style="font-size:14px">Đang tính...</div>':'')
+    +'<div class="prices" style="margin-top:8px">'+(p.prices||[]).map(pr=>'<button class="chip" onclick="buy('+p.id+','+pr.id+')"><span class="lb">'+h(pr.label)+'</span><span class="am">'+money(pr.amount)+'</span></button>').join('')+'</div></div>';
+}
+function startFlash(){
+  if(_flashTimer) clearInterval(_flashTimer);
+  const el=document.getElementById('flashcd'); if(!el) return;
+  const end=parseInt(el.dataset.end)||0;
+  const upd=()=>{ let s=end-Math.floor(Date.now()/1000);
+    if(s<=0){el.textContent='Đã kết thúc';clearInterval(_flashTimer);return}
+    const d=Math.floor(s/86400),hh=Math.floor(s%86400/3600),mm=Math.floor(s%3600/60),ss=s%60;
+    el.textContent='Còn '+(d?d+'n ':'')+String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0')+':'+String(ss).padStart(2,'0'); };
+  upd(); _flashTimer=setInterval(upd,1000);
+}
+/* Sản phẩm nổi bật theo danh mục (gamecat) */
+function gamecatHtml(){
+  const ids=Object.keys(PRODS).filter(cid=>(PRODS[cid]||[]).length);
+  if(!ids.length) return '';
+  let html='<h2>Sản phẩm nổi bật</h2>';
+  ids.forEach(cid=>{
+    const list=PRODS[cid]||[]; if(!list.length) return;
+    html+='<div class="cat">'+h(CATNAME[cid]||'Khác')+'</div>';
+    list.slice(0,8).forEach(p=>html+=card(p));
+    if(list.length>8) html+='<button class="btn sec" onclick="openCat('+cid+')">Xem tất cả '+list.length+' sản phẩm ›</button>';
+  });
+  return html;
+}
+/* Giao dịch gần đây (social proof) */
+function transactionsHtml(){
+  const list=(SHOW.recent_orders||[]).slice(0,8);
+  if(!list.length) return '';
+  let html='<h2>Giao dịch gần đây</h2><div class="card">';
+  list.forEach(o=>{ html+='<div class="tx"><span>🛒 '+h(o.user)+' mua '+h(o.product)+(o.label?' ('+h(o.label)+')':'')+'</span><b class="plus">'+money(o.amount)+'</b></div>'; });
   html+='</div>';
-  v.innerHTML=html; window.scrollTo(0,0);
+  return html;
+}
+/* Tải về miễn phí */
+function downloadsHtml(){
+  if(!DLS.length) return '';
+  let html='<h2>Tải về miễn phí</h2>';
+  DLS.slice(0,12).forEach(d=>{
+    html+='<a class="link" href="'+API+'/store/products/'+d.id+'/download" target="_blank">⬇️ '+h(d.name)+'</a>';
+  });
+  return html;
+}
+/* Tìm kiếm sản phẩm */
+function doSearch(){
+  const q=(document.getElementById('q').value||'').trim().toLowerCase();
+  const box=document.getElementById('searchres'); if(!box) return;
+  if(!q){ box.innerHTML=''; return; }
+  const hits=Object.values(PMAP).filter(p=>(p.name||'').toLowerCase().includes(q));
+  if(!hits.length){ box.innerHTML='<div class="pdesc" style="margin-top:10px">Không tìm thấy sản phẩm.</div>'; return; }
+  box.innerHTML='<h2>Kết quả ('+hits.length+')</h2>'+hits.slice(0,20).map(card).join('');
 }
 async function openCat(id){
   const c=CATS.find(x=>x.id===id)||{name:''};
