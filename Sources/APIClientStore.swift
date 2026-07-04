@@ -4,7 +4,8 @@ extension APIClient {
     // §IPA — Ký IPA ở máy chủ (zsign) rồi trả link cài OTA. Upload multipart qua file tạm
     // để chịu được IPA lớn (không nạp hết vào RAM).
     func signIPAOnServer(ipa: URL, p12: URL, password: String, provision: URL,
-                         publish: Bool = false) async throws -> IPASignResult {
+                         publish: Bool = false,
+                         appName: String = "", bundleId: String = "") async throws -> IPASignResult {
         let boundary = "KeniosBoundary-\(UUID().uuidString)"
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("ipaup_\(UUID().uuidString).bin")
         FileManager.default.createFile(atPath: tmp.path, contents: nil)
@@ -23,6 +24,8 @@ extension APIClient {
             try putFile("provision", "cert.mobileprovision", provision, "application/octet-stream")
             try put("--\(boundary)\r\nContent-Disposition: form-data; name=\"password\"\r\n\r\n\(password)\r\n")
             try put("--\(boundary)\r\nContent-Disposition: form-data; name=\"publish\"\r\n\r\n\(publish ? "1" : "0")\r\n")
+            try put("--\(boundary)\r\nContent-Disposition: form-data; name=\"app_name\"\r\n\r\n\(appName)\r\n")
+            try put("--\(boundary)\r\nContent-Disposition: form-data; name=\"bundle_id\"\r\n\r\n\(bundleId)\r\n")
             try put("--\(boundary)--\r\n")
             try? out.close()
         } catch { try? out.close(); try? FileManager.default.removeItem(at: tmp); throw error }

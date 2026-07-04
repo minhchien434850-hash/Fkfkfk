@@ -6753,6 +6753,8 @@ async def ipa_sign(ipa: UploadFile = FastAPIFile(...),
                    provision: UploadFile = FastAPIFile(...),
                    password: str = Form(""),
                    publish: str = Form(""),
+                   app_name: str = Form(""),      # đổi TÊN app khi ký (trống = giữ nguyên)
+                   bundle_id: str = Form(""),     # đổi ĐỊNH DANH (bundle id) khi ký (trống = giữ nguyên)
                    user=Depends(get_user)) -> dict[str, Any]:
     if not shutil.which("zsign"):
         raise HTTPException(status_code=503, detail="Máy chủ chưa cài zsign. Chạy lại capnhat-vps.sh trên VPS.")
@@ -6777,9 +6779,15 @@ async def ipa_sign(ipa: UploadFile = FastAPIFile(...),
         try:
             # -z 1: nén nhanh (file game lớn vốn đã nén sẵn, nén 9 chỉ tốn thời gian);
             # timeout 3600s để đủ ký IPA tới 10GB.
-            r = subprocess.run(["zsign", "-k", p12_path, "-p", password, "-m", prov_path,
-                                "-o", out_ipa, "-z", "1", in_ipa],
-                               capture_output=True, text=True, timeout=3600)
+            cmd = ["zsign", "-k", p12_path, "-p", password, "-m", prov_path,
+                   "-o", out_ipa, "-z", "1"]
+            # Đổi tên hiển thị / bundle id nếu người dùng nhập (trống = giữ nguyên bản gốc).
+            nm = (app_name or "").strip()
+            bid = (bundle_id or "").strip()
+            if nm:  cmd += ["-n", nm]
+            if bid: cmd += ["-b", bid]
+            cmd.append(in_ipa)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Chạy zsign lỗi: {e}")
         if not os.path.exists(out_ipa) or os.path.getsize(out_ipa) < 1000:

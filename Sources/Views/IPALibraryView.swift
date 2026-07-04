@@ -117,6 +117,12 @@ struct IPALibraryView: View {
     // §IPA — ký ở máy chủ (zsign) + cài OTA
     @State private var signingId: UUID?
     @State private var signMsg: String?
+    // Sheet ký: chọn tên app + định danh, ký xong mới hiện nút cài đặt
+    @State private var signItem: IPAFile?
+    @State private var signAppName = ""
+    @State private var signBundleId = ""
+    @State private var installURL: String?
+    @State private var signIsError = false
     // Admin cấu hình domain HTTPS + trạng thái zsign
     @State private var ipaBase = ""
     @State private var hasZsign = false
@@ -276,9 +282,11 @@ struct IPALibraryView: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
-                                // Ký ngay ở máy chủ + cài OTA (không cần eSign)
+                                // Ký ngay ở máy chủ + cài OTA (không cần eSign) — mở sheet chọn tên/định danh
                                 Button {
-                                    Task { await signOnServer(item) }
+                                    signAppName = ""; signBundleId = ""
+                                    installURL = nil; signMsg = nil; signIsError = false
+                                    signItem = item
                                 } label: {
                                     HStack {
                                         if signingId == item.id { ProgressView().tint(.white).padding(.trailing, 4) }
@@ -335,6 +343,86 @@ struct IPALibraryView: View {
                     ipa.importFiles(urls)
                 }.ignoresSafeArea()
             }
+            .sheet(item: $signItem) { item in signSheet(item) }
+        }
+    }
+
+    // Sheet KÝ: nhập tên app + định danh (tuỳ chọn) → bấm ký → ký xong mới hiện nút Cài đặt.
+    @ViewBuilder private func signSheet(_ item: IPAFile) -> some View {
+        let signing = (signingId == item.id)
+        NavigationStack {
+            Form {
+                Section {
+                    Text(item.name).font(.subheadline.bold()).lineLimit(2)
+                    Text(humanSize(item.size)).font(.caption2).foregroundStyle(.secondary)
+                } header: { Text(store.t("File sẽ ký", "File to sign")) }
+
+                Section {
+                    TextField(store.t("Tên app (để trống = giữ nguyên)", "App name (blank = keep original)"),
+                              text: $signAppName)
+                        .disabled(signing)
+                    TextField(store.t("Định danh / Bundle ID (để trống = giữ nguyên)", "Bundle ID (blank = keep original)"),
+                              text: $signBundleId)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        .disabled(signing)
+                } header: {
+                    Text(store.t("Tuỳ chỉnh khi ký", "Customize when signing"))
+                } footer: {
+                    Text(store.t("Tên app hiện dưới biểu tượng. Bundle ID dạng com.tencongty.tenapp — đổi để cài song song nhiều bản mà không đè lên nhau.",
+                                 "App name shows under the icon. Bundle ID like com.company.app — change it to install multiple copies side by side."))
+                        .font(.caption2)
+                }
+
+                Section {
+                    if installURL == nil {
+                        Button {
+                            Task { await signOnServer(item, appName: signAppName, bundleId: signBundleId) }
+                        } label: {
+                            HStack {
+                                if signing { ProgressView().padding(.trailing, 6) }
+                                Text(signing ? store.t("Đang tải lên & ký...", "Uploading & signing...")
+                                             : store.t("Bắt đầu ký", "Start signing")).bold()
+                            }.frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(signing || !certReady)
+                    } else if let link = installURL, let u = URL(string: link) {
+                        // Ký XONG → giờ mới hiện nút cài đặt (không tự mở).
+                        Button {
+                            UIApplication.shared.open(u)
+                        } label: {
+                            Label(store.t("Cài đặt lên máy này", "Install on this device"),
+                                  systemImage: "arrow.down.app.fill").bold()
+                                .frame(maxWidth: .infinity)
+                        }.buttonStyle(.borderedProminent).tint(.green)
+                        Button {
+                            signItem = nil
+                        } label: {
+                            Text(store.t("Xong", "Done")).frame(maxWidth: .infinity)
+                        }.buttonStyle(.bordered)
+                    }
+                    if let signMsg {
+                        Text(signMsg).font(.caption).foregroundStyle(signIsError ? .red : .green)
+                    }
+                    if !certReady {
+                        Text(store.t("Cần nhập chứng chỉ ở 'Chứng chỉ ký' trước (p12 + provision + mật khẩu).",
+                                     "Import your cert in 'Signing Cert' first (p12 + provision + password)."))
+                            .font(.caption2).foregroundStyle(.orange)
+                    }
+                }
+
+                if store.isAdmin, let link = lastPublicLink, installURL != nil {
+                    Section(store.t("Link cho khách", "Customer link")) { linkRow(link) }
+                }
+            }
+            .navigationTitle(store.t("Ký & cài", "Sign & install"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(store.t("Đóng", "Close")) { signItem = nil }.disabled(signing)
+                }
+            }
+            .interactiveDismissDisabled(signing)
         }
     }
 
@@ -393,31 +481,37 @@ struct IPALibraryView: View {
         }
     }
 
-    // Ký IPA ở máy chủ (dùng chứng chỉ đã nhập) → mở link cài OTA.
-    private func signOnServer(_ item: IPAFile) async {
+    // Ký IPA ở máy chủ (dùng chứng chỉ đã nhập). KHÔNG tự mở cài đặt —
+    // ký xong lưu link vào installURL để sheet hiện nút "Cài đặt".
+    private func signOnServer(_ item: IPAFile, appName: String, bundleId: String) async {
         guard certReady else {
+            signIsError = true
             signMsg = store.t("Chưa có chứng chỉ. Vào 'Chứng chỉ ký' nhập p12 + provision + mật khẩu.",
                               "No certificate. Go to 'Signing Cert' and import p12 + provision + password.")
             return
         }
-        signingId = item.id; signMsg = store.t("Đang tải lên & ký ở máy chủ...", "Uploading & signing on server...")
+        signingId = item.id; signIsError = false
+        signMsg = store.t("Đang tải lên & ký ở máy chủ...", "Uploading & signing on server...")
         defer { signingId = nil }
         do {
             let r = try await store.api.signIPAOnServer(
                 ipa: item.url, p12: certP12, password: certPassword, provision: certProvision,
-                publish: store.isAdmin && publishNext)
+                publish: store.isAdmin && publishNext,
+                appName: appName.trimmingCharacters(in: .whitespaces),
+                bundleId: bundleId.trimmingCharacters(in: .whitespaces))
+            installURL = r.installUrl        // ký xong → sheet hiện nút Cài đặt
+            signIsError = false
             if let pub = r.publicUrl, r.published == true {
                 lastPublicLink = pub
                 published = try? await store.api.adminGetPublishedIPA()
-                signMsg = store.t("Ký xong & ĐÃ PHÁT HÀNH: \(r.title). Gửi link cho khách để cài.",
-                                  "Signed & PUBLISHED: \(r.title). Share the link with customers.")
+                signMsg = store.t("Ký xong & ĐÃ PHÁT HÀNH: \(r.title). Bấm 'Cài đặt' để cài, hoặc gửi link cho khách.",
+                                  "Signed & PUBLISHED: \(r.title). Tap 'Install' or share the link with customers.")
             } else {
-                signMsg = store.t("Ký xong: \(r.title). Đang mở cài đặt...", "Signed: \(r.title). Opening install...")
-            }
-            if let u = URL(string: r.installUrl) {
-                await MainActor.run { UIApplication.shared.open(u) }
+                signMsg = store.t("Ký xong: \(r.title). Bấm 'Cài đặt lên máy này' để cài.",
+                                  "Signed: \(r.title). Tap 'Install on this device'.")
             }
         } catch {
+            signIsError = true
             signMsg = store.t("Ký thất bại: ", "Sign failed: ") + error.localizedDescription
         }
     }
