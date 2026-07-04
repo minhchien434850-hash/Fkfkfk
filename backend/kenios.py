@@ -6840,10 +6840,28 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
             if "all" in locks and _kill("", warn=False): return
 
     # ============ 2) Tin đã "sạch" → tiện ích, menu, lệnh ============
-    # 🧠 ĐỐ VUI: nhóm đang có câu đố → kiểm tra đáp án (trả lời đúng = +10 điểm)
+    # 🧠 ĐỐ VUI: nhóm đang có câu đố → kiểm tra đáp án (đúng = +10 điểm · sai = báo ❌)
     if text and not text.startswith("/") and chat_id in _TG_QUIZ:
         if _tg_quiz_try(token, chat_id, msg, text):
             return
+        # Trả lời SAI: chỉ báo khi tin nhắn TRÔNG GIỐNG một câu trả lời (ngắn ≤ 6 từ) để
+        # không làm phiền hội thoại thường. Thả 👎 lên tin + nhắc thử lại (tin nhắc tự xoá
+        # sau 8s; tối đa ~1 nhắc/4s mỗi nhóm để tránh spam).
+        _qz = _TG_QUIZ.get(chat_id)
+        if _qz is not None and 0 < len(text.split()) <= 6 and mid:
+            _now = time.time()
+            if _now - _qz.get("lastwrong", 0) >= 4:
+                _qz["lastwrong"] = _now
+                _r = _tg_send(token, chat_id,
+                              f"❌ {_tg_mention(frm)} chưa đúng, thử lại nào! "
+                              "(/goiy — gợi ý · /boqua — đáp án &amp; câu mới)")
+                _wmid = ((_r or {}).get("result") or {}).get("message_id")
+                if _wmid:
+                    _tg_delete_later(token, [(str(chat_id), _wmid)], 8)
+            _thr.Thread(target=_tg_call, args=(token, "setMessageReaction"),
+                        kwargs={"chat_id": chat_id, "message_id": mid,
+                                "reaction": [{"type": "emoji", "emoji": "👎"}]},
+                        daemon=True).start()
 
     # AFK: người đang AFK nhắn lại → chào trở lại
     if uid in _tg_afk and not low.startswith("/afk"):
