@@ -4974,6 +4974,41 @@ def _tg_start_music(token, chat_id, arg) -> None:
     import threading
     threading.Thread(target=_tg_music_task, args=(token, chat_id, arg), daemon=True).start()
 
+# ---------- Đếm người dùng bot mỗi tháng ----------
+def _tg_track(frm: dict) -> None:
+    if not frm or not frm.get("id"):
+        return
+    now = int(time.time())
+    try:
+        with db() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS tg_bot_users(user_id INTEGER PRIMARY KEY, "
+                      "last_seen INTEGER)")
+            c.execute("INSERT INTO tg_bot_users(user_id,last_seen) VALUES(?,?) "
+                      "ON CONFLICT(user_id) DO UPDATE SET last_seen=excluded.last_seen", (frm["id"], now))
+    except Exception:
+        pass
+
+def _tg_monthly() -> int:
+    try:
+        with db() as c:
+            c.execute("CREATE TABLE IF NOT EXISTS tg_bot_users(user_id INTEGER PRIMARY KEY, last_seen INTEGER)")
+            return c.execute("SELECT COUNT(*) n FROM tg_bot_users WHERE last_seen>=?",
+                             (int(time.time()) - 30 * 86400,)).fetchone()["n"]
+    except Exception:
+        return 0
+
+def _tg_send_photo_or_text(token: str, chat_id, text: str, buttons=None) -> None:
+    """Gửi lời chào KÈM ẢNH bot nếu admin đã đặt ảnh (tg_welcome_photo), không thì gửi chữ."""
+    photo = get_setting("tg_welcome_photo", "").strip()
+    if photo:
+        params = {"chat_id": chat_id, "photo": photo, "caption": text, "parse_mode": "HTML"}
+        if buttons:
+            params["reply_markup"] = {"inline_keyboard": buttons}
+        r = _tg_call(token, "sendPhoto", **params)
+        if r.get("ok"):
+            return
+    _tg_send(token, chat_id, text, buttons=buttons)
+
 # ---------- Tiện ích quản lý nhóm ----------
 _tg_admins_cache: dict = {}   # chat_id -> (ts, set(user_id admin))
 
@@ -5494,6 +5529,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         elif text.startswith("/start"):
             _tg_send(token, admin_chat, "Bạn là ADMIN. Khi khách nhắn bot, tin sẽ hiện ở đây — hãy REPLY vào tin đó để trả lời khách. Gõ /help để xem lệnh quản lý nhóm.")
         return
+    _tg_track(frm)   # đếm người dùng bot mỗi tháng
     if text.startswith("/start"):
         botname = get_setting("tg_bot_name", "TRẦN MINH CHIẾN")
         default_wel = ("👋 Chào {name}, tôi là <b>{botname}</b>.\n\n"
@@ -5501,7 +5537,8 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                        "Tôi hỗ trợ Tiếng Việt 🇻🇳 và English 🇺🇸")
         wel = get_setting("tg_welcome", default_wel)
         wel = wel.replace("{name}", name).replace("{botname}", botname)
-        _tg_send(token, chat_id, wel, buttons=_tg_menu_buttons())
+        wel += f"\n\n👥 <b>{_tg_monthly():,}</b> người dùng mỗi tháng".replace(",", ".")
+        _tg_send_photo_or_text(token, chat_id, wel, buttons=_tg_menu_buttons())
         return
     if admin_chat:
         _tg_send(token, admin_chat,
