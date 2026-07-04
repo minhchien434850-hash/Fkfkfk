@@ -877,6 +877,7 @@ struct IPASignResult: Decodable {
     let title: String
     let bundleId: String
     let published: Bool?      // đã đặt làm bản cài công khai (/install) chưa
+    let appUpdate: Bool?      // đã phát hành làm BẢN CẬP NHẬT app KENIOS chưa
     let publicUrl: String?    // link trang cài công khai để gửi khách
 }
 // Trạng thái bản cài đang phát hành công khai

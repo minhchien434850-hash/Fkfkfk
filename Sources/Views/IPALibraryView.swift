@@ -602,7 +602,10 @@ struct IPALibraryView: View {
                 bundleId: bundleId.trimmingCharacters(in: .whitespaces))
             installURL = r.installUrl        // ký xong → sheet hiện nút Cài đặt
             signIsError = false
-            if let pub = r.publicUrl, r.published == true {
+            if r.appUpdate == true {
+                signMsg = store.t("Ký xong & ĐÃ PHÁT HÀNH BẢN CẬP NHẬT APP: \(r.title). Mọi khách sẽ tự thấy popup 'Cập nhật ngay' (cài 1 chạm, không cần ESign).",
+                                  "Signed & PUBLISHED APP UPDATE: \(r.title). All users will see the 'Update now' popup (1-tap install, no ESign).")
+            } else if let pub = r.publicUrl, r.published == true {
                 lastPublicLink = pub
                 published = try? await store.api.adminGetPublishedIPA()
                 signMsg = store.t("Ký xong & ĐÃ PHÁT HÀNH: \(r.title). Bấm 'Cài đặt' để cài, hoặc gửi link cho khách.",

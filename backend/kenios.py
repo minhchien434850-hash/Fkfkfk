@@ -6709,6 +6709,8 @@ def media_serve(fid: int, background_tasks: BackgroundTasks):
 _IPA_DIR = os.path.join(os.path.dirname(os.path.abspath(UPLOAD_DIR)) or ".", "signed_ipa")
 try: os.makedirs(_IPA_DIR, exist_ok=True)
 except Exception: pass
+# Bundle id của chính app KENIOS — ký bản này & phát hành = cập nhật app (slot riêng, tách /install khách).
+APP_BUNDLE_ID = os.getenv("APP_BUNDLE_ID", "com.kenios.codebox")
 
 def _ipa_base_url() -> str:
     # Domain HTTPS cho cài OTA. Ưu tiên cấu hình admin → biến môi trường →
@@ -6804,16 +6806,24 @@ async def ipa_sign(ipa: UploadFile = FastAPIFile(...),
         f.write(_ipa_manifest(base, token, meta))
     manifest_url = f"{base}/ipa/dl/{token}.plist"
     published = False
+    app_update = False
     if str(publish).strip().lower() in ("1", "true", "yes", "on"):
-        # Phát hành: đặt bản này làm bản cài công khai ở trang /install cho khách.
-        set_setting("published_ipa_token", token)
-        set_setting("published_ipa_meta", json.dumps(meta))
-        set_setting("published_ipa_at", str(int(time.time())))
-        published = True
+        if meta.get("bundle_id", "") == APP_BUNDLE_ID:
+            # Đây là chính app KENIOS → slot CẬP NHẬT APP (OTA 1 chạm), KHÔNG đụng trang /install khách.
+            set_setting("app_update_token", token)
+            set_setting("app_update_meta", json.dumps(meta))
+            set_setting("app_update_at", str(int(time.time())))
+            app_update = True
+        else:
+            # App bán cho khách → trang cài công khai /install.
+            set_setting("published_ipa_token", token)
+            set_setting("published_ipa_meta", json.dumps(meta))
+            set_setting("published_ipa_at", str(int(time.time())))
+            published = True
     return {"install_url": f"itms-services://?action=download-manifest&url={manifest_url}",
             "ipa_url": f"{base}/ipa/dl/{token}.ipa", "manifest_url": manifest_url,
             "title": meta.get("title", "App"), "bundle_id": meta.get("bundle_id", ""),
-            "published": published, "public_url": f"{base}/install"}
+            "published": published, "app_update": app_update, "public_url": f"{base}/install"}
 
 
 def _published_ipa() -> Optional[dict]:
@@ -6849,10 +6859,26 @@ def admin_unpublish(admin=Depends(get_admin)) -> dict[str, Any]:
     return {"ok": True}
 
 
+def _app_update() -> Optional[dict]:
+    """Bản CẬP NHẬT app KENIOS đã ký (slot riêng, tách khỏi app khách ở /install)."""
+    token = (get_setting("app_update_token", "") or "").strip()
+    if not token:
+        return None
+    ipa_path = os.path.join(_IPA_DIR, f"{token}.ipa")
+    plist_path = os.path.join(_IPA_DIR, f"{token}.plist")
+    if not (os.path.exists(ipa_path) and os.path.exists(plist_path)):
+        return None
+    try:
+        meta = json.loads(get_setting("app_update_meta", "") or "{}")
+    except Exception:
+        meta = {}
+    return {"token": token, "meta": meta, "at": int(get_setting("app_update_at", "0") or "0")}
+
+
 @app.get("/app/ota")
 def app_ota_update() -> dict[str, Any]:
     """Bản KENIOS ĐÃ KÝ đang phát hành để cài OTA 1 chạm (app tự so số build để nhắc cập nhật)."""
-    p = _published_ipa()
+    p = _app_update()
     if not p:
         return {"available": False}
     base = _ipa_base_url()
