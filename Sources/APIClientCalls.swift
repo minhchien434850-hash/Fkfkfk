@@ -22,6 +22,19 @@ struct TelegramBotStatus: Decodable {
     let about: String?
     let username: String?
     let tokenOk: Bool?
+    // Quản lý nhóm
+    let modEnabled: Bool?
+    let delLinks: Bool?
+    let delStickers: Bool?
+    let delPhotos: Bool?
+    let warnLimit: Int?
+    let warnAction: String?
+    let welcomeOn: Bool?
+    let welcomeGroup: String?
+    let welcomeBtnText: String?
+    let welcomeBtnUrl: String?
+    let goodbyeOn: Bool?
+    let goodbye: String?
 }
 
 // ======================== Model cập nhật OTA (bản đã ký) ========================

@@ -256,6 +256,10 @@ struct APIClient {
         if !token.isEmpty { b["token"] = token }
         return try decode(try await send("/admin/telegram-bot", method: "POST", json: b))
     }
+    /// Lưu toàn bộ cấu hình bot (kèm quản lý nhóm) — truyền dict tự do.
+    func adminSaveTelegramBot(_ body: [String: Any]) async throws -> TelegramBotStatus {
+        try decode(try await send("/admin/telegram-bot", method: "POST", json: body))
+    }
     func adminTestTelegramBot() async throws {
         _ = try await send("/admin/telegram-bot/test", method: "POST")
     }

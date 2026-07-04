@@ -4906,8 +4906,157 @@ def _tg_menu_buttons() -> list:
     return [[{"text": "💬 Chat với hỗ trợ", "callback_data": "support"}],
             [{"text": "ℹ️ Giới thiệu", "callback_data": "about"}]]
 
+# ---------- Tiện ích quản lý nhóm ----------
+_tg_admins_cache: dict = {}   # chat_id -> (ts, set(user_id admin))
+
+def _tg_name(frm: dict) -> str:
+    if not frm: return "Thành viên"
+    n = ((frm.get("first_name", "") or "") + " " + (frm.get("last_name", "") or "")).strip()
+    return n or frm.get("username", "") or "Thành viên"
+
+def _tg_mention(frm: dict) -> str:
+    import html as _h
+    nm = _h.escape(_tg_name(frm)); uid = frm.get("id")
+    return f'<a href="tg://user?id={uid}">{nm}</a>' if uid else nm
+
+def _tg_is_admin(token: str, chat_id: str, uid) -> bool:
+    if uid is None: return False
+    now = time.time()
+    c = _tg_admins_cache.get(chat_id)
+    if not c or now - c[0] > 300:
+        res = _tg_call(token, "getChatAdministrators", chat_id=chat_id)
+        ids = {a.get("user", {}).get("id") for a in res.get("result", [])} if res.get("ok") else set()
+        _tg_admins_cache[chat_id] = (now, ids); c = (now, ids)
+    return uid in c[1]
+
+def _tg_has_link(msg: dict) -> bool:
+    import re as _re
+    for e in (msg.get("entities") or []) + (msg.get("caption_entities") or []):
+        if e.get("type") in ("url", "text_link"): return True
+    t = ((msg.get("text", "") or "") + " " + (msg.get("caption", "") or "")).lower()
+    if "http://" in t or "https://" in t or "t.me/" in t or "www." in t: return True
+    return bool(_re.search(r"\b[\w-]+\.(com|net|org|xyz|vn|io|me|link|top|shop|info|club|online|site)\b", t))
+
+def _warn_add(chat_id, uid) -> int:
+    cid = str(chat_id)
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_warns(chat_id TEXT, user_id INTEGER, count INTEGER DEFAULT 0, PRIMARY KEY(chat_id,user_id))")
+        row = c.execute("SELECT count FROM tg_warns WHERE chat_id=? AND user_id=?", (cid, uid)).fetchone()
+        n = (row["count"] if row else 0) + 1
+        if row: c.execute("UPDATE tg_warns SET count=? WHERE chat_id=? AND user_id=?", (n, cid, uid))
+        else: c.execute("INSERT INTO tg_warns(chat_id,user_id,count) VALUES(?,?,?)", (cid, uid, n))
+    return n
+
+def _warn_reset(chat_id, uid) -> None:
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS tg_warns(chat_id TEXT, user_id INTEGER, count INTEGER DEFAULT 0, PRIMARY KEY(chat_id,user_id))")
+        c.execute("UPDATE tg_warns SET count=0 WHERE chat_id=? AND user_id=?", (str(chat_id), uid))
+
+def _tg_warn(token: str, chat_id: str, frm: dict, reason: str) -> None:
+    uid = frm.get("id")
+    n = _warn_add(chat_id, uid)
+    limit = int(get_setting("tg_warn_limit", "3") or 3)
+    if n >= limit:
+        _warn_reset(chat_id, uid)
+        if get_setting("tg_warn_action", "mute") == "ban":
+            _tg_call(token, "banChatMember", chat_id=chat_id, user_id=uid)
+            _tg_send(token, chat_id, f"🚫 Đã CẤM {_tg_mention(frm)} (đủ {limit} cảnh báo).")
+        else:
+            _tg_call(token, "restrictChatMember", chat_id=chat_id, user_id=uid,
+                     permissions={"can_send_messages": False}, until_date=int(time.time()) + 3600)
+            _tg_send(token, chat_id, f"🔇 Đã CẤM CHAT {_tg_mention(frm)} 1 giờ (đủ {limit} cảnh báo).")
+    else:
+        _tg_send(token, chat_id, f"⚠️ {_tg_mention(frm)} bị cảnh báo ({n}/{limit}) — {reason}. Tin đã bị xoá.")
+
+def _tg_welcome_members(token: str, chat: dict, members: list) -> None:
+    if get_setting("tg_welcome_on", "1") != "1": return
+    tmpl = get_setting("tg_welcome_group", "👋 Chào mừng {name} đã vào {group}!")
+    bt, bu = get_setting("tg_welcome_btn_text", ""), get_setting("tg_welcome_btn_url", "")
+    buttons = [[{"text": bt, "url": bu}]] if bt and bu else None
+    gname = chat.get("title", "nhóm")
+    for m in members:
+        if m.get("is_bot"): continue
+        txt = tmpl.replace("{name}", _tg_mention(m)).replace("{group}", gname)
+        _tg_send(token, str(chat.get("id")), txt, buttons=buttons)
+
+def _tg_goodbye_member(token: str, chat: dict, m: dict) -> None:
+    if get_setting("tg_goodbye_on", "1") != "1" or m.get("is_bot"): return
+    tmpl = get_setting("tg_goodbye", "👋 Tạm biệt {name}, hẹn gặp lại!")
+    _tg_send(token, str(chat.get("id")), tmpl.replace("{name}", _tg_mention(m)).replace("{group}", chat.get("title", "nhóm")))
+
+def _tg_group_command(token: str, chat_id: str, msg: dict, text: str) -> None:
+    cmd = text.split()[0].lstrip("/").split("@")[0].lower()
+    parts = text.split()
+    reply = msg.get("reply_to_message") or {}
+    target = reply.get("from") if reply else None
+    tid = target.get("id") if target else None
+    if cmd == "id":
+        extra = f"\nUser: <code>{tid}</code>" if tid else ""
+        _tg_send(token, chat_id, f"Chat ID: <code>{chat_id}</code>{extra}"); return
+    if cmd == "config":
+        _tg_send(token, chat_id,
+                 "⚙️ <b>Cấu hình quản lý</b>\n"
+                 f"Chống link: {'BẬT' if get_setting('tg_del_links','0')=='1' else 'tắt'}\n"
+                 f"Xoá sticker/ảnh động: {'BẬT' if get_setting('tg_del_stickers','0')=='1' else 'tắt'}\n"
+                 f"Xoá ảnh: {'BẬT' if get_setting('tg_del_photos','0')=='1' else 'tắt'}\n"
+                 f"Ngưỡng cảnh báo: {get_setting('tg_warn_limit','3')} → {get_setting('tg_warn_action','mute')}\n"
+                 "Đổi cấu hình trong app KENIOS → Quản trị → Bot Telegram."); return
+    if cmd in ("ban", "mute", "unmute", "warn", "kick", "unwarn") and not tid:
+        _tg_send(token, chat_id, "↩️ Hãy REPLY vào tin của người cần xử lý rồi gõ lệnh."); return
+    tname = _tg_mention(target) if target else ""
+    if cmd == "ban":
+        _tg_call(token, "banChatMember", chat_id=chat_id, user_id=tid)
+        _tg_send(token, chat_id, f"🚫 Đã cấm {tname}.")
+    elif cmd == "kick":
+        _tg_call(token, "banChatMember", chat_id=chat_id, user_id=tid)
+        _tg_call(token, "unbanChatMember", chat_id=chat_id, user_id=tid)
+        _tg_send(token, chat_id, f"👢 Đã kick {tname}.")
+    elif cmd == "mute":
+        mins = 0
+        if len(parts) > 1 and parts[1].isdigit(): mins = int(parts[1])
+        kw = {"chat_id": chat_id, "user_id": tid, "permissions": {"can_send_messages": False}}
+        if mins > 0: kw["until_date"] = int(time.time()) + mins * 60
+        _tg_call(token, "restrictChatMember", **kw)
+        _tg_send(token, chat_id, f"🔇 Đã cấm chat {tname}" + (f" trong {mins} phút." if mins else "."))
+    elif cmd == "unmute":
+        _tg_call(token, "restrictChatMember", chat_id=chat_id, user_id=tid,
+                 permissions={"can_send_messages": True, "can_send_media_messages": True,
+                              "can_send_polls": True, "can_send_other_messages": True,
+                              "can_add_web_page_previews": True})
+        _tg_send(token, chat_id, f"🔊 Đã mở chat cho {tname}.")
+    elif cmd == "warn":
+        _tg_warn(token, chat_id, target, "admin cảnh báo")
+    elif cmd == "unwarn":
+        _warn_reset(chat_id, tid)
+        _tg_send(token, chat_id, f"✅ Đã xoá cảnh báo cho {tname}.")
+
+def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
+    frm = msg.get("from", {})
+    uid = frm.get("id")
+    text = msg.get("text", "") or ""
+    mid = msg.get("message_id")
+    # Lệnh của admin (ban/mute/warn/...) — dùng được kể cả khi tắt tự động lọc.
+    if text.startswith("/"):
+        if _tg_is_admin(token, chat_id, uid):
+            _tg_group_command(token, chat_id, msg, text)
+        return
+    if get_setting("tg_mod_enabled", "0") != "1": return
+    if _tg_is_admin(token, chat_id, uid): return   # admin/chủ nhóm được bỏ qua
+    # Chống spam link
+    if get_setting("tg_del_links", "0") == "1" and _tg_has_link(msg):
+        _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid)
+        _tg_warn(token, chat_id, frm, "gửi liên kết/spam"); return
+    # Xoá sticker & ảnh động (icon gợi cảm)
+    if get_setting("tg_del_stickers", "0") == "1" and (msg.get("sticker") or msg.get("animation")):
+        _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid)
+        _tg_warn(token, chat_id, frm, "gửi sticker/ảnh động"); return
+    # Xoá hình ảnh (nhạy cảm)
+    if get_setting("tg_del_photos", "0") == "1" and msg.get("photo"):
+        _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid)
+        _tg_warn(token, chat_id, frm, "gửi hình ảnh"); return
+
 def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
-    # Nút bấm (callback)
+    # Nút bấm (callback) — menu hỗ trợ chat riêng
     cq = u.get("callback_query")
     if cq:
         data = cq.get("data", "")
@@ -4922,12 +5071,22 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     msg = u.get("message")
     if not msg:
         return
-    chat_id = str(msg.get("chat", {}).get("id", ""))
+    chat = msg.get("chat", {})
+    chat_id = str(chat.get("id", ""))
+    ctype = chat.get("type", "")
+
+    # NHÓM: chào mừng / tạm biệt / quản lý (chống link, xoá ảnh-sticker, mute/ban, cảnh báo)
+    if msg.get("new_chat_members"):
+        _tg_welcome_members(token, chat, msg["new_chat_members"]); return
+    if msg.get("left_chat_member"):
+        _tg_goodbye_member(token, chat, msg["left_chat_member"]); return
+    if ctype in ("group", "supergroup"):
+        _tg_group_message(token, chat_id, msg); return
+
+    # CHAT RIÊNG: hỗ trợ khách ↔ admin
     text = msg.get("text", "") or msg.get("caption", "") or "[media]"
     frm = msg.get("from", {})
-    name = (frm.get("first_name", "") + " " + frm.get("last_name", "")).strip() or frm.get("username", "") or "Khách"
-
-    # Admin TRẢ LỜI (reply vào tin đã chuyển) → gửi lại đúng khách theo mã [cid:...]
+    name = _tg_name(frm)
     if admin_chat and chat_id == str(admin_chat):
         reply = msg.get("reply_to_message", {})
         rtext = reply.get("text", "") if reply else ""
@@ -4939,13 +5098,10 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         elif text.startswith("/start"):
             _tg_send(token, admin_chat, "Bạn là ADMIN. Khi khách nhắn bot, tin sẽ hiện ở đây — hãy REPLY vào tin đó để trả lời khách.")
         return
-
-    # Khách nhắn
     if text.startswith("/start"):
         wel = get_setting("tg_welcome", "👋 Chào mừng bạn đến với hỗ trợ KENIOS!\nBấm nút bên dưới hoặc nhắn nội dung cần hỗ trợ.")
         _tg_send(token, chat_id, wel, buttons=_tg_menu_buttons())
         return
-    # Chuyển tin của khách cho admin (kèm mã để reply lại đúng người)
     if admin_chat:
         _tg_send(token, admin_chat,
                  f"💬 <b>{name}</b> [cid:{chat_id}]\n{text}\n\n<i>Reply tin này để trả lời khách.</i>")
@@ -9039,6 +9195,19 @@ def _tg_bot_status() -> dict[str, Any]:
         "welcome": get_setting("tg_welcome", ""),
         "about": get_setting("tg_about", ""),
         "username": get_setting("tg_bot_username", ""),
+        # Quản lý nhóm
+        "mod_enabled": get_setting("tg_mod_enabled", "0") == "1",
+        "del_links": get_setting("tg_del_links", "0") == "1",
+        "del_stickers": get_setting("tg_del_stickers", "0") == "1",
+        "del_photos": get_setting("tg_del_photos", "0") == "1",
+        "warn_limit": int(get_setting("tg_warn_limit", "3") or 3),
+        "warn_action": get_setting("tg_warn_action", "mute"),
+        "welcome_on": get_setting("tg_welcome_on", "1") == "1",
+        "welcome_group": get_setting("tg_welcome_group", "👋 Chào mừng {name} đã vào {group}!"),
+        "welcome_btn_text": get_setting("tg_welcome_btn_text", ""),
+        "welcome_btn_url": get_setting("tg_welcome_btn_url", ""),
+        "goodbye_on": get_setting("tg_goodbye_on", "1") == "1",
+        "goodbye": get_setting("tg_goodbye", "👋 Tạm biệt {name}, hẹn gặp lại!"),
     }
 
 @app.get("/admin/telegram-bot")
@@ -9053,6 +9222,19 @@ def admin_set_tg_bot(body: dict = Body(...), admin=Depends(get_admin)) -> dict[s
     if body.get("admin_chat") is not None:    set_setting("tg_admin_chat", str(body["admin_chat"]).strip())
     if body.get("welcome") is not None:       set_setting("tg_welcome", str(body["welcome"])[:1500])
     if body.get("about") is not None:         set_setting("tg_about", str(body["about"])[:1500])
+    # Quản lý nhóm
+    if "mod_enabled" in body:   set_setting("tg_mod_enabled", "1" if body.get("mod_enabled") else "0")
+    if "del_links" in body:     set_setting("tg_del_links", "1" if body.get("del_links") else "0")
+    if "del_stickers" in body:  set_setting("tg_del_stickers", "1" if body.get("del_stickers") else "0")
+    if "del_photos" in body:    set_setting("tg_del_photos", "1" if body.get("del_photos") else "0")
+    if body.get("warn_limit") is not None:   set_setting("tg_warn_limit", str(max(1, min(int(body["warn_limit"]), 10))))
+    if body.get("warn_action") is not None:  set_setting("tg_warn_action", "ban" if body["warn_action"] == "ban" else "mute")
+    if "welcome_on" in body:    set_setting("tg_welcome_on", "1" if body.get("welcome_on") else "0")
+    if body.get("welcome_group") is not None:    set_setting("tg_welcome_group", str(body["welcome_group"])[:1500])
+    if body.get("welcome_btn_text") is not None: set_setting("tg_welcome_btn_text", str(body["welcome_btn_text"])[:60])
+    if body.get("welcome_btn_url") is not None:  set_setting("tg_welcome_btn_url", str(body["welcome_btn_url"]).strip()[:300])
+    if "goodbye_on" in body:    set_setting("tg_goodbye_on", "1" if body.get("goodbye_on") else "0")
+    if body.get("goodbye") is not None:          set_setting("tg_goodbye", str(body["goodbye"])[:1500])
     # Xác minh token + lấy @username của bot (getMe) để hiển thị/kiểm tra
     token = get_setting("tg_bot_token", "").strip()
     ok = False; uname = ""
