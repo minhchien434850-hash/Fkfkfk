@@ -5487,6 +5487,7 @@ _TG_CONGRATS = [
     "🧠 Bộ não thiên tài gọi tên {name}!", "🔥 {name} cân luôn câu khó!",
 ]
 _TG_QUIZ: dict = {}     # chat_id -> {"q","a","auto"} câu đố đang chờ trả lời
+_TG_QUIZ_LAST: dict = {}  # chat_id -> câu hỏi lần trước (để không hỏi trùng liên tiếp)
 _TG_XIDACH: dict = {}   # (chat_id, uid) -> {"p": bài người chơi, "d": bài nhà cái}
 _TG_QUIZ_BANK: list = []
 
@@ -5511,7 +5512,10 @@ def _tg_ans_ok(user: str, answers: list) -> bool:
     return False
 
 def _tg_quiz_bank() -> list:
-    """Ngân hàng ~700 câu đố (tạo 1 lần): thủ đô, cờ, toán, dãy số, kiến thức, mẹo, tục ngữ."""
+    """Ngân hàng ~1.150 câu đố (tạo 1 lần): thủ đô, cờ, toán, dãy số, kiến thức chung,
+    đố mẹo, tục ngữ, đố chữ, đố dân gian (con gì/cái gì), hại não, cơ thể, khoa học,
+    địa lý, lịch sử - ngày lễ, ẩm thực, cây cỏ - 12 con giáp, màu sắc - mùa, số học,
+    nghề nghiệp - công nghệ, ca dao."""
     global _TG_QUIZ_BANK
     if _TG_QUIZ_BANK:
         return _TG_QUIZ_BANK
@@ -5573,9 +5577,9 @@ def _tg_quiz_bank() -> list:
         seen.add((sym, a, b))
         v = a + b if sym == "+" else (a - b if sym == "-" else a * b)
         add(f"🧮 Tính nhanh: {a} {sym} {b} = ?", str(v))
-    # ---- 4) Dãy số (60 câu, sinh cố định) ----
+    # ---- 4) Dãy số (100 câu, sinh cố định) ----
     seen2 = set()
-    while len(seen2) < 60:
+    while len(seen2) < 100:
         if rr.random() < 0.7:
             s, d = rr.randint(1, 60), rr.randint(2, 19)
             seq = [s + i * d for i in range(5)]
@@ -5703,6 +5707,429 @@ def _tg_quiz_bank() -> list:
         ("Yêu nhau lắm, cắn nhau ...", "đau"), ("Có chí thì ...", "nên"),
     ]:
         add("📜 Điền từ còn thiếu: " + q, *a)
+    # ---- 8) Đố chữ / chữ cái ----
+    for q, *a in [
+        ("Để nguyên lấp lánh trên trời, bớt đầu thành chỗ cá bơi hằng ngày. Là chữ gì?", "sao"),
+        ("Con gì kêu 'quốc quốc' bên bờ, tên nghe cứ ngỡ non sông nước nhà?", "cuốc", "con cuốc", "chim cuốc"),
+        ("Chữ cái đầu tiên trong bảng chữ cái tiếng Việt?", "a"),
+        ("Chữ cái cuối cùng trong bảng chữ cái tiếng Anh?", "z"),
+        ("Bảng chữ cái tiếng Anh có bao nhiêu chữ cái?", "26"),
+        ("Nguyên âm đầu tiên trong tiếng Việt là chữ gì?", "a"),
+        ("Chữ số nào tròn trịa như quả trứng?", "0", "số 0", "không"),
+        ("Từ 'HỌC SINH' có mấy chữ cái?", "7", "bảy"),
+        ("Trong từ 'BÓNG ĐÁ' có mấy dấu sắc?", "1", "một"),
+        ("Chữ 'ê' có mấy dấu mũ?", "1", "một"),
+    ]:
+        add("🔤 Đố chữ: " + q, *a)
+    # ---- 9) Đố dân gian: con gì? ----
+    for q, *a in [
+        ("Con gì ăn no bụng to mắt híp, miệng kêu ụt ịt, nằm thở phì phò?", "lợn", "heo", "con lợn", "con heo"),
+        ("Con gì mào đỏ, gáy 'ò ó o' gọi người thức dậy mỗi sáng?", "gà trống", "gà", "con gà"),
+        ("Con gì đuôi ngắn tai dài, mắt hồng lông mượt, có tài nhảy nhanh?", "thỏ", "con thỏ"),
+        ("Con gì kêu 'meo meo', chuyên rình bắt chuột trong nhà?", "mèo", "con mèo"),
+        ("Con gì trung thành giữ nhà, thấy người lạ thì sủa vang?", "chó", "con chó"),
+        ("Con gì tám cẳng hai càng, không đi mà lại bò ngang cả đời?", "cua", "con cua"),
+        ("Con gì bơi dưới nước, thở bằng mang, mình đầy vảy?", "cá", "con cá"),
+        ("Con gì chậm chạp, mai cứng như mộc, sống rất thọ?", "rùa", "con rùa"),
+        ("Con gì trườn bò không chân, hay le lưỡi dọa người?", "rắn", "con rắn"),
+        ("Con gì bé tí phát sáng lập lòe trong vườn ban đêm?", "đom đóm", "con đom đóm"),
+        ("Con gì kêu 've ve' suốt cả mùa hè?", "ve", "ve sầu", "con ve"),
+        ("Con gì chăng tơ tám góc để bắt ruồi bắt muỗi?", "nhện", "con nhện"),
+        ("Con gì hút máu người, hay truyền bệnh sốt rét?", "muỗi", "con muỗi"),
+        ("Con gì siêng năng tha mồi, đi thành hàng dài không nghỉ?", "kiến", "con kiến"),
+        ("Con gì bay lượn, hút mật, đôi cánh sặc sỡ đủ màu?", "bướm", "con bướm"),
+        ("Con gì có bờm, được mệnh danh 'chúa sơn lâm' của châu Phi?", "sư tử", "con sư tử"),
+        ("Con gì cổ dài nhất, ăn lá trên cây cao?", "hươu cao cổ", "hươu"),
+        ("Con gì to lớn, có vòi và ngà, tai như quạt lớn?", "voi", "con voi"),
+        ("Con gì 'chúa tể bầu trời', mắt tinh, móng vuốt sắc bắt mồi?", "đại bàng", "chim đại bàng"),
+        ("Con gì đi lạch bạch, mỏ bẹt, lông không thấm nước?", "vịt", "con vịt"),
+        ("Con gì kêu 'ộp ộp', nhảy giỏi, sống cả trên cạn lẫn dưới nước?", "ếch", "con ếch"),
+        ("Con gì lông xù, kêu 'be be', cho ta len ấm?", "cừu", "con cừu"),
+        ("Con gì có bướu trên lưng, chịu khát băng qua sa mạc?", "lạc đà", "con lạc đà"),
+        ("Con gì đen trắng như ngựa vằn kẻ sọc?", "ngựa vằn", "con ngựa vằn"),
+        ("Con gì thân dẹt, hai mắt cùng một bên, nằm sát đáy biển?", "cá bơn", "cá thờn bơn"),
+        ("Con gì nhỏ, kêu 'chiếp chiếp', là con của gà?", "gà con", "gà con"),
+        ("Con gì đêm về ngủ treo ngược mình trong hang, bay bằng cánh da?", "dơi", "con dơi"),
+        ("Con gì thông minh, hay bắt chước, thích ăn chuối?", "khỉ", "con khỉ"),
+    ]:
+        add("🐾 Đố con gì: " + q, *a)
+    # ---- 10) Đố dân gian: cái gì? ----
+    for q, *a in [
+        ("Cái gì ban ngày nằm im, ban đêm thức, treo trần nhà toả sáng?", "đèn", "bóng đèn"),
+        ("Cái gì mặt tròn, kim chạy vòng vòng, báo cho ta biết giờ?", "đồng hồ", "cái đồng hồ"),
+        ("Cái gì mỏng nhẹ, chở đầy con chữ, cho ta kiến thức?", "sách", "quyển sách", "cuốn sách"),
+        ("Cái gì trong suốt, soi vào thấy rõ mặt mình?", "gương", "cái gương"),
+        ("Cái gì che nắng che mưa, cầm trên tay khi đi đường?", "ô", "cái ô", "dù", "cây dù"),
+        ("Cái gì có ruột bằng chì, khoác áo bằng gỗ, giúp ta viết chữ?", "bút chì", "cây bút chì"),
+        ("Cái gì quạt mát mùa hè, có cánh quay tít trên tường?", "quạt", "quạt điện", "cái quạt"),
+        ("Cái gì lạnh buốt bên trong, giữ đồ ăn tươi lâu?", "tủ lạnh", "cái tủ lạnh"),
+        ("Cái gì reo lên, giúp ta nghe được người ở xa nói chuyện?", "điện thoại", "cái điện thoại"),
+        ("Cái gì đi cùng ta suốt, mang dưới chân, bảo vệ bàn chân?", "giày", "dép", "đôi giày", "đôi dép"),
+        ("Cái gì tít tít mỗi sáng, đánh thức ta dậy đi học?", "đồng hồ báo thức", "đồng hồ"),
+        ("Cái gì đựng cơm, ngày ba bữa ta bưng lên ăn?", "bát", "chén", "cái bát", "cái chén"),
+        ("Cái gì có nhiều phím, ta gõ vào để viết trên máy tính?", "bàn phím", "cái bàn phím"),
+        ("Cái gì cắt được giấy, gồm hai lưỡi chéo nhau?", "kéo", "cái kéo"),
+        ("Cái gì đóng đinh vào gỗ, cầm tay mà nện?", "búa", "cái búa"),
+        ("Cái gì mềm mại, đắp lên người cho ấm khi ngủ?", "chăn", "cái chăn", "mền"),
+        ("Cái gì có bốn bánh, chở người chạy trên đường?", "ô tô", "xe hơi", "xe ô tô"),
+        ("Cái gì hai bánh, đạp bằng chân mà chạy?", "xe đạp", "chiếc xe đạp"),
+    ]:
+        add("🧰 Đố cái gì: " + q, *a)
+    # ---- 11) Đố mẹo hại não / hỏi xoáy ----
+    for q, *a in [
+        ("Cái gì khi đi thì nằm, đứng cũng nằm, nhưng nằm xuống lại đứng?", "bàn chân"),
+        ("Một đàn chim đậu trên cành, bắn rơi một con, còn lại mấy con?", "0", "không", "không con"),
+        ("9 người ăn 9 cái bánh hết 9 phút, 100 người ăn 100 cái bánh hết mấy phút?", "9"),
+        ("5 con mèo bắt 5 con chuột hết 5 phút, 100 con mèo bắt 100 con chuột hết mấy phút?", "5"),
+        ("Có 3 quả táo, bạn lấy đi 2 quả. Bạn đang có mấy quả?", "2", "hai"),
+        ("Bố mẹ có 6 người con trai, mỗi con trai có 1 em gái. Gia đình có mấy người con?", "7", "bảy"),
+        ("Cha của Bình có ba con: con cả tên Xuân, con thứ tên Hạ, con út tên gì?", "bình", "tên bình"),
+        ("Một sợi dây cắt làm 2 khúc mất 1 nhát. Cắt thành 5 khúc mất mấy nhát?", "4", "bốn"),
+        ("Con trai của mẹ bạn, nhưng không phải anh em trai của bạn, là ai?", "chính mình", "tôi", "bản thân", "chính bạn"),
+        ("Đố bạn con gì càng to càng nhỏ?", "con cua", "cua"),
+        ("Cái gì càng kéo càng ngắn?", "điếu thuốc", "điếu thuốc lá", "cây nến", "nến"),
+        ("Cái gì chạy mà không có chân?", "dòng nước", "nước", "thời gian", "dòng sông"),
+        ("Cái gì có tay mà không có chân, chỉ giờ cả ngày?", "đồng hồ", "cái đồng hồ"),
+        ("Thứ gì càng chia càng nhiều?", "niềm vui", "hạnh phúc", "kiến thức"),
+        ("Cái gì luôn tăng, không bao giờ giảm đi?", "tuổi", "tuổi tác"),
+        ("Cái gì đen khi sạch, trắng khi bẩn?", "bảng", "cái bảng", "bảng đen"),
+        ("Cái gì có đầu, có đuôi nhưng không có thân?", "đồng xu", "đồng tiền"),
+        ("Thứ gì mỗi người mỗi khác, in ở đầu ngón tay?", "vân tay", "dấu vân tay"),
+        ("Cái gì ướt khi càng lau khô?", "khăn", "cái khăn", "khăn lau"),
+        ("Đi trên đầu là cái gì?", "cái nón", "nón", "mũ", "cái mũ"),
+        ("Con gì đứng thì thấp, nằm lại cao?", "con chó", "chó"),
+        ("Cái gì có cánh mà không bay, có mắt mà không nhìn?", "quạt", "quạt máy"),
+        ("Thứ gì càng nóng thì càng đông (người mua)?", "kem", "que kem"),
+        ("Nhà nào không có cửa?", "nhà nghèo", "tổ chim"),
+        ("Con gì có 4 chân mà không biết đi?", "cái bàn", "bàn", "cái ghế", "ghế"),
+        ("Vừa bằng lá tre, ngo ngoe dưới nước — con gì?", "con đỉa", "đỉa"),
+        ("Sông nào không có nước?", "sông ngân", "ngân hà", "sông ngân hà"),
+        ("Đường nào dài nhất?", "đường đời"),
+        ("Con gì mắt trắng như bông, tối đến sáng rực, ngày lại thu vào?", "con đom đóm", "đom đóm"),
+        ("Bệnh gì bác sĩ cũng phải chịu, không thuốc nào chữa?", "bó tay", "gãy tay"),
+    ]:
+        add("🧩 Đố mẹo: " + q, *a)
+    # ---- 12) Cơ thể con người ----
+    for q, *a in [
+        ("Người trưởng thành có bao nhiêu chiếc răng?", "32"),
+        ("Bộ phận nào giúp con người nhìn thấy?", "mắt", "đôi mắt"),
+        ("Bộ phận nào giúp con người nghe?", "tai", "đôi tai"),
+        ("Cơ quan nào giúp ta hít thở?", "phổi", "hai lá phổi"),
+        ("Cơ quan lớn nhất trên cơ thể người?", "da", "làn da"),
+        ("Máu người bình thường có màu gì?", "đỏ", "màu đỏ"),
+        ("Bộ phận nào bảo vệ bộ não?", "hộp sọ", "xương sọ", "sọ"),
+        ("Con người có mấy lá phổi?", "2", "hai"),
+        ("Nhóm máu nào cho được mọi nhóm (nhóm cho vạn năng)?", "o", "nhóm o"),
+        ("Cơ quan nào lọc máu và thải nước tiểu?", "thận", "quả thận"),
+        ("Bộ phận nào giúp ta ngửi mùi?", "mũi", "cái mũi"),
+        ("Bộ phận nào giúp ta nếm vị?", "lưỡi", "cái lưỡi"),
+        ("Cơ bắp nào đập suốt đời, không nghỉ?", "tim", "trái tim", "con tim"),
+        ("Cơ thể người có bao nhiêu giác quan cơ bản?", "5", "năm"),
+        ("Bộ phận nào giúp ta cầm nắm đồ vật?", "tay", "bàn tay", "đôi tay"),
+        ("Bộ phận nào giúp con người đi lại?", "chân", "đôi chân"),
+    ]:
+        add("🫀 Đố cơ thể: " + q, *a)
+    # ---- 13) Khoa học & tự nhiên ----
+    for q, *a in [
+        ("Chất khí nào chiếm nhiều nhất trong không khí?", "nitơ", "ni tơ", "nito"),
+        ("Vật gì hút được sắt?", "nam châm", "cục nam châm"),
+        ("Lực nào làm mọi vật rơi xuống đất?", "trọng lực", "lực hút", "lực hút trái đất"),
+        ("1 kilôgam bằng bao nhiêu gam?", "1000"),
+        ("1 mét bằng bao nhiêu xăng-ti-mét?", "100"),
+        ("1 giờ bằng bao nhiêu giây?", "3600"),
+        ("1 ngày có bao nhiêu giờ?", "24"),
+        ("Khủng long ngày nay đã ra sao?", "tuyệt chủng", "đã tuyệt chủng"),
+        ("Kim cương được tạo nên từ nguyên tố nào?", "cacbon", "các bon", "cabon", "carbon"),
+        ("Ký hiệu hoá học của vàng là gì?", "au"),
+        ("Muối ăn có công thức hoá học là gì?", "nacl"),
+        ("Nước gồm hai nguyên tố hydro và gì?", "oxy", "oxi", "o"),
+        ("Vật thể nào phát ra ánh sáng và nhiệt cho Trái Đất?", "mặt trời"),
+        ("Hiện tượng nào tạo ra sấm và chớp?", "giông", "giông bão", "mưa giông", "sét"),
+        ("Đơn vị đo nhiệt độ thường dùng ở Việt Nam?", "độ c", "độ celsius", "celsius"),
+        ("Nam châm có mấy cực?", "2", "hai"),
+        ("Ánh sáng đi nhanh hơn hay âm thanh đi nhanh hơn?", "ánh sáng"),
+        ("Băng là thể gì của nước?", "thể rắn", "rắn", "đông đặc"),
+        ("Hơi nước là thể gì của nước?", "thể khí", "khí"),
+        ("Cây xanh cần khí gì để quang hợp?", "cacbonic", "co2", "khí cacbonic", "cabonic"),
+    ]:
+        add("🔬 Đố khoa học: " + q, *a)
+    # ---- 14) Địa lý mở rộng ----
+    for q, *a in [
+        ("Châu lục nào lạnh nhất, phủ đầy băng tuyết?", "nam cực", "châu nam cực"),
+        ("Đại dương nào nhỏ nhất thế giới?", "bắc băng dương"),
+        ("Nước nào có hình dạng giống chiếc ủng?", "ý", "italia", "italy"),
+        ("Thành phố nào của VN được gọi là 'thành phố ngàn hoa'?", "đà lạt"),
+        ("Tỉnh nào ở cực Bắc của Việt Nam?", "hà giang"),
+        ("Mũi Cà Mau nằm ở cực nào của Việt Nam?", "cực nam", "miền nam"),
+        ("Cố đô của triều Nguyễn ở tỉnh nào?", "huế", "thừa thiên huế"),
+        ("Hồ nước ngọt nổi tiếng giữa lòng Hà Nội?", "hồ gươm", "hồ hoàn kiếm"),
+        ("Vịnh nào ở Quảng Ninh là kỳ quan thiên nhiên thế giới?", "hạ long", "vịnh hạ long"),
+        ("Thành phố nào của VN có chợ Bến Thành?", "tphcm", "sài gòn", "hồ chí minh", "thành phố hồ chí minh"),
+        ("Ngọn hải đăng, biển xanh — đảo lớn nhất Việt Nam?", "phú quốc"),
+        ("Cao nguyên đá Đồng Văn thuộc tỉnh nào?", "hà giang"),
+        ("Thành phố biển nào nổi tiếng với 'phố biển', gần Nha Trang cùng tỉnh?", "nha trang", "khánh hòa"),
+        ("Sa Pa thuộc tỉnh nào?", "lào cai"),
+    ]:
+        add("🗺️ Đố địa lý: " + q, *a)
+    # ---- 15) Lịch sử & ngày lễ ----
+    for q, *a in [
+        ("Ai là vị vua đầu tiên (nước Văn Lang)?", "hùng vương", "vua hùng"),
+        ("Giỗ Tổ Hùng Vương ngày nào âm lịch?", "10/3", "mùng 10 tháng 3", "mồng 10 tháng 3"),
+        ("Ai lãnh đạo khởi nghĩa Lam Sơn chống quân Minh?", "lê lợi"),
+        ("Bà Triệu cưỡi con gì ra trận?", "voi", "con voi"),
+        ("Ngô Quyền đánh tan quân Nam Hán trên sông nào?", "bạch đằng", "sông bạch đằng"),
+        ("Quốc khánh Việt Nam là ngày nào?", "2/9", "mùng 2 tháng 9", "mồng 2 tháng 9"),
+        ("Ngày Nhà giáo Việt Nam là ngày nào?", "20/11"),
+        ("Ngày Quốc tế Phụ nữ là ngày nào?", "8/3"),
+        ("Ngày Quốc tế Thiếu nhi là ngày nào?", "1/6"),
+        ("Tết Trung thu vào ngày nào âm lịch?", "15/8", "rằm tháng 8", "rằm tháng tám"),
+        ("Vua nào dời đô về Thăng Long năm 1010?", "lý thái tổ", "lý công uẩn"),
+        ("Người anh hùng nhỏ tuổi đốt kho xăng giặc tên gì?", "lê văn tám"),
+        ("Chiếc xe tăng đầu tiên húc đổ cổng Dinh Độc Lập năm 1975 — sự kiện gọi là ngày Thống nhất, ngày nào?", "30/4", "ba mươi tháng tư"),
+    ]:
+        add("📜 Đố lịch sử: " + q, *a)
+    # ---- 16) Ẩm thực Việt ----
+    for q, *a in [
+        ("Món phở nổi tiếng nhất gắn với thủ đô nào?", "hà nội"),
+        ("Nước mắm — gia vị đặc trưng — làm từ con gì?", "cá", "con cá"),
+        ("Bún bò là đặc sản của tỉnh/thành nào?", "huế"),
+        ("Cao lầu là món đặc sản của phố cổ nào?", "hội an"),
+        ("Loại quả nào được gọi là 'vua của các loại trái cây'?", "sầu riêng"),
+        ("Gỏi cuốn thường được cuốn bằng lớp vỏ gì?", "bánh tráng"),
+        ("Cà phê sữa đá gồm cà phê, đá và gì?", "sữa"),
+        ("Bánh chưng vuông, còn bánh gì dài gói ngày Tết miền Nam?", "bánh tét"),
+        ("Mì Quảng là đặc sản của tỉnh nào?", "quảng nam"),
+        ("Chè là món ăn có vị chủ đạo gì?", "ngọt", "vị ngọt"),
+    ]:
+        add("🍜 Đố ẩm thực: " + q, *a)
+    # ---- 17) Cây cỏ, hoa lá & 12 con giáp ----
+    for q, *a in [
+        ("Loài hoa nào tượng trưng Tết miền Bắc, cánh hồng?", "hoa đào", "đào"),
+        ("Loài hoa nào tượng trưng Tết miền Nam, cánh vàng?", "hoa mai", "mai"),
+        ("Loài hoa nào nở về đêm, thơm ngát?", "hoa quỳnh", "quỳnh"),
+        ("Cây gì thân nhiều đốt, gấu trúc rất thích ăn?", "tre", "trúc", "cây tre"),
+        ("Loài hoa nào là biểu tượng của nước Nhật?", "hoa anh đào", "anh đào", "sakura"),
+        ("Quốc hoa của Việt Nam là hoa gì?", "hoa sen", "sen"),
+        ("Con giáp đầu tiên (tuổi Tý) là con gì?", "chuột", "con chuột"),
+        ("Con giáp cuối cùng (tuổi Hợi) là con gì?", "lợn", "heo", "con lợn", "con heo"),
+        ("Tuổi Sửu là con gì?", "trâu", "con trâu"),
+        ("Tuổi Dần là con gì?", "hổ", "cọp", "con hổ"),
+        ("Tuổi Mão (Mẹo) là con gì?", "mèo", "con mèo"),
+        ("Tuổi Thìn là con gì?", "rồng", "con rồng"),
+        ("Tuổi Tỵ là con gì?", "rắn", "con rắn"),
+        ("Tuổi Ngọ là con gì?", "ngựa", "con ngựa"),
+        ("Tuổi Mùi là con gì?", "dê", "con dê"),
+        ("Tuổi Thân là con gì?", "khỉ", "con khỉ"),
+        ("Tuổi Dậu là con gì?", "gà", "con gà"),
+        ("Tuổi Tuất là con gì?", "chó", "con chó"),
+        ("12 con giáp có bao nhiêu con vật?", "12", "mười hai"),
+    ]:
+        add("🌸 Đố cây cỏ - con giáp: " + q, *a)
+    # ---- 18) Màu sắc, mùa & thời gian ----
+    for q, *a in [
+        ("Trộn màu xanh dương với vàng ra màu gì?", "xanh lá", "xanh lá cây", "màu xanh lá"),
+        ("Trộn màu đỏ với vàng ra màu gì?", "cam", "màu cam"),
+        ("Trộn màu đỏ với xanh dương ra màu gì?", "tím", "màu tím"),
+        ("Máu, lửa và cờ Tổ quốc — cùng màu gì?", "đỏ", "màu đỏ"),
+        ("Tuyết, mây và sữa — cùng màu gì?", "trắng", "màu trắng"),
+        ("Lá cây khỏe mạnh có màu gì?", "xanh", "xanh lá", "màu xanh"),
+        ("Một năm ở miền Bắc có mấy mùa?", "4", "bốn"),
+        ("Mùa nào lạnh nhất trong năm?", "mùa đông", "đông"),
+        ("Mùa nào nóng nhất, học sinh được nghỉ dài?", "mùa hè", "mùa hạ", "hè"),
+        ("Mùa nào lá vàng rơi nhiều nhất?", "mùa thu", "thu"),
+        ("Tết Nguyên Đán rơi vào mùa nào?", "mùa xuân", "xuân"),
+        ("Một quý có mấy tháng?", "3", "ba"),
+        ("Một thế kỷ có bao nhiêu năm?", "100"),
+        ("Một thập kỷ có bao nhiêu năm?", "10"),
+        ("Nửa giờ có bao nhiêu phút?", "30"),
+        ("Một năm có bao nhiêu tuần (làm tròn)?", "52"),
+    ]:
+        add("🌈 Đố thường thức: " + q, *a)
+    # ---- 19) Số học vui ----
+    for q, *a in [
+        ("Số nhỏ nhất có hai chữ số?", "10"),
+        ("Số lớn nhất có một chữ số?", "9"),
+        ("Số La Mã X là số mấy?", "10"),
+        ("Số La Mã V là số mấy?", "5"),
+        ("Số La Mã I là số mấy?", "1"),
+        ("Số La Mã L là số mấy?", "50"),
+        ("Số La Mã C là số mấy?", "100"),
+        ("Một nửa của 100 là bao nhiêu?", "50"),
+        ("Một tá bằng bao nhiêu?", "12"),
+        ("Một trăm nghìn có mấy số 0?", "5", "năm"),
+        ("Số nào cộng với chính nó bằng nhân với chính nó (khác 0)?", "2", "hai"),
+        ("Số chẵn nhỏ nhất là số mấy?", "2", "hai"),
+        ("Số lẻ nhỏ nhất lớn hơn 0 là số mấy?", "1", "một"),
+        ("Có bao nhiêu số từ 1 đến 100?", "100"),
+        ("3 chục cộng 2 chục bằng bao nhiêu?", "50", "năm mươi"),
+        ("Một chục trứng là bao nhiêu quả?", "10", "mười"),
+    ]:
+        add("🔢 Đố số học: " + q, *a)
+    # ---- 20) Nghề nghiệp & công nghệ đời sống ----
+    for q, *a in [
+        ("Ai là người khám và chữa bệnh cho con người?", "bác sĩ"),
+        ("Ai dạy học cho học sinh?", "giáo viên", "thầy giáo", "cô giáo", "thầy cô"),
+        ("Ai dập lửa khi có cháy?", "lính cứu hỏa", "cứu hỏa", "lính cứu hoả"),
+        ("Ai bắt tội phạm, giữ gìn trật tự?", "công an", "cảnh sát"),
+        ("Ai lái máy bay?", "phi công"),
+        ("Ai nấu các món ăn ở nhà hàng?", "đầu bếp", "bếp trưởng"),
+        ("Ai trồng lúa, làm ruộng?", "nông dân"),
+        ("Ai đánh cá ngoài biển khơi?", "ngư dân"),
+        ("Ai chữa bệnh cho răng?", "nha sĩ", "bác sĩ răng"),
+        ("Ai hát biểu diễn trên sân khấu?", "ca sĩ"),
+        ("Ai vẽ nên những bức tranh?", "họa sĩ", "hoạ sĩ"),
+        ("Bộ não của máy tính gọi tắt là gì?", "cpu"),
+        ("Hệ điều hành của iPhone tên là gì?", "ios"),
+        ("Công ty nào tạo ra iPhone?", "apple"),
+        ("Mạng xã hội có biểu tượng chữ 'f' màu xanh?", "facebook"),
+        ("Ứng dụng nhắn tin có biểu tượng máy bay giấy?", "telegram"),
+        ("Google nổi tiếng nhất với vai trò công cụ gì?", "tìm kiếm", "công cụ tìm kiếm"),
+        ("1 byte bằng bao nhiêu bit?", "8", "tám"),
+        ("Đơn vị dung lượng nào lớn hơn MB?", "gb", "gigabyte"),
+        ("Phím dài nhất trên bàn phím tạo khoảng trắng gọi là phím gì?", "space", "cách", "phím cách", "dấu cách"),
+    ]:
+        add("💼 Đố nghề & công nghệ: " + q, *a)
+    # ---- 21) Điền ca dao - tục ngữ (mở rộng) ----
+    for q, *a in [
+        ("Bầu ơi thương lấy bí cùng, tuy rằng khác giống nhưng chung một ...", "giàn"),
+        ("Nhiễu điều phủ lấy giá gương, người trong một nước phải thương nhau ...", "cùng"),
+        ("Công cha như núi Thái ...", "sơn"),
+        ("Một mặt người bằng mười mặt ...", "của"),
+        ("Thất bại là mẹ ...", "thành công"),
+        ("Có chí làm quan, có gan làm ...", "giàu"),
+        ("Trăm hay không bằng tay ...", "quen"),
+        ("Chớ thấy sóng cả mà ngã tay ...", "chèo"),
+        ("Chuồn chuồn bay thấp thì mưa, bay cao thì nắng bay vừa thì ...", "râm"),
+        ("Đêm tháng năm chưa nằm đã sáng, ngày tháng mười chưa cười đã ...", "tối"),
+        ("Ráng mỡ gà, có nhà thì ...", "giữ"),
+        ("Tháng bảy kiến bò, chỉ lo lại ...", "lụt"),
+        ("Mau sao thì nắng, vắng sao thì ...", "mưa"),
+        ("Con trâu là đầu cơ ...", "nghiệp"),
+        ("Ta về ta tắm ao ta, dù trong dù đục ao nhà vẫn ...", "hơn"),
+        ("Thuận vợ thuận chồng, tát biển Đông cũng ...", "cạn"),
+        ("Muốn sang thì bắc cầu kiều, muốn con hay chữ phải yêu lấy ...", "thầy"),
+        ("Bán anh em xa, mua láng giềng ...", "gần"),
+        ("Của rẻ là của ...", "ôi"),
+        ("Đi hỏi già, về nhà hỏi ...", "trẻ"),
+        ("Học ăn, học nói, học gói, học ...", "mở"),
+        ("Khôn ngoan đối đáp người ngoài, gà cùng một mẹ chớ hoài đá ...", "nhau"),
+        ("Trâu buộc ghét trâu ...", "ăn"),
+        ("Ăn cháo đá ...", "bát"),
+        ("Gậy ông đập lưng ...", "ông"),
+        ("Nước đến chân mới ...", "nhảy"),
+        ("Chậm mà ...", "chắc"),
+        ("Có mới nới ...", "cũ"),
+        ("Một nghề cho chín còn hơn chín ...", "nghề"),
+        ("Đi đêm lắm có ngày gặp ...", "ma"),
+        ("Nuôi ong tay ...", "áo"),
+        ("Rước voi về giày mả ...", "tổ"),
+        ("Ếch ngồi đáy ...", "giếng"),
+        ("Thùng rỗng kêu ...", "to"),
+        ("Chở củi về ...", "rừng"),
+        ("Đàn gảy tai ...", "trâu"),
+        ("Nước đổ đầu ...", "vịt"),
+        ("Nước đổ lá ...", "khoai"),
+        ("Cõng rắn cắn gà ...", "nhà"),
+        ("Múa rìu qua mắt ...", "thợ"),
+        ("Ăn vóc học ...", "hay"),
+        ("Ăn kỹ no lâu, cày sâu tốt ...", "lúa"),
+        ("Nhất nước, nhì phân, tam cần, tứ ...", "giống"),
+        ("Cây cao bóng ...", "cả"),
+    ]:
+        add("🎏 Điền ca dao - tục ngữ: " + q, *a)
+    # ---- 22) Đố vui cười / hỏi xoáy ----
+    for q, *a in [
+        ("Cái gì mua thì đen, dùng thì đỏ, bỏ đi thì xám?", "than", "than củi", "hòn than"),
+        ("Cái gì đi bằng đầu?", "đinh", "cái đinh", "đinh vít"),
+        ("Quả gì không ăn được mà ai cũng có, đập suốt ngày?", "quả tim", "trái tim"),
+        ("Con gì có nghìn chân, bò lổm ngổm?", "con rết", "rết", "con cuốn chiếu", "cuốn chiếu"),
+        ("Loài chim nào biết nói tiếng người, hay nhại lời?", "vẹt", "con vẹt"),
+        ("Con vật nào biết đổi màu, thè lưỡi bắt mồi rất nhanh?", "tắc kè", "tắc kè hoa", "kỳ nhông"),
+        ("Xe gì không bao giờ chạy được trên đường?", "xe đạp nước", "xe tăng đồ chơi", "xe điếu"),
+        ("Cái gì càng đun càng vơi đi?", "nước", "nồi nước"),
+        ("Cái gì đầu voi đuôi chuột?", "con chuột chũi", "công việc bỏ dở", "đầu voi đuôi chuột"),
+        ("Cái gì trời cho, không xin cũng có, mất rồi hết mua?", "thời gian", "tuổi trẻ"),
+        ("Con gì kêu 'tu hú' báo hiệu mùa hè?", "chim tu hú", "tu hú"),
+        ("Cái gì có nhiều lá mà không phải là cây, ngày ngày cho ta xem ngày tháng?", "quyển lịch", "lịch", "tờ lịch"),
+        ("Vật gì ban đầu bốn chân, sau hai chân, rồi ba chân — là ai?", "con người", "người"),
+        ("Cái gì bạn không mượn mà vẫn phải trả mỗi ngày?", "hơi thở"),
+        ("Đường nào ai cũng phải đi qua mà không thấy đường?", "đường ruột", "đường tiêu hóa"),
+        ("Con gì đập thì sống, không đập thì chết?", "con tim", "trái tim", "tim"),
+        ("Bánh gì nghe tên tưởng ngọt mà lại rất cay?", "bánh tráng trộn", "bánh phồng cay"),
+        ("Cái gì thuộc về bạn nhưng bạn ít khi tự gọi nó ra nhất?", "tên", "tên mình", "cái tên"),
+        ("Con gì bay không cánh, chạy không chân, khóc không có nước mắt?", "đám mây", "mây"),
+        ("Con gì mình đồng da sắt, phun lửa cứu người khi cháy?", "xe cứu hỏa", "xe cứu hoả"),
+    ]:
+        add("😂 Đố vui: " + q, *a)
+    # ---- 23) Nhân vật cổ tích & hoạt hình ----
+    for q, *a in [
+        ("Nhân vật cổ tích nào mũi dài ra mỗi khi nói dối?", "pinocchio", "pi nô ki ô"),
+        ("Ai bị mụ phù thủy cho ăn táo độc rồi ngủ mê trong rừng?", "bạch tuyết"),
+        ("Nàng công chúa nào làm rơi chiếc giày (hài) khi rời dạ hội?", "lọ lem", "cinderella", "cô bé lọ lem"),
+        ("Ông Bụt thường hiện ra an ủi ai trong truyện Tấm Cám?", "tấm", "cô tấm"),
+        ("Thánh Gióng lớn nhanh như thổi rồi cưỡi con gì đi đánh giặc?", "ngựa sắt", "ngựa"),
+        ("Sơn Tinh và Thủy Tinh tranh giành cưới nàng công chúa tên gì?", "mị nương", "công chúa mị nương"),
+        ("Câu thần chú làm tre nhả đốt là 'khắc nhập' và ...?", "khắc xuất"),
+        ("Chú Cuội ngồi gốc cây gì trên cung trăng?", "cây đa", "đa"),
+        ("Cô bé quàng khăn màu gì trong truyện cổ tích?", "đỏ", "màu đỏ", "khăn đỏ"),
+        ("Chú heo hồng nổi tiếng trong phim hoạt hình thiếu nhi tên gì?", "peppa", "peppa pig", "heo peppa"),
+        ("Siêu anh hùng mặc giáp đỏ - vàng biết bay của Marvel?", "iron man", "người sắt"),
+        ("Biệt đội siêu anh hùng của Marvel gọi chung là gì?", "avengers", "biệt đội báo thù"),
+        ("Chàng chằn tinh xanh, tai nhọn, sống ở đầm lầy tên gì?", "shrek"),
+        ("Nàng công chúa băng giá có phép tạo tuyết trong phim hoạt hình?", "elsa"),
+    ]:
+        add("🎬 Đố nhân vật: " + q, *a)
+    # ---- 24) Thể thao ----
+    for q, *a in [
+        ("Trong bóng rổ, ném bóng vào đâu để ghi điểm?", "rổ", "vào rổ"),
+        ("Vận động viên chạy 100m thi ở môn nào?", "điền kinh", "chạy"),
+        ("Bóng chuyền mỗi đội có mấy người trên sân?", "6", "sáu"),
+        ("Cầu thủ đứng trong khung thành bắt bóng gọi là gì?", "thủ môn"),
+        ("Thế vận hội Olympic tổ chức mấy năm một lần?", "4", "bốn"),
+        ("Biểu tượng Olympic có mấy vòng tròn lồng nhau?", "5", "năm"),
+        ("Ai được mệnh danh 'Vua bóng đá', người Brazil?", "pele", "vua pele"),
+        ("Môn võ đấu vật của những người to lớn ở Nhật?", "sumo"),
+        ("Quần vợt trong tiếng Anh gọi là gì?", "tennis"),
+        ("Đội tuyển bóng đá Việt Nam thường mặc áo màu gì?", "đỏ", "màu đỏ"),
+        ("Môn thể thao trượt trên tuyết bằng ván gọi là gì?", "trượt tuyết", "trượt ván tuyết"),
+        ("Cờ vua mỗi bên có mấy quân khi bắt đầu?", "16", "mười sáu"),
+        ("Trong bóng đá, thẻ màu gì thì bị đuổi khỏi sân?", "đỏ", "thẻ đỏ"),
+    ]:
+        add("🏆 Đố thể thao: " + q, *a)
+    # ---- 25) Đố trẻ em ----
+    for q, *a in [
+        ("Con mèo kêu như thế nào?", "meo meo", "meo"),
+        ("Con chó kêu như thế nào?", "gâu gâu", "gâu"),
+        ("Con gà trống gáy như thế nào?", "ò ó o", "ò ó o o"),
+        ("Con vịt kêu như thế nào?", "cạp cạp", "cạc cạc"),
+        ("Con ong cho ta thứ gì ngọt?", "mật", "mật ong"),
+        ("Con tằm nhả ra thứ gì để dệt vải?", "tơ", "sợi tơ"),
+        ("Con bò cho ta uống gì mỗi ngày?", "sữa", "sữa bò"),
+        ("Con gà mái cho ta gì để ăn sáng?", "trứng", "trứng gà"),
+        ("Muốn qua đường an toàn, ta đi trên vạch kẻ màu gì?", "trắng", "vạch trắng"),
+        ("Đèn đỏ thì dừng, đèn xanh thì làm gì?", "đi", "được đi"),
+        ("Rửa tay bằng gì cho sạch vi khuẩn?", "xà phòng", "xà bông"),
+        ("Mỗi ngày nên đánh răng ít nhất mấy lần?", "2", "hai"),
+        ("Nước mưa rơi xuống từ đâu?", "trên trời", "từ mây", "mây"),
+        ("Ban ngày ông gì chiếu sáng cả bầu trời?", "mặt trời", "ông mặt trời"),
+    ]:
+        add("🧒 Đố trẻ em: " + q, *a)
+    # ---- 26) Suy luận / IQ ----
+    for q, *a in [
+        ("Nếu hôm nay là thứ Ba thì 3 ngày sau là thứ mấy?", "thứ sáu", "thứ 6"),
+        ("Bạn đang đua và vừa vượt qua người thứ 2. Bạn đang ở vị trí thứ mấy?", "2", "thứ 2", "thứ hai"),
+        ("Có 12 con cá trong bể, 4 con 'chết đuối'. Còn lại mấy con?", "12", "mười hai"),
+        ("Tháng nào trong năm có ít ngày nhất?", "tháng hai", "tháng 2"),
+        ("Anh trai của bố bạn, bạn gọi là gì?", "bác", "bác trai"),
+        ("Em gái của mẹ bạn, bạn gọi là gì?", "dì"),
+        ("Nếu 5 máy dệt 5 tấm vải trong 5 giờ thì 10 máy dệt 10 tấm vải trong mấy giờ?", "5", "năm"),
+        ("Một hồ sen mỗi ngày lá phủ gấp đôi, ngày 30 phủ kín hồ. Ngày nào phủ được nửa hồ?", "29", "ngày 29"),
+        ("Con của mẹ bạn mà không phải anh chị em của bạn — là ai?", "chính mình", "tôi", "bản thân", "chính bạn"),
+        ("Bố của Nam gọi bà nội của Nam bằng gì?", "mẹ"),
+        ("Cây kim ngắn của đồng hồ chỉ điều gì?", "giờ"),
+        ("Cây kim dài của đồng hồ chỉ điều gì?", "phút"),
+    ]:
+        add("🧠 Đố suy luận: " + q, *a)
     _TG_QUIZ_BANK = B
     return B
 
@@ -5725,9 +6152,16 @@ def _tg_pts_top(chat_id, n=10) -> list:
             "SELECT name,points FROM tg_fun_points WHERE chat_id=? ORDER BY points DESC LIMIT ?", (str(chat_id), n)).fetchall()]
 
 def _tg_quiz_post(token, chat_id, auto=True) -> None:
-    """Ra 1 câu đố ngẫu nhiên cho nhóm."""
+    """Ra 1 câu đố NGẪU NHIÊN cho nhóm (tránh trùng câu vừa hỏi ở lần trước)."""
     import random as _rd
-    q, a = _rd.choice(_tg_quiz_bank())
+    bank = _tg_quiz_bank()
+    last = _TG_QUIZ_LAST.get(chat_id)
+    q, a = _rd.choice(bank)
+    for _ in range(6):                     # thử tối đa 6 lần để khác câu vừa rồi
+        if q != last or len(bank) < 2:
+            break
+        q, a = _rd.choice(bank)
+    _TG_QUIZ_LAST[chat_id] = q
     _TG_QUIZ[chat_id] = {"q": q, "a": a, "auto": auto}
     _tg_send(token, chat_id, f"🧠 <b>CÂU ĐỐ</b> (+10 điểm cho người trả lời đúng đầu tiên):\n\n{q}\n\n"
                              "✍️ <b>Gõ thẳng đáp án vào khung chat</b> để trả lời — KHÔNG cần lệnh!\n"
