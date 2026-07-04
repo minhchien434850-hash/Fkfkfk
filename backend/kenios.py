@@ -5176,7 +5176,7 @@ _TG_RESERVED = {
     "stop", "filters", "save", "clear", "notes", "setrules", "rules", "clean", "nightmode",
     "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
     "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
-    "modon", "modoff", "autodel",
+    "modon", "modoff", "autodel", "modadmin",
 }
 
 def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
@@ -5299,7 +5299,7 @@ _TG_FEAT = {
     "🚫 Chặn từ": "🚫 <b>Chặn từ (Blacklist)</b>:\n/addbl &lt;từ&gt; · /rmbl &lt;từ&gt; · /blacklist",
     "🌊 Antiflood": ("🌊 <b>Antiflood</b> — chống spam gửi tin dồn dập (đang BẬT mặc định):\n"
                      "• /antiflood — bật/tắt · /antiflood 4 — đổi mức (quá 4 tin/7s bị xoá + cảnh báo)\n"
-                     "⚠️ Admin/chủ nhóm được MIỄN kiểm duyệt — muốn thử hãy dùng tài khoản thành viên thường."),
+                     "⚠️ Admin/chủ nhóm mặc định được MIỄN — muốn kiểm duyệt CẢ ADMIN: <code>/modadmin on</code>."),
     "😀 AutoReact": "😀 <b>AutoReact</b>: /autoreact — bot tự thả cảm xúc vào tin.",
     "🌙 NightMode": "🌙 <b>NightMode</b>: /nightmode — tự khóa chat ban đêm.",
     "🐢 Slowmode": "🐢 <b>Slowmode</b>: /slowmode &lt;giây&gt; — giãn cách gửi tin.",
@@ -5803,6 +5803,17 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
         else:
             set_setting("tg_mod_enabled", "1" if cmd == "modon" else "0")
             _tg_send(token, chat_id, "Quản lý nhóm: " + ("BẬT" if cmd == "modon" else "TẮT"))
+    elif cmd == "modadmin":
+        a = args.strip().lower()
+        cur = get_setting("tg_mod_admins", "0") == "1"
+        new = True if a in ("on", "bat", "bật", "1") else False if a in ("off", "tat", "tắt", "0") else not cur
+        set_setting("tg_mod_admins", "1" if new else "0")
+        if new:
+            _tg_send(token, chat_id,
+                     "👑 Kiểm duyệt CẢ ADMIN: <b>BẬT</b> — spam/link/media vi phạm của admin cũng bị XOÁ.\n"
+                     "(Telegram không cho bot cấm chat chủ nhóm — chỉ xoá tin được.)")
+        else:
+            _tg_send(token, chat_id, "👑 Kiểm duyệt CẢ ADMIN: <b>TẮT</b> — admin được miễn như bình thường.")
     elif cmd == "autodel":
         a = args.strip().lower()
         if a in ("off", "tat", "tắt", "0"):
@@ -5887,8 +5898,10 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
 
     # Tự động lọc — admin/chủ nhóm/Channel của nhóm được MIỄN (được gửi link, media…)
     # MẶC ĐỊNH BẬT (tắt bằng /modoff) — xoá vi phạm NGAY LẬP TỨC (~1 giây).
+    # /modadmin on → kiểm duyệt CẢ ADMIN (spam/link của admin cũng bị xoá).
     if get_setting("tg_mod_enabled", "1") != "1": return
-    if _tg_is_privileged(token, chat_id, msg): return
+    if _tg_is_privileged(token, chat_id, msg) and get_setting("tg_mod_admins", "0") != "1":
+        return
     # Slow mode: xoá tin gửi quá nhanh (giãn cách tối thiểu)
     if _slowmode_hit(chat_id, uid):
         _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=mid); return
@@ -6051,7 +6064,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                    "/filter", "/stop", "/filters", "/setrules", "/rules", "/clean", "/nightmode", "/antiflood",
                    "/captcha", "/autoreact", "/slowmode", "/log", "/diemdanh", "/top", "/report", "/save",
                    "/clear", "/notes", "/id", "/setwelcome", "/welcome", "/setwelcomebtn", "/setwelcomephoto",
-                   "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats", "/autodel"}
+                   "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats", "/autodel", "/modadmin"}
     if text.startswith("/") and text.split("@")[0].split()[0].lower() in _GROUP_CMDS:
         _tg_send(token, chat_id,
                  "🔧 Lệnh này dùng trong <b>NHÓM</b>, không chạy khi nhắn riêng bot.\n\n"
@@ -6161,6 +6174,7 @@ def _tg_register_commands(token: str) -> None:
         ("setwelcomebtn", "Nút link lời chào"), ("setwelcomephoto", "Ảnh lời chào"),
         ("setgoodbye", "Lời tạm biệt"), ("testwelcome", "Xem thử lời chào"),
         ("modon", "BẬT kiểm duyệt nhóm"), ("modoff", "TẮT kiểm duyệt nhóm"),
+        ("modadmin", "Kiểm duyệt cả admin on|off"),
         ("stats", "Thống kê nhóm"),
         ("slowmode", "Giãn cách gửi tin"), ("autoreact", "Tự thả cảm xúc"),
         ("autodel", "Tự xoá lệnh sau N giây"),
@@ -6191,7 +6205,7 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
-            "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /config\n"
+            "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /modadmin · /config\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
 def start_telegram_bot() -> None:
