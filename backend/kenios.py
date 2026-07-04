@@ -801,6 +801,16 @@ def init_db() -> None:
                 platform TEXT DEFAULT 'ios',
                 created_at INTEGER
             );
+            -- Lịch sử cuộc gọi (thoại/video) — dùng cho lịch sử & cuộc gọi nhỡ
+            CREATE TABLE IF NOT EXISTS call_logs(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                caller_id INTEGER NOT NULL,
+                callee_id INTEGER NOT NULL,
+                video INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'missed',   -- answered / missed / declined
+                started_at INTEGER,
+                duration INTEGER DEFAULT 0
+            );
             -- §1.1 — Thông báo phát cho TẤT CẢ người dùng (đọc trong app, không cần APNs)
             CREATE TABLE IF NOT EXISTS notifications(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -9730,8 +9740,13 @@ def _call_cleanup(now: float) -> None:
     for k in list(_calls.keys()):
         cl = _calls.get(k)
         if not cl: continue
+        # Cuộc gọi đổ chuông quá 60s mà không ai nghe/không kết thúc → coi là NHỠ, ghi log.
+        if cl["state"] == "ringing" and now - cl["created"] > 60:
+            _log_call_once(cl, "missed")
+            cl["state"] = "ended"; cl["ended_at"] = now
         # Xoá cuộc gọi quá cũ (1 giờ) hoặc đã kết thúc > 30s
         if now - cl["created"] > 3600 or (cl["state"] in ("ended", "declined") and now - cl.get("ended_at", now) > 30):
+            _log_call_once(cl, "missed")   # phòng khi chưa ghi
             _calls.pop(k, None)
 
 def _call_other(cl: dict, uid: int) -> int:
@@ -9742,6 +9757,24 @@ def _call_guard(cid: str, uid: int) -> dict:
     if not cl or uid not in (cl["from"], cl["to"]):
         raise HTTPException(status_code=404, detail="Cuộc gọi không tồn tại.")
     return cl
+
+def _log_call_once(cl: dict, status: str) -> None:
+    """Ghi 1 dòng lịch sử cuộc gọi khi kết thúc (answered/missed/declined)."""
+    if cl.get("logged"):
+        return
+    cl["logged"] = True
+    dur = 0
+    if cl.get("answered_at"):
+        dur = max(0, int(time.time() - cl["answered_at"]))
+        status = "answered"   # đã nghe máy → tính là answered dù kết thúc kiểu gì
+    try:
+        with db() as c:
+            c.execute("INSERT INTO call_logs(caller_id,callee_id,video,status,started_at,duration) "
+                      "VALUES(?,?,?,?,?,?)",
+                      (cl["from"], cl["to"], 1 if cl["video"] else 0, status,
+                       int(cl.get("created", time.time())), dur))
+    except Exception as e:
+        log.warning("log_call lỗi: %s", e)
 
 class CallStartIn(BaseModel):
     to: int
@@ -9790,8 +9823,11 @@ def call_answer(cid: str, accept: bool = True, user=Depends(get_user)) -> dict[s
     with _calls_lock:
         cl = _call_guard(cid, user["id"])
         if cl["state"] == "ringing":
-            cl["state"] = "active" if accept else "declined"
-            if not accept: cl["ended_at"] = time.time()
+            if accept:
+                cl["state"] = "active"; cl["answered_at"] = time.time()
+            else:
+                cl["state"] = "declined"; cl["ended_at"] = time.time()
+                _log_call_once(cl, "declined")
     return {"state": cl["state"]}
 
 @app.post("/calls/{cid}/end")
@@ -9799,6 +9835,8 @@ def call_end(cid: str, user=Depends(get_user)) -> dict[str, Any]:
     with _calls_lock:
         cl = _calls.get(cid)
         if cl and user["id"] in (cl["from"], cl["to"]):
+            # Chưa nghe máy mà kết thúc → NHỠ; đã nghe → answered (hàm tự tính).
+            _log_call_once(cl, "missed")
             cl["state"] = "ended"; cl["ended_at"] = time.time()
     return {"ok": True}
 
@@ -9844,6 +9882,34 @@ def call_audio_get(cid: str, after: int = 0, user=Depends(get_user)) -> dict[str
         buf = cl["audio"].get(other, [])
         out = [{"seq": s, "pcm": p} for (s, p) in buf if s > after]
     return {"chunks": out}
+
+
+@app.get("/calls/history")
+def call_history(user=Depends(get_user)) -> list[dict[str, Any]]:
+    """Lịch sử cuộc gọi của tôi (gọi đi + gọi đến). incoming+missed = cuộc gọi nhỡ."""
+    with db() as c:
+        rows = c.execute(
+            "SELECT cl.id, cl.caller_id, cl.callee_id, cl.video, cl.status, cl.started_at, cl.duration, "
+            "       uc.username AS caller_name, ue.username AS callee_name "
+            "FROM call_logs cl "
+            "JOIN users uc ON uc.id=cl.caller_id JOIN users ue ON ue.id=cl.callee_id "
+            "WHERE cl.caller_id=? OR cl.callee_id=? ORDER BY cl.id DESC LIMIT 100",
+            (user["id"], user["id"])).fetchall()
+    out = []
+    for r in rows:
+        incoming = (r["callee_id"] == user["id"])
+        out.append({
+            "id": r["id"],
+            "incoming": incoming,
+            "peer_id": r["caller_id"] if incoming else r["callee_id"],
+            "peer": r["caller_name"] if incoming else r["callee_name"],
+            "video": bool(r["video"]),
+            "status": r["status"],
+            "missed": incoming and r["status"] in ("missed", "declined"),
+            "started_at": r["started_at"] or 0,
+            "duration": r["duration"] or 0,
+        })
+    return out
 
 
 # ======================== Search ========================

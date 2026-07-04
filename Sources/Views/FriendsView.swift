@@ -27,7 +27,10 @@ struct FriendsView: View {
     
     @State private var loadingRequests = false
     @State private var loadingFriends = false
-    
+    // Cuộc gọi nhỡ chưa xem → chấm đỏ trên nút Lịch sử cuộc gọi
+    @AppStorage("lastSeenCallId") private var lastSeenCallId = 0
+    @State private var missedCount = 0
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -70,6 +73,16 @@ struct FriendsView: View {
                     ThreeDLogoText(size: 20)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink { CallHistoryView() } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "phone.arrow.up.right")
+                            if missedCount > 0 {
+                                Circle().fill(.red).frame(width: 9, height: 9).offset(x: 4, y: -3)
+                            }
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task {
                             await refreshData()
@@ -82,6 +95,7 @@ struct FriendsView: View {
             .task {
                 await refreshData()
                 await loadMyAvatar()
+                await loadMissedCalls()
             }
             .onChange(of: avatarItem) { item in
                 guard let item else { return }
@@ -141,6 +155,11 @@ struct FriendsView: View {
         if let p = try? await store.api.myProfile() {
             myAvatar = p.avatarUrl ?? ""
         }
+    }
+
+    private func loadMissedCalls() async {
+        let hist = (try? await store.api.callHistory()) ?? []
+        missedCount = hist.filter { $0.missed && $0.id > lastSeenCallId }.count
     }
 
     private func uploadAvatar(_ item: PhotosPickerItem) async {

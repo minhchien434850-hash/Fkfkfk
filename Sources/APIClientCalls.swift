@@ -68,4 +68,20 @@ extension APIClient {
     func callGetAudio(_ cid: String, after: Int) async throws -> CallAudioResult {
         try decode(try await send("/calls/\(cid)/audio?after=\(after)"))
     }
+    func callHistory() async throws -> [CallHistoryItem] {
+        try decode(try await send("/calls/history"))
+    }
+}
+
+// ======================== Model lịch sử cuộc gọi ========================
+struct CallHistoryItem: Decodable, Identifiable {
+    let id: Int
+    let incoming: Bool
+    let peerId: Int
+    let peer: String
+    let video: Bool
+    let status: String       // answered / missed / declined
+    let missed: Bool         // incoming + (missed/declined) = cuộc gọi nhỡ
+    let startedAt: Int
+    let duration: Int
 }
