@@ -20,11 +20,9 @@ struct AppInfoView: View {
     private var build: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
     }
-    // Phiên bản hiển thị: kèm số build (tự tăng mỗi lần cập nhật) để luôn phản ánh bản mới.
-    private var versionDisplay: String {
-        if let n = Int(build), n > 1 { return "\(version) (build \(n))" }
-        return version
-    }
+    // Phiên bản hiển thị: chỉ số phiên bản (đã TỰ TĂNG 3.1, 3.2... theo mỗi bản build mới),
+    // bỏ "(build N)" cố định cho gọn.
+    private var versionDisplay: String { version }
     private let publisher = "KENIOS"
 
     // Ngày sản xuất ≈ ngày build (lấy theo thời điểm sửa Info.plist trong gói app).
