@@ -4,6 +4,10 @@ import SwiftUI
 // rõ Ngày sản xuất và Nhà phát hành để tăng tính minh bạch, chuyên nghiệp.
 struct AppInfoView: View {
     @EnvironmentObject var store: AppStore
+    // Đồng bộ logo với app gốc: cùng đọc cài đặt logo admin chỉnh (hiệu ứng/font/chuyển động).
+    @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
+    @AppStorage("appLogoFont") private var appLogoFont = "rounded"
+    @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
 
     private var appName: String {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
@@ -15,6 +19,11 @@ struct AppInfoView: View {
     }
     private var build: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+    // Phiên bản hiển thị: kèm số build (tự tăng mỗi lần cập nhật) để luôn phản ánh bản mới.
+    private var versionDisplay: String {
+        if let n = Int(build), n > 1 { return "\(version) (build \(n))" }
+        return version
     }
     private let publisher = "KENIOS"
 
@@ -44,7 +53,9 @@ struct AppInfoView: View {
         ScrollView {
             VStack(spacing: 18) {
                 VStack(spacing: 10) {
-                    AnimatedStoreLogo(text: "KENIOS", effect: "gradient", fontStyle: "rounded", anim: "shimmer", size: 40)
+                    // Logo đồng bộ với app gốc: admin đổi trong Cài đặt → hiện ngay ở đây.
+                    AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
+                                      fontStyle: appLogoFont, anim: appLogoAnim, size: 40)
                     Text(store.t("Ứng dụng chính thức KENIOS", "Official KENIOS application"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -53,7 +64,7 @@ struct AppInfoView: View {
                 VStack(spacing: 0) {
                     infoRow(store.t("Tên ứng dụng", "App name"), appName)
                     Divider()
-                    infoRow(store.t("Phiên bản", "Version"), version)
+                    infoRow(store.t("Phiên bản", "Version"), versionDisplay)
                     Divider()
                     infoRow(store.t("Ngày sản xuất", "Production date"), productionDateString)
                     Divider()
