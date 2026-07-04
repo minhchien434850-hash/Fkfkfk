@@ -18,6 +18,7 @@ struct AdminView: View {
     @State private var maintMsg = "Ứng dụng đang nâng cấp phiên bản. Vui lòng đợi trong giây lát."
     // §9.1 — cảnh báo xâm nhập
     @State private var secEnabled = false
+    @State private var emailNotify = true
     @State private var secToken = ""
     @State private var secChat = ""
 
@@ -164,6 +165,21 @@ struct AdminView: View {
                         .font(.caption2)
                 }
 
+                // Thông báo qua email/Gmail (miễn phí) khi người dùng offline
+                Section {
+                    Toggle(store.t("Gửi thông báo qua email khi offline", "Email notifications when offline"),
+                           isOn: Binding(get: { emailNotify }, set: { on in
+                        emailNotify = on
+                        Task { try? await store.api.adminSetEmailNotify(on) }
+                    }))
+                } header: {
+                    Text(store.t("📧 Thông báo qua Email (miễn phí)", "📧 Email notifications (free)"))
+                } footer: {
+                    Text(store.t("Khi có tin nhắn/cuộc gọi mà người nhận đang TẮT app, hệ thống gửi email báo (Gmail tự hiện thông báo) — miễn phí, không cần APNs. Chỉ gửi khi họ offline & tối đa 1 email/2 phút để tránh spam.",
+                                 "When there's a message/call and the recipient has the app closed, the server emails them (Gmail shows the alert) — free, no APNs. Only sent when offline, max 1 email/2 min to avoid spam."))
+                        .font(.caption2)
+                }
+
                 // ==================== Danh sách người dùng ====================
                 Section(store.t("Người dùng", "Users") + " (\(users.count))") {
                     ForEach(users) { u in
@@ -254,6 +270,7 @@ struct AdminView: View {
                 await loadStats()
                 await loadPendingPayments()
                 await loadSecurityAlert()
+                if let e = try? await store.api.adminGetEmailNotify() { emailNotify = e.enabled }
                 // Tự làm mới danh sách người dùng mỗi 15s để xem "đang dùng" theo thời gian thực
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 15_000_000_000)

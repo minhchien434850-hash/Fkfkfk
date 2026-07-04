@@ -8077,6 +8077,50 @@ def _notify_user(uid: int, title: str, body: str) -> None:
         log.warning("notify_user lỗi: %s", e)
 
 
+# ===== Thông báo qua EMAIL/Gmail (MIỄN PHÍ) — hiện cả khi app KENIOS tắt hẳn =====
+_email_notif_last: dict[int, float] = {}
+
+def _notif_email_html(subject: str, body: str) -> str:
+    import html as _html
+    s = _html.escape(subject); b = _html.escape(body)
+    return (
+        '<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:480px;margin:0 auto;padding:16px">'
+        '<div style="background:linear-gradient(135deg,#0095F6,#8b5cf6);color:#fff;padding:16px 20px;border-radius:14px 14px 0 0">'
+        '<div style="font-size:20px;font-weight:800;letter-spacing:1px">KENIOS</div></div>'
+        '<div style="background:#fff;border:1px solid #eee;border-top:none;border-radius:0 0 14px 14px;padding:20px">'
+        f'<div style="font-size:16px;font-weight:700;color:#111">{s}</div>'
+        f'<div style="font-size:15px;color:#444;margin-top:8px;line-height:1.5">{b}</div>'
+        '<div style="margin-top:16px;font-size:12px;color:#999">Bạn nhận email này vì có hoạt động mới trên KENIOS. '
+        'Mở app KENIOS để xem chi tiết.</div></div></div>'
+    )
+
+def _notify_user_email(uid: int, subject: str, body: str) -> None:
+    """Gửi thông báo qua email (Gmail…) khi người nhận đang OFFLINE — miễn phí, không cần APNs.
+    Chỉ gửi khi: bật cấu hình + có SMTP relay + user có email + đang offline + không quá 1 email/2 phút."""
+    try:
+        if get_setting("email_notify_enabled", "1") != "1" or not SMTP_RELAY_HOST:
+            return
+        now = time.time()
+        with db() as c:
+            row = c.execute("SELECT email, last_seen FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            return
+        email = (row["email"] or "").strip()
+        if "@" not in email:
+            return
+        if now - (row["last_seen"] or 0) < 120:   # đang mở app → khỏi email
+            return
+        if now - _email_notif_last.get(uid, 0) < 120:   # chống spam
+            return
+        _email_notif_last[uid] = now
+        import threading
+        threading.Thread(target=send_system_mail,
+                         args=(email, subject, body, _notif_email_html(subject, body)),
+                         daemon=True, name="notif-email").start()
+    except Exception as e:
+        log.warning("notify_user_email lỗi: %s", e)
+
+
 def _broadcast_notification(title: str, body: str, kind: str = "general", link: str = "", image: str = "") -> None:
     """§1.1 — Lưu thông báo PHÁT cho tất cả người dùng để app đọc (không phụ thuộc APNs).
     Đây là kênh tin cậy: mọi user mở app đều thấy, kể cả bản cài qua eSign."""
@@ -8116,6 +8160,17 @@ def list_notifications(limit: int = 20, user=Depends(get_user)) -> list[dict[str
             "SELECT id,title,body,kind,link,COALESCE(image,'') AS image,created_at FROM notifications "
             "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]
+
+
+@app.get("/admin/email-notify")
+def admin_get_email_notify(admin=Depends(get_admin)) -> dict[str, Any]:
+    return {"enabled": get_setting("email_notify_enabled", "1") == "1",
+            "has_relay": bool(SMTP_RELAY_HOST)}
+
+@app.post("/admin/email-notify")
+def admin_set_email_notify(body: dict = Body(...), admin=Depends(get_admin)) -> dict[str, Any]:
+    set_setting("email_notify_enabled", "1" if body.get("enabled") else "0")
+    return {"ok": True, "enabled": get_setting("email_notify_enabled", "1") == "1"}
 
 
 # ==================== §11 — Điều khiển PC từ xa (relay qua KENIOS, không cần VPS riêng) ====================
@@ -8803,8 +8858,10 @@ def send_direct_message(b: DirectMessageIn, user=Depends(get_user)) -> dict[str,
             (user["id"], b.receiver_id, b.content.strip(), int(time.time()))
         )
         msg_id = cur.lastrowid
-    # Push cho người nhận để hiện thông báo cả khi TẮT APP (best-effort, cần cấu hình APNs).
-    _notify_user(b.receiver_id, f"💬 {user['username']}", _push_preview(b.content))
+    # Thông báo cho người nhận cả khi TẮT APP: push APNs (nếu có) + email/Gmail (miễn phí, khi offline).
+    _prev = _push_preview(b.content)
+    _notify_user(b.receiver_id, f"💬 {user['username']}", _prev)
+    _notify_user_email(b.receiver_id, f"💬 {user['username']} nhắn bạn trên KENIOS", _prev)
     return {"id": msg_id, "message": "Đã gửi tin nhắn thành công."}
 
 
@@ -8886,9 +8943,10 @@ def call_start(b: CallStartIn, user=Depends(get_user)) -> dict[str, Any]:
         _calls[cid] = {"from": user["id"], "from_name": user["username"], "to": b.to,
                        "video": bool(b.video), "state": "ringing", "created": now,
                        "frames": {}, "audio": {}, "aseq": 0}
-    # Push cho người được gọi để hiện "cuộc gọi đến" cả khi TẮT APP.
-    _notify_user(b.to, f"{'📹' if b.video else '📞'} {user['username']} đang gọi",
-                 "Mở KENIOS để nghe máy.")
+    # Thông báo cuộc gọi đến cả khi TẮT APP: push APNs + email/Gmail (khi offline).
+    _ct = f"{'📹' if b.video else '📞'} {user['username']} đang gọi"
+    _notify_user(b.to, _ct, "Mở KENIOS để nghe máy.")
+    _notify_user_email(b.to, _ct + " trên KENIOS", "Mở app KENIOS để nghe máy.")
     return {"call_id": cid}
 
 @app.get("/calls/incoming")

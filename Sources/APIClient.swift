@@ -239,6 +239,12 @@ struct APIClient {
     func adminUnsuspend(_ uid: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/users/\(uid)/unsuspend", method: "POST"))
     }
+    func adminGetEmailNotify() async throws -> EmailNotifyStatus {
+        try decode(try await send("/admin/email-notify"))
+    }
+    func adminSetEmailNotify(_ enabled: Bool) async throws {
+        _ = try await send("/admin/email-notify", method: "POST", json: ["enabled": enabled])
+    }
     func adminDeleteUser(_ uid: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/users/\(uid)", method: "DELETE"))
     }

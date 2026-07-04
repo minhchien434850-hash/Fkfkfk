@@ -1,5 +1,11 @@
 import Foundation
 
+// ======================== Model thông báo qua email ========================
+struct EmailNotifyStatus: Decodable {
+    let enabled: Bool
+    let hasRelay: Bool?
+}
+
 // ======================== Model cập nhật OTA (bản đã ký) ========================
 struct AppOTAUpdate: Decodable {
     let available: Bool
