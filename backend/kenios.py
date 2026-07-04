@@ -5014,7 +5014,7 @@ def _tg_reply_menu() -> dict:
     rows = [
         ["🎵 Lấy nhạc", "📊 Thống kê"],
         ["🛡️ Quản trị nhóm", "🔒 Khoá nội dung"],
-        ["🧹 Lọc & Chống spam", "🎉 Chào mừng"],
+        ["🧹 Lọc & Chống spam", "🎉 Chào nhóm"],
         ["ℹ️ Giới thiệu", "💬 Hỗ trợ"],
         ["📚 Hướng dẫn đầy đủ"],
         ["🏠 Menu", "❌ Đóng"],
@@ -5057,9 +5057,11 @@ def _tg_menu_click(token, chat_id, text) -> bool:
     if t == "🧹 Lọc & Chống spam":
         _tg_send(token, chat_id, "🧹 <b>Lọc &amp; chống spam</b> (trong nhóm):\n"
                  "/addbl · /rmbl · /blacklist · /filter · /filters · /antiflood · /slowmode [giây] · /captcha · /clean · /nightmode"); return True
-    if t == "🎉 Chào mừng":
-        _tg_send(token, chat_id, "🎉 <b>Chào mừng &amp; nội quy</b> (trong nhóm):\n"
-                 "/setrules · /rules. Bật lời chào thành viên mới trong app: Quản trị → Bot Telegram."); return True
+    if t == "🎉 Chào nhóm":
+        _tg_send(token, chat_id, "🎉 <b>Chào nhóm</b> — lời chào thành viên MỚI khi vào nhóm:\n"
+                 "• Bật/soạn lời chào (kèm ảnh, nút bấm) trong app: <b>Quản trị → Bot Telegram → Chào nhóm</b>.\n"
+                 "• Đặt nội quy: /setrules trong nhóm · xem: /rules.\n"
+                 "💡 Bot là admin trong nhóm thì tự chào mỗi khi có người mới vào."); return True
     if t == "ℹ️ Giới thiệu":
         _tg_send(token, chat_id, get_setting("tg_about", "KENIOS — nền tảng ứng dụng & cửa hàng số. Gõ /start để mở menu.")); return True
     if t == "💬 Hỗ trợ":
