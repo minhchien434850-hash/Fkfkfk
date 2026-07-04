@@ -7299,12 +7299,8 @@ function fixUrl(u){
   }catch(e){ return u; }
 }
 function m1(m){return fixUrl((m&&m.length&&m[0]&&m[0].url)||'')}
-function mediaEl(url,type){
-  url=fixUrl(url);
-  if(!url) return '';
-  const vid=(type==='video')||/\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
-  return vid?'<video src="'+h(url)+'" autoplay muted loop playsinline></video>':'<img src="'+h(url)+'">';
-}
+// Logo / nền / banner (ảnh hoặc video) — dùng chung mediaThumb để video tự phát ổn định trên iOS.
+function mediaEl(url,type){ return mediaThumb(url,type); }
 function applyBranding(cfg){
   const lb=document.getElementById('logobox');
   if(cfg.logo_url) lb.innerHTML=mediaEl(cfg.logo_url,cfg.logo_type); else lb.textContent='K';
@@ -7332,6 +7328,7 @@ function firstMedia(m){
   return {url:fixUrl(m[0].url), type:(m[0].type||'')};
 }
 function mediaThumb(url,type,cls){
+  url=fixUrl(url);
   if(!url) return '';
   const c=cls?(' class="'+cls+'"'):'';
   // Nhận diện video theo TYPE trước (link /media/123 không có đuôi .mp4), rồi mới tới đuôi file.
