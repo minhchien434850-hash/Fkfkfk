@@ -7203,7 +7203,13 @@ h2{font-size:16px;margin:16px 4px 8px;font-weight:800}
 .authtabs{display:flex;gap:5px;background:var(--card2);border-radius:12px;padding:4px;margin:12px 0}
 .authtabs button{flex:1;background:none;border:0;color:var(--mut);padding:9px 4px;border-radius:9px;font-weight:700;font-size:13px}
 .authtabs button.on{background:var(--accent);color:#fff}
-.tx{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
+.ticker{height:150px;overflow:hidden;position:relative;
+  -webkit-mask-image:linear-gradient(transparent,#000 14%,#000 86%,transparent);
+  mask-image:linear-gradient(transparent,#000 14%,#000 86%,transparent)}
+.ticker-inner{animation-name:tick;animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}
+@keyframes tick{from{transform:translateY(0)}to{transform:translateY(-50%)}}
+.tx{display:flex;justify-content:space-between;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
+.tx span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tx b{font-weight:800}
 .plus{color:#7ee2a8}.minus{color:#ff9b9b}
 .ordk{background:var(--card2);border-radius:10px;padding:10px;margin-top:8px;font-size:13px;word-break:break-all;color:#bcd0ff;font-weight:700}
@@ -7321,16 +7327,22 @@ function statsHtml(){
     +'<div class="stat"><div class="n">'+f(s)+'</div><div class="l">Đã bán</div></div>'
     +'<div class="stat"><div class="n">'+f(r)+'</div><div class="l">Đánh giá</div></div></div>';
 }
-function mediaThumb(url,cls){
+function firstMedia(m){
+  if(!m||!m.length||!m[0]||!m[0].url) return null;
+  return {url:fixUrl(m[0].url), type:(m[0].type||'')};
+}
+function mediaThumb(url,type,cls){
   if(!url) return '';
   const c=cls?(' class="'+cls+'"'):'';
-  const vid=/\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
-  return vid?'<video'+c+' src="'+h(url)+'" autoplay muted loop playsinline></video>'
+  // Nhận diện video theo TYPE trước (link /media/123 không có đuôi .mp4), rồi mới tới đuôi file.
+  const vid=(type==='video')||/\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
+  return vid?'<video'+c+' src="'+h(url)+'" autoplay muted loop playsinline webkit-playsinline preload="auto"></video>'
            :'<img'+c+' loading="lazy" src="'+h(url)+'">';
 }
-function tile(onclick,name,url,emoji){
-  const img=url?mediaThumb(url):'<div class="ph">'+emoji+'</div>';
-  return '<button class="tile" onclick="'+onclick+'">'+img+'<div class="nm">'+h(name)+'</div></button>';
+function tile(onclick,name,media,emoji){
+  const fm=firstMedia(media);
+  const inner=fm?mediaThumb(fm.url,fm.type):'<div class="ph">'+emoji+'</div>';
+  return '<button class="tile" onclick="'+onclick+'">'+inner+'<div class="nm">'+h(name)+'</div></button>';
 }
 function heroHtml(){
   const t=((CFG.hero_title||'').trim())||CFG.logo_name||'KENIOS Store';
@@ -7350,7 +7362,7 @@ function renderCats(){
     +'<div id="searchres"></div>';
   if(CATS.length){
     html+='<h2>Danh mục</h2><div class="grid">';
-    CATS.forEach(c=>html+=tile('openCat('+c.id+')',c.name,m1(c.media),'🎮'));
+    CATS.forEach(c=>html+=tile('openCat('+c.id+')',c.name,c.media,'🎮'));
     html+='</div>';
   }
   html+=gamecatHtml()+transactionsHtml()+downloadsHtml();
@@ -7392,14 +7404,15 @@ function gamecatHtml(){
   });
   return html;
 }
-/* Giao dịch gần đây (social proof) */
+/* Giao dịch gần đây — thanh CHẠY tự cuộn lên vòng lặp (giống app) */
 function transactionsHtml(){
-  const list=(SHOW.recent_orders||[]).slice(0,8);
+  const list=(SHOW.recent_orders||[]).slice(0,15);
   if(!list.length) return '';
-  let html='<h2>Giao dịch gần đây</h2><div class="card">';
-  list.forEach(o=>{ html+='<div class="tx"><span>🛒 '+h(o.user)+' mua '+h(o.product)+(o.label?' ('+h(o.label)+')':'')+'</span><b class="plus">'+money(o.amount)+'</b></div>'; });
-  html+='</div>';
-  return html;
+  const row=o=>'<div class="tx"><span>🛒 <b>'+h(o.user)+'</b> mua '+h(o.product)+(o.label?' ('+h(o.label)+')':'')+'</span><b class="plus">'+money(o.amount)+'</b></div>';
+  const rows=list.map(row).join('');
+  const dur=Math.max(12,list.length*2.4);
+  return '<h2>Giao dịch gần đây</h2><div class="card" style="padding:4px 14px">'
+    +'<div class="ticker"><div class="ticker-inner" style="animation-duration:'+dur+'s">'+rows+rows+'</div></div></div>';
 }
 /* Tải về miễn phí */
 function downloadsHtml(){
@@ -7431,7 +7444,7 @@ function renderFolders(){
   let html='<button class="back" onclick="backCat()">‹ Danh mục</button>'
     +'<div class="crumb">'+h(cat.name)+'</div><h2>Thư mục</h2>';
   if(!list.length) html+='<div class="center">Danh mục này chưa có thư mục.</div>';
-  else{ html+='<div class="grid">'; list.forEach(f=>html+=tile('openFolder('+f.id+')',f.name,m1(f.media),'📁')); html+='</div>'; }
+  else{ html+='<div class="grid">'; list.forEach(f=>html+=tile('openFolder('+f.id+')',f.name,f.media,'📁')); html+='</div>'; }
   v.innerHTML=html; window.scrollTo(0,0);
 }
 async function openFolder(id){
@@ -7453,7 +7466,7 @@ function renderProds(){
 function backCat(){ NAV={lvl:'cat'}; renderCats(); }
 function backFolder(){ NAV={lvl:'folder',cat:NAV.cat}; renderFolders(); }
 function card(p){
-  const u=m1(p.media); const img=u?mediaThumb(u,'pimg'):'';
+  const fm=firstMedia(p.media); const img=fm?mediaThumb(fm.url,fm.type,'pimg'):'';
   const stock=p.available_keys>0?'<span class="stock ok">Còn '+p.available_keys+' key</span>':'<span class="stock no">Hết hàng</span>';
   let chips='<div class="prices">';
   (p.prices||[]).forEach(pr=>{
