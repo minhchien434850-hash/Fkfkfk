@@ -60,35 +60,120 @@ final class IPAStore: ObservableObject {
         refresh()
     }
 
+    // Nhận NHIỀU dạng link: .ipa trực tiếp · itms-services://?url=... (manifest plist) ·
+    // link .plist manifest · hoặc trang web cài đặt (tự dò link .ipa/itms bên trong).
     func downloadFromURL(_ raw: String) async {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: s), url.scheme?.hasPrefix("http") == true else {
-            message = "Link không hợp lệ."; return
-        }
-        downloading = true; message = nil
+        guard !s.isEmpty else { message = "Chưa nhập link."; return }
+        downloading = true; message = "Đang phân tích link..."
         defer { downloading = false }
         do {
-            let (tmp, resp) = try await URLSession.shared.download(from: url)
-            var name = url.lastPathComponent
-            if !name.lowercased().hasSuffix(".ipa") {
-                // Lấy tên từ header nếu có, không thì đặt mặc định
-                if let http = resp as? HTTPURLResponse,
-                   let disp = http.value(forHTTPHeaderField: "Content-Disposition"),
-                   let r = disp.range(of: "filename=") {
-                    name = String(disp[r.upperBound...]).trimmingCharacters(in: CharacterSet(charactersIn: "\"; "))
-                }
-                if !name.lowercased().hasSuffix(".ipa") {
-                    name = "download_\(Int(Date().timeIntervalSince1970)).ipa"
-                }
+            guard let ipaURL = try await resolveIPAURL(from: s, depth: 0) else {
+                message = "Không tìm thấy tệp .ipa từ link này. Kiểm tra lại hoặc dùng link .ipa trực tiếp."
+                return
             }
-            let dest = uniqueDest(for: name)
-            try? FileManager.default.removeItem(at: dest)
-            try FileManager.default.moveItem(at: tmp, to: dest)
-            message = "Đã tải: \(dest.lastPathComponent)"
-            refresh()
+            message = "Đang tải IPA..."
+            try await downloadIPA(from: ipaURL)
         } catch {
             message = "Tải thất bại: \(error.localizedDescription)"
         }
+    }
+
+    // Bóc tách link đầu vào → trả về URL .ipa tải được (đi qua manifest/HTML nếu cần).
+    private func resolveIPAURL(from raw: String, depth: Int) async throws -> URL? {
+        if depth > 4 { return nil }
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 1) itms-services://?action=download-manifest&url=<manifest.plist>
+        if s.lowercased().hasPrefix("itms-services://") {
+            let fixed = s.replacingOccurrences(of: "&amp;", with: "&")
+            guard let comps = URLComponents(string: fixed),
+                  let inner = comps.queryItems?.first(where: { $0.name == "url" })?.value else { return nil }
+            return try await resolveIPAURL(from: inner, depth: depth + 1)
+        }
+
+        guard let url = URL(string: s), url.scheme?.hasPrefix("http") == true else { return nil }
+        // 2) Link .ipa trực tiếp → dùng luôn (không tải để dò).
+        if url.pathExtension.lowercased() == "ipa" { return url }
+
+        // 3) Xem thử kiểu nội dung (HEAD) để không lỡ tải nguyên file lớn khi dò.
+        let (ctype, length) = await sniff(url)
+        if ctype.contains("zip") || ctype.contains("octet-stream")
+            || ctype.contains("iphone") || length > 3_000_000 {
+            return url   // gần như chắc là file .ipa
+        }
+
+        // 4) Tải phần nội dung nhỏ (plist/HTML) rồi phân tích.
+        var req = URLRequest(url: url)
+        req.setValue("Mozilla/5.0 KENIOS", forHTTPHeaderField: "User-Agent")
+        let (data, _) = try await URLSession.shared.data(for: req)
+        // 4a) Manifest plist (chứa software-package)
+        if let ipa = ipaURLFromManifest(data) { return URL(string: ipa) }
+        // 4b) File zip/ipa nhận qua "magic bytes" PK
+        if data.count > 4, data[0] == 0x50, data[1] == 0x4B { return url }
+        // 4c) Trang HTML → dò link itms-services / .ipa bên trong
+        if let found = firstInstallLink(in: data) {
+            return try await resolveIPAURL(from: found, depth: depth + 1)
+        }
+        return nil
+    }
+
+    // HEAD để lấy Content-Type + độ dài (thất bại thì trả rỗng, sẽ tải nhỏ để dò).
+    private func sniff(_ url: URL) async -> (String, Int) {
+        var req = URLRequest(url: url); req.httpMethod = "HEAD"
+        req.setValue("Mozilla/5.0 KENIOS", forHTTPHeaderField: "User-Agent")
+        guard let (_, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse else { return ("", 0) }
+        let ctype = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+        let len = Int(http.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
+        return (ctype, len)
+    }
+
+    // Đọc URL .ipa (software-package) từ manifest plist của itms-services.
+    private func ipaURLFromManifest(_ data: Data) -> String? {
+        guard let obj = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let plist = obj as? [String: Any],
+              let items = plist["items"] as? [[String: Any]] else { return nil }
+        for item in items {
+            guard let assets = item["assets"] as? [[String: Any]] else { continue }
+            for a in assets where (a["kind"] as? String) == "software-package" {
+                if let u = a["url"] as? String, !u.isEmpty { return u }
+            }
+        }
+        return nil
+    }
+
+    // Dò link cài đặt đầu tiên trong HTML: ưu tiên itms-services, rồi tới .ipa.
+    private func firstInstallLink(in data: Data) -> String? {
+        guard let html = String(data: data, encoding: .utf8) else { return nil }
+        if let r = html.range(of: "itms-services://[^\"'\\s<>]+", options: .regularExpression) {
+            return String(html[r]).replacingOccurrences(of: "&amp;", with: "&")
+        }
+        if let r = html.range(of: "https?://[^\"'\\s<>]+\\.ipa", options: .regularExpression) {
+            return String(html[r])
+        }
+        return nil
+    }
+
+    // Tải file .ipa về kho (stream ra đĩa, không nạp cả file vào RAM).
+    private func downloadIPA(from url: URL) async throws {
+        let (tmp, resp) = try await URLSession.shared.download(from: url)
+        var name = url.lastPathComponent
+        if !name.lowercased().hasSuffix(".ipa") {
+            if let http = resp as? HTTPURLResponse,
+               let disp = http.value(forHTTPHeaderField: "Content-Disposition"),
+               let r = disp.range(of: "filename=") {
+                name = String(disp[r.upperBound...]).trimmingCharacters(in: CharacterSet(charactersIn: "\"; "))
+            }
+            if !name.lowercased().hasSuffix(".ipa") {
+                name = "download_\(Int(Date().timeIntervalSince1970)).ipa"
+            }
+        }
+        let dest = uniqueDest(for: name)
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: tmp, to: dest)
+        message = "Đã tải: \(dest.lastPathComponent)"
+        refresh()
     }
 
     func delete(_ item: IPAFile) {
@@ -156,7 +241,7 @@ struct IPALibraryView: View {
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
 
-                Section("Thêm IPA") {
+                Section {
                     Button {
                         showImporter = true
                     } label: {
@@ -164,9 +249,10 @@ struct IPALibraryView: View {
                               systemImage: "square.and.arrow.down.on.square")
                     }
                     HStack {
-                        TextField(store.t("Hoặc dán link .ipa để tải...", "Or paste .ipa link to download..."),
+                        TextField(store.t("Dán URL để tải (trang cài / itms-services / .ipa)...",
+                                          "Paste URL to download (install page / itms-services / .ipa)..."),
                                   text: $downloadURL)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                         Button {
                             let u = downloadURL; downloadURL = ""
                             Task { await ipa.downloadFromURL(u) }
@@ -176,6 +262,21 @@ struct IPALibraryView: View {
                         }
                         .disabled(ipa.downloading || downloadURL.isEmpty)
                     }
+                } header: {
+                    Text(store.t("Thêm IPA", "Add IPA"))
+                } footer: {
+                    Text(store.t("""
+                    Nhập URL trang web chứa IPA (cài trực tiếp / ITMS Services) hoặc URL trực tiếp tới tệp IPA. Hỗ trợ:
+                    • https://trang-cai-dat.com
+                    • itms-services://?action=download-manifest&url=https://…/manifest.plist
+                    • https://…/app.ipa
+                    """, """
+                    Enter a webpage URL containing an IPA (direct install / ITMS Services) or a direct URL to the IPA file. Supported:
+                    • https://install-page.com
+                    • itms-services://?action=download-manifest&url=https://…/manifest.plist
+                    • https://…/app.ipa
+                    """))
+                        .font(.caption2)
                 }
 
                 // Cấu hình ký ở máy chủ (chỉ admin) — cần domain HTTPS cho cài OTA
