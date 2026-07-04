@@ -5086,6 +5086,393 @@ def _tg_start_music(token, chat_id, arg) -> None:
     import threading
     threading.Thread(target=_tg_music_task, args=(token, chat_id, arg), daemon=True).start()
 
+# ============================================================================
+#  🎮 GÓC GIẢI TRÍ & TIỆN ÍCH NHÓM — trò chơi · hài hước · bói vui · công cụ
+#  (35+ lệnh công khai, ai cũng dùng được — trong nhóm & chat riêng)
+# ============================================================================
+_TG_JOKES = [
+    "Tại sao con gà băng qua đường? — Vì bên kia có con gà khác đang chờ nó. ❤️",
+    "Tiền không mua được hạnh phúc, nhưng khóc trong ô tô vẫn dễ chịu hơn khóc trên xe đạp. 🚗",
+    "Mỗi ngày tôi đều chạy bộ... trong suy nghĩ. Vậy là đủ cardio rồi. 🏃",
+    "Ngủ sớm để da đẹp. Tôi thức khuya vì tôi đẹp sẵn rồi. 😌",
+    "WiFi nhà hàng xóm như tình đầu: thấy đó mà không với tới được. 📶",
+    "Tôi không lười, tôi chỉ đang ở chế độ tiết kiệm năng lượng. 🔋",
+    "Cuối tháng ví tôi mỏng như niềm tin của tôi vào thứ Hai. 👛",
+    "Ăn kiêng ngày 1: xoá app đồ ăn. Ngày 2: cài lại và đặt gấp đôi. 🍜",
+    "Tôi với cái giường là mối tình bền nhất: sáng nào chia tay cũng đau khổ. 🛏️",
+    "Não tôi có 2 chế độ: 'quên' và 'nhớ nhầm'. 🧠",
+    "Đi làm để kiếm tiền, kiếm tiền để có sức... đi làm tiếp. Vòng lặp hoàn hảo. 💼",
+    "Thất bại là mẹ thành công — nhà tôi giờ đông mẹ lắm rồi. 🏠",
+    "Tôi của tối nay: 'mai dậy sớm tập thể dục'. Tôi của 5h sáng: 'ai hứa người đó giữ'. ⏰",
+    "Bạn thân là đứa cười to nhất khi mình ngã... xong mới đỡ. 🤝",
+    "Mua 1 món giảm giá là tiết kiệm. Mua 10 món giảm giá là 10 lần tiết kiệm! 🛍️",
+    "Điện thoại 1% pin dạy tôi trân trọng từng giây phút bên nhau. 🔌",
+    "Hồi bé ước mau lớn. Giờ chỉ ước được ngủ trưa như hồi mẫu giáo. 😴",
+    "Tôi nấu ăn theo công thức 'áng chừng' và 'chắc là được'. Kết quả: đặt đồ ăn ngoài. 🍳",
+    "Người ta có gấu để ôm mùa đông, tôi có... cái chăn, và nó chưa bao giờ phản bội. 🧸",
+    "Hôm nay đẹp trời, thích hợp để... ở nhà nằm điều hoà. ☀️",
+]
+_TG_QUOTES = [
+    "Chậm mà chắc còn hơn nhanh mà chệch hướng.",
+    "Đừng so sánh chương 1 của bạn với chương 20 của người khác.",
+    "Muốn đi nhanh hãy đi một mình, muốn đi xa hãy đi cùng nhau.",
+    "Gió tầng nào gặp mây tầng đó — cứ tốt lên rồi đúng người sẽ tới.",
+    "Kỷ luật là cây cầu nối giữa mục tiêu và thành tựu.",
+    "Bạn không cần hoàn hảo để bắt đầu, nhưng cần bắt đầu để hoàn hảo hơn.",
+    "Im lặng là câu trả lời sang trọng nhất cho những ồn ào không đáng.",
+    "Đừng sợ thất bại — hãy sợ việc chưa từng thử.",
+    "Cách tốt nhất để dự đoán tương lai là tự tay tạo ra nó.",
+    "Không ai nghèo đi vì cho đi một nụ cười.",
+    "Thứ quý nhất không phải là có tất cả, mà là trân trọng những gì đang có.",
+    "Hôm nay khó, ngày mai có thể khó hơn — nhưng ngày kia sẽ tươi sáng.",
+]
+_TG_POEMS = [
+    "Gió theo mây, mây theo gió cuốn\nAnh theo em từ buổi chợ đông 💘",
+    "Trời xanh vì có nắng vàng\nTim anh xanh mướt vì nàng đi qua 🌿",
+    "Cà phê đắng bởi thiếu đường\nĐời anh nhạt bởi thiếu hương tay nàng ☕",
+    "Ước gì mình chung lối về\nĐể anh bớt phải cà phê một mình 💫",
+    "Hoa hồng nào chẳng có gai\nThương em nào ngại đường dài gió sương 🌹",
+    "Sông sâu còn có kẻ dò\nLòng em sâu thẳm biết đo đường nào 🌊",
+    "Trăng lên đỉnh núi trăng tà\nNhớ em từ sáng đến già chưa thôi 🌙",
+    "Bàn tay năm ngón thon dài\nNắm vào một cái là hai cuộc đời 🤍",
+]
+_TG_COMPLIMENTS = [
+    "là mặt trời của nhóm này, thiếu bạn là nhóm tối om! ☀️",
+    "nói chuyện có duyên xỉu, nghe là muốn thả tim! 💖",
+    "đẹp nhất cái nhóm này, không nhận không được! 😎",
+    "IQ vô cực, EQ tràn màn hình! 🧠",
+    "cười một cái là sáng cả khung chat! 😄",
+    "tốt bụng số 2 thì không ai dám nhận số 1! 🥇",
+    "gõ phím thôi cũng thấy khí chất ngời ngời! ⌨️",
+    "là định nghĩa sống của từ 'tuyệt vời'! 📖",
+    "năng lượng tích cực lan toả khắp nhóm! 🔆",
+    "có mặt là nhóm vui gấp 10 lần! 🎉",
+]
+_TG_TEASES = [
+    "ngủ dậy chưa mà online sớm thế, chăm ghê ta! 🌞",
+    "hôm nay gõ chữ nhanh ghê, chắc vừa nạp 3 ly cà phê! ☕",
+    "nói chuyện hay như sách — mà là sách tô màu! 🖍️",
+    "IQ cao lắm, chỉ tội hay để quên ở nhà! 🧠",
+    "online 24/7, WiFi nhà chắc khoẻ lắm ha! 📶",
+    "hát hay lắm — hàng xóm khen đóng cửa rất kỹ! 🎤",
+    "nấu ăn ngon nhất nhà, vì nhà có mỗi mình ên! 🍳",
+    "chạy bộ mỗi sáng... trên giường, trong mơ! 🏃",
+    "đẹp thì có đẹp, mà hơi khiêm tốn chiều cao nhỉ! 📏",
+    "tiết kiệm số 1 — đến nụ cười cũng ít khi cho ai! 😁",
+]
+_TG_8BALL = [
+    "Chắc chắn luôn! ✅", "Không phải nghĩ — CÓ! 💯", "Có, nhưng từ từ đã. 🐢",
+    "Triển vọng tốt đấy! 🌤️", "Hỏi lại sau nhé, giờ là bí mật. 🤫",
+    "Mình thấy hơi khó à nha. 😬", "KHÔNG là câu trả lời. ❌",
+    "Đừng mơ giữa ban ngày! 😅", "50/50 — tuỳ bạn quyết! ⚖️",
+    "Dấu hiệu chỉ ra là CÓ. 🔮", "Dấu hiệu chỉ ra là KHÔNG. 🌫️",
+    "Cứ làm đi, hỏi gì nữa! 🚀", "Vũ trụ trả lời: CÓ. 🌌",
+    "Hên xui, mà nghiêng về... xui. 🎲", "Tốt hơn là không nên. 🙅", "Tin mình đi — được đó! 👍",
+]
+_TG_TRUTH = [
+    "Crush đầu tiên của bạn là ai?", "Điều xấu hổ nhất bạn từng làm ở trường/chỗ làm?",
+    "Lần gần nhất bạn nói dối là về việc gì?", "Người trong nhóm này bạn muốn ăn tối cùng nhất?",
+    "Bí mật bạn chưa từng kể với ai?", "Bạn từng thích người yêu của bạn thân chưa?",
+    "Tin nhắn ngại nhất bạn từng gửi nhầm?", "Nếu phải hôn 1 người trong nhóm, bạn chọn ai? 😳",
+    "Bạn đã từng stalk người yêu cũ chưa?", "Điều trẻ con nhất bạn vẫn làm khi ở một mình?",
+    "Bạn từng khóc vì bộ phim nào?", "Thói quen xấu nhất của bạn là gì?",
+    "Nếu tàng hình 1 ngày, bạn làm gì đầu tiên?", "Ai trong nhóm bạn nghĩ sẽ nổi tiếng nhất?",
+    "Số dư tài khoản hiện tại của bạn có mấy chữ số? 😏",
+]
+_TG_DARE = [
+    "Gửi 1 tấm selfie ngay bây giờ vào nhóm! 🤳",
+    "Đổi avatar thành hình do nhóm chọn trong 1 giờ!",
+    "Nhắn 'Tớ nhớ cậu' cho một người bạn cũ lâu rồi chưa nói chuyện!",
+    "Ghi âm giọng hát 'Chúc mừng sinh nhật' gửi vào nhóm! 🎂",
+    "Viết 1 status khen nhóm này thật lố lên trang cá nhân!",
+    "Kể 1 bí mật nho nhỏ của bạn ngay tại đây!",
+    "Gửi tấm ảnh GẦN NHẤT trong thư viện — không được chọn lại! 📸",
+    "Nói 'em sai rồi' với người tiếp theo nhắn tin, bất kể chuyện gì! 😂",
+    "Nhắn 3 tin liên tiếp bằng giọng miền khác!",
+    "Thả tim ❤️ 10 tin nhắn gần nhất trong nhóm!",
+    "Khen 3 người trong nhóm, mỗi người 1 câu thật lòng!",
+    "Gửi voice 10 giây kể bạn ăn gì hôm nay, giọng thật truyền cảm! 🎙️",
+    "Đặt 'người gửi tin kế tiếp' làm hình nền điện thoại 1 ngày! 📱",
+    "Gõ tên crush bằng... khuỷu tay và gửi luôn không sửa! 💪",
+    "Up ảnh bất kỳ kèm caption 'nhóm mình dễ thương nhất'! 😽",
+]
+_TG_FORTUNES = [
+    "Hôm nay quý nhân xuất hiện — để ý người nhắn tin cho bạn đầu tiên! 🍀",
+    "Tiền bạc rủng rỉnh bất ngờ, nhưng đừng vội khao cả nhóm. 💰",
+    "Chuyện tình cảm sáng sủa — ai độc thân hôm nay nhớ tắm rửa thơm tho. 💘",
+    "Cẩn thận lời nói buổi chiều — uốn lưỡi 7 lần trước khi gõ phím. 🤐",
+    "Vận may nghiêng về buổi tối, mua ly trà sữa để kích hoạt nhân phẩm. 🧋",
+    "Có tin vui về công việc/học tập trong 3 ngày tới. 📈",
+    "Hôm nay dễ bị cà khịa — cứ cười là thắng. 😁",
+    "Món đồ thất lạc sắp tìm thấy — thử nhìn dưới gối xem. 🛏️",
+    "Người bạn lâu ngày sắp liên lạc lại — đừng quên trả lời nhé. 📱",
+    "Hôm nay hợp màu xanh — mặc gì xanh xanh sẽ hên cả ngày. 💚",
+    "Đừng ngủ trưa quá 30 phút, kẻo lỡ chuyện thú vị. ⏰",
+    "Tài lộc gõ cửa nhưng gõ nhẹ — chăm thêm chút là mở được. 🚪",
+    "Nói ít lại, làm nhiều lên — cuối ngày có quà. 🎁",
+    "Duyên chưa tới nhưng vui thì tới rồi — cười lên! 😄",
+    "Bạn là 'người được chọn' hôm nay — thử vận may với /xoso xem! 🎰",
+    "Sao may mắn chiếu mệnh — làm gì cũng thuận, trừ thức khuya. 🌟",
+]
+
+_tg_guess: dict = {}   # chat_id -> số bí mật (trò đoán số 1–100)
+
+def _tg_daily_hash(*parts) -> int:
+    """Số 'định mệnh' ổn định trong ngày (đổi mỗi ngày) — cho bói vui/tình duyên."""
+    import hashlib, datetime as _dt
+    s = "|".join(str(p) for p in parts) + _dt.date.today().isoformat()
+    return int(hashlib.md5(s.encode()).hexdigest(), 16)
+
+def _tg_calc_expr(expr: str) -> str:
+    """Máy tính an toàn: chỉ + - * / % // ** và số."""
+    import ast as _ast, operator as _op
+    expr = (expr or "").replace("^", "**").replace(",", ".").replace("×", "*").replace("÷", "/")[:80]
+    ops = {_ast.Add: _op.add, _ast.Sub: _op.sub, _ast.Mult: _op.mul, _ast.Div: _op.truediv,
+           _ast.Pow: _op.pow, _ast.Mod: _op.mod, _ast.FloorDiv: _op.floordiv,
+           _ast.USub: _op.neg, _ast.UAdd: _op.pos}
+    def ev(n):
+        if isinstance(n, _ast.Constant) and isinstance(n.value, (int, float)):
+            return n.value
+        if isinstance(n, _ast.BinOp) and type(n.op) in ops:
+            l, r = ev(n.left), ev(n.right)
+            if isinstance(n.op, _ast.Pow) and (abs(l) > 1000 or abs(r) > 100):
+                raise ValueError("số quá lớn")
+            return ops[type(n.op)](l, r)
+        if isinstance(n, _ast.UnaryOp) and type(n.op) in ops:
+            return ops[type(n.op)](ev(n.operand))
+        raise ValueError("chỉ hỗ trợ phép tính số")
+    v = ev(_ast.parse(expr, mode="eval").body)
+    return f"{v:,.6f}".rstrip("0").rstrip(".").replace(",", " ") if isinstance(v, float) else f"{v:,}".replace(",", " ")
+
+def _tg_active_names(chat_id, n=50) -> list:
+    try:
+        rows, _ = _msgcount_top(chat_id, n)
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
+def _tg_fun_net_task(token, chat_id, cmd, args) -> None:
+    """Các lệnh cần MẠNG (thời tiết, giá coin, tỷ giá, dịch) — chạy thread riêng."""
+    import httpx, html as _h, urllib.parse as _up
+    try:
+        if cmd == "thoitiet":
+            city = (args.strip() or "Hanoi")
+            r = httpx.get(f"https://wttr.in/{_up.quote(city)}", params={"format": "%l: %c %t, ẩm %h, gió %w", "lang": "vi", "m": ""},
+                          headers={"User-Agent": "curl/8"}, timeout=12)
+            t = (r.text or "").strip()
+            _tg_send(token, chat_id, "⛅ " + _h.escape(t[:300]) if t and "Unknown" not in t else "⛅ Không tìm thấy nơi này, thử /thoitiet Hanoi")
+        elif cmd == "giacoin":
+            sym = (args.strip().upper() or "BTC").replace("USDT", "")
+            r = httpx.get("https://api.binance.com/api/v3/ticker/24hr", params={"symbol": f"{sym}USDT"}, timeout=12).json()
+            if r.get("lastPrice"):
+                p = float(r["lastPrice"]); ch = float(r.get("priceChangePercent", 0))
+                arrow = "📈" if ch >= 0 else "📉"
+                _tg_send(token, chat_id, f"💰 <b>{sym}/USDT</b>: <b>{p:,.6g}</b> USD {arrow} {ch:+.2f}%/24h")
+            else:
+                _tg_send(token, chat_id, f"Không thấy đồng <b>{_h.escape(sym)}</b>. VD: /giacoin btc · eth · bnb · sol")
+        elif cmd == "tygia":
+            r = httpx.get("https://open.er-api.com/v6/latest/USD", timeout=12).json()
+            vnd = (r.get("rates") or {}).get("VND")
+            if vnd:
+                _tg_send(token, chat_id, f"💵 1 USD ≈ <b>{vnd:,.0f} VND</b>\n💶 1 EUR ≈ <b>{vnd / (r['rates'].get('EUR') or 1):,.0f} VND</b>".replace(",", "."))
+            else:
+                _tg_send(token, chat_id, "Không lấy được tỷ giá lúc này, thử lại sau nhé.")
+        elif cmd == "dich":
+            if not args.strip():
+                _tg_send(token, chat_id, "🌐 Dùng: <code>/dich hello my friend</code> — dịch sang tiếng Việt."); return
+            r = httpx.get("https://translate.googleapis.com/translate_a/single",
+                          params={"client": "gtx", "sl": "auto", "tl": "vi", "dt": "t", "q": args[:1500]}, timeout=12).json()
+            out = "".join(seg[0] for seg in (r[0] or []) if seg and seg[0])
+            _tg_send(token, chat_id, "🌐 " + _h.escape(out[:1000]) if out else "Không dịch được, thử lại sau.")
+    except Exception as e:
+        log.warning("tg fun net %s lỗi: %s", cmd, e)
+        _tg_send(token, chat_id, "⚠️ Dịch vụ đang bận, thử lại sau nhé.")
+
+# Tất cả lệnh vui/tiện ích (công khai — dùng ở nhóm & chat riêng)
+_TG_FUN_CMDS = {
+    "xucxac", "slot", "phitieu", "bongda", "bongro", "bowling", "tungxu", "oantuti", "keobuabao",
+    "doanso", "doan", "random", "chon", "xoso",
+    "cuoi", "joke", "cakhia", "khen", "triethly", "thotinh", "noinguoc", "thatha", "thachthuc",
+    "ghep", "lucky", "boi", "tinhduyen", "hoi", "danhgia",
+    "tinh", "qr", "thoitiet", "giacoin", "tygia", "dich", "nhacnho", "binhchon", "poll", "gio", "dem", "password",
+}
+
+def _tg_fun_command(token, chat_id, msg, cmd, args) -> bool:
+    """Xử lý lệnh GIẢI TRÍ & TIỆN ÍCH. Trả True nếu đã xử lý."""
+    import html as _h, random as _rd, threading as _thr
+    frm = msg.get("from", {}) or {}
+    uid = frm.get("id") or 0
+    rfrm = (msg.get("reply_to_message") or {}).get("from") or {}
+    target = _tg_mention(rfrm) if rfrm.get("id") else _tg_mention(frm)
+
+    # ---------- 🎮 TRÒ CHƠI ----------
+    dice = {"xucxac": "🎲", "slot": "🎰", "phitieu": "🎯", "bongda": "⚽", "bongro": "🏀", "bowling": "🎳"}
+    if cmd in dice:
+        _tg_call(token, "sendDice", chat_id=chat_id, emoji=dice[cmd]); return True
+    if cmd == "tungxu":
+        _tg_send(token, chat_id, f"🪙 {_tg_mention(frm)} tung đồng xu… ra <b>{_rd.choice(['NGỬA 🌝', 'SẤP 🌚'])}</b>!"); return True
+    if cmd in ("oantuti", "keobuabao"):
+        icons = {"kéo": "✂️", "búa": "✊", "bao": "🖐"}
+        a = args.strip().lower().replace("keo", "kéo").replace("bua", "búa")
+        if a not in icons:
+            _tg_send(token, chat_id, "✂️ Oẳn tù tì với bot: <code>/oantuti kéo</code> · <code>/oantuti búa</code> · <code>/oantuti bao</code>"); return True
+        b = _rd.choice(list(icons))
+        win = {("kéo", "bao"), ("búa", "kéo"), ("bao", "búa")}
+        kq = "HOÀ! 🤝" if a == b else ("BẠN THẮNG! 🎉" if (a, b) in win else "BOT THẮNG! 😎")
+        _tg_send(token, chat_id, f"Bạn ra {icons[a]} — bot ra {icons[b]} → <b>{kq}</b>"); return True
+    if cmd == "doanso":
+        _tg_guess[chat_id] = _rd.randint(1, 100)
+        _tg_send(token, chat_id, "🔢 Mình đã nghĩ 1 số từ <b>1–100</b>. Cả nhóm đoán bằng <code>/doan 50</code> nào!"); return True
+    if cmd == "doan":
+        if chat_id not in _tg_guess:
+            _tg_send(token, chat_id, "Chưa có ván nào — gõ <code>/doanso</code> để bắt đầu!"); return True
+        try:
+            n = int(args.split()[0])
+        except Exception:
+            _tg_send(token, chat_id, "Đoán bằng số nhé: <code>/doan 50</code>"); return True
+        s = _tg_guess[chat_id]
+        if n == s:
+            del _tg_guess[chat_id]
+            _tg_send(token, chat_id, f"🎉 <b>CHÍNH XÁC!</b> {_tg_mention(frm)} đoán trúng số <b>{s}</b>! Gõ /doanso chơi ván mới.")
+        else:
+            _tg_send(token, chat_id, f"{'⬆️ Lớn hơn' if n < s else '⬇️ Nhỏ hơn'} {n} nhé!")
+        return True
+    if cmd == "random":
+        p = args.split()
+        try:
+            a, b = (int(p[0]), int(p[1])) if len(p) >= 2 else (1, 100)
+        except Exception:
+            a, b = 1, 100
+        _tg_send(token, chat_id, f"🎲 Số ngẫu nhiên {min(a,b)}–{max(a,b)}: <b>{_rd.randint(min(a, b), max(a, b))}</b>"); return True
+    if cmd == "chon":
+        opts = [x.strip() for x in (args.split("|") if "|" in args else args.split()) if x.strip()]
+        if len(opts) < 2:
+            _tg_send(token, chat_id, "🤔 Đưa mình ít nhất 2 lựa chọn: <code>/chon trà sữa | cà phê | nước cam</code>"); return True
+        _tg_send(token, chat_id, f"👉 Mình chọn: <b>{_h.escape(_rd.choice(opts))}</b>"); return True
+    if cmd == "xoso":
+        nums = sorted(_rd.sample(range(1, 46), 6))
+        _tg_send(token, chat_id, "🎰 Dãy số may mắn của bạn: <b>" + " – ".join(f"{n:02d}" for n in nums) + "</b> 🍀"); return True
+
+    # ---------- 😂 GIẢI TRÍ ----------
+    if cmd in ("cuoi", "joke"):
+        _tg_send(token, chat_id, "😂 " + _rd.choice(_TG_JOKES)); return True
+    if cmd == "cakhia":
+        _tg_send(token, chat_id, f"😜 {target} {_rd.choice(_TG_TEASES)}"); return True
+    if cmd == "khen":
+        _tg_send(token, chat_id, f"🌟 {target} {_rd.choice(_TG_COMPLIMENTS)}"); return True
+    if cmd == "triethly":
+        _tg_send(token, chat_id, "🧘 <i>" + _rd.choice(_TG_QUOTES) + "</i>"); return True
+    if cmd == "thotinh":
+        _tg_send(token, chat_id, "📜 " + _rd.choice(_TG_POEMS)); return True
+    if cmd == "noinguoc":
+        if not args.strip():
+            _tg_send(token, chat_id, "🔄 Dùng: <code>/noinguoc xin chào cả nhóm</code>"); return True
+        _tg_send(token, chat_id, "🔄 " + _h.escape(args.strip()[:300][::-1])); return True
+    if cmd == "thatha":
+        _tg_send(token, chat_id, f"🙊 <b>NÓI THẬT</b> — {target}:\n{_rd.choice(_TG_TRUTH)}"); return True
+    if cmd == "thachthuc":
+        _tg_send(token, chat_id, f"🔥 <b>THỬ THÁCH</b> — {target}:\n{_rd.choice(_TG_DARE)}"); return True
+    if cmd == "ghep":
+        names = _tg_active_names(chat_id)
+        if len(names) < 2:
+            _tg_send(token, chat_id, "💞 Cần nhóm có người nhắn tin rồi mới ghép được — mọi người chat đi nào!"); return True
+        a, b = _rd.sample(names, 2)
+        pct = _tg_daily_hash(a, b, chat_id) % 101
+        _tg_send(token, chat_id, f"💞 <b>Ghép đôi hôm nay:</b>\n👩‍❤️‍👨 <b>{_h.escape(a)}</b> ❤ <b>{_h.escape(b)}</b>\n💯 Độ hợp: <b>{pct}%</b> {'💒 Cưới luôn!' if pct >= 80 else ('😍 Có triển vọng!' if pct >= 50 else '🙈 Làm bạn đã nha!')}"); return True
+    if cmd == "lucky":
+        names = _tg_active_names(chat_id)
+        if not names:
+            _tg_send(token, chat_id, "🍀 Chưa có dữ liệu thành viên — cả nhóm chat vài câu đi!"); return True
+        _tg_send(token, chat_id, f"🍀 <b>Thành viên may mắn hôm nay:</b> 🎉 <b>{_h.escape(_rd.choice(names))}</b> 🎉"); return True
+
+    # ---------- 🔮 BÓI VUI ----------
+    if cmd == "boi":
+        h = _tg_daily_hash("boi", uid)
+        _tg_send(token, chat_id, f"🔮 <b>Bói vui hôm nay của {_tg_mention(frm)}:</b>\n"
+                                 f"{_TG_FORTUNES[h % len(_TG_FORTUNES)]}\n💫 Độ may mắn: <b>{h % 101}%</b>"); return True
+    if cmd == "tinhduyen":
+        if rfrm.get("id"):
+            n1, n2 = _tg_name(frm), _tg_name(rfrm)
+        elif "|" in args:
+            p = [x.strip() for x in args.split("|") if x.strip()]
+            n1, n2 = (p + ["?", "?"])[:2]
+        elif args.strip():
+            n1, n2 = _tg_name(frm), args.strip()
+        else:
+            _tg_send(token, chat_id, "💘 Dùng: reply tin người ấy rồi gõ /tinhduyen · hoặc <code>/tinhduyen Tuấn | Hoa</code>"); return True
+        pct = _tg_daily_hash("love", n1.lower(), n2.lower()) % 101
+        verdict = "💒 Trời sinh một cặp!" if pct >= 85 else ("❤️ Rất hợp nhau!" if pct >= 60 else ("🌱 Cần vun đắp thêm!" if pct >= 35 else "🙈 Duyên bạn bè thôi!"))
+        _tg_send(token, chat_id, f"💘 <b>Bói tình duyên:</b> {_h.escape(n1)} ❤ {_h.escape(n2)}\n💯 Độ hợp: <b>{pct}%</b>\n{verdict}"); return True
+    if cmd == "hoi":
+        if not args.strip():
+            _tg_send(token, chat_id, "🎱 Hỏi bot tiên tri: <code>/hoi mai có trúng số không?</code>"); return True
+        _tg_send(token, chat_id, f"🎱 <i>{_h.escape(args.strip()[:150])}</i>\n→ <b>{_rd.choice(_TG_8BALL)}</b>"); return True
+    if cmd == "danhgia":
+        if not args.strip():
+            _tg_send(token, chat_id, "💯 Dùng: <code>/danhgia độ đẹp trai của tôi</code>"); return True
+        _tg_send(token, chat_id, f"💯 <b>{_h.escape(args.strip()[:120])}</b>: <b>{_tg_daily_hash('rate', args.strip().lower()) % 101}%</b>"); return True
+
+    # ---------- 🧰 TIỆN ÍCH ----------
+    if cmd == "tinh":
+        if not args.strip():
+            _tg_send(token, chat_id, "🧮 Máy tính: <code>/tinh 5*(3+2)/2</code>"); return True
+        try:
+            _tg_send(token, chat_id, f"🧮 <code>{_h.escape(args.strip()[:80])}</code> = <b>{_tg_calc_expr(args)}</b>")
+        except Exception:
+            _tg_send(token, chat_id, "❌ Biểu thức không hợp lệ. VD: <code>/tinh (5+3)*2</code>")
+        return True
+    if cmd == "qr":
+        if not args.strip():
+            _tg_send(token, chat_id, "🔳 Tạo mã QR: <code>/qr https://app.kenios.store</code>"); return True
+        import urllib.parse as _up
+        _tg_call(token, "sendPhoto", chat_id=chat_id, caption="🔳 Mã QR của bạn",
+                 photo=f"https://api.qrserver.com/v1/create-qr-code/?size=500x500&data={_up.quote(args.strip()[:800])}")
+        return True
+    if cmd in ("thoitiet", "giacoin", "tygia", "dich"):
+        _thr.Thread(target=_tg_fun_net_task, args=(token, chat_id, cmd, args), daemon=True).start(); return True
+    if cmd == "nhacnho":
+        p = args.split(maxsplit=1)
+        try:
+            mins = float(p[0].replace(",", "."))
+        except Exception:
+            mins = 0
+        if mins <= 0 or len(p) < 2:
+            _tg_send(token, chat_id, "⏰ Hẹn nhắc: <code>/nhacnho 30 họp nhóm</code> (phút, tối đa 7 ngày)"); return True
+        mins = min(mins, 7 * 24 * 60)
+        who = _tg_mention(frm); note = _h.escape(p[1][:300])
+        t = _thr.Timer(mins * 60, _tg_send, args=(token, chat_id, f"⏰ {who} — đến giờ: <b>{note}</b>"))
+        t.daemon = True; t.start()
+        _tg_send(token, chat_id, f"✅ Sẽ nhắc <b>{note}</b> sau <b>{mins:g} phút</b>."); return True
+    if cmd in ("binhchon", "poll"):
+        parts = [x.strip() for x in args.split("|") if x.strip()]
+        if len(parts) < 3:
+            _tg_send(token, chat_id, "🗳️ Tạo bình chọn: <code>/binhchon Tối ăn gì? | Lẩu | Nướng | Bún chả</code>"); return True
+        _tg_call(token, "sendPoll", chat_id=chat_id, question=parts[0][:250],
+                 options=[p[:90] for p in parts[1:11]], is_anonymous=False)
+        return True
+    if cmd == "gio":
+        import datetime as _dt
+        u = _dt.datetime.utcnow()
+        _tg_send(token, chat_id,
+                 f"🕐 <b>Giờ hiện tại</b>\n🇻🇳 Việt Nam: <b>{(u + _dt.timedelta(hours=7)):%H:%M — %d/%m/%Y}</b>\n"
+                 f"🇯🇵 Tokyo: {(u + _dt.timedelta(hours=9)):%H:%M} · 🇬🇧 London: {(u + _dt.timedelta(hours=1)):%H:%M} · 🇺🇸 New York: {(u - _dt.timedelta(hours=4)):%H:%M}")
+        return True
+    if cmd == "dem":
+        s = args.strip()
+        if not s:
+            _tg_send(token, chat_id, "🔢 Đếm chữ: <code>/dem đoạn văn cần đếm</code>"); return True
+        _tg_send(token, chat_id, f"🔢 <b>{len(s)}</b> ký tự · <b>{len(s.split())}</b> từ · <b>{len(s.splitlines())}</b> dòng"); return True
+    if cmd == "password":
+        import string as _st
+        try:
+            ln = max(8, min(64, int(args.split()[0])))
+        except Exception:
+            ln = 14
+        chars = _st.ascii_letters + _st.digits + "!@#$%^&*"
+        pw = "".join(secrets.choice(chars) for _ in range(ln))
+        _tg_send(token, chat_id, f"🔐 Mật khẩu mạnh ({ln} ký tự):\n<code>{pw}</code>"); return True
+    return False
+
 # ---------- Đếm người dùng bot mỗi tháng ----------
 def _tg_track(frm: dict) -> None:
     if not frm or not frm.get("id"):
@@ -5177,6 +5564,12 @@ _TG_RESERVED = {
     "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
     "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
     "modon", "modoff", "autodel", "modadmin",
+    # 🎮 lệnh giải trí & tiện ích (không cho lệnh riêng ghi đè)
+    "xucxac", "slot", "phitieu", "bongda", "bongro", "bowling", "tungxu", "oantuti", "keobuabao",
+    "doanso", "doan", "random", "chon", "xoso", "cuoi", "joke", "cakhia", "khen", "triethly",
+    "thotinh", "noinguoc", "thatha", "thachthuc", "ghep", "lucky", "boi", "tinhduyen", "hoi",
+    "danhgia", "tinh", "qr", "thoitiet", "giacoin", "tygia", "dich", "nhacnho", "binhchon",
+    "poll", "gio", "dem", "password",
 }
 
 def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
@@ -5322,6 +5715,23 @@ _TG_FEAT = {
     "🗑️ Dọn tin": ("🗑️ <b>Dọn tin</b> (trong nhóm): /del (reply) xoá 1 tin · /purge (reply) xoá hàng loạt tới tin đó.\n"
                    "🧽 <b>Tự xoá lệnh</b>: dùng lệnh xong bot tự xoá tin lệnh + trả lời sau 5 giây.\n"
                    "• /autodel 10 — đổi số giây · /autodel off — tắt"),
+    "🎮 Trò chơi": ("🎮 <b>Trò chơi</b> (ai cũng chơi được):\n"
+                    "/xucxac 🎲 · /slot 🎰 · /phitieu 🎯 · /bongda ⚽ · /bongro 🏀 · /bowling 🎳\n"
+                    "/tungxu — tung đồng xu · /oantuti kéo|búa|bao — đấu với bot\n"
+                    "/doanso — đoán số 1–100 (đoán bằng /doan 50)\n"
+                    "/random 1 100 · /chon trà sữa | cà phê · /xoso — quay số may mắn"),
+    "😂 Giải trí": ("😂 <b>Giải trí</b>:\n"
+                    "/cuoi — chuyện cười · /cakhia (reply) — cà khịa vui · /khen (reply) — khen ai đó\n"
+                    "/thatha — nói thật · /thachthuc — thử thách · /ghep — ghép đôi ngẫu nhiên\n"
+                    "/lucky — thành viên may mắn · /triethly · /thotinh · /noinguoc <chữ>"),
+    "🔮 Bói vui": ("🔮 <b>Bói vui</b>:\n"
+                   "/boi — vận may hôm nay · /tinhduyen (reply hoặc /tinhduyen Tuấn | Hoa)\n"
+                   "/hoi <câu hỏi> — bot tiên tri trả lời · /danhgia <thứ gì đó> — chấm điểm %"),
+    "🧰 Tiện ích": ("🧰 <b>Tiện ích</b>:\n"
+                    "/tinh 5*(3+2) — máy tính · /qr <nội dung> — tạo mã QR\n"
+                    "/thoitiet [thành phố] · /giacoin btc · /tygia — USD→VND · /dich <chữ>\n"
+                    "/nhacnho 30 họp nhóm — hẹn nhắc · /binhchon Câu hỏi | A | B — bình chọn\n"
+                    "/gio — giờ thế giới · /dem <chữ> · /password 16 — tạo mật khẩu"),
     "🔗 Liên kết": None,        # → nút mở link (web, cài app, kênh…)
     "➕ Lệnh riêng": None,       # → hướng dẫn tự thêm lệnh bot
     "📣 Loa phường": None,      # → hướng dẫn broadcast (admin)
@@ -5335,7 +5745,8 @@ _TG_FEAT = {
 
 # Nút CÔNG KHAI — thành viên thường thấy; các nút còn lại (quản trị) CHỈ ADMIN thấy.
 _TG_PUBLIC_BTNS = {"✅ Điểm danh", "🏆 Xếp hạng", "🚨 Báo cáo", "🆔 ID", "💤 AFK", "🔗 Liên kết",
-                   "📖 Tất cả lệnh", "🎵 Lấy nhạc", "📊 Thống kê", "ℹ️ Giới thiệu", "💬 Hỗ trợ"}
+                   "📖 Tất cả lệnh", "🎵 Lấy nhạc", "📊 Thống kê", "ℹ️ Giới thiệu", "💬 Hỗ trợ",
+                   "🎮 Trò chơi", "😂 Giải trí", "🔮 Bói vui", "🧰 Tiện ích"}
 
 def _tg_full_menu(admin: bool = False) -> dict:
     labels = [b for b in _TG_FEAT.keys() if admin or b in _TG_PUBLIC_BTNS]
@@ -5913,10 +6324,15 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
                           admin=_tg_is_privileged(token, chat_id, msg)):
             return
 
-    # Lệnh (/... hoặc #ghichú) — dùng xong TỰ XOÁ tin lệnh + trả lời bot sau N giây
+    # Lệnh (/... hoặc #ghichú) — dùng xong TỰ XOÁ tin lệnh + trả lời bot sau N giây.
+    # Riêng lệnh GIẢI TRÍ (trò chơi, bói, chuyện cười…) GIỮ LẠI cho cả nhóm xem.
     if text.startswith("/") or text.startswith("#"):
-        _tg_with_autodel(token, chat_id, mid,
-                         lambda: _tg_dispatch_command(token, chat_id, msg, text, uid, frm))
+        _c0 = text.split()[0].lstrip("/#").split("@")[0].lower()
+        if _c0 in _TG_FUN_CMDS:
+            _tg_dispatch_command(token, chat_id, msg, text, uid, frm)
+        else:
+            _tg_with_autodel(token, chat_id, mid,
+                             lambda: _tg_dispatch_command(token, chat_id, msg, text, uid, frm))
         return
 
     # FameRank: đếm tin nhắn · AutoReact: thả cảm xúc (chạy NỀN — không chặn vòng lặp)
@@ -5955,6 +6371,11 @@ def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, fr
         title = msg.get("chat", {}).get("title", "nhóm")
         if ac: _tg_send(token, ac, f"⚠️ Báo cáo từ nhóm <b>{title}</b> bởi {_tg_mention(frm)}.")
         _tg_send(token, chat_id, "⚠️ Đã báo cáo tới quản trị viên."); return
+    # 🎮 Lệnh GIẢI TRÍ & TIỆN ÍCH — ai cũng dùng được
+    if cmd0 in _TG_FUN_CMDS:
+        _sp = text.split(maxsplit=1)
+        if _tg_fun_command(token, chat_id, msg, cmd0, _sp[1] if len(_sp) > 1 else ""):
+            return
     if cmd0 in ("help", "start", "menu"):
         _tg_send_menu(token, chat_id, "📋 <b>MENU KENIOS</b> — chọn chức năng bên dưới 👇",
                       admin=_tg_is_privileged(token, chat_id, msg)); return
@@ -6065,6 +6486,13 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     if _tg_menu_click(token, chat_id, text, name,
                       admin=bool(admin_chat) and chat_id == str(admin_chat)):
         return
+    # 🎮 Lệnh GIẢI TRÍ & TIỆN ÍCH — dùng được cả trong chat riêng
+    if text.startswith("/"):
+        _fc = text.split()[0].lstrip("/").split("@")[0].lower()
+        if _fc in _TG_FUN_CMDS:
+            _fsp = text.split(maxsplit=1)
+            if _tg_fun_command(token, chat_id, msg, _fc, _fsp[1] if len(_fsp) > 1 else ""):
+                return
     # Lệnh QUẢN LÝ NHÓM gõ trong chat riêng → nhắc: chỉ chạy trong nhóm (tránh "im lặng tưởng lỗi").
     _GROUP_CMDS = {"/ban", "/kick", "/mute", "/unmute", "/warn", "/unwarn", "/warns", "/pin", "/unpin",
                    "/del", "/purge", "/info", "/lock", "/unlock", "/locks", "/addbl", "/rmbl", "/blacklist",
@@ -6166,6 +6594,19 @@ def _tg_register_commands(token: str) -> None:
         ("report", "Báo cáo admin (reply)"), ("rules", "Xem nội quy"),
         ("afk", "Báo bận"), ("id", "Xem Chat/User ID"),
         ("links", "🔗 Liên kết nhanh"), ("cmds", "Xem lệnh riêng"),
+        # 🎮 Giải trí & tiện ích
+        ("xucxac", "🎲 Tung xúc xắc"), ("slot", "🎰 Quay slot"), ("tungxu", "🪙 Tung đồng xu"),
+        ("oantuti", "✂️ Oẳn tù tì với bot"), ("doanso", "🔢 Trò đoán số 1-100"),
+        ("xoso", "🎰 Quay số may mắn"), ("chon", "🤔 Bot chọn giúp A | B"),
+        ("cuoi", "😂 Chuyện cười"), ("cakhia", "😜 Cà khịa vui (reply)"),
+        ("khen", "🌟 Khen ai đó (reply)"), ("thatha", "🙊 Nói thật"), ("thachthuc", "🔥 Thử thách"),
+        ("ghep", "💞 Ghép đôi ngẫu nhiên"), ("lucky", "🍀 Thành viên may mắn"),
+        ("boi", "🔮 Bói vui hôm nay"), ("tinhduyen", "💘 Bói tình duyên"),
+        ("hoi", "🎱 Hỏi bot tiên tri"), ("danhgia", "💯 Chấm điểm %"),
+        ("tinh", "🧮 Máy tính"), ("qr", "🔳 Tạo mã QR"), ("thoitiet", "⛅ Thời tiết"),
+        ("giacoin", "💰 Giá coin"), ("tygia", "💵 Tỷ giá USD→VND"), ("dich", "🌐 Dịch sang tiếng Việt"),
+        ("nhacnho", "⏰ Hẹn nhắc việc"), ("binhchon", "🗳️ Tạo bình chọn"),
+        ("gio", "🕐 Giờ thế giới"), ("password", "🔐 Tạo mật khẩu mạnh"),
     ]
     # Lệnh QUẢN TRỊ — CHỈ admin nhóm (và admin bot) thấy
     adm = pub + [
@@ -6203,6 +6644,10 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
     greet = (f"👋 Chào {_h.escape(name)}, tôi là <b>{_h.escape(bot)}</b>.\n\n" if name
              else f"👋 Xin chào, tôi là <b>{_h.escape(bot)}</b>.\n\n")
     pub = ("🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
+           "🎮 <b>Trò chơi:</b> /xucxac /slot /phitieu /bongda /bongro /bowling /tungxu /oantuti /doanso /random /chon /xoso\n"
+           "😂 <b>Giải trí:</b> /cuoi /cakhia /khen /thatha /thachthuc /ghep /lucky /triethly /thotinh /noinguoc\n"
+           "🔮 <b>Bói vui:</b> /boi /tinhduyen /hoi /danhgia\n"
+           "🧰 <b>Tiện ích:</b> /tinh /qr /thoitiet /giacoin /tygia /dich /nhacnho /binhchon /gio /dem /password\n"
            "🔗 /links — liên kết nhanh · /cmds — lệnh riêng\n"
            "<b>Trong nhóm:</b> /diemdanh · /top · /report (reply) · /rules · /afk [lý do] · /id")
     if not admin:
