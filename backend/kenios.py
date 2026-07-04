@@ -7095,6 +7095,20 @@ _SHOP_HTML = r'''<!doctype html><html lang="vi"><head>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 :root{--bg:#0b1220;--card:#151f38;--card2:#1c2947;--line:#28365c;--accent:#2f7bff;--accent2:#7a3cff;--txt:#eef2fb;--mut:#9aa6c2;--green:#22c55e}
 body{background:linear-gradient(180deg,#0b1220,#0e1630);color:var(--txt);min-height:100vh;padding-bottom:78px}
+.bgwrap{position:fixed;inset:0;z-index:-1;overflow:hidden}
+.bgwrap img,.bgwrap video{width:100%;height:100%;object-fit:cover}
+.bgwrap::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(9,14,26,.72),rgba(9,14,26,.88))}
+#logobox{overflow:hidden}
+#logobox img,#logobox video{width:100%;height:100%;object-fit:cover}
+.announce{overflow:hidden;white-space:nowrap;padding:7px 0;font-size:12.5px;font-weight:700;
+  position:sticky;top:54px;z-index:19;background:rgba(47,123,255,.16);border-bottom:1px solid var(--line)}
+.announce.red{background:rgba(239,68,68,.18)}.announce.green{background:rgba(34,197,94,.18)}
+.announce.gold{background:rgba(245,180,60,.18)}.announce.purple{background:rgba(150,90,255,.18)}
+.announce span{display:inline-block;padding-left:100%;animation:mq 16s linear infinite}
+@keyframes mq{to{transform:translateX(-100%)}}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin:12px 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 6px;text-align:center}
+.stat .n{font-size:18px;font-weight:900;color:#ffd54a}.stat .l{font-size:11px;color:var(--mut);margin-top:2px}
 .wrap{max-width:520px;margin:0 auto;padding:14px}
 .top{display:flex;align-items:center;gap:10px;padding:10px 14px;position:sticky;top:0;z-index:20;
   background:rgba(11,18,32,.86);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
@@ -7177,11 +7191,14 @@ h2{font-size:16px;margin:16px 4px 8px;font-weight:800}
 a.link{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:9px;color:#fff;text-decoration:none;font-weight:700}
 </style></head><body>
 
+<div class="bgwrap" id="bgwrap"></div>
+
 <div class="top">
-  <div class="logo">K</div>
+  <div class="logo" id="logobox">K</div>
   <div class="brand" id="brand">KENIOS Store</div>
   <button class="wbtn" id="walletTop" onclick="go('wallet')"><span id="wbal">Đăng nhập</span></button>
 </div>
+<div class="announce" id="announce" style="display:none"><span id="announceText"></span></div>
 
 <div class="wrap" id="view"></div>
 
@@ -7236,9 +7253,37 @@ async function loadStore(){
     PMAP={}; Object.keys(PRODS).forEach(cid=>(PRODS[cid]||[]).forEach(p=>PMAP[p.id]=p));
     document.getElementById('brand').textContent=cfg.logo_name||'KENIOS Store';
     document.title=(cfg.logo_name||'KENIOS')+' Store';
+    applyBranding(cfg);
   }catch(e){}
 }
 function m1(m){return (m&&m.length&&m[0]&&m[0].url)||''}
+function mediaEl(url,type){
+  if(!url) return '';
+  const vid=(type==='video')||/\.(mp4|mov|webm|m4v)(\?|$)/i.test(url);
+  return vid?'<video src="'+h(url)+'" autoplay muted loop playsinline></video>':'<img src="'+h(url)+'">';
+}
+function applyBranding(cfg){
+  const lb=document.getElementById('logobox');
+  if(cfg.logo_url) lb.innerHTML=mediaEl(cfg.logo_url,cfg.logo_type); else lb.textContent='K';
+  const bw=document.getElementById('bgwrap');
+  bw.innerHTML=(cfg.bg_url && cfg.bg_type && cfg.bg_type!=='none')?mediaEl(cfg.bg_url,cfg.bg_type):'';
+  const an=document.getElementById('announce');
+  if(cfg.announce_enabled && (cfg.announce_text||'').trim()){
+    document.getElementById('announceText').textContent=cfg.announce_text;
+    an.className='announce '+(cfg.announce_color||'accent'); an.style.display='block';
+  } else an.style.display='none';
+}
+function statsHtml(){
+  const u=(CFG.stat_users_base||0)+(CFG.stat_users_real||0);
+  const s=(CFG.stat_sold_base||0)+(CFG.stat_sold_real||0);
+  const r=(CFG.stat_reviews_base||0)+(CFG.stat_reviews_real||0);
+  if(!(u||s||r)) return '';
+  const f=n=>n.toLocaleString('vi-VN');
+  return '<div class="stats">'
+    +'<div class="stat"><div class="n">'+f(u)+'</div><div class="l">Người dùng</div></div>'
+    +'<div class="stat"><div class="n">'+f(s)+'</div><div class="l">Đã bán</div></div>'
+    +'<div class="stat"><div class="n">'+f(r)+'</div><div class="l">Đánh giá</div></div></div>';
+}
 function tile(onclick,name,url,emoji){
   const img=url?'<img loading="lazy" src="'+h(url)+'">':'<div class="ph">'+emoji+'</div>';
   return '<button class="tile" onclick="'+onclick+'">'+img+'<div class="nm">'+h(name)+'</div></button>';
@@ -7257,7 +7302,7 @@ function renderShop(){
 function renderCats(){
   const v=document.getElementById('view');
   if(!CATS.length){ v.innerHTML=heroHtml()+'<div class="center">Chưa có danh mục nào.</div>'; return }
-  let html=heroHtml()+'<h2>Danh mục</h2><div class="grid">';
+  let html=heroHtml()+statsHtml()+'<h2>Danh mục</h2><div class="grid">';
   CATS.forEach(c=>html+=tile('openCat('+c.id+')',c.name,m1(c.media),'🎮'));
   html+='</div>';
   v.innerHTML=html; window.scrollTo(0,0);
