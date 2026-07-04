@@ -4585,6 +4585,22 @@ def _deliver_incoming(rcpt: str, sender: str, subject: str, body: str) -> None:
         logging.warning("deliver_incoming lỗi: %s", e)
 
 
+def _smtp_cfg() -> dict:
+    """Cấu hình SMTP relay để gửi email ra ngoài (Gmail…). Ưu tiên cài trong Quản trị,
+    fallback biến môi trường. Nhờ vậy admin nhập Gmail + mật khẩu ứng dụng ngay trong app."""
+    try:
+        port = int((get_setting("smtp_relay_port", "") or "").strip() or SMTP_RELAY_PORT)
+    except Exception:
+        port = SMTP_RELAY_PORT
+    return {
+        "host": (get_setting("smtp_relay_host", "") or SMTP_RELAY_HOST).strip(),
+        "port": port,
+        "user": (get_setting("smtp_relay_user", "") or SMTP_RELAY_USER).strip(),
+        "pass": (get_setting("smtp_relay_pass", "") or SMTP_RELAY_PASS),
+        "from": (get_setting("smtp_mail_from", "") or MAIL_FROM or "").strip(),
+    }
+
+
 def send_system_mail(to: str, subject: str, body: str,
                      html: Optional[str] = None,
                      images: Optional[dict] = None) -> str:
@@ -4605,12 +4621,15 @@ def send_system_mail(to: str, subject: str, body: str,
     # Nếu là tên miền mặc định @MAIL_DOMAIN nhưng chưa tạo hộp thư
     if to.lower().endswith("@" + MAIL_DOMAIN):
         return "none"
-    # Bên ngoài: cần SMTP relay
-    if SMTP_RELAY_HOST:
+    # Bên ngoài: cần SMTP relay (Gmail…) — lấy cấu hình admin/env
+    cfg = _smtp_cfg()
+    if cfg["host"]:
+        # Gmail bắt buộc From = tài khoản đã đăng nhập, nếu không sẽ bị từ chối.
+        relay_from = cfg["from"] or (cfg["user"] if "@" in (cfg["user"] or "") else sender)
         try:
             m = _EmailMessage()
-            m["From"] = f"{MAIL_FROM_NAME} <{sender}>"; m["To"] = to; m["Subject"] = subject
-            m["Reply-To"] = sender
+            m["From"] = f"{MAIL_FROM_NAME} <{relay_from}>"; m["To"] = to; m["Subject"] = subject
+            m["Reply-To"] = relay_from
             m.set_content(body)   # bản chữ thuần (dự phòng)
             if html:
                 m.add_alternative(html, subtype="html")
@@ -4619,10 +4638,10 @@ def send_system_mail(to: str, subject: str, body: str,
                     for cid, b64 in images.items():
                         html_part.add_related(base64.b64decode(b64), maintype="image",
                                               subtype="png", cid=f"<{cid}>")
-            with _smtplib.SMTP(SMTP_RELAY_HOST, SMTP_RELAY_PORT, timeout=15) as s:
+            with _smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as s:
                 s.starttls()
-                if SMTP_RELAY_USER:
-                    s.login(SMTP_RELAY_USER, SMTP_RELAY_PASS)
+                if cfg["user"]:
+                    s.login(cfg["user"], cfg["pass"])
                 s.send_message(m)
             return "external"
         except Exception as e:
@@ -8073,9 +8092,21 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.announce_enabled is not None: set_setting("store_announce_enabled", "1" if b.announce_enabled else "0")
     if b.announce_text is not None: set_setting("store_announce_text", b.announce_text.strip()[:200])
     if b.announce_color is not None: set_setting("store_announce_color", b.announce_color.strip()[:20])
-    if b.latest_version is not None: set_setting("store_latest_version", b.latest_version.strip()[:20])
+    _ver_old = None
+    if b.latest_version is not None:
+        _ver_old = get_setting("store_latest_version", "")
+        set_setting("store_latest_version", b.latest_version.strip()[:20])
     if b.update_url is not None: set_setting("store_update_url", b.update_url.strip()[:300])
     if b.update_message is not None: set_setting("store_update_message", b.update_message.strip()[:300])
+    # §1.2 — Phiên bản MỚI (đổi khác trước): thông báo cho MỌI user (in-app + Gmail).
+    if _ver_old is not None:
+        _nv = get_setting("store_latest_version", "")
+        if _nv and _nv != _ver_old:
+            _notify_all_users(
+                f"🎉 KENIOS có phiên bản mới {_nv}",
+                get_setting("store_update_message", "") or
+                f"Phiên bản {_nv} đã sẵn sàng. Mở app KENIOS để cập nhật ngay!",
+                kind="update", link=get_setting("store_update_url", ""))
     if b.welcome_popup_enabled is not None: set_setting("store_welcome_popup_enabled", "1" if b.welcome_popup_enabled else "0")
     if b.welcome_popup_title is not None: set_setting("store_welcome_popup_title", b.welcome_popup_title.strip()[:80])
     if b.welcome_popup_text is not None: set_setting("store_welcome_popup_text", b.welcome_popup_text.strip()[:500])
@@ -8655,7 +8686,7 @@ def _notify_user_email(uid: int, subject: str, body: str) -> None:
     """Gửi thông báo qua email (Gmail…) khi người nhận đang OFFLINE — miễn phí, không cần APNs.
     Chỉ gửi khi: bật cấu hình + có SMTP relay + user có email + đang offline + không quá 1 email/2 phút."""
     try:
-        if get_setting("email_notify_enabled", "1") != "1" or not SMTP_RELAY_HOST:
+        if get_setting("email_notify_enabled", "1") != "1" or not _smtp_cfg()["host"]:
             return
         now = time.time()
         with db() as c:
@@ -8692,10 +8723,37 @@ def _broadcast_notification(title: str, body: str, kind: str = "general", link: 
         log.warning("broadcast_notification lỗi: %s", e)
 
 
+def _email_broadcast_all(subject: str, body: str) -> None:
+    """Gửi email (Gmail…) cho MỌI người dùng có email — dùng cho SẢN PHẨM MỚI / PHIÊN BẢN MỚI.
+    Chạy nền, giãn nhịp để không bị Gmail chặn. Chỉ chạy khi bật + đã cấu hình SMTP relay."""
+    if get_setting("email_notify_enabled", "1") != "1" or not _smtp_cfg()["host"]:
+        return
+    def run():
+        try:
+            with db() as c:
+                emails = [r["email"] for r in c.execute(
+                    "SELECT DISTINCT email FROM users WHERE email IS NOT NULL AND email LIKE '%@%'").fetchall()]
+            html = _notif_email_html(subject, body)
+            sent = 0
+            for em in emails:
+                try:
+                    if send_system_mail(em, subject, body, html) == "external":
+                        sent += 1
+                    time.sleep(1.2)   # nhẹ tay với Gmail (tránh bị chặn gửi hàng loạt)
+                except Exception:
+                    pass
+            log.info("email_broadcast: đã gửi %d/%d email — %s", sent, len(emails), subject)
+        except Exception as e:
+            log.warning("email_broadcast lỗi: %s", e)
+    import threading
+    threading.Thread(target=run, daemon=True, name="email-broadcast").start()
+
+
 def _notify_all_users(title: str, body: str, kind: str = "general", link: str = "", image: str = "") -> None:
     """§1.1 — Thông báo cho MỌI người dùng: (1) LƯU vào bảng notifications để app đọc
-    (tin cậy, không cần quyền push) + (2) đẩy APNs nếu có cấu hình (best-effort)."""
+    (tin cậy, không cần quyền push) + (2) GỬI EMAIL cho user có Gmail + (3) đẩy APNs nếu có."""
     _broadcast_notification(title, body, kind, link, image)
+    _email_broadcast_all(title, body)   # ← gửi Gmail cho mọi user có email
     try:
         with db() as c:
             tokens = [r["token"] for r in c.execute("SELECT token FROM device_tokens").fetchall()]
@@ -8719,15 +8777,38 @@ def list_notifications(limit: int = 20, user=Depends(get_user)) -> list[dict[str
     return [dict(r) for r in rows]
 
 
+def _email_notify_status() -> dict[str, Any]:
+    cfg = _smtp_cfg()
+    return {"enabled": get_setting("email_notify_enabled", "1") == "1",
+            "has_relay": bool(cfg["host"]),
+            "smtp_host": cfg["host"], "smtp_port": cfg["port"],
+            "smtp_user": cfg["user"], "mail_from": cfg["from"],
+            "smtp_pass_set": bool(cfg["pass"])}
+
 @app.get("/admin/email-notify")
 def admin_get_email_notify(admin=Depends(get_admin)) -> dict[str, Any]:
-    return {"enabled": get_setting("email_notify_enabled", "1") == "1",
-            "has_relay": bool(SMTP_RELAY_HOST)}
+    return _email_notify_status()
 
 @app.post("/admin/email-notify")
 def admin_set_email_notify(body: dict = Body(...), admin=Depends(get_admin)) -> dict[str, Any]:
-    set_setting("email_notify_enabled", "1" if body.get("enabled") else "0")
-    return {"ok": True, "enabled": get_setting("email_notify_enabled", "1") == "1"}
+    if "enabled" in body:
+        set_setting("email_notify_enabled", "1" if body.get("enabled") else "0")
+    if body.get("smtp_host") is not None:  set_setting("smtp_relay_host", str(body["smtp_host"]).strip())
+    if body.get("smtp_port") is not None:  set_setting("smtp_relay_port", str(body["smtp_port"]).strip())
+    if body.get("smtp_user") is not None:  set_setting("smtp_relay_user", str(body["smtp_user"]).strip())
+    if body.get("mail_from") is not None:  set_setting("smtp_mail_from", str(body["mail_from"]).strip())
+    # Mật khẩu ứng dụng: chỉ ghi khi nhập mới (để trống = giữ nguyên)
+    if body.get("smtp_pass"):              set_setting("smtp_relay_pass", str(body["smtp_pass"]))
+    # Gửi email kiểm tra (tuỳ chọn) — dùng cấu hình vừa lưu
+    if body.get("test_to"):
+        r = send_system_mail(str(body["test_to"]).strip(), "KENIOS — Thư kiểm tra cấu hình",
+                             "Nếu bạn nhận được email này, cấu hình gửi Gmail của KENIOS đã hoạt động.",
+                             _notif_email_html("KENIOS — Kiểm tra cấu hình",
+                                               "Cấu hình gửi email hoạt động tốt! 🎉 Từ giờ khách sẽ nhận được thông báo sản phẩm mới & phiên bản mới qua Gmail."))
+        out = _email_notify_status(); out["test_result"] = r
+        out["test_ok"] = (r == "external")
+        return out
+    return _email_notify_status()
 
 
 # ==================== §11 — Điều khiển PC từ xa (relay qua KENIOS, không cần VPS riêng) ====================

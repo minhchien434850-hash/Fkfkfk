@@ -245,6 +245,15 @@ struct APIClient {
     func adminSetEmailNotify(_ enabled: Bool) async throws {
         _ = try await send("/admin/email-notify", method: "POST", json: ["enabled": enabled])
     }
+    /// Lưu cấu hình SMTP (Gmail) + tuỳ chọn gửi email kiểm tra. Trả về trạng thái mới.
+    func adminSetEmailConfig(host: String, port: Int, user: String, pass: String,
+                             from: String, testTo: String = "") async throws -> EmailNotifyStatus {
+        var body: [String: Any] = ["smtp_host": host, "smtp_port": port,
+                                    "smtp_user": user, "mail_from": from]
+        if !pass.isEmpty { body["smtp_pass"] = pass }
+        if !testTo.isEmpty { body["test_to"] = testTo }
+        return try decode(try await send("/admin/email-notify", method: "POST", json: body))
+    }
     func adminDeleteUser(_ uid: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/users/\(uid)", method: "DELETE"))
     }

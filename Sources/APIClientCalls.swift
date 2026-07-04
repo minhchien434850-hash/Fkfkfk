@@ -4,6 +4,13 @@ import Foundation
 struct EmailNotifyStatus: Decodable {
     let enabled: Bool
     let hasRelay: Bool?
+    let smtpHost: String?
+    let smtpPort: Int?
+    let smtpUser: String?
+    let mailFrom: String?
+    let smtpPassSet: Bool?
+    let testResult: String?
+    let testOk: Bool?
 }
 
 // ======================== Model cập nhật OTA (bản đã ký) ========================

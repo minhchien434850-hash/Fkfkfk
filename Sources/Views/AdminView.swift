@@ -21,6 +21,16 @@ struct AdminView: View {
     @State private var emailNotify = true
     @State private var secToken = ""
     @State private var secChat = ""
+    // Cấu hình SMTP (Gmail) để gửi thông báo ra ngoài
+    @State private var smtpHost = ""
+    @State private var smtpPort = "587"
+    @State private var smtpUser = ""
+    @State private var smtpPass = ""
+    @State private var mailFrom = ""
+    @State private var smtpPassSet = false
+    @State private var smtpTestTo = ""
+    @State private var smtpMsg: String?
+    @State private var smtpSaving = false
 
     var body: some View {
         NavigationStack {
@@ -175,8 +185,45 @@ struct AdminView: View {
                 } header: {
                     Text(store.t("📧 Thông báo qua Email (miễn phí)", "📧 Email notifications (free)"))
                 } footer: {
-                    Text(store.t("Khi có tin nhắn/cuộc gọi mà người nhận đang TẮT app, hệ thống gửi email báo (Gmail tự hiện thông báo) — miễn phí, không cần APNs. Chỉ gửi khi họ offline & tối đa 1 email/2 phút để tránh spam.",
-                                 "When there's a message/call and the recipient has the app closed, the server emails them (Gmail shows the alert) — free, no APNs. Only sent when offline, max 1 email/2 min to avoid spam."))
+                    Text(store.t("Gửi email cho khách khi: có SẢN PHẨM MỚI, PHIÊN BẢN MỚI, hoặc tin nhắn/cuộc gọi lúc họ tắt app. BẮT BUỘC cấu hình SMTP Gmail bên dưới thì email mới gửi được.",
+                                 "Emails customers on: NEW PRODUCTS, NEW VERSIONS, or messages/calls while offline. REQUIRES the Gmail SMTP config below to actually send."))
+                        .font(.caption2)
+                }
+
+                // Cấu hình SMTP Gmail — nhập thì email mới gửi được ra ngoài
+                Section {
+                    HStack {
+                        Image(systemName: smtpPassSet && !smtpHost.isEmpty ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(smtpPassSet && !smtpHost.isEmpty ? .green : .orange)
+                        Text(smtpPassSet && !smtpHost.isEmpty
+                             ? store.t("Đã cấu hình gửi email", "Email sending configured")
+                             : store.t("Chưa cấu hình — email chưa gửi được", "Not configured — email won't send"))
+                            .font(.caption)
+                    }
+                    TextField("SMTP host (vd smtp.gmail.com)", text: $smtpHost)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField("Cổng (587)", text: $smtpPort).keyboardType(.numberPad)
+                    TextField(store.t("Gmail đăng nhập (vd ban@gmail.com)", "Gmail login"), text: $smtpUser)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
+                    SecureField(smtpPassSet ? store.t("Mật khẩu ứng dụng (để trống = giữ nguyên)", "App password (blank = keep)")
+                                            : store.t("Mật khẩu ứng dụng 16 ký tự", "16-char app password"), text: $smtpPass)
+                    TextField(store.t("Email gửi đi (mặc định = Gmail trên)", "From email (default = Gmail above)"), text: $mailFrom)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
+                    TextField(store.t("Email để gửi thử (tuỳ chọn)", "Test email (optional)"), text: $smtpTestTo)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
+                    Button {
+                        Task { await saveSmtp() }
+                    } label: {
+                        HStack { if smtpSaving { ProgressView().padding(.trailing, 4) }
+                            Text(smtpTestTo.isEmpty ? store.t("Lưu cấu hình", "Save config")
+                                                    : store.t("Lưu & gửi email thử", "Save & send test")).bold() }
+                    }.disabled(smtpSaving)
+                    if let smtpMsg { Text(smtpMsg).font(.caption).foregroundStyle(.secondary) }
+                } header: {
+                    Text(store.t("Cấu hình gửi Gmail (SMTP)", "Gmail sending (SMTP)"))
+                } footer: {
+                    Text(store.t("Cách lấy: Tài khoản Google → Bảo mật → Xác minh 2 bước (bật) → Mật khẩu ứng dụng → tạo cho 'Mail' → dán 16 ký tự vào ô Mật khẩu. Host: smtp.gmail.com · Cổng: 587.",
+                                 "How: Google Account → Security → 2-Step Verification (on) → App passwords → create for 'Mail' → paste the 16 chars. Host: smtp.gmail.com · Port: 587."))
                         .font(.caption2)
                 }
 
@@ -270,7 +317,7 @@ struct AdminView: View {
                 await loadStats()
                 await loadPendingPayments()
                 await loadSecurityAlert()
-                if let e = try? await store.api.adminGetEmailNotify() { emailNotify = e.enabled }
+                if let e = try? await store.api.adminGetEmailNotify() { applyEmailStatus(e) }
                 // Tự làm mới danh sách người dùng mỗi 15s để xem "đang dùng" theo thời gian thực
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 15_000_000_000)
@@ -400,6 +447,40 @@ struct AdminView: View {
             secToken = c.botToken ?? ""
             secChat = c.chatId ?? ""
         }
+    }
+
+    private func applyEmailStatus(_ e: EmailNotifyStatus) {
+        emailNotify = e.enabled
+        smtpHost = e.smtpHost ?? ""
+        if let p = e.smtpPort { smtpPort = String(p) }
+        smtpUser = e.smtpUser ?? ""
+        mailFrom = e.mailFrom ?? ""
+        smtpPassSet = e.smtpPassSet ?? false
+    }
+
+    private func saveSmtp() async {
+        smtpSaving = true; smtpMsg = nil
+        defer { smtpSaving = false }
+        do {
+            let s = try await store.api.adminSetEmailConfig(
+                host: smtpHost.trimmingCharacters(in: .whitespaces),
+                port: Int(smtpPort) ?? 587,
+                user: smtpUser.trimmingCharacters(in: .whitespaces),
+                pass: smtpPass,
+                from: mailFrom.trimmingCharacters(in: .whitespaces),
+                testTo: smtpTestTo.trimmingCharacters(in: .whitespaces))
+            applyEmailStatus(s)
+            smtpPass = ""   // đã lưu → xoá khỏi ô nhập
+            if let tr = s.testResult {
+                smtpMsg = (s.testOk == true)
+                    ? store.t("✅ Đã gửi email thử thành công! Kiểm tra hộp thư.", "✅ Test email sent! Check inbox.")
+                    : store.t("⚠️ Gửi thử chưa được (\(tr)). Kiểm tra lại Gmail & mật khẩu ứng dụng.",
+                              "⚠️ Test failed (\(tr)). Check Gmail & app password.")
+                smtpTestTo = ""
+            } else {
+                smtpMsg = store.t("Đã lưu cấu hình ✅", "Config saved ✅")
+            }
+        } catch { smtpMsg = error.localizedDescription }
     }
 
     private func saveSecurityAlert(test: Bool) async {
