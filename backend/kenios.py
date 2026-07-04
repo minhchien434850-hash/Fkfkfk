@@ -5251,7 +5251,9 @@ _TG_FEAT = {
     "🛡️ Quản trị": "🛡️ <b>Quản trị</b> (trong nhóm, reply vào tin thành viên):\n/ban · /kick · /mute [phút] · /unmute · /warn · /unwarn · /warns · /pin · /unpin · /del · /purge · /info",
     "🔒 Khóa": "🔒 <b>Khóa nội dung</b> (trong nhóm):\n/lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks",
     "🚫 Chặn từ": "🚫 <b>Chặn từ (Blacklist)</b>:\n/addbl &lt;từ&gt; · /rmbl &lt;từ&gt; · /blacklist",
-    "🌊 Antiflood": "🌊 <b>Antiflood</b>: /antiflood — chống spam gửi tin liên tục.",
+    "🌊 Antiflood": ("🌊 <b>Antiflood</b> — chống spam gửi tin dồn dập (đang BẬT mặc định):\n"
+                     "• /antiflood — bật/tắt · /antiflood 4 — đổi mức (quá 4 tin/7s bị xoá + cảnh báo)\n"
+                     "⚠️ Admin/chủ nhóm được MIỄN kiểm duyệt — muốn thử hãy dùng tài khoản thành viên thường."),
     "😀 AutoReact": "😀 <b>AutoReact</b>: /autoreact — bot tự thả cảm xúc vào tin.",
     "🌙 NightMode": "🌙 <b>NightMode</b>: /nightmode — tự khóa chat ban đêm.",
     "🐢 Slowmode": "🐢 <b>Slowmode</b>: /slowmode &lt;giây&gt; — giãn cách gửi tin.",
@@ -5733,11 +5735,23 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
         else:
             _tg_welcome_members(token, msg.get("chat", {}), [msg.get("from", {})])
     elif cmd in ("clean", "nightmode", "antiflood", "captcha", "modon", "modoff"):
-        keymap = {"clean": "tg_clean_service", "nightmode": "tg_nightmode_on",
-                  "antiflood": "tg_antiflood_on", "captcha": "tg_captcha_on"}
-        if cmd in keymap:
-            cur = get_setting(keymap[cmd], "0") == "1"; set_setting(keymap[cmd], "0" if cur else "1")
-            _tg_send(token, chat_id, f"{cmd}: {'TẮT' if cur else 'BẬT'}")
+        # (key, mặc định) — antiflood mặc định BẬT nên toggle phải đọc đúng mặc định "1"
+        keymap = {"clean": ("tg_clean_service", "0"), "nightmode": ("tg_nightmode_on", "0"),
+                  "antiflood": ("tg_antiflood_on", "1"), "captcha": ("tg_captcha_on", "0")}
+        if cmd == "antiflood" and args.strip().split() and args.strip().split()[0].isdigit():
+            mx = max(2, min(30, int(args.strip().split()[0])))
+            set_setting("tg_antiflood_max", str(mx)); set_setting("tg_antiflood_on", "1")
+            _tg_send(token, chat_id,
+                     f"🌊 Antiflood: BẬT — quá <b>{mx}</b> tin/7 giây sẽ bị xoá + cảnh báo.\n"
+                     "(Admin/chủ nhóm được MIỄN — thử bằng tài khoản thành viên thường.)")
+        elif cmd in keymap:
+            k, d = keymap[cmd]
+            cur = get_setting(k, d) == "1"; set_setting(k, "0" if cur else "1")
+            extra = ""
+            if cmd == "antiflood" and not cur:
+                extra = (f" — quá <b>{get_setting('tg_antiflood_max', '6')}</b> tin/7 giây sẽ bị xoá + cảnh báo.\n"
+                         "Đổi mức: <code>/antiflood 4</code>. (Admin được MIỄN — thử bằng tài khoản thành viên.)")
+            _tg_send(token, chat_id, f"{cmd}: {'TẮT' if cur else 'BẬT'}{extra}")
         else:
             set_setting("tg_mod_enabled", "1" if cmd == "modon" else "0")
             _tg_send(token, chat_id, "Quản lý nhóm: " + ("BẬT" if cmd == "modon" else "TẮT"))
