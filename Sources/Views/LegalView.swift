@@ -5,16 +5,28 @@ struct LegalView: View {
     @EnvironmentObject var store: AppStore
 
     // Biểu tượng cho từng mục (khớp thứ tự 1..9 của nội dung) — cho bắt mắt, dễ đọc.
-    private let termsIcons = [
+    static let termsIcons = [
         "checkmark.seal.fill", "person.crop.circle.fill", "hand.raised.fill",
         "cart.fill", "square.and.pencil", "crown.fill",
         "exclamationmark.shield.fill", "arrow.triangle.2.circlepath", "envelope.fill"
     ]
-    private let privacyIcons = [
+    static let privacyIcons = [
         "tray.full.fill", "gearshape.fill", "externaldrive.fill",
         "arrow.left.arrow.right", "iphone.gen3", "person.badge.key.fill",
         "figure.child", "arrow.triangle.2.circlepath", "envelope.fill"
     ]
+
+    // Tài liệu dùng chung (gọi được cả từ màn đăng nhập).
+    static func termsDoc(_ store: AppStore) -> LegalDocView {
+        LegalDocView(title: store.t("Điều khoản sử dụng", "Terms of Use"),
+                     headerIcon: "doc.text.fill", accent: .blue,
+                     content: termsBody(store), icons: termsIcons)
+    }
+    static func privacyDoc(_ store: AppStore) -> LegalDocView {
+        LegalDocView(title: store.t("Chính sách bảo mật", "Privacy Policy"),
+                     headerIcon: "lock.shield.fill", accent: Theme.accent,
+                     content: privacyBody(store), icons: privacyIcons)
+    }
 
     var body: some View {
         ScrollView {
@@ -38,9 +50,7 @@ struct LegalView: View {
 
                 // 2 thẻ điều hướng
                 NavigationLink {
-                    LegalDocView(title: store.t("Điều khoản sử dụng", "Terms of Use"),
-                                 headerIcon: "doc.text.fill", accent: .blue,
-                                 content: LegalView.termsBody(store), icons: termsIcons)
+                    LegalView.termsDoc(store)
                 } label: {
                     legalCard(icon: "doc.text.fill", tint: .blue,
                               title: store.t("Điều khoản sử dụng", "Terms of Use"),
@@ -49,9 +59,7 @@ struct LegalView: View {
                 }.buttonStyle(.plain)
 
                 NavigationLink {
-                    LegalDocView(title: store.t("Chính sách bảo mật", "Privacy Policy"),
-                                 headerIcon: "lock.shield.fill", accent: Theme.accent,
-                                 content: LegalView.privacyBody(store), icons: privacyIcons)
+                    LegalView.privacyDoc(store)
                 } label: {
                     legalCard(icon: "lock.shield.fill", tint: Theme.accent,
                               title: store.t("Chính sách bảo mật", "Privacy Policy"),

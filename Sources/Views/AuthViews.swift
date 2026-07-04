@@ -108,10 +108,27 @@ struct LoginView: View {
                         .padding(.horizontal)
                     }
 
-                    NavigationLink { LegalView() } label: {
-                        Text(store.t("Điều khoản & Chính sách bảo mật", "Terms & Privacy Policy"))
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }.padding(.top, 4)
+                    // Pháp lý — hiện rõ 2 mục ngay ở màn đăng nhập (chưa cần đăng nhập vẫn xem được)
+                    HStack(spacing: 10) {
+                        NavigationLink { LegalView.termsDoc(store) } label: {
+                            Label(store.t("Điều khoản sử dụng", "Terms of Use"), systemImage: "doc.text.fill")
+                                .font(.caption.bold()).foregroundStyle(.blue)
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 11).fill(Color.blue.opacity(0.12)))
+                        }
+                        NavigationLink { LegalView.privacyDoc(store) } label: {
+                            Label(store.t("Chính sách bảo mật", "Privacy Policy"), systemImage: "lock.shield.fill")
+                                .font(.caption.bold()).foregroundStyle(Theme.accent)
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 11).fill(Theme.accent.opacity(0.12)))
+                        }
+                    }
+                    .padding(.horizontal).padding(.top, 6)
+
+                    Text(store.t("Bằng việc đăng nhập/đăng ký, bạn đồng ý với Điều khoản & Chính sách bảo mật.",
+                                 "By signing in/up, you agree to the Terms & Privacy Policy."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).padding(.horizontal).padding(.top, 2)
 
                     // Ẩn hoàn toàn phần liên kết máy chủ khi đã cài sẵn URL mặc định (Config.defaultServerURL)
                     if Config.defaultServerURL.isEmpty {
