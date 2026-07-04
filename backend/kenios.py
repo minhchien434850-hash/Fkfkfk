@@ -8048,6 +8048,35 @@ def _notify_admins(title: str, body: str) -> None:
         log.warning("notify_admins lỗi: %s", e)
 
 
+def _push_preview(content: str) -> str:
+    """Rút gọn nội dung tin nhắn để hiện trên push (tin media → nhãn thân thiện)."""
+    marker = "⁣KMEDIA⁣"
+    if content.startswith(marker):
+        parts = content.split(marker)
+        kind = parts[1] if len(parts) > 1 else ""
+        return {"img": "📷 Hình ảnh", "video": "🎬 Video",
+                "audio": "🎤 Tin nhắn thoại", "file": "📎 Tệp đính kèm"}.get(kind, "📎 Tệp đính kèm")
+    s = content.strip()
+    return s if len(s) <= 120 else s[:117] + "..."
+
+
+def _notify_user(uid: int, title: str, body: str) -> None:
+    """Gửi push tới MỌI thiết bị của MỘT người dùng (tin nhắn/cuộc gọi) — chạy nền, không chặn."""
+    try:
+        if not _apns_configured():
+            return
+        with db() as c:
+            tokens = [r["token"] for r in c.execute(
+                "SELECT token FROM device_tokens WHERE user_id=?", (uid,)).fetchall()]
+        if not tokens:
+            return
+        import threading
+        threading.Thread(target=_apns_send, args=(tokens, title, body),
+                         daemon=True, name="notify-user").start()
+    except Exception as e:
+        log.warning("notify_user lỗi: %s", e)
+
+
 def _broadcast_notification(title: str, body: str, kind: str = "general", link: str = "", image: str = "") -> None:
     """§1.1 — Lưu thông báo PHÁT cho tất cả người dùng để app đọc (không phụ thuộc APNs).
     Đây là kênh tin cậy: mọi user mở app đều thấy, kể cả bản cài qua eSign."""
@@ -8774,6 +8803,8 @@ def send_direct_message(b: DirectMessageIn, user=Depends(get_user)) -> dict[str,
             (user["id"], b.receiver_id, b.content.strip(), int(time.time()))
         )
         msg_id = cur.lastrowid
+    # Push cho người nhận để hiện thông báo cả khi TẮT APP (best-effort, cần cấu hình APNs).
+    _notify_user(b.receiver_id, f"💬 {user['username']}", _push_preview(b.content))
     return {"id": msg_id, "message": "Đã gửi tin nhắn thành công."}
 
 
@@ -8855,6 +8886,9 @@ def call_start(b: CallStartIn, user=Depends(get_user)) -> dict[str, Any]:
         _calls[cid] = {"from": user["id"], "from_name": user["username"], "to": b.to,
                        "video": bool(b.video), "state": "ringing", "created": now,
                        "frames": {}, "audio": {}, "aseq": 0}
+    # Push cho người được gọi để hiện "cuộc gọi đến" cả khi TẮT APP.
+    _notify_user(b.to, f"{'📹' if b.video else '📞'} {user['username']} đang gọi",
+                 "Mở KENIOS để nghe máy.")
     return {"call_id": cid}
 
 @app.get("/calls/incoming")
