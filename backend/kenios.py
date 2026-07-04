@@ -8728,6 +8728,19 @@ def send_direct_message(b: DirectMessageIn, user=Depends(get_user)) -> dict[str,
     return {"id": msg_id, "message": "Đã gửi tin nhắn thành công."}
 
 
+@app.delete("/direct_messages/{mid}")
+def delete_direct_message(mid: int, user=Depends(get_user)) -> dict[str, Any]:
+    """Thu hồi tin nhắn: chỉ NGƯỜI GỬI mới xoá được (xoá cho cả hai phía)."""
+    with db() as c:
+        row = c.execute("SELECT sender_id, receiver_id FROM direct_messages WHERE id=?", (mid,)).fetchone()
+        if not row:
+            return {"ok": True, "message": "Tin nhắn đã được xoá."}
+        if row["sender_id"] != user["id"]:
+            raise HTTPException(status_code=403, detail="Chỉ người gửi mới thu hồi được tin nhắn này.")
+        c.execute("DELETE FROM direct_messages WHERE id=?", (mid,))
+    return {"ok": True, "message": "Đã thu hồi tin nhắn."}
+
+
 @app.get("/direct_messages_recent")
 def recent_incoming_dms(after_id: int = 0, user=Depends(get_user)) -> list[dict[str, Any]]:
     """Tin nhắn ĐẾN gần đây (id > after_id) kèm tên người gửi — để app poll & bật thông báo."""

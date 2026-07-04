@@ -26,13 +26,16 @@ struct DirectMessageChatView: View {
     @State private var avatarPickerItem: PhotosPickerItem? = nil
     @State private var updatingAvatar = false
     @StateObject private var recorder = ChatVoiceRecorder()
+    // Xoá tin nhắn ở phía tôi (ẩn cục bộ) + thu hồi + thông báo lưu media
+    @State private var hiddenIds: Set<Int> = []
+    @State private var savedNote: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
             // Chat history list
             ScrollViewReader { proxy in
                 ScrollView {
-                    let messages = store.directMessages[friend.id] ?? []
+                    let messages = (store.directMessages[friend.id] ?? []).filter { !hiddenIds.contains($0.id) }
                     VStack(spacing: 12) {
                         if messages.isEmpty {
                             Text("Chưa có tin nhắn nào. Hãy gửi lời chào!")
@@ -47,6 +50,7 @@ struct DirectMessageChatView: View {
 
                                     VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
                                         bubble(for: msg, isMe: isMe)
+                                            .contextMenu { messageMenu(msg, isMe: isMe) }
 
                                         Text(formatTime(msg.createdAt))
                                             .font(.system(size: 9))
@@ -76,6 +80,9 @@ struct DirectMessageChatView: View {
 
             if let err = sendError {
                 Text(err).font(.caption).foregroundStyle(.red).padding(.horizontal)
+            }
+            if let savedNote {
+                Text(savedNote).font(.caption).foregroundStyle(.green).padding(.horizontal)
             }
 
             if uploading {
@@ -125,7 +132,7 @@ struct DirectMessageChatView: View {
                 .disabled(updatingAvatar)
             }
         }
-        .onAppear { startPolling(); Task { await refreshAvatars() } }
+        .onAppear { startPolling(); loadHidden(); Task { await refreshAvatars() } }
         .onDisappear { stopPolling(); recorder.cancel() }
         .onChange(of: photoItem) { item in
             guard let item else { return }
@@ -416,6 +423,95 @@ struct DirectMessageChatView: View {
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
     }
+
+    // MARK: - Menu nhấn giữ tin nhắn (sao chép / lưu media / xoá / thu hồi)
+    @ViewBuilder
+    private func messageMenu(_ msg: DirectMessageItem, isMe: Bool) -> some View {
+        let media = ChatMedia.parse(msg.content)
+        if let media {
+            if media.kind == "img" {
+                Button { saveImage(media.url) } label: { Label("Lưu ảnh về máy", systemImage: "square.and.arrow.down") }
+            } else if media.kind == "video" {
+                Button { saveVideo(media.url) } label: { Label("Lưu video về máy", systemImage: "square.and.arrow.down") }
+            }
+        } else {
+            Button { UIPasteboard.general.string = msg.content } label: {
+                Label("Sao chép", systemImage: "doc.on.doc")
+            }
+        }
+        // Xoá ở phía tôi (ẩn cục bộ) — áp dụng mọi tin nhắn
+        Button(role: .destructive) { hideLocally(msg) } label: {
+            Label("Xoá ở phía tôi", systemImage: "eye.slash")
+        }
+        // Thu hồi (chỉ tin của tôi) — xoá ở cả hai phía
+        if isMe {
+            Button(role: .destructive) { Task { await recall(msg) } } label: {
+                Label("Thu hồi (xoá cả 2 bên)", systemImage: "arrow.uturn.backward")
+            }
+        }
+    }
+
+    private func recall(_ msg: DirectMessageItem) async {
+        do {
+            _ = try await store.api.recallDirectMessage(msg.id)
+            hiddenIds.remove(msg.id)   // không cần ẩn cục bộ nữa vì đã xoá thật
+            await store.refreshDirectMessages(friendId: friend.id)
+            showSaved("Đã thu hồi tin nhắn.")
+        } catch { sendError = error.localizedDescription }
+    }
+
+    // Ẩn tin nhắn ở phía mình (lưu vào máy, không đụng máy chủ).
+    private func hideLocally(_ msg: DirectMessageItem) {
+        hiddenIds.insert(msg.id)
+        UserDefaults.standard.set(Array(hiddenIds), forKey: hiddenKey)
+    }
+    private var hiddenKey: String { "dm_hidden_\(friend.id)" }
+    private func loadHidden() {
+        if let arr = UserDefaults.standard.array(forKey: hiddenKey) as? [Int] {
+            hiddenIds = Set(arr)
+        }
+    }
+
+    // MARK: - Lưu ảnh / video về Thư viện
+    private func saveImage(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let img = UIImage(data: data) {
+                    UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+                    showSaved("Đã lưu ảnh vào Thư viện.")
+                } else { sendError = "Không đọc được ảnh." }
+            } catch { sendError = "Lưu ảnh thất bại: \(error.localizedDescription)" }
+        }
+    }
+
+    private func saveVideo(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        showSaved("Đang tải video để lưu...")
+        Task {
+            do {
+                let (tmp, _) = try await URLSession.shared.download(from: url)
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("save_\(Int(Date().timeIntervalSince1970)).mp4")
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                if UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(dest.path) {
+                    UISaveVideoAtPathToSavedPhotosAlbum(dest.path, nil, nil, nil)
+                    showSaved("Đã lưu video vào Thư viện.")
+                } else {
+                    sendError = "Định dạng video không lưu được vào Thư viện."
+                }
+            } catch { sendError = "Lưu video thất bại: \(error.localizedDescription)" }
+        }
+    }
+
+    private func showSaved(_ text: String) {
+        savedNote = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            if savedNote == text { savedNote = nil }
+        }
+    }
 }
 
 // MARK: - Mã hoá/giải mã tin nhắn media (không cần đổi backend, dùng chuỗi content sẵn có)
@@ -645,6 +741,7 @@ struct ChatVideoPlayerView: View {
     let urlString: String
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer? = nil
+    @State private var savedMsg: String? = nil
 
     var body: some View {
         ZStack {
@@ -662,9 +759,17 @@ struct ChatVideoPlayerView: View {
                         Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white.opacity(0.9))
                     }
                     Spacer()
+                    Button { saveVideo() } label: {
+                        Image(systemName: "square.and.arrow.down").font(.title2).foregroundStyle(.white.opacity(0.9))
+                    }
                 }
                 .padding()
                 Spacer()
+                if let savedMsg {
+                    Text(savedMsg).font(.caption).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.ultraThinMaterial).clipShape(Capsule()).padding(.bottom, 30)
+                }
             }
         }
         .onAppear {
@@ -674,5 +779,29 @@ struct ChatVideoPlayerView: View {
             }
         }
         .onDisappear { player?.pause(); player = nil }
+    }
+
+    private func saveVideo() {
+        guard let url = URL(string: urlString) else { return }
+        savedMsg = "Đang tải video để lưu..."
+        Task {
+            do {
+                let (tmp, _) = try await URLSession.shared.download(from: url)
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("save_\(Int(Date().timeIntervalSince1970)).mp4")
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                await MainActor.run {
+                    if UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(dest.path) {
+                        UISaveVideoAtPathToSavedPhotosAlbum(dest.path, nil, nil, nil)
+                        savedMsg = "Đã lưu video vào Thư viện"
+                    } else {
+                        savedMsg = "Định dạng video không lưu được"
+                    }
+                }
+            } catch {
+                await MainActor.run { savedMsg = "Lưu thất bại" }
+            }
+        }
     }
 }

@@ -579,6 +579,11 @@ extension APIClient {
         try decode(try await send("/direct_messages", method: "POST", json: ["receiver_id": receiverId, "content": content]))
     }
 
+    /// Thu hồi tin nhắn (chỉ người gửi) — xoá ở cả hai phía.
+    func recallDirectMessage(_ messageId: Int) async throws -> MessageResponse {
+        try decode(try await send("/direct_messages/\(messageId)", method: "DELETE"))
+    }
+
     // Tin nhắn ĐẾN gần đây (id > afterId) — để bật thông báo khi bạn bè nhắn
     func recentIncomingMessages(afterId: Int) async throws -> [IncomingDM] {
         try decode(try await send("/direct_messages_recent?after_id=\(afterId)"))
