@@ -6907,7 +6907,8 @@ def install_page():
     if not p:
         body = ('<div class="card"><div class="logo">K</div>'
                 f'<h1>{app_name}</h1>'
-                '<p class="muted">Chưa có bản cài. Quản trị viên chưa phát hành ứng dụng.</p>'
+                '<p class="muted">Chưa có bản cài native. Nhưng bạn vẫn mua hàng được ngay trên web:</p>'
+                f'<a class="btn" style="background:linear-gradient(135deg,#16a34a,#22c55e)" href="{base}/shop">🛍️ Vào cửa hàng web</a>'
                 '</div>')
         return HTMLResponse(_install_html(app_name, body))
     meta = p["meta"]
@@ -6940,6 +6941,12 @@ def install_page():
         '<div class="step"><b>2.</b> Chọn <b>“Thêm vào MH chính” (Add to Home Screen)</b>.</div>'
         '<div class="step"><b>3.</b> Bấm <b>Thêm</b> — biểu tượng KENIOS hiện ngay trên màn hình chính.</div>'
         '</div>'
+
+        # CÁCH 3 — dùng cửa hàng web, không cần cài gì
+        '<div class="tag alt">Cách 3 · Mua hàng không cần cài</div>'
+        f'<a class="btn" style="background:linear-gradient(135deg,#16a34a,#22c55e)" href="{base}/shop">🛍️ Vào cửa hàng web</a>'
+        '<div class="steps"><div class="step">Xem sản phẩm, mua key, nạp ví ngay trên trình duyệt — '
+        'không cần cài app, không cần chứng chỉ.</div></div>'
 
         '<p class="tip">Chỉ hỗ trợ iPhone/iPad. Hãy mở link này bằng <b>Safari</b>.</p>'
         '</div>')
@@ -7063,6 +7070,328 @@ def admin_get_ipa_base(admin=Depends(get_admin)) -> dict[str, Any]:
 def admin_set_ipa_base(b: IpaBaseIn, admin=Depends(get_admin)) -> dict[str, Any]:
     set_setting("ipa_sign_base", (b.base or "").strip().rstrip("/"))
     return {"ok": True, "base": _ipa_base_url(), "has_zsign": bool(shutil.which("zsign"))}
+
+
+
+
+# ======================== KENIOS WEB — Cửa hàng chạy trên Safari (PWA, không cần cài app) ========================
+@app.get("/shop", response_class=HTMLResponse)
+def shop_page():
+    """Cửa hàng web (PWA): khách mở Safari → Thêm vào Màn hình chính → mua bán, KHÔNG cần cài app/chứng chỉ."""
+    return HTMLResponse(_SHOP_HTML)
+
+
+_SHOP_HTML = r'''<!doctype html><html lang="vi"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>KENIOS Store</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="KENIOS">
+<meta name="theme-color" content="#0b1220">
+<link rel="apple-touch-icon" href="/install/icon.png">
+<link rel="icon" href="/install/icon.png">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+:root{--bg:#0b1220;--card:#151f38;--card2:#1c2947;--line:#28365c;--accent:#2f7bff;--accent2:#7a3cff;--txt:#eef2fb;--mut:#9aa6c2;--green:#22c55e}
+body{background:linear-gradient(180deg,#0b1220,#0e1630);color:var(--txt);min-height:100vh;padding-bottom:78px}
+.wrap{max-width:520px;margin:0 auto;padding:14px}
+.top{display:flex;align-items:center;gap:10px;padding:10px 14px;position:sticky;top:0;z-index:20;
+  background:rgba(11,18,32,.86);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;font-weight:900;font-size:19px}
+.brand{font-weight:800;font-size:17px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wbtn{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:999px;
+  padding:7px 13px;font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px}
+.wbtn b{color:#ffd54a}
+h2{font-size:16px;margin:16px 4px 8px;font-weight:800}
+.cat{font-size:13px;color:var(--mut);font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin:18px 4px 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+.pname{font-size:15.5px;font-weight:800;margin-bottom:3px}
+.pdesc{font-size:12.5px;color:var(--mut);line-height:1.45;margin-bottom:10px;white-space:pre-wrap}
+.stock{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;display:inline-block;margin-bottom:8px}
+.stock.ok{color:#7ee2a8;background:rgba(34,197,94,.14)}
+.stock.no{color:#ff9b9b;background:rgba(255,80,80,.14)}
+.prices{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:9px 12px;flex:1 1 auto;
+  min-width:44%;text-align:left;color:var(--txt)}
+.chip:active{transform:scale(.98)}
+.chip .lb{font-size:11.5px;color:var(--mut);display:block}
+.chip .am{font-size:15px;font-weight:800;color:#fff}
+.chip:disabled{opacity:.45}
+.nav{position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;background:rgba(11,18,32,.92);
+  backdrop-filter:blur(12px);border-top:1px solid var(--line);max-width:520px;margin:0 auto}
+.nav button{flex:1;background:none;border:0;color:var(--mut);padding:10px 4px 14px;font-size:11px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:3px}
+.nav button.on{color:#7db0ff}
+.nav .ic{font-size:20px}
+.btn{display:block;width:100%;padding:15px;border-radius:14px;font-size:16px;font-weight:800;border:0;
+  color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent2));margin-top:10px}
+.btn:active{transform:scale(.99)}
+.btn.g{background:linear-gradient(135deg,#16a34a,#22c55e)}
+.btn.sec{background:var(--card2);border:1px solid var(--line)}
+.inp{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:#fff;font-size:15px;margin-top:10px}
+.inp::placeholder{color:#6f7ca0}
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;display:none;align-items:flex-end;justify-content:center}
+.mask.show{display:flex}
+.sheet{background:#111a30;border:1px solid var(--line);border-radius:22px 22px 0 0;width:100%;max-width:520px;
+  padding:22px 18px calc(22px + env(safe-area-inset-bottom));animation:up .22s ease}
+@keyframes up{from{transform:translateY(40px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.sheet h3{font-size:18px;font-weight:800;margin-bottom:6px}
+.sheet p{font-size:13px;color:var(--mut);line-height:1.5}
+.keybox{background:var(--card2);border:1px dashed #3a5cff;border-radius:12px;padding:14px;
+  font-size:15px;font-weight:800;word-break:break-all;margin:12px 0;color:#bcd0ff}
+.row{display:flex;gap:10px;margin-top:10px}
+.row .btn{margin-top:0}
+.muted{color:var(--mut);font-size:12.5px;text-align:center;margin:14px 4px}
+.center{text-align:center;padding:40px 10px;color:var(--mut)}
+.spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;
+  animation:sp 1s linear infinite;margin:30px auto}
+@keyframes sp{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#111a30;border:1px solid var(--line);
+  color:#fff;padding:12px 18px;border-radius:12px;font-size:13.5px;z-index:99;opacity:0;transition:.25s;max-width:90%;text-align:center}
+.toast.show{opacity:1}
+.tx{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
+.tx b{font-weight:800}
+.plus{color:#7ee2a8}.minus{color:#ff9b9b}
+.ordk{background:var(--card2);border-radius:10px;padding:10px;margin-top:8px;font-size:13px;word-break:break-all;color:#bcd0ff;font-weight:700}
+a.link{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:9px;color:#fff;text-decoration:none;font-weight:700}
+</style></head><body>
+
+<div class="top">
+  <div class="logo">K</div>
+  <div class="brand" id="brand">KENIOS Store</div>
+  <button class="wbtn" id="walletTop" onclick="go('wallet')"><span id="wbal">Đăng nhập</span></button>
+</div>
+
+<div class="wrap" id="view"></div>
+
+<div class="nav">
+  <button data-tab="shop" class="on" onclick="go('shop')"><span class="ic">🛍️</span>Cửa hàng</button>
+  <button data-tab="wallet" onclick="go('wallet')"><span class="ic">💰</span>Ví</button>
+  <button data-tab="orders" onclick="go('orders')"><span class="ic">🔑</span>Đơn của tôi</button>
+  <button data-tab="contact" onclick="go('contact')"><span class="ic">💬</span>Liên hệ</button>
+</div>
+
+<div class="mask" id="mask"><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = location.origin;
+let TOKEN = localStorage.getItem('kenios_token') || '';
+let CFG = {}, CATS = [], PRODS = {}, PMAP = {}, TAB = 'shop';
+
+function h(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function money(n){return (n||0).toLocaleString('vi-VN')+'đ'}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2200)}
+async function api(path,opt={}){
+  opt.headers=Object.assign({'Content-Type':'application/json'},opt.headers||{});
+  if(TOKEN) opt.headers['Authorization']='Bearer '+TOKEN;
+  const r=await fetch(API+path,opt);
+  const t=await r.text(); let d={}; try{d=t?JSON.parse(t):{}}catch(e){d={}}
+  if(!r.ok) throw new Error(d.detail||('Lỗi '+r.status));
+  return d;
+}
+function openSheet(html){document.getElementById('sheet').innerHTML=html;document.getElementById('mask').classList.add('show')}
+function closeSheet(){document.getElementById('mask').classList.remove('show')}
+document.getElementById('mask').addEventListener('click',e=>{if(e.target.id==='mask')closeSheet()});
+
+function go(tab){
+  TAB=tab;
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
+  if(tab==='shop') renderShop();
+  else if(tab==='wallet') renderWallet();
+  else if(tab==='orders') renderOrders();
+  else if(tab==='contact') renderContact();
+  window.scrollTo(0,0);
+}
+
+/* ---------- Cửa hàng ---------- */
+async function loadStore(){
+  try{
+    const [cfg,cats,all]=await Promise.all([
+      api('/store/config'),api('/store/categories'),api('/store/all-products')]);
+    CFG=cfg; CATS=cats; PRODS=all.by_category||{};
+    PMAP={}; Object.keys(PRODS).forEach(cid=>(PRODS[cid]||[]).forEach(p=>PMAP[p.id]=p));
+    document.getElementById('brand').textContent=cfg.logo_name||'KENIOS Store';
+    document.title=(cfg.logo_name||'KENIOS')+' Store';
+  }catch(e){}
+}
+function renderShop(){
+  const v=document.getElementById('view');
+  if(!CATS.length && !Object.keys(PRODS).length){v.innerHTML='<div class="spin"></div>';return}
+  let html='<h2>Sản phẩm</h2>';
+  const catName={}; CATS.forEach(c=>catName[c.id]=c.name);
+  const ids=Object.keys(PRODS);
+  if(!ids.length) html+='<div class="center">Chưa có sản phẩm nào.</div>';
+  ids.forEach(cid=>{
+    const list=PRODS[cid]||[]; if(!list.length) return;
+    html+='<div class="cat">'+h(catName[cid]||'Khác')+'</div>';
+    list.forEach(p=>html+=card(p));
+  });
+  v.innerHTML=html;
+}
+function card(p){
+  const stock=p.available_keys>0?'<span class="stock ok">Còn '+p.available_keys+' key</span>':'<span class="stock no">Hết hàng</span>';
+  let chips='<div class="prices">';
+  (p.prices||[]).forEach(pr=>{
+    const dis=p.available_keys<=0?'disabled':'';
+    chips+='<button class="chip" '+dis+' onclick="buy('+p.id+','+pr.id+')">'
+      +'<span class="lb">'+h(pr.label)+'</span><span class="am">'+money(pr.amount)+'</span></button>';
+  });
+  chips+='</div>';
+  if(!(p.prices||[]).length) chips='<div class="pdesc">Chưa có giá bán.</div>';
+  return '<div class="card"><div class="pname">'+h(p.name)+'</div>'
+    +(p.description?'<div class="pdesc">'+h(p.description)+'</div>':'')
+    +stock+chips+'</div>';
+}
+
+/* ---------- Mua ---------- */
+function buy(pid,priceId){
+  if(!TOKEN){ loginSheet(); return; }
+  const p=PMAP[pid]; if(!p){toast('Sản phẩm không còn');return}
+  const pr=(p.prices||[]).find(x=>x.id===priceId); if(!pr){toast('Mốc giá không còn');return}
+  const name=p.name, amount=pr.amount, label=pr.label;
+  openSheet('<h3>Xác nhận mua</h3><p>'+h(name)+' — <b>'+h(label)+'</b></p>'
+    +'<div class="keybox" style="text-align:center;border-style:solid">'+money(amount)+'</div>'
+    +'<p>Trừ vào số dư ví của bạn. Key sẽ giao ngay sau khi mua.</p>'
+    +'<button class="btn g" id="okbuy">Mua ngay</button>'
+    +'<button class="btn sec" onclick="closeSheet()">Huỷ</button>');
+  document.getElementById('okbuy').onclick=async()=>{
+    const btn=document.getElementById('okbuy'); btn.textContent='Đang xử lý...'; btn.disabled=true;
+    try{
+      const r=await api('/store/orders',{method:'POST',body:JSON.stringify({product_id:pid,price_id:priceId})});
+      setBal(r.balance);
+      openSheet('<h3>🎉 Mua thành công!</h3><p>'+h(r.product_name||name)+'</p>'
+        +'<div class="keybox">'+h(r.key||'')+'</div>'
+        +(r.delivery?'<p style="white-space:pre-wrap">'+h(r.delivery)+'</p>':'')
+        +'<button class="btn" onclick=\'copy('+JSON.stringify(r.key||'')+')\'>Sao chép key</button>'
+        +'<button class="btn sec" onclick="closeSheet();loadStore().then(renderShop)">Xong</button>');
+    }catch(e){
+      btn.textContent='Mua ngay'; btn.disabled=false;
+      if((e.message||'').includes('ví không đủ')){ toast(e.message); go('wallet'); closeSheet(); }
+      else toast(e.message);
+    }
+  };
+}
+function copy(t){navigator.clipboard.writeText(t).then(()=>toast('Đã sao chép ✓'))}
+
+/* ---------- Đăng nhập (OTP qua email) ---------- */
+function loginSheet(){
+  openSheet('<h3>Đăng nhập</h3><p>Nhập Gmail để nhận mã đăng nhập (không cần mật khẩu).</p>'
+    +'<input class="inp" id="lemail" type="email" placeholder="email@gmail.com" autocapitalize="off">'
+    +'<button class="btn" id="sendbtn">Gửi mã</button>'
+    +'<div id="codebox" style="display:none">'
+    +'<input class="inp" id="lcode" inputmode="numeric" placeholder="Nhập mã 6 số">'
+    +'<button class="btn g" id="verbtn">Đăng nhập</button></div>');
+  document.getElementById('sendbtn').onclick=async()=>{
+    const em=document.getElementById('lemail').value.trim();
+    if(!em){toast('Nhập Gmail đã');return}
+    const b=document.getElementById('sendbtn'); b.textContent='Đang gửi...'; b.disabled=true;
+    try{ await api('/auth/send-otp',{method:'POST',body:JSON.stringify({email:em,purpose:'login'})});
+      document.getElementById('codebox').style.display='block'; b.textContent='Gửi lại mã'; b.disabled=false;
+      toast('Đã gửi mã tới '+em);
+    }catch(e){ b.textContent='Gửi mã'; b.disabled=false; toast(e.message) }
+  };
+  document.getElementById('verbtn').onclick=async()=>{
+    const em=document.getElementById('lemail').value.trim();
+    const cd=document.getElementById('lcode').value.trim();
+    if(!cd){toast('Nhập mã đã');return}
+    const b=document.getElementById('verbtn'); b.textContent='Đang vào...'; b.disabled=true;
+    try{ const r=await api('/auth/login-otp',{method:'POST',body:JSON.stringify({email:em,code:cd})});
+      TOKEN=r.token; localStorage.setItem('kenios_token',TOKEN);
+      closeSheet(); toast('Xin chào '+(r.user&&r.user.username||'')); refreshWallet();
+    }catch(e){ b.textContent='Đăng nhập'; b.disabled=false; toast(e.message) }
+  };
+}
+function logout(){TOKEN='';localStorage.removeItem('kenios_token');setBal(null);toast('Đã đăng xuất');go('shop')}
+function setBal(b){
+  const el=document.getElementById('wbal');
+  if(b===null||b===undefined){el.innerHTML=TOKEN?'Ví':'Đăng nhập'}
+  else el.innerHTML='<b>'+money(b)+'</b>';
+}
+async function refreshWallet(){ if(!TOKEN){setBal(null);return}
+  try{const w=await api('/store/wallet');setBal(w.balance)}catch(e){setBal(null)} }
+
+/* ---------- Ví ---------- */
+async function renderWallet(){
+  const v=document.getElementById('view');
+  if(!TOKEN){ v.innerHTML='<h2>Ví tiền</h2><div class="card"><p class="pdesc">Đăng nhập để dùng ví, mua key và xem đơn.</p><button class="btn" onclick="loginSheet()">Đăng nhập</button></div>'; return }
+  v.innerHTML='<div class="spin"></div>';
+  try{
+    const w=await api('/store/wallet'); setBal(w.balance);
+    let html='<h2>Ví tiền</h2><div class="card"><div class="pdesc">Số dư</div>'
+      +'<div style="font-size:30px;font-weight:900;color:#ffd54a">'+money(w.balance)+'</div>'
+      +(w.bonus_percent?'<div class="stock ok" style="margin-top:8px">Nạp tặng thêm '+w.bonus_percent+'%</div>':'')
+      +'<button class="btn" onclick="topupSheet('+ (w.bonus_percent||0) +')">Nạp tiền</button>'
+      +'<button class="btn sec" onclick="logout()">Đăng xuất</button></div>';
+    html+='<h2>Lịch sử</h2><div class="card">';
+    if(!(w.tx||[]).length) html+='<div class="pdesc">Chưa có giao dịch.</div>';
+    (w.tx||[]).forEach(t=>{const pos=t.amount>=0;
+      html+='<div class="tx"><span>'+h(t.note||t.kind)+'</span><b class="'+(pos?'plus':'minus')+'">'+(pos?'+':'')+money(t.amount)+'</b></div>'});
+    html+='</div>';
+    v.innerHTML=html;
+  }catch(e){ v.innerHTML='<div class="center">'+h(e.message)+'</div>' }
+}
+function topupSheet(bonus){
+  openSheet('<h3>Nạp tiền vào ví</h3>'+(bonus?'<p>Nạp được tặng thêm <b>'+bonus+'%</b>.</p>':'')
+    +'<input class="inp" id="tamt" inputmode="numeric" placeholder="Số tiền (vd 50000)">'
+    +'<button class="btn g" id="tbtn">Tạo lệnh nạp</button>');
+  document.getElementById('tbtn').onclick=async()=>{
+    const amt=parseInt(document.getElementById('tamt').value.replace(/\D/g,''))||0;
+    if(amt<1000){toast('Tối thiểu 1.000đ');return}
+    const b=document.getElementById('tbtn'); b.textContent='Đang tạo...'; b.disabled=true;
+    try{ const r=await api('/store/wallet/topup',{method:'POST',body:JSON.stringify({amount:amt})});
+      let img=r.qr_url?'<img src="'+r.qr_url+'" style="width:100%;max-width:240px;border-radius:12px;display:block;margin:12px auto;background:#fff">':'';
+      openSheet('<h3>Chuyển khoản để nạp</h3><p style="white-space:pre-wrap">'+h(r.message||'')+'</p>'+img
+        +'<p class="muted">Sau khi chuyển khoản đúng nội dung, ví sẽ tự cộng trong ít phút. Kéo lại tab Ví để kiểm tra.</p>'
+        +'<button class="btn sec" onclick="closeSheet();renderWallet()">Đã hiểu</button>');
+    }catch(e){ b.textContent='Tạo lệnh nạp'; b.disabled=false; toast(e.message) }
+  };
+}
+
+/* ---------- Đơn của tôi ---------- */
+async function renderOrders(){
+  const v=document.getElementById('view');
+  if(!TOKEN){ v.innerHTML='<h2>Đơn của tôi</h2><div class="card"><p class="pdesc">Đăng nhập để xem key đã mua.</p><button class="btn" onclick="loginSheet()">Đăng nhập</button></div>'; return }
+  v.innerHTML='<div class="spin"></div>';
+  try{
+    const list=await api('/store/orders');
+    let html='<h2>Đơn của tôi</h2>';
+    if(!list.length) html+='<div class="center">Chưa có đơn nào.</div>';
+    list.forEach(o=>{
+      html+='<div class="card"><div class="pname">'+h(o.product_name)+'</div>'
+        +'<div class="pdesc">'+money(o.amount)+' · '+new Date(o.created_at*1000).toLocaleDateString('vi-VN')+'</div>';
+      if(o.key){ html+='<div class="ordk" onclick=\'copy('+JSON.stringify(o.key)+')\'>🔑 '+h(o.key)+'</div>'
+        +(o.delivery?'<div class="pdesc" style="white-space:pre-wrap;margin-top:8px">'+h(o.delivery)+'</div>':''); }
+      else html+='<div class="stock no">'+h(o.status)+'</div>';
+      html+='</div>';
+    });
+    v.innerHTML=html;
+  }catch(e){ v.innerHTML='<div class="center">'+h(e.message)+'</div>' }
+}
+
+/* ---------- Liên hệ ---------- */
+async function renderContact(){
+  const v=document.getElementById('view');
+  v.innerHTML='<div class="spin"></div>';
+  try{
+    const c=await api('/store/contacts');
+    let html='<h2>Liên hệ & Cộng đồng</h2>';
+    const all=[].concat(c.contact||[],c.groups||[]);
+    if(!all.length) html+='<div class="center">Chưa có kênh liên hệ.</div>';
+    all.forEach(x=>{ html+='<a class="link" href="'+h(x.url)+'" target="_blank">💬 '+h(x.label||x.platform||x.url)+'</a>' });
+    html+='<div class="muted">Mẹo: bấm nút Chia sẻ của Safari → “Thêm vào Màn hình chính” để dùng như một ứng dụng.</div>';
+    v.innerHTML=html;
+  }catch(e){ v.innerHTML='<div class="center">'+h(e.message)+'</div>' }
+}
+
+/* ---------- Khởi động ---------- */
+(async function(){
+  await loadStore(); renderShop(); refreshWallet();
+})();
+</script>
+</body></html>'''
 
 
 # ======================== VÍ CỬA HÀNG (tách biệt thanh toán app chính) ========================
