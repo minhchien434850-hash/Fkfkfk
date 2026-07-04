@@ -5259,8 +5259,13 @@ _TG_FEAT = {
     "🏆 Xếp hạng": "🏆 <b>Xếp hạng</b>: /top — thành viên tích cực nhất.",
     "🚨 Báo cáo": "🚨 <b>Báo cáo</b>: /report (reply) — báo admin xử lý.",
     "🆔 ID": "🆔 <b>/id</b> — xem Chat ID / User ID (reply để lấy ID người khác).",
+    "💤 AFK": "💤 <b>AFK</b>: /afk [lý do] — báo bận; ai nhắc tên bạn, bot sẽ báo bạn đang bận.",
+    "📌 Ghim": "📌 <b>Ghim tin</b> (reply, trong nhóm): /pin · /unpin.",
+    "🗑️ Dọn tin": "🗑️ <b>Dọn tin</b> (trong nhóm): /del (reply) xoá 1 tin · /purge (reply) xoá hàng loạt tới tin đó.",
     "🔗 Liên kết": None,        # → nút mở link (web, cài app, kênh…)
     "➕ Lệnh riêng": None,       # → hướng dẫn tự thêm lệnh bot
+    "📣 Loa phường": None,      # → hướng dẫn broadcast (admin)
+    "⚙️ Cấu hình": None,        # → xem cấu hình bot
     "📖 Tất cả lệnh": None,     # → hiện danh sách lệnh dạng chữ
     "🎵 Lấy nhạc": None,        # → hướng dẫn /nhac
     "📊 Thống kê": None,        # → số người dùng
@@ -5299,6 +5304,23 @@ def _tg_menu_click(token, chat_id, text, name="") -> bool:
             _tg_send(token, chat_id, "🔗 <b>Liên kết nhanh:</b>", buttons=btns)
         else:
             _tg_send(token, chat_id, "Chưa có liên kết. Admin dùng /setlinks để thêm.")
+        return True
+    if t == "📣 Loa phường":
+        _tg_send(token, chat_id,
+                 "📣 <b>Loa phường</b> (chỉ ADMIN): <code>/broadcast &lt;nội dung&gt;</code>\n"
+                 "Gửi thông báo tới TẤT CẢ người đã từng nhắn bot, kèm nút liên kết.")
+        return True
+    if t == "⚙️ Cấu hình":
+        _tg_send(token, chat_id,
+                 "⚙️ <b>Cấu hình bot</b>\n"
+                 f"Quản lý nhóm: {'BẬT' if get_setting('tg_mod_enabled','0')=='1' else 'tắt'}\n"
+                 f"Chống link: {'✓' if get_setting('tg_del_links','0')=='1' else '✗'} · "
+                 f"Antiflood: {'✓' if get_setting('tg_antiflood_on','0')=='1' else '✗'} · "
+                 f"Captcha: {'✓' if get_setting('tg_captcha_on','0')=='1' else '✗'}\n"
+                 f"AutoReact: {'✓' if get_setting('tg_autoreact_on','0')=='1' else '✗'} · "
+                 f"Slowmode: {get_setting('tg_slowmode','0')}s · "
+                 f"NightMode: {'✓' if get_setting('tg_nightmode_on','0')=='1' else '✗'}\n"
+                 "Chỉnh chi tiết trong app KENIOS → Quản trị → Bot Telegram, hoặc lệnh trong nhóm.")
         return True
     if t == "➕ Lệnh riêng":
         lst = _tg_cc_list()
@@ -5878,7 +5900,16 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                      f"NightMode: {'✓' if get_setting('tg_nightmode_on','0')=='1' else '✗'}\n"
                      "Chỉnh chi tiết trong app KENIOS → Quản trị → Bot Telegram, hoặc dùng lệnh trong nhóm.")
         elif text.startswith("/start"):
-            _tg_send(token, admin_chat, "Bạn là ADMIN. Khi khách nhắn bot, tin sẽ hiện ở đây — hãy REPLY vào tin đó để trả lời khách. Gõ /help để xem lệnh quản lý nhóm.")
+            botname = get_setting("tg_bot_name", "TRẦN MINH CHIẾN")
+            _cnt = f"{_tg_monthly():,}".replace(",", ".")
+            _tg_send_menu(token, admin_chat,
+                          f"👋 Chào {name}, tôi là <b>{botname}</b>.\n\n"
+                          "👑 Bạn là <b>ADMIN</b>. Khi khách nhắn bot, tin sẽ hiện ở đây — REPLY vào tin đó để trả lời khách.\n"
+                          f"\n👥 <b>{_cnt}</b> người dùng mỗi tháng"
+                          "\n\n📋 Chọn chức năng ở lưới nút bên dưới 👇", photo_first=True)
+            _lb = _tg_link_buttons()
+            if _lb:
+                _tg_send(token, admin_chat, "🔗 <b>Liên kết nhanh:</b>", buttons=_lb)
         return
     _tg_track(frm)   # đếm người dùng bot mỗi tháng
     if text.startswith("/start"):
