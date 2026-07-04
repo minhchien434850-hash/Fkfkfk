@@ -105,10 +105,54 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             } else { ok = false }
 
+            // --- Tin nhắn mới từ bạn bè (miễn phí, không cần APNs) ---
+            if token != nil {
+                let lastDM = ud.integer(forKey: "bgLastDMId")
+                if let dms = try? await api.recentIncomingMessages(afterId: lastDM), !dms.isEmpty {
+                    // dms sắp xếp id giảm dần; báo tối đa 5 tin mới nhất chưa đọc.
+                    for m in dms.prefix(5) where (m.isRead ?? 0) == 0 {
+                        AppDelegate.postBgNotification(
+                            title: "💬 \(m.senderName ?? "Tin nhắn mới")",
+                            body: AppDelegate.bgMessagePreview(m.content),
+                            category: "KENIOS_DM")
+                    }
+                    if let maxId = dms.map(\.id).max() { ud.set(maxId, forKey: "bgLastDMId") }
+                }
+
+                // --- Thông báo phát mới (sản phẩm/tin tức) ---
+                if let notifs = try? await api.getNotifications(limit: 5), let newest = notifs.first {
+                    let lastN = ud.integer(forKey: "bgLastNotifId")
+                    if newest.id > lastN {
+                        if lastN > 0 {
+                            AppDelegate.postBgNotification(
+                                title: newest.title.isEmpty ? "🔔 KENIOS" : newest.title,
+                                body: newest.body, category: "KENIOS_PRODUCT")
+                        }
+                        ud.set(newest.id, forKey: "bgLastNotifId")
+                    }
+                }
+            }
+
             // Lên lịch lần kiểm tra tiếp theo
             AppDelegate.scheduleNextRefresh()
             task.setTaskCompleted(success: ok)
         }
+    }
+
+    /// Rút gọn nội dung tin nhắn cho thông báo (tin media → nhãn thân thiện).
+    static func bgMessagePreview(_ content: String) -> String {
+        let marker = "\u{2063}KMEDIA\u{2063}"
+        if content.hasPrefix(marker) {
+            let parts = content.components(separatedBy: marker)
+            let kind = parts.count > 1 ? parts[1] : ""
+            switch kind {
+            case "img": return "📷 Hình ảnh"
+            case "video": return "🎬 Video"
+            case "audio": return "🎤 Tin nhắn thoại"
+            default: return "📎 Tệp đính kèm"
+            }
+        }
+        return content.count <= 120 ? content : String(content.prefix(117)) + "..."
     }
 
     /// Gửi local notification từ background task
