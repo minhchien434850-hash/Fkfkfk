@@ -27,6 +27,17 @@ struct TelegramBotView: View {
     @State private var goodbyeOn = true
     @State private var goodbye = "👋 Tạm biệt {name}, hẹn gặp lại!"
 
+    // Nâng cao
+    @State private var antifloodOn = false
+    @State private var antifloodMax = 6
+    @State private var cleanService = false
+    @State private var captchaOn = false
+    @State private var nightmodeOn = false
+    @State private var nightStart = 23
+    @State private var nightEnd = 6
+    @State private var rules = ""
+    @State private var blacklist = ""
+
     @State private var saving = false
     @State private var message: String?
     @State private var isError = false
@@ -119,6 +130,33 @@ struct TelegramBotView: View {
                 }
             }
 
+            // ---- Nâng cao ----
+            Section {
+                Toggle(store.t("Antiflood (chống gửi dồn dập)", "Antiflood"), isOn: $antifloodOn)
+                if antifloodOn {
+                    Stepper(store.t("Tối đa ", "Max ") + "\(antifloodMax)" + store.t(" tin/7 giây", " msgs/7s"),
+                            value: $antifloodMax, in: 3...30)
+                }
+                Toggle(store.t("Dọn tin 'đã vào/rời nhóm'", "Clean join/leave messages"), isOn: $cleanService)
+                Toggle(store.t("Captcha xác minh thành viên mới", "Captcha verify new members"), isOn: $captchaOn)
+                Toggle(store.t("NightMode (khoá nhóm ban đêm)", "NightMode (lock at night)"), isOn: $nightmodeOn)
+                if nightmodeOn {
+                    Stepper(store.t("Từ ", "From ") + "\(nightStart)h", value: $nightStart, in: 0...23)
+                    Stepper(store.t("Đến ", "To ") + "\(nightEnd)h", value: $nightEnd, in: 0...23)
+                }
+            } header: {
+                Text(store.t("⚙️ Nâng cao", "⚙️ Advanced"))
+            } footer: {
+                Text(store.t("NightMode dùng giờ máy chủ. Còn Khoá (ảnh/video/forward…), Bộ lọc, Ghi chú quản lý bằng LỆNH trong nhóm: /lock /filter /save…",
+                             "NightMode uses server time. Locks, Filters and Notes are managed by in-group commands: /lock /filter /save…"))
+                    .font(.caption2)
+            }
+            Section(store.t("Nội quy & Từ cấm", "Rules & Blacklist")) {
+                TextField(store.t("Nội quy nhóm (/rules)", "Group rules (/rules)"), text: $rules, axis: .vertical).lineLimit(2...6)
+                TextField(store.t("Từ cấm (cách nhau dấu phẩy)", "Banned words (comma-separated)"), text: $blacklist, axis: .vertical).lineLimit(1...4)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+            }
+
             // ---- Hỗ trợ chat riêng ----
             Section(store.t("Hỗ trợ chat riêng", "Private support")) {
                 TextField(store.t("Lời chào /start", "Welcome /start"), text: $welcome, axis: .vertical).lineLimit(2...5)
@@ -160,6 +198,15 @@ struct TelegramBotView: View {
         welcomeBtnUrl = s.welcomeBtnUrl ?? ""
         goodbyeOn = s.goodbyeOn ?? true
         if let g = s.goodbye, !g.isEmpty { goodbye = g }
+        antifloodOn = s.antifloodOn ?? false
+        antifloodMax = s.antifloodMax ?? 6
+        cleanService = s.cleanService ?? false
+        captchaOn = s.captchaOn ?? false
+        nightmodeOn = s.nightmodeOn ?? false
+        nightStart = s.nightStart ?? 23
+        nightEnd = s.nightEnd ?? 6
+        rules = s.rules ?? ""
+        blacklist = s.blacklist ?? ""
     }
 
     private func save() async {
@@ -171,6 +218,10 @@ struct TelegramBotView: View {
             "welcome_on": welcomeOn, "welcome_group": welcomeGroup,
             "welcome_btn_text": welcomeBtnText, "welcome_btn_url": welcomeBtnUrl,
             "goodbye_on": goodbyeOn, "goodbye": goodbye,
+            "antiflood_on": antifloodOn, "antiflood_max": antifloodMax,
+            "clean_service": cleanService, "captcha_on": captchaOn,
+            "nightmode_on": nightmodeOn, "night_start": nightStart, "night_end": nightEnd,
+            "rules": rules, "blacklist": blacklist,
         ]
         if !token.isEmpty { body["token"] = token }
         do {

@@ -35,6 +35,17 @@ struct TelegramBotStatus: Decodable {
     let welcomeBtnUrl: String?
     let goodbyeOn: Bool?
     let goodbye: String?
+    // Module nâng cao
+    let antifloodOn: Bool?
+    let antifloodMax: Int?
+    let cleanService: Bool?
+    let captchaOn: Bool?
+    let nightmodeOn: Bool?
+    let nightStart: Int?
+    let nightEnd: Int?
+    let rules: String?
+    let locks: String?
+    let blacklist: String?
 }
 
 // ======================== Model cập nhật OTA (bản đã ký) ========================
