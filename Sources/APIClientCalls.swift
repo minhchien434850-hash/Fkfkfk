@@ -13,6 +13,17 @@ struct EmailNotifyStatus: Decodable {
     let testOk: Bool?
 }
 
+// ======================== Model bot Telegram hỗ trợ ========================
+struct TelegramBotStatus: Decodable {
+    let enabled: Bool
+    let hasToken: Bool?
+    let adminChat: String?
+    let welcome: String?
+    let about: String?
+    let username: String?
+    let tokenOk: Bool?
+}
+
 // ======================== Model cập nhật OTA (bản đã ký) ========================
 struct AppOTAUpdate: Decodable {
     let available: Bool

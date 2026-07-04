@@ -175,6 +175,18 @@ struct AdminView: View {
                         .font(.caption2)
                 }
 
+                // Bot Telegram hỗ trợ khách (chỉ admin)
+                Section {
+                    NavigationLink { TelegramBotView() } label: {
+                        Label(store.t("Bot Telegram hỗ trợ", "Telegram support bot"),
+                              systemImage: "paperplane.fill")
+                    }
+                } footer: {
+                    Text(store.t("Khách nhắn bot Telegram → tin về admin; admin reply là trả lời khách. Cấu hình token & bật/tắt tại đây.",
+                                 "Customers message the Telegram bot → forwarded to admin; reply to answer them. Configure token & toggle here."))
+                        .font(.caption2)
+                }
+
                 // Thông báo qua email/Gmail (miễn phí) khi người dùng offline
                 Section {
                     Toggle(store.t("Gửi thông báo qua email khi offline", "Email notifications when offline"),

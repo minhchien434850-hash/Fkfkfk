@@ -1825,6 +1825,7 @@ def _startup() -> None:
     global _acb_task
     init_db()
     start_mail_smtp()
+    start_telegram_bot()
     try:
         _acb_task = asyncio.create_task(_acb_autopay_loop())
     except RuntimeError:
@@ -4874,6 +4875,112 @@ def start_mail_smtp() -> None:
         logging.info("KenMail SMTP nhận thư tại cổng %s cho @%s", MAIL_SMTP_PORT, MAIL_DOMAIN)
     except Exception as e:
         logging.warning("KenMail: không khởi động được SMTP cổng %s: %s", MAIL_SMTP_PORT, e)
+
+
+# ============================================================================
+#  BOT TELEGRAM HỖ TRỢ KHÁCH — chỉ admin cấu hình & quản lý (trong app).
+#  Khách nhắn bot → chuyển cho admin (kèm mã khách). Admin TRẢ LỜI ngay trên
+#  Telegram (reply vào tin đó) → bot chuyển lại đúng khách. Chạy nền bằng
+#  long-polling getUpdates (đọc token trực tiếp từ cấu hình, đổi được lúc chạy).
+# ============================================================================
+_tg_offset = 0
+_tg_thread = None
+
+def _tg_call(token: str, method: str, **params):
+    import httpx
+    try:
+        r = httpx.post(f"https://api.telegram.org/bot{token}/{method}", json=params, timeout=35)
+        return r.json()
+    except Exception as e:
+        log.warning("tg_call %s lỗi: %s", method, e)
+        return {}
+
+def _tg_send(token: str, chat_id, text: str, buttons: Optional[list] = None) -> None:
+    params = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
+              "disable_web_page_preview": True}
+    if buttons:
+        params["reply_markup"] = {"inline_keyboard": buttons}
+    _tg_call(token, "sendMessage", **params)
+
+def _tg_menu_buttons() -> list:
+    return [[{"text": "💬 Chat với hỗ trợ", "callback_data": "support"}],
+            [{"text": "ℹ️ Giới thiệu", "callback_data": "about"}]]
+
+def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
+    # Nút bấm (callback)
+    cq = u.get("callback_query")
+    if cq:
+        data = cq.get("data", "")
+        chat = str(cq.get("message", {}).get("chat", {}).get("id", ""))
+        _tg_call(token, "answerCallbackQuery", callback_query_id=cq.get("id", ""))
+        if data == "support":
+            _tg_send(token, chat, "✍️ Bạn cứ nhắn nội dung cần hỗ trợ ở đây, đội ngũ KENIOS sẽ trả lời sớm nhất.")
+        elif data == "about":
+            _tg_send(token, chat, get_setting("tg_about", "KENIOS — nền tảng ứng dụng & cửa hàng số. Gõ /start để xem menu."))
+        return
+
+    msg = u.get("message")
+    if not msg:
+        return
+    chat_id = str(msg.get("chat", {}).get("id", ""))
+    text = msg.get("text", "") or msg.get("caption", "") or "[media]"
+    frm = msg.get("from", {})
+    name = (frm.get("first_name", "") + " " + frm.get("last_name", "")).strip() or frm.get("username", "") or "Khách"
+
+    # Admin TRẢ LỜI (reply vào tin đã chuyển) → gửi lại đúng khách theo mã [cid:...]
+    if admin_chat and chat_id == str(admin_chat):
+        reply = msg.get("reply_to_message", {})
+        rtext = reply.get("text", "") if reply else ""
+        import re as _re
+        m = _re.search(r"\[cid:(-?\d+)\]", rtext or "")
+        if m and text and not text.startswith("/"):
+            _tg_send(token, m.group(1), f"👨‍💼 <b>Hỗ trợ KENIOS:</b>\n{text}")
+            _tg_send(token, admin_chat, "✅ Đã gửi trả lời tới khách.")
+        elif text.startswith("/start"):
+            _tg_send(token, admin_chat, "Bạn là ADMIN. Khi khách nhắn bot, tin sẽ hiện ở đây — hãy REPLY vào tin đó để trả lời khách.")
+        return
+
+    # Khách nhắn
+    if text.startswith("/start"):
+        wel = get_setting("tg_welcome", "👋 Chào mừng bạn đến với hỗ trợ KENIOS!\nBấm nút bên dưới hoặc nhắn nội dung cần hỗ trợ.")
+        _tg_send(token, chat_id, wel, buttons=_tg_menu_buttons())
+        return
+    # Chuyển tin của khách cho admin (kèm mã để reply lại đúng người)
+    if admin_chat:
+        _tg_send(token, admin_chat,
+                 f"💬 <b>{name}</b> [cid:{chat_id}]\n{text}\n\n<i>Reply tin này để trả lời khách.</i>")
+        _tg_send(token, chat_id, "✅ Đã gửi tới đội ngũ hỗ trợ. Vui lòng chờ phản hồi nhé!")
+
+def _tg_loop() -> None:
+    global _tg_offset
+    import httpx
+    while True:
+        try:
+            token = (get_setting("tg_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+            enabled = get_setting("tg_bot_enabled", "0") == "1"
+            if not token or not enabled:
+                time.sleep(5); continue
+            admin_chat = (get_setting("tg_admin_chat", "") or os.getenv("TELEGRAM_ADMIN_CHAT", "")).strip()
+            r = httpx.get(f"https://api.telegram.org/bot{token}/getUpdates",
+                          params={"offset": _tg_offset + 1, "timeout": 25}, timeout=35)
+            for upd in r.json().get("result", []):
+                _tg_offset = max(_tg_offset, upd.get("update_id", 0))
+                try:
+                    _tg_handle_update(token, admin_chat, upd)
+                except Exception as e:
+                    log.warning("tg handle update lỗi: %s", e)
+        except Exception:
+            time.sleep(3)
+
+def start_telegram_bot() -> None:
+    """Khởi động bot Telegram hỗ trợ (long-polling) trong 1 thread nền."""
+    global _tg_thread
+    if _tg_thread and _tg_thread.is_alive():
+        return
+    import threading
+    _tg_thread = threading.Thread(target=_tg_loop, daemon=True, name="telegram-bot")
+    _tg_thread.start()
+    logging.info("Telegram support bot: thread khởi động (bật khi admin cấu hình token & enable).")
 
 
 # ======================== Dịch sang tiếng Việt (TTS đa ngôn ngữ) ========================
@@ -8920,6 +9027,53 @@ def admin_set_email_notify(body: dict = Body(...), admin=Depends(get_admin)) -> 
         out["test_ok"] = (r == "external")
         return out
     return _email_notify_status()
+
+
+# ===================== Admin: Bot Telegram hỗ trợ =====================
+def _tg_bot_status() -> dict[str, Any]:
+    token = get_setting("tg_bot_token", "")
+    return {
+        "enabled": get_setting("tg_bot_enabled", "0") == "1",
+        "has_token": bool(token.strip()),
+        "admin_chat": get_setting("tg_admin_chat", ""),
+        "welcome": get_setting("tg_welcome", ""),
+        "about": get_setting("tg_about", ""),
+        "username": get_setting("tg_bot_username", ""),
+    }
+
+@app.get("/admin/telegram-bot")
+def admin_get_tg_bot(admin=Depends(get_admin)) -> dict[str, Any]:
+    return _tg_bot_status()
+
+@app.post("/admin/telegram-bot")
+def admin_set_tg_bot(body: dict = Body(...), admin=Depends(get_admin)) -> dict[str, Any]:
+    if body.get("token"):                     # để trống = giữ token cũ
+        set_setting("tg_bot_token", str(body["token"]).strip())
+    if "enabled" in body:                     set_setting("tg_bot_enabled", "1" if body.get("enabled") else "0")
+    if body.get("admin_chat") is not None:    set_setting("tg_admin_chat", str(body["admin_chat"]).strip())
+    if body.get("welcome") is not None:       set_setting("tg_welcome", str(body["welcome"])[:1500])
+    if body.get("about") is not None:         set_setting("tg_about", str(body["about"])[:1500])
+    # Xác minh token + lấy @username của bot (getMe) để hiển thị/kiểm tra
+    token = get_setting("tg_bot_token", "").strip()
+    ok = False; uname = ""
+    if token:
+        me = _tg_call(token, "getMe")
+        if me.get("ok"):
+            ok = True
+            uname = me.get("result", {}).get("username", "")
+            set_setting("tg_bot_username", uname)
+    start_telegram_bot()   # đảm bảo thread đang chạy
+    out = _tg_bot_status(); out["token_ok"] = ok; out["username"] = uname
+    return out
+
+@app.post("/admin/telegram-bot/test")
+def admin_test_tg_bot(admin=Depends(get_admin)) -> dict[str, Any]:
+    token = get_setting("tg_bot_token", "").strip()
+    chat = get_setting("tg_admin_chat", "").strip()
+    if not token or not chat:
+        raise HTTPException(status_code=400, detail="Cần nhập Bot Token và Chat ID admin trước.")
+    _tg_send(token, chat, "✅ KENIOS Bot: gửi thử thành công! Bot đã sẵn sàng nhận tin khách.")
+    return {"ok": True}
 
 
 # ===================== Trang Pháp lý công khai (Điều khoản & Chính sách) =====================

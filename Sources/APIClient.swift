@@ -245,6 +245,20 @@ struct APIClient {
     func adminSetEmailNotify(_ enabled: Bool) async throws {
         _ = try await send("/admin/email-notify", method: "POST", json: ["enabled": enabled])
     }
+    // ---- Bot Telegram hỗ trợ (admin) ----
+    func adminGetTelegramBot() async throws -> TelegramBotStatus {
+        try decode(try await send("/admin/telegram-bot"))
+    }
+    func adminSetTelegramBot(token: String, enabled: Bool, adminChat: String,
+                             welcome: String, about: String) async throws -> TelegramBotStatus {
+        var b: [String: Any] = ["enabled": enabled, "admin_chat": adminChat,
+                                "welcome": welcome, "about": about]
+        if !token.isEmpty { b["token"] = token }
+        return try decode(try await send("/admin/telegram-bot", method: "POST", json: b))
+    }
+    func adminTestTelegramBot() async throws {
+        _ = try await send("/admin/telegram-bot/test", method: "POST")
+    }
     /// Lưu cấu hình SMTP (Gmail) + tuỳ chọn gửi email kiểm tra. Trả về trạng thái mới.
     func adminSetEmailConfig(host: String, port: Int, user: String, pass: String,
                              from: String, testTo: String = "") async throws -> EmailNotifyStatus {
