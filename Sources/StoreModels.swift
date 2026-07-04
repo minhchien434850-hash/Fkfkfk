@@ -71,6 +71,7 @@ struct StoreAppConfig: Codable, Hashable {
     var welcomeVoiceText: String? = nil
     var welcomeVoiceRate: Float? = nil
     var welcomeVoiceId: String? = nil   // giọng admin chọn — đồng bộ cho MỌI người ("google" = chị Google)
+    var notifVoiceEnabled: Bool? = nil  // đọc to thông báo sản phẩm mới (mặc định bật)
     // Thanh thông báo chạy đầu trang
     var announceEnabled: Bool? = nil
     var announceText: String? = nil

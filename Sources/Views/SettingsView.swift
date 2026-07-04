@@ -360,6 +360,8 @@ struct WelcomeGreetingView: View {
     @State private var gVersion = ""
     @State private var gUpdateUrl = ""
     @State private var gUpdateMsg = ""
+    // Đọc to thông báo sản phẩm mới bằng giọng đồng bộ (mặc định BẬT)
+    @State private var gNotifVoice = true
 
     private let templates = [
         "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!",
@@ -486,6 +488,18 @@ struct WelcomeGreetingView: View {
                         .font(.caption2)
                 }
 
+                // ===== Đọc to THÔNG BÁO SẢN PHẨM MỚI =====
+                Section {
+                    Toggle(store.t("Đọc to thông báo sản phẩm mới", "Read new-product notices aloud"),
+                           isOn: $gNotifVoice)
+                } header: {
+                    Text(store.t("📣 Thông báo sản phẩm mới — Admin", "📣 New-product notice — Admin"))
+                } footer: {
+                    Text(store.t("Khi admin đăng sản phẩm mới, app của MỌI người hiện thông báo VÀ đọc to bằng giọng đồng bộ ở trên (chị Google / giọng admin chọn).",
+                                 "When a new product is posted, every user's app shows the notice AND reads it aloud with the synced voice above."))
+                        .font(.caption2)
+                }
+
                 // ===== Thông báo cập nhật phiên bản =====
                 Section {
                     TextField(store.t("Phiên bản mới nhất (vd 3.1)", "Latest version (e.g. 3.1)"), text: $gVersion)
@@ -551,6 +565,7 @@ struct WelcomeGreetingView: View {
         gVersion = c.latestVersion ?? ""
         gUpdateUrl = c.updateUrl ?? ""
         gUpdateMsg = c.updateMessage ?? ""
+        gNotifVoice = c.notifVoiceEnabled ?? true
         // Admin chỉ có 1 lời chào duy nhất → hiển thị giá trị toàn cục lên giao diện chung.
         store.setWelcomeEnabled(gEnabled)
         if !gText.isEmpty { store.setWelcomeText(gText) }
@@ -578,6 +593,7 @@ struct WelcomeGreetingView: View {
                 welcomeVoiceText: gText,
                 welcomeVoiceRate: Float(gRate),
                 welcomeVoiceId: store.welcomeVoiceId,
+                notifVoiceEnabled: gNotifVoice,
                 latestVersion: gVersion, updateUrl: gUpdateUrl,
                 updateMessage: gUpdateMsg)
             gIsError = false; gMessage = r.message

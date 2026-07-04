@@ -358,6 +358,17 @@ struct MainTabView: View {
         if !showUpdate && !showWelcomePopup {
             withAnimation(.spring(response: 0.4)) { showNotif = true }
         }
+        // + ĐỌC TO thông báo bằng GIỌNG ĐỒNG BỘ toàn cục (giọng admin chọn / chị Google).
+        if let cfg = try? await store.api.storeConfig(), cfg.notifVoiceEnabled != false {
+            let gvid = (cfg.welcomeVoiceId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let spoken = latest.title.isEmpty ? latest.body : "\(latest.title). \(latest.body)"
+            if !spoken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                WelcomeVoice.shared.announce(
+                    text: spoken,
+                    voiceId: gvid.isEmpty ? store.welcomeVoiceId : gvid,
+                    rate: cfg.welcomeVoiceRate ?? store.welcomeRate)
+            }
+        }
     }
 
     // Thông báo tin nhắn mới từ bạn bè (chỉ tin CHƯA đọc → không báo lại tin đã xem trong chat).

@@ -7059,6 +7059,8 @@ def store_config() -> dict[str, Any]:
         "welcome_voice_rate": float(get_setting("store_welcome_voice_rate", "0.5") or 0.5),
         # GIỌNG đọc admin chọn — đồng bộ cho MỌI người; mặc định "google" (chị Google)
         "welcome_voice_id": get_setting("store_welcome_voice_id", "google"),
+        # ĐỌC TO thông báo sản phẩm mới bằng giọng đồng bộ — mặc định BẬT
+        "notif_voice_enabled": get_setting("store_notif_voice_enabled", "1") == "1",
         # §1.2 — Thông báo cập nhật phiên bản mới (admin đặt)
         "latest_version": get_setting("store_latest_version", ""),
         "update_url": get_setting("store_update_url", ""),
@@ -9489,6 +9491,7 @@ class StoreConfigIn(BaseModel):
     welcome_voice_text: Optional[str] = None
     welcome_voice_rate: Optional[float] = None
     welcome_voice_id: Optional[str] = None
+    notif_voice_enabled: Optional[bool] = None
     # Thanh thông báo chạy
     announce_enabled: Optional[bool] = None
     announce_text: Optional[str] = None
@@ -9574,6 +9577,7 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.welcome_voice_text is not None: set_setting("store_welcome_voice_text", b.welcome_voice_text.strip()[:500])
     if b.welcome_voice_rate is not None: set_setting("store_welcome_voice_rate", str(max(0.3, min(float(b.welcome_voice_rate), 0.65))))
     if b.welcome_voice_id is not None: set_setting("store_welcome_voice_id", b.welcome_voice_id.strip()[:200])
+    if b.notif_voice_enabled is not None: set_setting("store_notif_voice_enabled", "1" if b.notif_voice_enabled else "0")
     if b.gamecat_limit is not None: set_setting("store_gamecat_limit", str(max(1, min(int(b.gamecat_limit), 30))))
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
