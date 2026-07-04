@@ -5377,11 +5377,26 @@ async def payment_webhook(request: Request) -> dict[str, Any]:
 
 
 def _extract_customer_id(description: str) -> Optional[str]:
-    """Lấy ID khách hàng (dạng KEN + chữ số) trong nội dung chuyển khoản."""
+    """Lấy ID khách hàng (dạng KEN + chữ số) trong nội dung chuyển khoản (tương thích cũ)."""
     if not description:
         return None
     m = re.search(r"(KEN\d{6,})", description, re.IGNORECASE)
     return m.group(1).upper() if m else None
+
+
+def _customer_id_candidates(description: str) -> list:
+    """Mọi ID có thể có trong nội dung CK: số thuần 6–12 chữ số (bản mới) + KEN###### (bản cũ).
+    Trả nhiều ứng viên, hàm xác nhận sẽ thử từng cái với public_id thật trong DB."""
+    if not description:
+        return []
+    out, seen = [], set()
+    for m in re.findall(r"KEN\d{6,}", description, re.IGNORECASE):
+        u = m.upper()
+        if u not in seen: seen.add(u); out.append(u)
+    # Số thuần — ưu tiên cụm dài trước (public_id thường 9 số), tránh nhầm số ngắn.
+    for m in sorted(re.findall(r"\d{6,12}", description), key=len, reverse=True):
+        if m not in seen: seen.add(m); out.append(m)
+    return out
 
 
 def _extract_ref(description: str) -> Optional[str]:
@@ -5392,10 +5407,10 @@ def _extract_ref(description: str) -> Optional[str]:
 
 
 def _confirm_from_description(desc: str, amount: int) -> bool:
-    """Ưu tiên dò theo ID khách hàng; nếu không có thì thử theo mã ref cũ."""
-    cid = _extract_customer_id(desc)
-    if cid and _confirm_by_customer_id(cid, amount):
-        return True
+    """Dò theo ID khách (thử mọi ứng viên số trong nội dung CK) → mã ref cũ."""
+    for cid in _customer_id_candidates(desc):
+        if _confirm_by_customer_id(cid, amount):
+            return True
     ref = _extract_ref(desc)
     if ref and _auto_confirm_payment(ref, amount):
         return True
@@ -5459,7 +5474,11 @@ async def _acb_fetch_and_confirm() -> int:
         if not isinstance(tx, dict):
             continue
         desc = (tx.get("description") or tx.get("content") or tx.get("transactionContent")
-                or tx.get("addDescription") or tx.get("comment") or "")
+                or tx.get("addDescription") or tx.get("comment") or tx.get("body")
+                or tx.get("des") or tx.get("transferContent") or tx.get("note") or "")
+        if not desc:
+            # Không rõ tên trường nội dung → gộp MỌI giá trị chuỗi để không bỏ sót ID khách.
+            desc = " ".join(str(v) for v in tx.values() if isinstance(v, str))
         amt_raw = (tx.get("amount") or tx.get("creditAmount") or tx.get("transferAmount")
                    or tx.get("money") or 0)
         try:
