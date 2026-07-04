@@ -6845,7 +6845,8 @@ def _published_ipa() -> Optional[dict]:
 
 @app.get("/admin/ipa/published")
 def admin_get_published(admin=Depends(get_admin)) -> dict[str, Any]:
-    p = _published_ipa()
+    # Trang /install dùng app khách riêng nếu có, không thì rơi về bản KENIOS đã ký.
+    p = _published_ipa() or _app_update()
     base = _ipa_base_url()
     return {"published": bool(p), "public_url": f"{base}/install",
             "title": (p or {}).get("meta", {}).get("title", ""),
@@ -6897,9 +6898,11 @@ def app_ota_update() -> dict[str, Any]:
 
 @app.get("/install", response_class=HTMLResponse)
 def install_page():
-    """Trang cài đặt công khai — khách mở link, bấm 1 nút là app hiện lên màn hình chính."""
+    """Trang cài đặt công khai — khách mở link, bấm 1 nút là app hiện lên màn hình chính.
+    Ưu tiên app khách phát hành riêng; nếu chưa có thì DÙNG LUÔN bản KENIOS đã ký
+    (slot cập nhật) để khách mới vẫn cài được app KENIOS từ trang này."""
     base = _ipa_base_url()
-    p = _published_ipa()
+    p = _published_ipa() or _app_update()
     app_name = get_setting("app_display_name", "") or "KENIOS"
     if not p:
         body = ('<div class="card"><div class="logo">K</div>'
