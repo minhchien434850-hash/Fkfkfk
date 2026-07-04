@@ -2,7 +2,47 @@ import SwiftUI
 import AVFoundation
 import CoreImage
 import ImageIO
+import ReplayKit
 import UIKit
+
+// MARK: - Chia sẻ màn hình (ReplayKit) — gửi khung hình màn hình qua cùng kênh relay
+final class ScreenShareCapture {
+    var onFrameJPEG: ((Data) -> Void)?
+    private let recorder = RPScreenRecorder.shared()
+    private let ctx = CIContext(options: [.useSoftwareRenderer: false])
+    private var lastUpload = Date.distantPast
+    private let interval: TimeInterval = 0.18   // ~5–6 khung/giây cho màn hình
+    private(set) var active = false
+
+    func start(_ completion: @escaping (Bool) -> Void) {
+        guard recorder.isAvailable else { completion(false); return }
+        recorder.isMicrophoneEnabled = false
+        recorder.startCapture(handler: { [weak self] sample, type, err in
+            guard err == nil, type == .video, let self,
+                  CMSampleBufferIsValid(sample),
+                  let pb = CMSampleBufferGetImageBuffer(sample) else { return }
+            let now = Date()
+            guard now.timeIntervalSince(self.lastUpload) >= self.interval else { return }
+            self.lastUpload = now
+            var ci = CIImage(cvPixelBuffer: pb)
+            let w = ci.extent.width
+            let scale = min(1.0, 540.0 / max(1.0, w))
+            if scale < 1.0 { ci = ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
+            if let cg = self.ctx.createCGImage(ci, from: ci.extent),
+               let data = UIImage(cgImage: cg).jpegData(compressionQuality: 0.4) {
+                self.onFrameJPEG?(data)
+            }
+        }, completionHandler: { err in
+            DispatchQueue.main.async { completion(err == nil) }
+        })
+    }
+    func stop() {
+        guard active else { return }
+        active = false
+        recorder.stopCapture(handler: nil)
+    }
+    func markActive() { active = true }
+}
 
 // ============================================================================
 //  Gọi thoại / video giữa bạn bè — relay khung hình + âm thanh qua máy chủ.
@@ -254,6 +294,7 @@ final class CallSession: ObservableObject {
     @Published var muted = false
     @Published var speakerOn = true
     @Published var cameraOn: Bool
+    @Published var screenSharing = false
     @Published var beauty: Double = 0.5
     @Published var effect: CallEffect = .original
     @Published var durationText = "00:00"
@@ -265,6 +306,7 @@ final class CallSession: ObservableObject {
     let isCaller: Bool
     let camera = CameraCapture()
     private let audio = CallAudio()
+    private let screenCap = ScreenShareCapture()
     private let api: APIClient
     private let onClose: () -> Void
 
@@ -373,8 +415,34 @@ final class CallSession: ObservableObject {
     // MARK: điều khiển
     func toggleMute() { muted.toggle(); audio.muted = muted }
     func toggleSpeaker() { speakerOn.toggle(); audio.setSpeaker(speakerOn) }
-    func toggleCamera() { cameraOn.toggle(); camera.enabled = cameraOn }
+    func toggleCamera() { cameraOn.toggle(); camera.enabled = cameraOn && !screenSharing }
     func flipCamera() { camera.flip() }
+
+    // Chia sẻ màn hình: gửi khung hình MÀN HÌNH thay cho camera (qua cùng kênh relay).
+    func toggleScreenShare() {
+        if screenSharing {
+            screenCap.stop()
+            screenSharing = false
+            camera.enabled = cameraOn
+        } else {
+            let api = self.api
+            let cid = self.callId
+            screenCap.onFrameJPEG = { d in
+                let b64 = d.base64EncodedString()
+                Task { try? await api.callPutFrame(cid, jpgBase64: b64) }
+            }
+            screenCap.start { [weak self] ok in
+                guard let self else { return }
+                if ok {
+                    self.camera.enabled = false     // ngừng gửi khung camera
+                    self.screenCap.markActive()
+                    self.screenSharing = true
+                } else {
+                    self.statusText = "Không bật được chia sẻ màn hình"
+                }
+            }
+        }
+    }
     func setBeauty(_ v: Double) { beauty = v; camera.beauty = v }
     func setEffect(_ e: CallEffect) { effect = e; camera.effect = e }
 
@@ -396,6 +464,7 @@ final class CallSession: ObservableObject {
         guard !ended else { return }
         ended = true
         stopRing()
+        screenCap.stop()
         timers.forEach { $0.invalidate() }; timers.removeAll()
         camera.stop(); audio.stop()
         onClose()
@@ -478,7 +547,14 @@ struct CallScreen: View {
                 HStack {
                     Spacer()
                     ZStack {
-                        if session.cameraOn {
+                        if session.screenSharing {
+                            Color.black
+                            VStack(spacing: 4) {
+                                Image(systemName: "rectangle.on.rectangle").foregroundStyle(.green)
+                                Text("Đang chia sẻ\nmàn hình").font(.system(size: 9))
+                                    .multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.85))
+                            }
+                        } else if session.cameraOn {
                             LocalPreview(camera: session.camera)
                         } else {
                             Color.black
@@ -586,11 +662,17 @@ struct CallScreen: View {
 
     // Hàng nút điều khiển
     private var controlBar: some View {
-        HStack(spacing: 22) {
+        HStack(spacing: 16) {
             ctrl(session.muted ? "mic.slash.fill" : "mic.fill", session.muted ? .red : .white) { session.toggleMute() }
             if session.isVideo {
                 ctrl(session.cameraOn ? "video.fill" : "video.slash.fill", .white) { session.toggleCamera() }
                 ctrl("arrow.triangle.2.circlepath.camera.fill", .white) { session.flipCamera() }
+                if session.phase == .active {
+                    ctrl("rectangle.on.rectangle", session.screenSharing ? .green : .white,
+                         bg: session.screenSharing ? Color.green.opacity(0.25) : .white.opacity(0.18)) {
+                        session.toggleScreenShare()
+                    }
+                }
             }
             ctrl(session.speakerOn ? "speaker.wave.2.fill" : "speaker.fill", .white) { session.toggleSpeaker() }
             ctrl("phone.down.fill", .white, bg: .red) { session.hangUp() }
