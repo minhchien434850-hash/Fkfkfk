@@ -4941,6 +4941,59 @@ def _tg_send_audio(token: str, chat_id, path: str, title: str) -> bool:
     except Exception as e:
         log.warning("tg sendAudio lỗi: %s", e); return False
 
+# Telegram bot chỉ cho gửi file ≤ 50MB. Ta NÉN bitrate cho vừa, bài dài thì CẮT nhiều phần.
+_TG_AUDIO_LIMIT = 49 * 1024 * 1024
+
+def _tg_audio_duration(path: str) -> float:
+    """Thời lượng (giây) qua ffprobe; 0 nếu không đọc được."""
+    try:
+        r = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                            "-of", "csv=p=0", path], capture_output=True, text=True, timeout=60)
+        return float((r.stdout or "0").strip() or 0)
+    except Exception:
+        return 0.0
+
+def _tg_fit_audio(path: str) -> list:
+    """Trả về danh sách file mp3 mỗi cái ≤ 50MB để gửi thẳng vào Telegram.
+    - Nếu đã nhỏ: trả nguyên.
+    - Nén bitrate cho cả bài ~45MB (96–320kbps).
+    - Vẫn to (bài rất dài): cắt thành nhiều phần, mỗi phần ~45MB."""
+    try:
+        if os.path.getsize(path) <= _TG_AUDIO_LIMIT:
+            return [path]
+    except Exception:
+        return [path]
+    if not shutil.which("ffmpeg"):
+        return [path]
+    import glob as _glob
+    d = os.path.dirname(path)
+    base = os.path.splitext(os.path.basename(path))[0]
+    dur = _tg_audio_duration(path)
+    kbps = 128
+    if dur > 0:
+        kbps = max(96, min(320, int((45 * 1024 * 1024 * 8) / dur / 1000)))
+    # (1) Nén cả bài về một bitrate cho vừa
+    out = os.path.join(d, base + "_fit.mp3")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-v", "quiet", "-i", path, "-vn", "-b:a", f"{kbps}k", out],
+                       capture_output=True, timeout=1800)
+    except Exception:
+        pass
+    if os.path.exists(out) and os.path.getsize(out) <= _TG_AUDIO_LIMIT:
+        return [out]
+    # (2) Vẫn quá lớn → cắt thành nhiều khúc, mỗi khúc ~45MB ở bitrate đã chọn
+    src = out if os.path.exists(out) else path
+    seg = max(300, int((45 * 1024 * 1024 * 8) / (kbps * 1000))) if kbps > 0 else 2400
+    segpat = os.path.join(d, base + "_p%03d.mp3")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-v", "quiet", "-i", src, "-vn", "-b:a", f"{kbps}k",
+                        "-f", "segment", "-segment_time", str(seg), segpat],
+                       capture_output=True, timeout=1800)
+    except Exception:
+        pass
+    parts = sorted(_glob.glob(os.path.join(d, base + "_p*.mp3")))
+    return parts if parts else [path]
+
 def _tg_music_task(token: str, chat_id, arg: str) -> None:
     """Tải & gửi nhạc (chạy trong thread riêng để không chặn vòng lặp bot)."""
     import html as _h
@@ -4953,16 +5006,29 @@ def _tg_music_task(token: str, chat_id, arg: str) -> None:
     if not path:
         _tg_send(token, chat_id, "❌ Không lấy được nhạc.\n" + _h.escape((err or "")[:300])); return
     try:
-        if os.path.getsize(path) <= 49 * 1024 * 1024:
-            if not _tg_send_audio(token, chat_id, path, title):
-                _tg_send(token, chat_id, "❌ Gửi file nhạc thất bại.")
+        # Nén/cắt cho vừa 50MB rồi gửi THẲNG vào Telegram (không còn gửi link).
+        parts = _tg_fit_audio(path)
+        sendable = [p for p in parts if os.path.getsize(p) <= _TG_AUDIO_LIMIT]
+        if sendable:
+            n = len(sendable)
+            if n > 1:
+                _tg_call(token, "sendChatAction", chat_id=chat_id, action="upload_voice")
+                _tg_send(token, chat_id, f"🎵 <b>{_h.escape(title)}</b>\nBài dài nên nô tì chia làm <b>{n}</b> phần 👇")
+            fail = 0
+            for i, p in enumerate(sendable, 1):
+                t = f"{title} ({i}/{n})" if n > 1 else title
+                if not _tg_send_audio(token, chat_id, p, t):
+                    fail += 1
+            if fail:
+                _tg_send(token, chat_id, f"⚠️ Có {fail} phần gửi chưa được, thử lại /nhac nhé.")
         else:
+            # Trường hợp hiếm (không có ffmpeg / bài siêu lớn) → vẫn để link tải.
             tk = secrets.token_hex(8)
             dst = os.path.join(_IPA_DIR, f"tgmusic_{tk}.mp3")
             shutil.copy(path, dst)
             base = _ipa_base_url() or "https://app.kenios.store"
             _tg_send(token, chat_id,
-                     f"🎵 <b>{_h.escape(title)}</b>\nFile lớn (&gt;50MB) — tải tại:\n{base}/ipa/dl/tgmusic_{tk}.mp3")
+                     f"🎵 <b>{_h.escape(title)}</b>\nFile quá lớn — tải tại:\n{base}/ipa/dl/tgmusic_{tk}.mp3")
     except Exception as e:
         log.warning("tg music gửi lỗi: %s", e)
         _tg_send(token, chat_id, "❌ Có lỗi khi gửi nhạc.")
