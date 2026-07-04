@@ -4895,12 +4895,58 @@ def _tg_call(token: str, method: str, **params):
         log.warning("tg_call %s lỗi: %s", method, e)
         return {}
 
-def _tg_send(token: str, chat_id, text: str, buttons: Optional[list] = None) -> None:
+# Bộ thu gom tin bot gửi ra khi đang chạy 1 lệnh trong NHÓM — để TỰ XOÁ sau N giây.
+_tg_del_ctx = None   # (thread_ident, [(chat_id, message_id), ...]) khi đang gom
+
+def _tg_send(token: str, chat_id, text: str, buttons: Optional[list] = None):
     params = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
               "disable_web_page_preview": True}
     if buttons:
         params["reply_markup"] = {"inline_keyboard": buttons}
-    _tg_call(token, "sendMessage", **params)
+    r = _tg_call(token, "sendMessage", **params)
+    try:
+        import threading as _thr
+        if _tg_del_ctx and _tg_del_ctx[0] == _thr.get_ident():
+            mid = ((r or {}).get("result") or {}).get("message_id")
+            if mid:
+                _tg_del_ctx[1].append((str(chat_id), mid))
+    except Exception:
+        pass
+    return r
+
+def _tg_autodel_sec() -> int:
+    try:
+        return int(get_setting("tg_autodel_sec", "5") or 0)
+    except Exception:
+        return 0
+
+def _tg_delete_later(token: str, items: list, delay: int) -> None:
+    import threading as _thr
+    def _t():
+        time.sleep(delay)
+        for cid, mid in items:
+            _tg_call(token, "deleteMessage", chat_id=cid, message_id=mid)
+    _thr.Thread(target=_t, daemon=True).start()
+
+def _tg_with_autodel(token: str, chat_id, user_mid, fn):
+    """Chạy fn() (xử lý 1 lệnh trong nhóm) rồi TỰ XOÁ tin lệnh + tin bot trả lời
+    sau tg_autodel_sec giây (mặc định 5s; /autodel để chỉnh/tắt). Trả kết quả fn."""
+    import threading as _thr
+    global _tg_del_ctx
+    sec = _tg_autodel_sec()
+    if sec <= 0 or not user_mid:   # tắt, hoặc chat riêng (không xoá gì)
+        return fn()
+    _tg_del_ctx = (_thr.get_ident(), [])
+    try:
+        res = fn()
+    finally:
+        items = _tg_del_ctx[1] if _tg_del_ctx else []
+        _tg_del_ctx = None
+    if (res is None or res) and user_mid:   # fn đã xử lý lệnh → xoá cả tin lệnh
+        items.append((str(chat_id), user_mid))
+    if items:
+        _tg_delete_later(token, items, sec)
+    return res
 
 def _tg_menu_buttons() -> list:
     return [[{"text": "💬 Chat với hỗ trợ", "callback_data": "support"}],
@@ -5130,7 +5176,7 @@ _TG_RESERVED = {
     "stop", "filters", "save", "clear", "notes", "setrules", "rules", "clean", "nightmode",
     "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
     "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
-    "modon", "modoff",
+    "modon", "modoff", "autodel",
 }
 
 def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
@@ -5273,7 +5319,9 @@ _TG_FEAT = {
     "🆔 ID": "🆔 <b>/id</b> — xem Chat ID / User ID (reply để lấy ID người khác).",
     "💤 AFK": "💤 <b>AFK</b>: /afk [lý do] — báo bận; ai nhắc tên bạn, bot sẽ báo bạn đang bận.",
     "📌 Ghim": "📌 <b>Ghim tin</b> (reply, trong nhóm): /pin · /unpin.",
-    "🗑️ Dọn tin": "🗑️ <b>Dọn tin</b> (trong nhóm): /del (reply) xoá 1 tin · /purge (reply) xoá hàng loạt tới tin đó.",
+    "🗑️ Dọn tin": ("🗑️ <b>Dọn tin</b> (trong nhóm): /del (reply) xoá 1 tin · /purge (reply) xoá hàng loạt tới tin đó.\n"
+                   "🧽 <b>Tự xoá lệnh</b>: dùng lệnh xong bot tự xoá tin lệnh + trả lời sau 5 giây.\n"
+                   "• /autodel 10 — đổi số giây · /autodel off — tắt"),
     "🔗 Liên kết": None,        # → nút mở link (web, cài app, kênh…)
     "➕ Lệnh riêng": None,       # → hướng dẫn tự thêm lệnh bot
     "📣 Loa phường": None,      # → hướng dẫn broadcast (admin)
@@ -5755,6 +5803,20 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
         else:
             set_setting("tg_mod_enabled", "1" if cmd == "modon" else "0")
             _tg_send(token, chat_id, "Quản lý nhóm: " + ("BẬT" if cmd == "modon" else "TẮT"))
+    elif cmd == "autodel":
+        a = args.strip().lower()
+        if a in ("off", "tat", "tắt", "0"):
+            set_setting("tg_autodel_sec", "0")
+            _tg_send(token, chat_id, "🧽 Tự xoá lệnh: TẮT — tin lệnh & trả lời bot sẽ được giữ lại.")
+        elif a.isdigit():
+            sec = max(3, min(300, int(a)))
+            set_setting("tg_autodel_sec", str(sec))
+            _tg_send(token, chat_id, f"🧽 Tự xoá lệnh: BẬT — lệnh + trả lời bot tự xoá sau <b>{sec} giây</b>.")
+        else:
+            cur = _tg_autodel_sec()
+            _tg_send(token, chat_id,
+                     f"🧽 <b>Tự xoá lệnh</b>: {'BẬT — sau ' + str(cur) + ' giây' if cur > 0 else 'TẮT'}\n"
+                     "• <code>/autodel 10</code> — đổi số giây (3–300)\n• <code>/autodel off</code> — tắt")
     elif cmd == "stats":
         _, tot = _msgcount_top(chat_id, 1)
         mc = _tg_call(token, "getChatMemberCount", chat_id=chat_id)
@@ -5805,9 +5867,11 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
                           admin=_tg_is_privileged(token, chat_id, msg)):
             return
 
-    # Lệnh (/... hoặc #ghichú)
+    # Lệnh (/... hoặc #ghichú) — dùng xong TỰ XOÁ tin lệnh + trả lời bot sau N giây
     if text.startswith("/") or text.startswith("#"):
-        _tg_dispatch_command(token, chat_id, msg, text, uid, frm); return
+        _tg_with_autodel(token, chat_id, mid,
+                         lambda: _tg_dispatch_command(token, chat_id, msg, text, uid, frm))
+        return
 
     low = text.lower()
     # FameRank: đếm tin nhắn · AutoReact: tự thả cảm xúc
@@ -5946,14 +6010,19 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         _ufrom = (msg.get("from") or {}).get("id")
         _mng_admin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
             ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _ufrom))
+        _is_grp = ctype in ("group", "supergroup")
+        _umid = msg.get("message_id") if _is_grp else None
         if _c0 in ("links", "cmds", "addcmd", "delcmd", "setlinks", "broadcast"):
-            if _tg_manage_command(token, chat_id, _tgtxt, _mng_admin):
+            if _tg_with_autodel(token, chat_id, _umid,
+                                lambda: _tg_manage_command(token, chat_id, _tgtxt, _mng_admin)):
                 return
         # Lệnh do admin tự tạo (không trùng lệnh hệ thống) → trả lời kèm nút liên kết.
         if _c0 not in _TG_RESERVED:
             _ccresp = _tg_cc_get(_c0)
             if _ccresp is not None:
-                _tg_send(token, chat_id, _ccresp, buttons=(_tg_link_buttons() or None))
+                _tg_with_autodel(token, chat_id, _umid,
+                                 lambda: _tg_send(token, chat_id, _ccresp,
+                                                  buttons=(_tg_link_buttons() or None)))
                 return
 
     # NHÓM: thành viên mới (captcha/chào mừng) · rời nhóm (tạm biệt) · quản lý
@@ -5982,7 +6051,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                    "/filter", "/stop", "/filters", "/setrules", "/rules", "/clean", "/nightmode", "/antiflood",
                    "/captcha", "/autoreact", "/slowmode", "/log", "/diemdanh", "/top", "/report", "/save",
                    "/clear", "/notes", "/id", "/setwelcome", "/welcome", "/setwelcomebtn", "/setwelcomephoto",
-                   "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats"}
+                   "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats", "/autodel"}
     if text.startswith("/") and text.split("@")[0].split()[0].lower() in _GROUP_CMDS:
         _tg_send(token, chat_id,
                  "🔧 Lệnh này dùng trong <b>NHÓM</b>, không chạy khi nhắn riêng bot.\n\n"
@@ -6094,6 +6163,7 @@ def _tg_register_commands(token: str) -> None:
         ("modon", "BẬT kiểm duyệt nhóm"), ("modoff", "TẮT kiểm duyệt nhóm"),
         ("stats", "Thống kê nhóm"),
         ("slowmode", "Giãn cách gửi tin"), ("autoreact", "Tự thả cảm xúc"),
+        ("autodel", "Tự xoá lệnh sau N giây"),
         ("addcmd", "Thêm lệnh riêng"), ("delcmd", "Xoá lệnh riêng"),
         ("setlinks", "Đặt nút liên kết"), ("broadcast", "📣 Loa phường"),
     ]
@@ -6121,7 +6191,7 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
-            "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /log · /modon /modoff · /config\n"
+            "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /config\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
 def start_telegram_bot() -> None:
