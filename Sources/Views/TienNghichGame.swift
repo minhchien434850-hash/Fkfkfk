@@ -192,6 +192,44 @@ let TN_MOUNTS: [TNMount] = [
 ]
 func tnMount(_ id: String) -> TNMount? { TN_MOUNTS.first { $0.id == id } }
 
+// MARK: - Thời trang: Cánh (đeo sau lưng · vừa đẹp vừa buff)
+struct TNWing: Identifiable {
+    let id: String; let name: String; let emoji: String; let price: Int
+    let atk: Int; let hp: Int; let colors: [Color]; let desc: String
+}
+let TN_WINGS: [TNWing] = [
+    TNWing(id: "none", name: "Không đeo", emoji: "🚫", price: 0, atk: 0, hp: 0, colors: [.gray], desc: "Bỏ trang bị cánh."),
+    TNWing(id: "thienvu", name: "Thiên Vũ Cánh", emoji: "🕊️", price: 600, atk: 10, hp: 80,
+           colors: [.white, .cyan], desc: "Đôi cánh lông vũ trắng thanh khiết, nhẹ tựa mây."),
+    TNWing(id: "hoaphuong", name: "Hỏa Phượng Cánh", emoji: "🔥", price: 1500, atk: 26, hp: 140,
+           colors: [.orange, .red], desc: "Cánh phượng lửa rực cháy, bay tới đâu thiêu đốt tới đó."),
+    TNWing(id: "bangtinh", name: "Băng Tinh Cánh", emoji: "❄️", price: 1500, atk: 18, hp: 220,
+           colors: [.cyan, .blue], desc: "Cánh pha lê băng tinh, lạnh lẽo mà kiêu sa."),
+    TNWing(id: "hondiep", name: "Hồn Điệp Cánh", emoji: "🦋", price: 2600, atk: 34, hp: 200,
+           colors: [.purple, .pink], desc: "Cánh bướm hồn mộng ngũ sắc, huyễn hoặc lòng người."),
+    TNWing(id: "cothan", name: "Cổ Thần Long Dực", emoji: "🐉", price: 5000, atk: 60, hp: 400,
+           colors: [Color(red:1,green:0.85,blue:0.2), .orange], desc: "Long dực Cổ Thần chí tôn, mở cánh che kín trời."),
+]
+func tnWing(_ id: String) -> TNWing? { TN_WINGS.first { $0.id == id && $0.id != "none" } }
+
+// MARK: - Thời trang: Hào quang (vòng sáng quanh thân)
+struct TNHalo: Identifiable {
+    let id: String; let name: String; let emoji: String; let price: Int
+    let atk: Int; let def: Int; let color: Color; let desc: String
+}
+let TN_HALOS: [TNHalo] = [
+    TNHalo(id: "none", name: "Không khoác", emoji: "🚫", price: 0, atk: 0, def: 0, color: .gray, desc: "Bỏ hào quang."),
+    TNHalo(id: "thanhloi", name: "Thanh Loi Quang", emoji: "⚡", price: 500, atk: 12, def: 6,
+           color: .yellow, desc: "Vòng sáng sấm sét lam, lôi quang chớp giật."),
+    TNHalo(id: "tuha", name: "Tử Hà Quang", emoji: "🟣", price: 1200, atk: 18, def: 14,
+           color: .purple, desc: "Hào quang tử hà tím huyền, cao quý phi phàm."),
+    TNHalo(id: "kimo", name: "Kim Ô Thánh Quang", emoji: "☀️", price: 2400, atk: 32, def: 20,
+           color: .orange, desc: "Thánh quang Kim Ô chói lọi như mặt trời."),
+    TNHalo(id: "luanhoi", name: "Luân Hồi Thần Quang", emoji: "🌀", price: 4200, atk: 46, def: 34,
+           color: .cyan, desc: "Thần quang luân hồi xoay chuyển càn khôn, uy áp tứ phương."),
+]
+func tnHalo(_ id: String) -> TNHalo? { TN_HALOS.first { $0.id == id && $0.id != "none" } }
+
 // MARK: - Đạo lữ (bạn đời tu tiên) — kết duyên nhận thân mật & buff
 struct TNSpouse: Identifiable {
     let id: String; let name: String; let emoji: String; let dowry: Int
@@ -372,6 +410,10 @@ struct TNSave: Codable {
     var lastFreeGift = ""    // ngày (yyyy-MM-dd) đã nhận quà miễn phí ở cửa hàng nạp
     var totalRecharged = 0   // tổng linh thạch đã nạp (mốc VIP)
     var lastVipGift = ""     // ngày đã nhận rương đặc quyền VIP
+    var ownedWings: [String] = []
+    var activeWing = ""      // thời trang cánh đang đeo
+    var ownedHalos: [String] = []
+    var activeHalo = ""      // hào quang đang khoác
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -402,10 +444,15 @@ struct TNSave: Codable {
     var vip: Int { min(totalRecharged / 5000, 6) }
     private var vipAtkB: Int { vip * 18 }
     private var vipHpB: Int { vip * 100 }
-    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB + vipHpB)) * guildHpMul) }
+    // Thời trang cánh & hào quang: vừa đẹp vừa cộng nhẹ chỉ số
+    private var wingAtkB: Int { tnWing(activeWing)?.atk ?? 0 }
+    private var wingHpB: Int { tnWing(activeWing)?.hp ?? 0 }
+    private var haloAtkB: Int { tnHalo(activeHalo)?.atk ?? 0 }
+    private var haloDefB: Int { tnHalo(activeHalo)?.def ?? 0 }
+    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB + vipHpB + wingHpB)) * guildHpMul) }
     var mpMax: Int { 60 + tier * 40 + level * 6 }
-    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB + vipAtkB)) * guildAtkMul) }
-    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB + mountDefB }
+    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB + vipAtkB + wingAtkB + haloAtkB)) * guildAtkMul) }
+    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB + mountDefB + haloDefB }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
     var powerScore: Int { atk * 3 + def * 5 + hpMax }
@@ -687,6 +734,31 @@ final class TNGame: ObservableObject {
         if id.isEmpty || s.ownedMounts.contains(id) { s.activeMount = id; s.hp = min(s.hp, s.hpMax); save() }
     }
 
+    // Thời trang cánh: mua & đeo
+    func buyWing(_ w: TNWing) -> Bool {
+        guard !s.ownedWings.contains(w.id), s.linhThach >= w.price else { return false }
+        s.linhThach -= w.price
+        s.ownedWings.append(w.id)
+        s.activeWing = w.id
+        s.hp = min(s.hp, s.hpMax)
+        save(); return true
+    }
+    func equipWing(_ id: String) {
+        if id.isEmpty || s.ownedWings.contains(id) { s.activeWing = id; s.hp = min(s.hp, s.hpMax); save() }
+    }
+    // Hào quang: mua & khoác
+    func buyHalo(_ h: TNHalo) -> Bool {
+        guard !s.ownedHalos.contains(h.id), s.linhThach >= h.price else { return false }
+        s.linhThach -= h.price
+        s.ownedHalos.append(h.id)
+        s.activeHalo = h.id
+        s.hp = min(s.hp, s.hpMax)
+        save(); return true
+    }
+    func equipHalo(_ id: String) {
+        if id.isEmpty || s.ownedHalos.contains(id) { s.activeHalo = id; s.hp = min(s.hp, s.hpMax); save() }
+    }
+
     // Đạo lữ: kết duyên (trả sính lễ) & tặng quà tăng thân mật
     func marry(_ sp: TNSpouse) -> String {
         guard s.spouse != sp.id else { return "💞 Hai người đã là đạo lữ rồi." }
@@ -898,9 +970,23 @@ struct TNHeroAvatar: View {
     let skin: TNSkin
     let realm: TNRealm
     var size: CGFloat = 130
+    var wing: TNWing? = nil
+    var halo: TNHalo? = nil
     @State private var pulse = false
+    @State private var flap = false
     var body: some View {
         ZStack {
+            // CÁNH thời trang (sau lưng) — hai bên vỗ nhẹ
+            if let w = wing {
+                HStack(spacing: size * 0.62) {
+                    Text(w.emoji).scaleEffect(x: -1, y: 1)
+                    Text(w.emoji)
+                }
+                .font(.system(size: size * 0.62))
+                .shadow(color: w.colors.first!.opacity(0.9), radius: 10)
+                .rotationEffect(.degrees(flap ? -6 : 6))
+                .offset(y: -size * 0.05)
+            }
             // Hào quang xoay + nhấp nháy
             Circle()
                 .fill(RadialGradient(colors: [skin.colors.first!.opacity(0.9), realm.color.opacity(0.5), .clear],
@@ -908,6 +994,14 @@ struct TNHeroAvatar: View {
                 .frame(width: size * 1.5, height: size * 1.5)
                 .scaleEffect(pulse ? 1.08 : 0.94)
                 .blur(radius: 6)
+            // HÀO QUANG thời trang (vòng sáng bổ sung)
+            if let h = halo {
+                Circle()
+                    .strokeBorder(AngularGradient(colors: [h.color, .white, h.color, .clear, h.color], center: .center), lineWidth: 5)
+                    .frame(width: size * 1.35, height: size * 1.35)
+                    .rotationEffect(.degrees(pulse ? -360 : 0))
+                    .shadow(color: h.color, radius: 12)
+            }
             Circle()
                 .strokeBorder(AngularGradient(colors: skin.colors + [skin.colors.first!], center: .center), lineWidth: 3)
                 .frame(width: size * 1.15, height: size * 1.15)
@@ -927,6 +1021,7 @@ struct TNHeroAvatar: View {
         .onAppear {
             withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) { pulse = true }
             withAnimation(.linear(duration: 10).repeatForever(autoreverses: false)) { pulse = true }
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { flap = true }
         }
     }
 }
@@ -971,6 +1066,7 @@ struct TNHomeView: View {
     @State private var showSpouse = false
     @State private var showRecharge = false
     @State private var showVip = false
+    @State private var showFashion = false
 
     var body: some View {
         ScrollView {
@@ -994,7 +1090,8 @@ struct TNHomeView: View {
                         .padding(.top, 8)
                 }
 
-                TNHeroAvatar(skin: tnSkin(game.s.skin), realm: game.s.realmEnum)
+                TNHeroAvatar(skin: tnSkin(game.s.skin), realm: game.s.realmEnum,
+                             wing: tnWing(game.s.activeWing), halo: tnHalo(game.s.activeHalo))
                     .scaleEffect(meditating ? 1.06 : 1.0)
 
                 Text(game.s.name).font(.title2.bold()).foregroundStyle(.white)
@@ -1068,6 +1165,7 @@ struct TNHomeView: View {
                     Button { showBattle = true } label: { bigBtn("⚔️ Phiêu Lưu — Luyện Yêu Thú", [.purple, .indigo]) }.buttonStyle(TNPress(glow: .purple))
                     Button { showMap = true } label: { bigBtn("🗺️ Bản Đồ — Khám Phá Vùng Đất", [.green, .teal]) }.buttonStyle(TNPress(glow: .green))
                     Button { showPets = true } label: { bigBtn("🐾 Thú Cưng Đồng Hành", [.orange, .pink]) }.buttonStyle(TNPress(glow: .orange))
+                    Button { showFashion = true } label: { bigBtn("👗 Thời Trang — Cánh & Hào Quang", [.purple, .pink]) }.buttonStyle(TNPress(glow: .purple))
                     Button { tab = 1 } label: { bigBtn("📖 Đi Theo Cốt Truyện", [.brown, .orange]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showForge = true } label: { bigBtn("⚒️ Chế Tạo — Luyện Khí · Luyện Đan", [.gray, .brown]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showArena = true } label: { bigBtn("🏆 Đấu Đài — Thách Đấu Cao Thủ", [.yellow, .orange]) }.buttonStyle(TNPress(glow: .yellow))
@@ -1103,6 +1201,7 @@ struct TNHomeView: View {
         .sheet(isPresented: $showSpouse) { TNSpouseView(game: game) }
         .sheet(isPresented: $showRecharge) { TNRechargeView(game: game) }
         .sheet(isPresented: $showVip) { TNVipView(game: game) }
+        .sheet(isPresented: $showFashion) { TNFashionView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -2379,6 +2478,108 @@ struct TNVipView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
             .preferredColorScheme(.dark)
         }
+    }
+}
+
+// MARK: - Thời Trang: Cánh & Hào Quang (xem trước trên avatar · mua · trang bị)
+struct TNFashionView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab = 0            // 0: cánh · 1: hào quang
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    // Xem trước avatar với cánh + hào quang đang chọn
+                    TNHeroAvatar(skin: tnSkin(game.s.skin), realm: game.s.realmEnum, size: 120,
+                                 wing: tnWing(game.s.activeWing), halo: tnHalo(game.s.activeHalo))
+                        .frame(height: 190).padding(.top, 10)
+                    HStack {
+                        Text("👗 THỜI TRANG").font(.title3.bold()).foregroundStyle(.pink)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal)
+
+                    // Chuyển tab cánh / hào quang
+                    Picker("", selection: $tab) {
+                        Text("🪽 Cánh").tag(0); Text("💫 Hào Quang").tag(1)
+                    }.pickerStyle(.segmented).padding(.horizontal)
+
+                    if tab == 0 {
+                        ForEach(TN_WINGS) { w in wingRow(w) }
+                    } else {
+                        ForEach(TN_HALOS) { h in haloRow(h) }
+                    }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.1,green:0.04,blue:0.12), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Thời Trang").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+        }
+    }
+
+    @ViewBuilder private func wingRow(_ w: TNWing) -> some View {
+        let isNone = w.id == "none"
+        let owned = isNone || game.s.ownedWings.contains(w.id)
+        let active = game.s.activeWing == w.id || (isNone && game.s.activeWing.isEmpty)
+        HStack(spacing: 12) {
+            Text(w.emoji).font(.system(size: 32)).frame(width: 54, height: 54)
+                .background(w.colors.first!.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(w.name).font(.headline).foregroundStyle(.white)
+                Text(w.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                if !isNone { Text("⚔️+\(w.atk) ❤️+\(w.hp)").font(.system(size: 10, weight: .bold)).foregroundStyle(w.colors.first!) }
+            }
+            Spacer()
+            fashionButton(active: active, owned: owned, price: w.price,
+                          equip: { game.equipWing(isNone ? "" : w.id) },
+                          buy: { flash(game.buyWing(w) ? "✅ Đã sắm \(w.name)!" : "❌ Không đủ linh thạch!") },
+                          color: w.colors.first!)
+        }
+        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+    }
+
+    @ViewBuilder private func haloRow(_ h: TNHalo) -> some View {
+        let isNone = h.id == "none"
+        let owned = isNone || game.s.ownedHalos.contains(h.id)
+        let active = game.s.activeHalo == h.id || (isNone && game.s.activeHalo.isEmpty)
+        HStack(spacing: 12) {
+            Text(h.emoji).font(.system(size: 32)).frame(width: 54, height: 54)
+                .background(h.color.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(h.name).font(.headline).foregroundStyle(.white)
+                Text(h.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                if !isNone { Text("⚔️+\(h.atk) 🛡️+\(h.def)").font(.system(size: 10, weight: .bold)).foregroundStyle(h.color) }
+            }
+            Spacer()
+            fashionButton(active: active, owned: owned, price: h.price,
+                          equip: { game.equipHalo(isNone ? "" : h.id) },
+                          buy: { flash(game.buyHalo(h) ? "✅ Đã sắm \(h.name)!" : "❌ Không đủ linh thạch!") },
+                          color: h.color)
+        }
+        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+    }
+
+    @ViewBuilder private func fashionButton(active: Bool, owned: Bool, price: Int,
+                                            equip: @escaping () -> Void, buy: @escaping () -> Void, color: Color) -> some View {
+        if active { Text("Đang dùng").font(.caption.bold()).foregroundStyle(.green) }
+        else if owned {
+            Button("Dùng") { equip() }.font(.caption.bold()).foregroundStyle(.white)
+                .padding(.horizontal, 14).padding(.vertical, 7).background(.blue, in: Capsule())
+        } else {
+            Button("💎\(price)") { buy() }.font(.caption.bold()).foregroundStyle(.white)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(game.s.linhThach >= price ? color : Color.gray, in: Capsule())
+                .buttonStyle(TNPress(glow: color))
+        }
+    }
+
+    private func flash(_ m: String) {
+        withAnimation { msg = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
     }
 }
 
