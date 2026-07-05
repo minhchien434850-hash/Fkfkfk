@@ -39,7 +39,7 @@ from typing import Any, Optional
 import httpx
 from fastapi import FastAPI, Request, HTTPException, Header, Depends, UploadFile, File as FastAPIFile, Form, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse, Response
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse, Response, RedirectResponse
 from pydantic import BaseModel
 
 # ========================= Cấu hình =========================
@@ -8772,6 +8772,221 @@ def start_telegram_bot() -> None:
     _tg_thread = threading.Thread(target=_tg_loop, daemon=True, name="telegram-bot")
     _tg_thread.start()
     logging.info("Telegram support bot: thread khởi động (bật khi admin cấu hình token & enable).")
+
+
+# ============================================================================
+#  ZALO OFFICIAL ACCOUNT (OA) — kênh CHÍNH THỐNG (có API thật, không lo khóa).
+#  Khách QUAN TÂM (follow) OA → bot tự CHÀO MỪNG. Khách nhắn OA → bot tự trả
+#  lời (hoặc chuyển admin). Tự làm mới access_token bằng refresh_token.
+#  (Zalo KHÔNG cho bot vào nhóm chat thường — đây là kênh OA ↔ người quan tâm.)
+# ============================================================================
+_ZALO_OAUTH = "https://oauth.zaloapp.com/v4/oa"
+_ZALO_OPENAPI = "https://openapi.zalo.me/v3.0/oa"
+
+def _zalo_redirect_uri() -> str:
+    base = (_ipa_base_url() or "https://app.kenios.store").rstrip("/")
+    return f"{base}/zalo/oauth/callback"
+
+def _zalo_set_tokens(access: str, refresh: str, expires_in) -> None:
+    set_setting("zalo_oa_access_token", (access or "").strip())
+    if refresh:
+        set_setting("zalo_oa_refresh_token", refresh.strip())
+    try:
+        exp = int(time.time()) + int(expires_in) - 300   # trừ hao 5 phút
+    except Exception:
+        exp = int(time.time()) + 3600
+    set_setting("zalo_oa_token_exp", str(exp))
+
+def _zalo_refresh_if_needed() -> str:
+    """Trả về access_token còn hạn (tự refresh nếu sắp hết). "" nếu chưa kết nối."""
+    import httpx
+    access = (get_setting("zalo_oa_access_token", "") or "").strip()
+    refresh = (get_setting("zalo_oa_refresh_token", "") or "").strip()
+    app_id = (get_setting("zalo_app_id", "") or "").strip()
+    secret = (get_setting("zalo_app_secret", "") or "").strip()
+    try:
+        exp = int(get_setting("zalo_oa_token_exp", "0") or 0)
+    except Exception:
+        exp = 0
+    if access and time.time() < exp:
+        return access
+    if not (refresh and app_id and secret):
+        return access
+    try:
+        r = httpx.post(f"{_ZALO_OAUTH}/access_token",
+                       headers={"secret_key": secret, "Content-Type": "application/x-www-form-urlencoded"},
+                       data={"refresh_token": refresh, "app_id": app_id, "grant_type": "refresh_token"},
+                       timeout=20)
+        j = r.json()
+        if j.get("access_token"):
+            _zalo_set_tokens(j["access_token"], j.get("refresh_token", ""), j.get("expires_in", 90000))
+            return j["access_token"].strip()
+        log.warning("zalo refresh token lỗi: %s", j)
+    except Exception as e:
+        log.warning("zalo refresh token exception: %s", e)
+    return access
+
+def _zalo_send_text(user_id: str, text: str) -> dict:
+    """Gửi tin nhắn văn bản từ OA tới 1 người quan tâm."""
+    import httpx
+    token = _zalo_refresh_if_needed()
+    if not token or not user_id:
+        return {"error": "chưa kết nối OA hoặc thiếu user_id"}
+    try:
+        r = httpx.post(f"{_ZALO_OPENAPI}/message",
+                       headers={"access_token": token, "Content-Type": "application/json"},
+                       json={"recipient": {"user_id": str(user_id)}, "message": {"text": text[:2000]}},
+                       timeout=20)
+        return r.json()
+    except Exception as e:
+        log.warning("zalo send lỗi: %s", e)
+        return {"error": str(e)}
+
+def _zalo_greet(user_id: str) -> None:
+    if get_setting("zalo_welcome_on", "1") != "1":
+        return
+    wel = get_setting("zalo_welcome",
+        "👋 Chào mừng bạn đã quan tâm KENIOS!\nBạn cần hỗ trợ gì cứ nhắn ở đây nhé. 💙")
+    _zalo_send_text(user_id, wel)
+
+def _zalo_verify_sig(app_id: str, raw: bytes, timestamp: str, signature: str) -> bool:
+    """MAC = sha256(app_id + raw_body + timestamp + oa_secret)."""
+    import hashlib
+    secret = (get_setting("zalo_app_secret", "") or "").strip()
+    if not secret or not signature:
+        return True   # chưa đặt secret / Zalo không gửi chữ ký → không chặn
+    try:
+        mac = hashlib.sha256((app_id + raw.decode("utf-8", "ignore") + str(timestamp) + secret).encode()).hexdigest()
+        return ("mac=" + mac) == signature or mac == signature
+    except Exception:
+        return True
+
+class ZaloOAConfig(BaseModel):
+    enabled: Optional[bool] = None
+    app_id: Optional[str] = None
+    app_secret: Optional[str] = None
+    welcome: Optional[str] = None
+    welcome_on: Optional[bool] = None
+    auto_reply: Optional[str] = None
+    auto_reply_on: Optional[bool] = None
+
+def _zalo_status() -> dict[str, Any]:
+    connected = bool((get_setting("zalo_oa_access_token", "") or "").strip()
+                     and (get_setting("zalo_oa_refresh_token", "") or "").strip())
+    return {
+        "enabled": get_setting("zalo_oa_enabled", "0") == "1",
+        "app_id": get_setting("zalo_app_id", ""),
+        "has_secret": bool((get_setting("zalo_app_secret", "") or "").strip()),
+        "connected": connected,
+        "welcome": get_setting("zalo_welcome",
+            "👋 Chào mừng bạn đã quan tâm KENIOS!\nBạn cần hỗ trợ gì cứ nhắn ở đây nhé. 💙"),
+        "welcome_on": get_setting("zalo_welcome_on", "1") == "1",
+        "auto_reply": get_setting("zalo_auto_reply", ""),
+        "auto_reply_on": get_setting("zalo_auto_reply_on", "0") == "1",
+        "webhook_url": (_ipa_base_url() or "https://app.kenios.store").rstrip("/") + "/zalo/webhook",
+        "connect_url": (_ipa_base_url() or "https://app.kenios.store").rstrip("/") + "/zalo/connect",
+    }
+
+@app.get("/admin/zalo-oa")
+def admin_get_zalo(admin=Depends(get_admin)) -> dict[str, Any]:
+    return _zalo_status()
+
+@app.post("/admin/zalo-oa")
+def admin_set_zalo(b: ZaloOAConfig, admin=Depends(get_admin)) -> dict[str, Any]:
+    if b.enabled is not None:      set_setting("zalo_oa_enabled", "1" if b.enabled else "0")
+    if b.app_id is not None:       set_setting("zalo_app_id", b.app_id.strip())
+    if b.app_secret:               set_setting("zalo_app_secret", b.app_secret.strip())
+    if b.welcome is not None:      set_setting("zalo_welcome", b.welcome[:2000])
+    if b.welcome_on is not None:   set_setting("zalo_welcome_on", "1" if b.welcome_on else "0")
+    if b.auto_reply is not None:   set_setting("zalo_auto_reply", b.auto_reply[:2000])
+    if b.auto_reply_on is not None: set_setting("zalo_auto_reply_on", "1" if b.auto_reply_on else "0")
+    return _zalo_status()
+
+@app.get("/zalo/connect")
+def zalo_connect():
+    """Bắt đầu kết nối OA (PKCE) — admin bấm link này, đăng nhập Zalo, cấp quyền OA."""
+    import hashlib, base64
+    app_id = (get_setting("zalo_app_id", "") or "").strip()
+    if not app_id:
+        return HTMLResponse("<h3>Chưa nhập App ID Zalo. Vào app KENIOS → Quản trị → Zalo OA để nhập trước.</h3>", status_code=400)
+    verifier = secrets.token_urlsafe(48)
+    set_setting("zalo_pkce_verifier", verifier)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    from urllib.parse import urlencode
+    q = urlencode({"app_id": app_id, "redirect_uri": _zalo_redirect_uri(),
+                   "code_challenge": challenge, "state": secrets.token_hex(6)})
+    return RedirectResponse(f"{_ZALO_OAUTH}/permission?{q}")
+
+@app.get("/zalo/oauth/callback")
+def zalo_oauth_callback(code: str = "", oa_id: str = ""):
+    """Zalo gọi lại sau khi admin cấp quyền → đổi code lấy access/refresh token."""
+    import httpx
+    if not code:
+        return HTMLResponse("<h3>Thiếu mã uỷ quyền (code). Thử kết nối lại.</h3>", status_code=400)
+    app_id = (get_setting("zalo_app_id", "") or "").strip()
+    secret = (get_setting("zalo_app_secret", "") or "").strip()
+    verifier = (get_setting("zalo_pkce_verifier", "") or "").strip()
+    try:
+        r = httpx.post(f"{_ZALO_OAUTH}/access_token",
+                       headers={"secret_key": secret, "Content-Type": "application/x-www-form-urlencoded"},
+                       data={"code": code, "app_id": app_id, "grant_type": "authorization_code",
+                             "code_verifier": verifier},
+                       timeout=20)
+        j = r.json()
+    except Exception as e:
+        return HTMLResponse(f"<h3>Lỗi đổi token: {e}</h3>", status_code=500)
+    if j.get("access_token"):
+        _zalo_set_tokens(j["access_token"], j.get("refresh_token", ""), j.get("expires_in", 90000))
+        if oa_id:
+            set_setting("zalo_oa_id", oa_id)
+        set_setting("zalo_oa_enabled", "1")
+        return HTMLResponse("<h2>✅ Kết nối Zalo OA thành công!</h2>"
+                            "<p>Bạn có thể đóng trang này và quay lại app KENIOS. "
+                            "Bot sẽ tự chào người mới quan tâm OA.</p>")
+    return HTMLResponse(f"<h3>Kết nối chưa được: {j}</h3>", status_code=400)
+
+@app.get("/zalo/webhook")
+def zalo_webhook_verify():
+    return {"ok": True}
+
+@app.post("/zalo/webhook")
+async def zalo_webhook(request: Request):
+    """Nhận sự kiện OA: follow (quan tâm) → chào; user_send_text → tự trả lời/chuyển admin."""
+    raw = await request.body()
+    try:
+        ev = json.loads(raw.decode("utf-8", "ignore") or "{}")
+    except Exception:
+        return {"ok": True}
+    app_id = (ev.get("app_id") or get_setting("zalo_app_id", "") or "").strip()
+    sig = request.headers.get("X-ZEvent-Signature", "")
+    if not _zalo_verify_sig(app_id, raw, ev.get("timestamp", ""), sig):
+        log.warning("zalo webhook sai chữ ký")
+        # vẫn trả 200 để Zalo không retry dồn dập, nhưng bỏ qua xử lý
+        return {"ok": True}
+    if get_setting("zalo_oa_enabled", "0") != "1":
+        return {"ok": True}
+    name = ev.get("event_name", "")
+    try:
+        if name == "follow":
+            uid = ((ev.get("follower") or {}).get("id")) or ev.get("user_id")
+            if uid:
+                _zalo_greet(str(uid))
+        elif name in ("user_send_text", "user_send_image", "user_send_sticker"):
+            uid = ((ev.get("sender") or {}).get("id"))
+            text = ((ev.get("message") or {}).get("text") or "")
+            if uid:
+                if get_setting("zalo_auto_reply_on", "0") == "1":
+                    rep = get_setting("zalo_auto_reply",
+                        "Cảm ơn bạn đã nhắn KENIOS! Đội ngũ sẽ phản hồi sớm nhất. 💙")
+                    _zalo_send_text(str(uid), rep)
+                # Chuyển nội dung cho admin Telegram (nếu đã cấu hình) để theo dõi
+                ac = (get_setting("tg_admin_chat", "") or "").strip()
+                tk = (get_setting("tg_bot_token", "") or "").strip()
+                if ac and tk and text:
+                    _tg_send(tk, ac, f"📩 <b>Zalo OA</b> [uid:{uid}]\n{text}")
+    except Exception as e:
+        log.warning("zalo webhook xử lý lỗi: %s", e)
+    return {"ok": True}
 
 
 # ======================== Dịch sang tiếng Việt (TTS đa ngôn ngữ) ========================

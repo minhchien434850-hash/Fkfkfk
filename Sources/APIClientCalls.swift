@@ -13,6 +13,30 @@ struct EmailNotifyStatus: Decodable {
     let testOk: Bool?
 }
 
+// ======================== Model Zalo Official Account (OA) ========================
+struct ZaloOAStatus: Decodable {
+    let enabled: Bool
+    let appId: String?
+    let hasSecret: Bool?
+    let connected: Bool?
+    let welcome: String?
+    let welcomeOn: Bool?
+    let autoReply: String?
+    let autoReplyOn: Bool?
+    let webhookUrl: String?
+    let connectUrl: String?
+}
+
+extension APIClient {
+    func adminGetZaloOA() async throws -> ZaloOAStatus {
+        try decode(try await send("/admin/zalo-oa"))
+    }
+    @discardableResult
+    func adminSetZaloOA(_ body: [String: Any]) async throws -> ZaloOAStatus {
+        try decode(try await send("/admin/zalo-oa", method: "POST", json: body))
+    }
+}
+
 // ======================== Model bot Telegram hỗ trợ ========================
 struct TelegramBotStatus: Decodable {
     let enabled: Bool

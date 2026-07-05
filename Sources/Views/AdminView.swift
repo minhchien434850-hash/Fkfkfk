@@ -187,6 +187,18 @@ struct AdminView: View {
                         .font(.caption2)
                 }
 
+                // Zalo Official Account — kênh chính thống (chỉ admin)
+                Section {
+                    NavigationLink { ZaloOAView() } label: {
+                        Label(store.t("Zalo OA (chào & trả lời)", "Zalo OA (greet & reply)"),
+                              systemImage: "bubble.left.and.text.bubble.right.fill")
+                    }
+                } footer: {
+                    Text(store.t("Kênh Zalo CHÍNH THỐNG: người quan tâm OA được bot tự chào, nhắn OA được tự trả lời. (Zalo không cho bot vào nhóm chat thường.)",
+                                 "Official Zalo channel: OA followers get auto-greeted, messages auto-replied. (Zalo doesn't allow bots in normal groups.)"))
+                        .font(.caption2)
+                }
+
                 // Thông báo qua email/Gmail (miễn phí) khi người dùng offline
                 Section {
                     Toggle(store.t("Gửi thông báo qua email khi offline", "Email notifications when offline"),
