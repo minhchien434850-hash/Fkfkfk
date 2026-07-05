@@ -135,6 +135,54 @@ let TN_SKINS: [TNSkin] = [
 ]
 func tnSkin(_ id: String) -> TNSkin { TN_SKINS.first { $0.id == id } ?? TN_SKINS[0] }
 
+// MARK: - Thú cưng đồng hành (linh thú)
+struct TNPet: Identifiable {
+    let id: String; let name: String; let emoji: String; let price: Int
+    let atk: Int; let def: Int; let hp: Int; let assist: Double   // % công người chơi mỗi lượt
+    let desc: String; let color: Color
+}
+let TN_PETS: [TNPet] = [
+    TNPet(id: "tieuhuyen", name: "Tiểu Huyền", emoji: "🐱", price: 200, atk: 10, def: 6, hp: 60, assist: 0.10,
+          desc: "Linh thú tinh nghịch · cân bằng, dễ nuôi."),
+    TNPet(id: "banghо",    name: "Băng Hổ", emoji: "🐯", price: 600, atk: 15, def: 22, hp: 120, assist: 0.12,
+          desc: "Thánh thú băng hàn · phòng thủ vượt trội."),
+    TNPet(id: "loiung",    name: "Lôi Ưng", emoji: "🦅", price: 800, atk: 26, def: 8, hp: 80, assist: 0.22,
+          desc: "Thánh thú sấm sét · tiếp sức đòn đánh cực mạnh."),
+    TNPet(id: "thanhlong", name: "Thanh Long", emoji: "🐉", price: 1400, atk: 40, def: 20, hp: 180, assist: 0.20,
+          desc: "Thánh thú uy nghiêm · công thủ toàn diện."),
+    TNPet(id: "hoaphuong", name: "Hỏa Phượng", emoji: "🔥", price: 1800, atk: 48, def: 15, hp: 160, assist: 0.28,
+          desc: "Thánh thú lửa thiêng · sát thương tiếp sức bùng nổ."),
+    TNPet(id: "kimo",      name: "Kim Ô", emoji: "🐦‍🔥", price: 3200, atk: 70, def: 35, hp: 300, assist: 0.30,
+          desc: "Thần điểu bất phàm · mạnh nhất, đồng hành tối thượng."),
+]
+func tnPet(_ id: String) -> TNPet? { TN_PETS.first { $0.id == id } }
+
+// MARK: - Bản đồ vùng (khám phá theo cảnh giới)
+struct TNZone: Identifiable {
+    let id = UUID(); let name: String; let emoji: String; let minRealm: Int
+    let foes: [(String, String)]; let rewardMul: Double; let desc: String
+}
+let TN_ZONES: [TNZone] = [
+    TNZone(name: "Thanh Vân Sơn", emoji: "⛰️", minRealm: 0,
+           foes: [("Yêu Lang", "🐺"), ("Sơn Trư", "🐗"), ("Độc Xà", "🐍")], rewardMul: 1.0,
+           desc: "Ngọn núi khởi đầu của mọi tán tu."),
+    TNZone(name: "Hắc Phong Lâm", emoji: "🌲", minRealm: 1,
+           foes: [("Hắc Điêu", "🦅"), ("Ma Lang", "🐺"), ("U Hồn", "👻")], rewardMul: 1.25,
+           desc: "Rừng gió đen âm u, yêu thú ẩn nấp."),
+    TNZone(name: "Xích Diễm Cốc", emoji: "🌋", minRealm: 3,
+           foes: [("Hỏa Phượng", "🔥"), ("Diễm Hổ", "🐯"), ("Nham Quái", "🗿")], rewardMul: 1.6,
+           desc: "Sơn cốc dung nham, hỏa khí ngút trời."),
+    TNZone(name: "Vạn Băng Nguyên", emoji: "🏔️", minRealm: 5,
+           foes: [("Băng Hổ", "🐯"), ("Tuyết Yêu", "❄️"), ("Huyền Vũ", "🐢")], rewardMul: 2.0,
+           desc: "Băng nguyên vạn dặm, lạnh thấu xương."),
+    TNZone(name: "Cửu U Minh Hải", emoji: "🌊", minRealm: 7,
+           foes: [("Ma Xà", "🐍"), ("Âm Long", "🐉"), ("Quỷ Vương", "😈")], rewardMul: 2.6,
+           desc: "Biển u minh sâu thẳm, tử khí nồng đậm."),
+    TNZone(name: "Thiên Ngoại Hư Không", emoji: "🌌", minRealm: 10,
+           foes: [("Hư Không Thú", "🌀"), ("Tinh Ma", "⭐"), ("Cổ Yêu", "👁️")], rewardMul: 3.5,
+           desc: "Hư không ngoài trời, nơi Cổ Thần trú ngụ."),
+]
+
 // MARK: - Môn phái
 struct TNSect: Identifiable {
     let id: String
@@ -188,6 +236,8 @@ struct TNSave: Codable {
     var danHp = 0            // Luyện Đan — cộng máu vĩnh viễn
     var linhThao = 0         // nguyên liệu: linh thảo (luyện đan)
     var khoangThach = 0      // nguyên liệu: khoáng thạch (luyện khí)
+    var ownedPets: [String] = []
+    var activePet = ""       // thú cưng đang đồng hành
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -202,10 +252,13 @@ struct TNSave: Codable {
     var levelExpMax: Int { level * 120 }
     var isMaxLevel: Bool { level >= 100 }
     var expMax: Int { 80 + tier * 45 }
-    var hpMax: Int { Int(Double(120 + tier * 70 + level * 22) * sectHp) + danHp }
+    private var petAtkB: Int { tnPet(activePet)?.atk ?? 0 }
+    private var petDefB: Int { tnPet(activePet)?.def ?? 0 }
+    private var petHpB: Int { tnPet(activePet)?.hp ?? 0 }
+    var hpMax: Int { Int(Double(120 + tier * 70 + level * 22) * sectHp) + danHp + petHpB }
     var mpMax: Int { 60 + tier * 40 + level * 6 }
-    var atk: Int { Int(Double(18 + tier * 12 + level * 4) * sectAtk) + weaponLv * 15 + danAtk }
-    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 }
+    var atk: Int { Int(Double(18 + tier * 12 + level * 4) * sectAtk) + weaponLv * 15 + danAtk + petAtkB }
+    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
     var powerScore: Int { atk * 3 + def * 5 + hpMax }
@@ -416,6 +469,19 @@ final class TNGame: ObservableObject {
     func equipSkin(_ id: String) { if s.ownedSkins.contains(id) { s.skin = id; save() } }
     func heal() { s.hp = s.hpMax; save() }
 
+    // Thú cưng: mua & trang bị
+    func buyPet(_ p: TNPet) -> Bool {
+        guard !s.ownedPets.contains(p.id), s.linhThach >= p.price else { return false }
+        s.linhThach -= p.price
+        s.ownedPets.append(p.id)
+        s.activePet = p.id
+        s.hp = min(s.hp, s.hpMax)
+        save(); return true
+    }
+    func equipPet(_ id: String) {
+        if id.isEmpty || s.ownedPets.contains(id) { s.activePet = id; s.hp = min(s.hp, s.hpMax); save() }
+    }
+
     // Tạo nhân vật mới (server + tên + môn phái)
     func createCharacter(name: String, server: String, sect: TNSect) {
         var v = TNSave()
@@ -585,6 +651,8 @@ struct TNHomeView: View {
     @State private var showChars = false
     @State private var showArena = false
     @State private var showForge = false
+    @State private var showMap = false
+    @State private var showPets = false
 
     var body: some View {
         ScrollView {
@@ -656,6 +724,8 @@ struct TNHomeView: View {
                     }
 
                     Button { showBattle = true } label: { bigBtn("⚔️ Phiêu Lưu — Luyện Yêu Thú", [.purple, .indigo]) }.buttonStyle(TNPress(glow: .purple))
+                    Button { showMap = true } label: { bigBtn("🗺️ Bản Đồ — Khám Phá Vùng Đất", [.green, .teal]) }.buttonStyle(TNPress(glow: .green))
+                    Button { showPets = true } label: { bigBtn("🐾 Thú Cưng Đồng Hành", [.orange, .pink]) }.buttonStyle(TNPress(glow: .orange))
                     Button { tab = 1 } label: { bigBtn("📖 Đi Theo Cốt Truyện", [.brown, .orange]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showForge = true } label: { bigBtn("⚒️ Chế Tạo — Luyện Khí · Luyện Đan", [.gray, .brown]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showArena = true } label: { bigBtn("🏆 Đấu Đài — Thách Đấu Cao Thủ", [.yellow, .orange]) }.buttonStyle(TNPress(glow: .yellow))
@@ -677,6 +747,8 @@ struct TNHomeView: View {
         .sheet(isPresented: $showChars) { TNCharactersView() }
         .fullScreenCover(isPresented: $showArena) { TNArenaView(game: game) }
         .sheet(isPresented: $showForge) { TNForgeView(game: game) }
+        .fullScreenCover(isPresented: $showMap) { TNMapView(game: game) }
+        .sheet(isPresented: $showPets) { TNPetView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -879,6 +951,12 @@ struct TNBattleView: View {
         enemy.hp = max(0, enemy.hp - d)
         enemyDmg = ("-\(d)", color)
         log = msg
+        // 🐾 Thú cưng tiếp sức: gây thêm sát thương mỗi lượt của người chơi
+        if let pet = tnPet(game.s.activePet), enemy.hp > 0 {
+            let pd = max(1, Int(Double(game.s.atk) * pet.assist))
+            enemy.hp = max(0, enemy.hp - pd)
+            log += "  \(pet.emoji) +\(pd)"
+        }
         withAnimation(.default.repeatCount(3, autoreverses: true).speed(4)) { shake.toggle() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { shake = false; fx = nil }
         if enemy.hp <= 0 {
@@ -1107,6 +1185,134 @@ struct TNShopView: View {
                 if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow) }
                 Color.clear.frame(height: 20)
             }
+        }
+    }
+    private func flash(_ m: String) {
+        withAnimation { msg = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Bản đồ vùng (khám phá → chiến đấu)
+struct TNMapView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var showBattle = false
+    @State private var zoneIdx = 0
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red:0.04,green:0.1,blue:0.08), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            TNCloudsBG()
+            VStack(spacing: 0) {
+                HStack {
+                    Text("🗺️ BẢN ĐỒ").font(.title2.bold()).foregroundStyle(.green)
+                    Spacer(); Button("Đóng") { dismiss() }.foregroundStyle(.white)
+                }.padding()
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(TN_ZONES.indices, id: \.self) { i in
+                            let z = TN_ZONES[i]
+                            let locked = game.s.realm < z.minRealm
+                            Button { if !locked { zoneIdx = i; showBattle = true } } label: {
+                                HStack(spacing: 12) {
+                                    Text(z.emoji).font(.system(size: 40))
+                                        .frame(width: 62, height: 62)
+                                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(z.name).font(.headline).foregroundStyle(.white)
+                                        Text(z.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                                        Text(locked ? "🔒 Cần cảnh giới \(TNRealm(rawValue: z.minRealm)?.name ?? "?")"
+                                                    : "⚔️ Yêu thú: \(z.foes.map{$0.1}.joined()) · Thưởng x\(String(format:"%.1f",z.rewardMul))")
+                                            .font(.system(size: 10, weight: .bold)).foregroundStyle(locked ? .gray : .green)
+                                    }
+                                    Spacer()
+                                    if !locked { Image(systemName: "chevron.right").foregroundStyle(.white.opacity(0.5)) }
+                                }
+                                .padding(12)
+                                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                                .opacity(locked ? 0.55 : 1)
+                            }
+                            .buttonStyle(TNPress(glow: .green)).disabled(locked)
+                            .padding(.horizontal)
+                        }
+                        Color.clear.frame(height: 20)
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .fullScreenCover(isPresented: $showBattle) {
+            TNBattleView(game: game, enemy: zoneEnemy(TN_ZONES[zoneIdx]), storyMode: false, onDone: { _ in })
+        }
+    }
+    private func zoneEnemy(_ z: TNZone) -> TNEnemy {
+        let f = z.foes.randomElement()!
+        let lvl = Double(game.s.realm * 9 + game.s.stage + game.s.level / 5)
+        let hp = Int((90 + lvl * 90) * z.rewardMul)
+        return TNEnemy(name: f.0, emoji: f.1, hp: hp, hpMax: hp,
+                       atk: Int(Double(game.s.atk) * 0.6 * z.rewardMul), def: Int(Double(game.s.def) * 0.6),
+                       reward: Int((45 + lvl * 12) * z.rewardMul), exp: Int((35 + lvl * 18) * z.rewardMul))
+    }
+}
+
+// MARK: - Thú cưng đồng hành
+struct TNPetView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("🐾 THÚ CƯNG").font(.title2.bold()).foregroundStyle(.orange)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal).padding(.top, 8)
+                    Text("Thú cưng cộng chỉ số & TIẾP SỨC sát thương mỗi lượt đánh.")
+                        .font(.caption).foregroundStyle(.white.opacity(0.6))
+                    // Bỏ trang bị
+                    if !game.s.activePet.isEmpty {
+                        Button { game.equipPet("") } label: {
+                            Text("Đang đồng hành: \(tnPet(game.s.activePet)?.emoji ?? "") \(tnPet(game.s.activePet)?.name ?? "") — bấm để THU HỒI")
+                                .font(.caption).foregroundStyle(.yellow)
+                        }
+                    }
+                    ForEach(TN_PETS) { p in
+                        let owned = game.s.ownedPets.contains(p.id)
+                        let active = game.s.activePet == p.id
+                        HStack(spacing: 12) {
+                            Text(p.emoji).font(.system(size: 34))
+                                .frame(width: 56, height: 56)
+                                .background(p.color.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(p.name).font(.headline).foregroundStyle(.white)
+                                Text(p.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                                Text("⚔️+\(p.atk) 🛡️+\(p.def) ❤️+\(p.hp) · 🐾 tiếp sức \(Int(p.assist*100))%")
+                                    .font(.system(size: 10, weight: .bold)).foregroundStyle(p.color)
+                            }
+                            Spacer()
+                            if active { Text("Đồng hành").font(.caption.bold()).foregroundStyle(.green) }
+                            else if owned {
+                                Button("Chọn") { game.equipPet(p.id) }.font(.caption.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 7).background(.blue, in: Capsule())
+                            } else {
+                                Button("💎\(p.price)") { flash(game.buyPet(p) ? "✅ Đã thu phục \(p.name)!" : "❌ Không đủ linh thạch!") }
+                                    .font(.caption.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .background(game.s.linhThach >= p.price ? Color.orange : Color.gray, in: Capsule())
+                                    .buttonStyle(TNPress(glow: .orange))
+                            }
+                        }
+                        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                    }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.1,green:0.06,blue:0.08), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Thú Cưng").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
         }
     }
     private func flash(_ m: String) {
