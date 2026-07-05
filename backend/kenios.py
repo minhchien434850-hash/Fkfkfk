@@ -6467,6 +6467,8 @@ _TG_RESERVED = {
     "dovui", "goiy", "boqua", "dungdo", "diemdo", "baicao", "xidach", "rut", "dan", "baucua",
     # 🤖 Trợ lý AI
     "ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp", "aidm", "aiall",
+    # 🛒 Tư vấn khách hàng
+    "tuvan", "banggia", "gia", "muahack", "hotro", "setpay", "setweb",
 }
 
 # ======================== 🤖 Trợ lý AI trong bot (bật/tắt bằng /ai) ========================
@@ -6795,6 +6797,89 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
                  "đời sống, hỏi ngày/giờ… đều trả lời chính xác.\n"
                  "🛡️ Tự bỏ qua tin quá ngắn (ok/haha) &amp; giới hạn nhịp để không spam.\n"
                  "Nếu muốn tôi CHỈ trả lời khi được gọi (reply/tag/\"?\"): <code>/aiall off</code> · Tắt hẳn: <code>/ai off</code>.")
+
+# ======================== 🛒 Tư vấn khách hàng KENIOS (chọn OS → game → bảng giá) ========================
+def _kenios_catalog() -> dict:
+    """Danh mục sản phẩm & bảng giá (giá KHÔNG bí mật — sửa trực tiếp ở đây khi đổi giá)."""
+    return {
+        "pubg": {
+            "name": "🔫 PUBG Mobile",
+            "ios": [("💎 VNHAX", "600K/tháng · 300K/tuần"),
+                    ("💎 VNHAX MOD SKIN VN", "450K/tháng · 225K/tuần"),
+                    ("💎 OASIS VIP", "800K/tháng · 400K/tuần"),
+                    ("💎 KING", "900K/tháng · 450K/tuần"),
+                    ("💎 TIMO VIP", "500K/tháng · 250K/tuần · 50K/ngày"),
+                    ("💎 VINGODL", "550K/tháng · 250K/tuần")],
+            "android": [("💰 ZOLO", "500K/tháng · 250K/tuần"),
+                        ("💰 MG", "500K/tháng · 250K/tuần"),
+                        ("💰 VNB", "500K/tháng · 250K/tuần"),
+                        ("💰 ROOT", "650K/tháng")],
+            "goiy": {"ios": "🛡️ An toàn & ổn định nhất: <b>VNHAX</b> hoặc <b>TIMO VIP</b> (có gói ngày 50K để thử trước).",
+                     "android": "🛡️ An toàn & chơi ổn nhất: <b>ZOLO</b> / <b>VNB</b>. Máy đã root thì thêm bản <b>ROOT</b>."},
+        },
+        "lienquan": {
+            "name": "⚔️ Liên Quân",
+            "both": [("⚔️ LIÊN QUÂN", "250K/tháng · 120K/tuần")],
+            "goiy": {"": "🛡️ Bản Liên Quân an toàn, ổn định — dùng được cả iOS &amp; Android."},
+        },
+        "hyper": {
+            "name": "🔥 Hyper",
+            "both": [("🔥 HYPER", "350K/tháng · 150K/tuần"), ("🔥 HYPER CHỐNG TỐ", "650K/tháng")],
+            "goiy": {"": "🛡️ Muốn an toàn tránh bị báo cáo/tố → chọn bản <b>HYPER CHỐNG TỐ</b>."},
+        },
+    }
+
+# Từ khoá khách hỏi tư vấn → kích hoạt luồng chọn OS/game.
+_KENIOS_SUP_TRIGGERS = (
+    "an toàn", "bản nào", "ban nao", "bảng giá", "bang gia", "tư vấn", "tu van",
+    "chơi ok", "choi ok", "chơi oke", "ngon nhất", "ngon nhat", "nên mua", "nen mua",
+    "bản nào tốt", "bản nào ngon", "có bản nào", "co ban nao", "mua bản", "mua ban",
+    "bao nhiêu tiền", "giá bao nhiêu", "gia bao nhieu", "mua hack", "còn bản", "con ban",
+)
+
+def _kenios_wants_support(low: str) -> bool:
+    return bool(low) and any(k in low for k in _KENIOS_SUP_TRIGGERS)
+
+def _kenios_support_start(token, chat_id) -> None:
+    _tg_send(token, chat_id,
+             "👋 <b>KENIOS — Tư vấn chọn bản an toàn</b>\n\n"
+             "Để shop tư vấn bản <b>an toàn &amp; hợp máy</b> nhất, cho hỏi nhẹ:\n"
+             "📲 <b>Bạn đang dùng hệ điều hành nào?</b>",
+             buttons=[[{"text": "📱 iOS (iPhone)", "callback_data": "ksup:os:ios"},
+                       {"text": "🤖 Android", "callback_data": "ksup:os:android"}]])
+
+def _kenios_support_games(token, chat_id, os_, mid=None) -> None:
+    oslabel = "📱 iOS (iPhone)" if os_ == "ios" else "🤖 Android"
+    btns = [[{"text": "🔫 PUBG Mobile", "callback_data": f"ksup:game:{os_}:pubg"}],
+            [{"text": "⚔️ Liên Quân", "callback_data": f"ksup:game:{os_}:lienquan"}],
+            [{"text": "🔥 Hyper", "callback_data": f"ksup:game:{os_}:hyper"}]]
+    text = f"✅ Hệ điều hành: <b>{oslabel}</b>\n\n🎮 <b>Bạn muốn chơi game nào?</b>"
+    if mid:
+        _tg_call(token, "editMessageText", chat_id=chat_id, message_id=mid, text=text,
+                 parse_mode="HTML", reply_markup={"inline_keyboard": btns})
+    else:
+        _tg_send(token, chat_id, text, buttons=btns)
+
+def _kenios_support_info(token, chat_id, os_, game) -> None:
+    g = _kenios_catalog().get(game)
+    if not g:
+        return
+    oslabel = "📱 iOS (iPhone)" if os_ == "ios" else "🤖 Android"
+    if game == "pubg":
+        items = g["ios"] if os_ == "ios" else g["android"]
+        goiy = g["goiy"]["ios" if os_ == "ios" else "android"]
+    else:
+        items = g["both"]
+        goiy = g["goiy"][""]
+    lines = "\n".join(f"{n} — <b>{p}</b>" for n, p in items)
+    web = get_setting("kenios_website", "https://linkbio.co/KENIOS")
+    pay = get_setting("kenios_pay", "")
+    txt = (f"{g['name']} — <b>{oslabel}</b>\n━━━━━━━━━━━━━━\n{lines}\n\n{goiy}\n\n"
+           f"🌐 Tất cả dịch vụ: {web}")
+    if pay:
+        txt += f"\n🏦 Thanh toán: {pay}"
+    txt += "\n\n💬 Anh/chị chốt bản nào cứ nhắn shop để được kích hoạt ngay nhé! ❤️"
+    _tg_send(token, chat_id, txt)
 
 def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
     """Gửi 1 thông báo tới TẤT CẢ người đã từng nhắn bot (loa phường)."""
@@ -7678,6 +7763,10 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
                     kwargs={"chat_id": chat_id, "message_id": mid,
                             "reaction": [{"type": "emoji", "emoji": get_setting("tg_autoreact_emoji", "👍")}]},
                     daemon=True).start()
+    # 🛒 KHÁCH HỎI TƯ VẤN trong nhóm ("bản nào an toàn", "chơi ok nhất"…) → mở luồng chọn OS → game.
+    if text and not text.startswith("/") and _kenios_wants_support(low):
+        _kenios_support_start(token, chat_id)
+        return
     # 🤖 AI: BẬT ở nhóm → trả lời khi được gọi (reply/tag/"ai"/"?"), hoặc TRẢ LỜI TẤT CẢ nếu /aiall on.
     _aiw = _tg_ai_wants(chat_id, msg, text, low)
     if _aiw:
@@ -7774,6 +7863,15 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                 _tg_call(token, "answerCallbackQuery", callback_query_id=cq.get("id", ""), text="Nút này không dành cho bạn.")
             return
         _tg_call(token, "answerCallbackQuery", callback_query_id=cq.get("id", ""))
+        # 🛒 Luồng tư vấn: chọn OS → chọn game → bảng giá đầy đủ
+        if data.startswith("ksup:"):
+            _kp = data.split(":")
+            _kmid = cq.get("message", {}).get("message_id")
+            if len(_kp) >= 3 and _kp[1] == "os":
+                _kenios_support_games(token, chat, _kp[2], _kmid)
+            elif len(_kp) >= 4 and _kp[1] == "game":
+                _kenios_support_info(token, chat, _kp[2], _kp[3])
+            return
         if data == "support":
             _tg_send(token, chat, "✍️ Bạn cứ nhắn nội dung cần hỗ trợ ở đây, đội ngũ KENIOS sẽ trả lời sớm nhất.")
         elif data == "about":
@@ -7809,6 +7907,28 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
             elif _aic == "aioff":
                 _c, _a = "ai", "off"
             _tg_ai_command(token, chat_id, msg, _c, _a, _aiadmin, ctype)
+            return
+
+    # 🛒 Tư vấn khách hàng KENIOS: /tuvan /banggia mở luồng · /setpay /setweb (admin) đặt thanh toán.
+    if _tgtxt.startswith("/") and _tgtxt.split():
+        _kc = _tgtxt.split()[0].lstrip("/").split("@")[0].lower()
+        if _kc in ("tuvan", "banggia", "gia", "muahack", "hotro"):
+            _kenios_support_start(token, chat_id)
+            return
+        if _kc in ("setpay", "setweb"):
+            _uid3 = (msg.get("from") or {}).get("id")
+            _kadm = (bool(admin_chat) and chat_id == str(admin_chat)) or (
+                ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _uid3))
+            if not _kadm:
+                _tg_send(token, chat_id, "🔒 Lệnh này chỉ dành cho <b>quản trị viên</b>.")
+                return
+            _kv = _tgtxt.split(maxsplit=1)[1].strip() if len(_tgtxt.split(maxsplit=1)) > 1 else ""
+            if _kc == "setpay":
+                set_setting("kenios_pay", _kv)
+                _tg_send(token, chat_id, f"✅ Đã lưu thông tin thanh toán hiển thị khi tư vấn:\n{_kv or '(đã xoá)'}")
+            else:
+                set_setting("kenios_website", _kv or "https://linkbio.co/KENIOS")
+                _tg_send(token, chat_id, f"✅ Đã lưu website dịch vụ: {_kv or 'https://linkbio.co/KENIOS'}")
             return
 
     # 🔗 Lệnh QUẢN LÝ NỘI DUNG BOT & ⚙️ LỆNH TÙY BIẾN — chạy ở cả nhóm & chat riêng.
@@ -7863,6 +7983,10 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
             if not _tg_quiz_try(token, chat_id, msg, _qtxt):
                 _tg_send(token, chat_id, "❌ Chưa đúng, thử lại nào! (✍️ nhắn thẳng đáp án · /goiy — gợi ý · /boqua — bỏ qua)")
             return
+    # 🛒 KHÁCH HỎI TƯ VẤN ("bản nào an toàn", "chơi ok nhất"…) → mở luồng chọn OS → game → bảng giá.
+    if text and not text.startswith("/") and _kenios_wants_support(text.lower()):
+        _kenios_support_start(token, chat_id)
+        return
     # 🤖 AI trong CHAT RIÊNG: MẶC ĐỊNH BẬT (khi có khoá) → nhắn thẳng là AI trả lời, KHỎI CẦN LỆNH.
     # (Trừ khi admin /aidm off, hoặc DM này /ai off; và không nuốt tin admin đang reply cho khách.)
     if _tg_ai_dm_on(chat_id) and text and not text.startswith("/") and text != "[media]":
@@ -7974,6 +8098,7 @@ def _tg_register_commands(token: str) -> None:
     # Lệnh CÔNG KHAI — mọi người thấy khi bấm "/"
     pub = [
         ("help", "Menu & danh sách lệnh"), ("menu", "Mở menu nút bấm"),
+        ("tuvan", "🛒 Tư vấn chọn bản (bảng giá)"), ("banggia", "💰 Xem bảng giá"),
         ("hoiai", "🤖 Hỏi trợ lý AI"),
         ("nhac", "Lấy nhạc YouTube/TikTok"),
         ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"),
