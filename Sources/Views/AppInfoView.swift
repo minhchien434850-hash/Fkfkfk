@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // §5 — "Thông tin ứng dụng": màn công khai (tách khỏi trang quản trị) thể hiện
 // rõ Ngày sản xuất và Nhà phát hành để tăng tính minh bạch, chuyên nghiệp.
@@ -21,6 +22,12 @@ struct AppInfoView: View {
         return "\(1 + idx / 10).\(idx % 10)"
     }
     private let publisher = "KENIOS"
+
+    // Kiểm tra cập nhật THỦ CÔNG (dò GitHub Release mới nhất)
+    @State private var checking = false
+    @State private var checkMsg: String?
+    @State private var updateLink: String?
+    @State private var showUpdate = false
 
     // Ngày sản xuất ≈ ngày build (lấy theo thời điểm sửa Info.plist trong gói app).
     private var productionDate: Date {
@@ -69,6 +76,27 @@ struct AppInfoView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .padding(.horizontal)
 
+                // Nút KIỂM TRA CẬP NHẬT thủ công
+                Button {
+                    Task { await checkUpdate() }
+                } label: {
+                    HStack {
+                        if checking { ProgressView().padding(.trailing, 4) }
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text(store.t("Kiểm tra cập nhật", "Check for updates")).bold()
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                    .background(Theme.accent.opacity(0.15))
+                    .foregroundStyle(Theme.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(checking)
+                .padding(.horizontal)
+                if let checkMsg {
+                    Text(checkMsg).font(.caption).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).padding(.horizontal)
+                }
+
                 Text("© \(String(Calendar.current.component(.year, from: Date()))) \(publisher). "
                      + store.t("Bảo lưu mọi quyền.", "All rights reserved."))
                     .font(.caption2).foregroundStyle(.tertiary)
@@ -79,6 +107,28 @@ struct AppInfoView: View {
         }
         .navigationTitle(store.t("Thông tin ứng dụng", "App Information"))
         .navigationBarTitleDisplayMode(.inline)
+        .alert(store.t("Có bản cập nhật mới", "Update available"), isPresented: $showUpdate) {
+            Button(store.t("Cập nhật ngay", "Update now")) {
+                if let l = updateLink, let u = URL(string: l) { UIApplication.shared.open(u) }
+            }
+            Button(store.t("Để sau", "Later"), role: .cancel) {}
+        } message: {
+            Text(checkMsg ?? "")
+        }
+    }
+
+    // Dò bản mới trên GitHub Release; có thì mở hộp cập nhật, không thì báo đã mới nhất.
+    private func checkUpdate() async {
+        checking = true; checkMsg = nil; defer { checking = false }
+        let curBuild = Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
+        if let up = await MainTabView.checkGitHubUpdate(), up.build > curBuild {
+            updateLink = up.ipaURL
+            checkMsg = store.t("Đã có phiên bản \(MainTabView.versionFromBuild(up.build)) — bấm Cập nhật ngay để cài.",
+                               "Version \(MainTabView.versionFromBuild(up.build)) is available — tap Update now.")
+            showUpdate = true
+        } else {
+            checkMsg = store.t("✅ Bạn đang dùng phiên bản mới nhất.", "✅ You're on the latest version.")
+        }
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {

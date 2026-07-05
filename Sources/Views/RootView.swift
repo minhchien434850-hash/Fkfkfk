@@ -245,13 +245,6 @@ struct MainTabView: View {
                         updateVersion = latest
                         showUpdate = true
                     }
-                    // TỰ ĐỘNG: nếu chưa có nguồn nào → tự dò bản mới trên GitHub Release (bản chưa ký, qua ESign).
-                    if !showUpdate, let up = await Self.checkGitHubUpdate(), up.build > Self.appBuild {
-                        updateLink = up.ipaURL
-                        updateVersion = Self.versionFromBuild(up.build)
-                        updateMsg = ""
-                        showUpdate = true
-                    }
                     // §1.3 — Lời chào toàn cục cho MỌI người
                     if cfg.welcomePopupEnabled == true {
                         let t = (cfg.welcomePopupText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -274,6 +267,14 @@ struct MainTabView: View {
                             voiceId: gvid.isEmpty ? store.welcomeVoiceId : gvid,
                             rate: cfg.welcomeVoiceRate ?? store.welcomeRate)
                     }
+                }
+                // TỰ ĐỘNG dò bản mới trên GitHub Release — CHẠY ĐỘC LẬP (không phụ thuộc
+                // storeConfig thành công) để không bao giờ bị "im" khi máy chủ chậm 1 nhịp.
+                if !showUpdate, let up = await Self.checkGitHubUpdate(), up.build > Self.appBuild {
+                    updateLink = up.ipaURL
+                    updateVersion = Self.versionFromBuild(up.build)
+                    updateMsg = ""
+                    showUpdate = true
                 }
             }
             // §1.1 — Kiểm tra thông báo phát (sản phẩm mới…) ngay khi mở app
