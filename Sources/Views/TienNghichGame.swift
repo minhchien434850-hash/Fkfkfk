@@ -175,6 +175,40 @@ let TN_GUILDS: [TNGuild] = [
 ]
 func tnGuild(_ id: String) -> TNGuild? { TN_GUILDS.first { $0.id == id } }
 
+// MARK: - Thú cưỡi bay (mount) — cưỡi để tăng chỉ số & oai phong
+struct TNMount: Identifiable {
+    let id: String; let name: String; let emoji: String; let price: Int
+    let atk: Int; let def: Int; let hp: Int; let desc: String; let color: Color
+}
+let TN_MOUNTS: [TNMount] = [
+    TNMount(id: "hac", name: "Hắc Vân Điêu", emoji: "🦅", price: 500, atk: 12, def: 8, hp: 80,
+            desc: "Chim ưng mây đen · phi hành nhập môn, nhanh nhẹn.", color: .gray),
+    TNMount(id: "bach", name: "Bạch Hạc Tiên", emoji: "🕊️", price: 1200, atk: 18, def: 20, hp: 160,
+            desc: "Tiên hạc thanh nhã · cưỡi mây đạp gió, khí chất bất phàm.", color: .teal),
+    TNMount(id: "phuong", name: "Ngũ Sắc Phượng", emoji: "🦚", price: 2600, atk: 40, def: 28, hp: 260,
+            desc: "Phượng hoàng ngũ sắc · thần thú truyền thuyết, uy chấn tứ phương.", color: .pink),
+    TNMount(id: "long", name: "Chân Long Ngự Thiên", emoji: "🐲", price: 5200, atk: 70, def: 50, hp: 460,
+            desc: "Chân long ngự thiên · thú cưỡi tối thượng, chân long hộ chủ.", color: .yellow),
+]
+func tnMount(_ id: String) -> TNMount? { TN_MOUNTS.first { $0.id == id } }
+
+// MARK: - Đạo lữ (bạn đời tu tiên) — kết duyên nhận thân mật & buff
+struct TNSpouse: Identifiable {
+    let id: String; let name: String; let emoji: String; let dowry: Int
+    let title: String; let desc: String; let color: Color
+}
+let TN_SPOUSES: [TNSpouse] = [
+    TNSpouse(id: "lymuwan", name: "Lý Mộ Uyển", emoji: "🌸", dowry: 800,
+             title: "Thiên Kiều Thánh Nữ", desc: "Tiểu thư danh môn dịu dàng, thanh mai trúc mã của Vương Lâm.", color: .pink),
+    TNSpouse(id: "cothanhy", name: "Cổ Thanh Y", emoji: "❄️", dowry: 1600,
+             title: "Băng Sơn Kiếm Tiên", desc: "Nữ kiếm tu lạnh lùng, chỉ vì một người mà tan băng.", color: .cyan),
+    TNSpouse(id: "hongnhi", name: "Hồng Nhi", emoji: "🔥", dowry: 2400,
+             title: "Hỏa Linh Yêu Cơ", desc: "Yêu nữ hoả linh nhiệt tình, ái mộ cường giả nghịch thiên.", color: .red),
+    TNSpouse(id: "tuyennguyet", name: "Tuyến Nguyệt Tiên Tử", emoji: "🌙", dowry: 4000,
+             title: "Nguyệt Cung Thượng Tiên", desc: "Thượng tiên nơi nguyệt cung, duyên phận vượt tam giới.", color: .purple),
+]
+func tnSpouse(_ id: String) -> TNSpouse? { TN_SPOUSES.first { $0.id == id } }
+
 // MARK: - Bậc danh vọng PvP (theo điểm)
 struct TNRank { let name: String; let emoji: String; let color: Color }
 func tnPvpRank(_ pts: Int) -> TNRank {
@@ -274,6 +308,10 @@ struct TNSave: Codable {
     var pvpPoints = 0        // điểm danh vọng PvP
     var pvpWins = 0
     var pvpLosses = 0
+    var spouse = ""          // đạo lữ đã kết duyên (id)
+    var affinity = 0         // độ thân mật với đạo lữ (tặng quà tăng)
+    var ownedMounts: [String] = []
+    var activeMount = ""     // thú cưỡi đang cưỡi (thú bay)
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -293,10 +331,17 @@ struct TNSave: Codable {
     private var petHpB: Int { tnPet(activePet)?.hp ?? 0 }
     private var guildAtkMul: Double { 1 + (tnGuild(guild)?.atkBuff ?? 0) }
     private var guildHpMul: Double { 1 + (tnGuild(guild)?.hpBuff ?? 0) }
-    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB)) * guildHpMul) }
+    private var mountAtkB: Int { tnMount(activeMount)?.atk ?? 0 }
+    private var mountDefB: Int { tnMount(activeMount)?.def ?? 0 }
+    private var mountHpB: Int { tnMount(activeMount)?.hp ?? 0 }
+    // Đạo lữ: mỗi bậc thân mật (mỗi 100 điểm) cộng nhẹ công & máu
+    var affinityTier: Int { min(affinity / 100, 5) }
+    private var spouseAtkB: Int { spouse.isEmpty ? 0 : affinityTier * 12 }
+    private var spouseHpB: Int { spouse.isEmpty ? 0 : affinityTier * 60 }
+    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB)) * guildHpMul) }
     var mpMax: Int { 60 + tier * 40 + level * 6 }
-    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB)) * guildAtkMul) }
-    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB }
+    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB)) * guildAtkMul) }
+    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB + mountDefB }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
     var powerScore: Int { atk * 3 + def * 5 + hpMax }
@@ -559,6 +604,44 @@ final class TNGame: ObservableObject {
         }
     }
 
+    // Thú cưỡi bay: mua & cưỡi
+    func buyMount(_ m: TNMount) -> Bool {
+        guard !s.ownedMounts.contains(m.id), s.linhThach >= m.price else { return false }
+        s.linhThach -= m.price
+        s.ownedMounts.append(m.id)
+        s.activeMount = m.id
+        s.hp = min(s.hp, s.hpMax)
+        save(); return true
+    }
+    func rideMount(_ id: String) {
+        if id.isEmpty || s.ownedMounts.contains(id) { s.activeMount = id; s.hp = min(s.hp, s.hpMax); save() }
+    }
+
+    // Đạo lữ: kết duyên (trả sính lễ) & tặng quà tăng thân mật
+    func marry(_ sp: TNSpouse) -> String {
+        guard s.spouse != sp.id else { return "💞 Hai người đã là đạo lữ rồi." }
+        guard s.linhThach >= sp.dowry else { return "❌ Thiếu linh thạch làm sính lễ (cần \(sp.dowry))." }
+        s.linhThach -= sp.dowry
+        s.spouse = sp.id
+        s.affinity = max(s.affinity, 50)
+        s.hp = min(s.hp, s.hpMax)
+        save()
+        return "💐 Kết duyên đạo lữ cùng \(sp.name)! Tình thâm cộng thêm chỉ số."
+    }
+    func giftSpouse() -> String {
+        guard !s.spouse.isEmpty else { return "❌ Chưa có đạo lữ." }
+        let cost = 150
+        guard s.linhThach >= cost else { return "❌ Thiếu linh thạch tặng quà (cần \(cost))." }
+        s.linhThach -= cost
+        let old = s.affinityTier
+        s.affinity += 40
+        s.hp = min(s.hp, s.hpMax)
+        save()
+        let up = s.affinityTier > old ? " · 💖 Thân mật lên bậc \(s.affinityTier)!" : ""
+        return "🎁 Tặng quà — thân mật +40 (hiện \(s.affinity))\(up)"
+    }
+    func divorce() { s.spouse = ""; s.affinity = 0; s.hp = min(s.hp, s.hpMax); save() }
+
     // Tạo nhân vật mới (server + tên + môn phái)
     func createCharacter(name: String, server: String, sect: TNSect) {
         var v = TNSave()
@@ -732,6 +815,8 @@ struct TNHomeView: View {
     @State private var showPets = false
     @State private var showGuild = false
     @State private var showPvP = false
+    @State private var showMount = false
+    @State private var showSpouse = false
 
     var body: some View {
         ScrollView {
@@ -772,6 +857,24 @@ struct TNHomeView: View {
                 }
                 .foregroundStyle(.white)
 
+                // Đạo lữ & thú cưỡi đang gắn (nếu có)
+                if !game.s.spouse.isEmpty || !game.s.activeMount.isEmpty {
+                    HStack(spacing: 8) {
+                        if let sp = tnSpouse(game.s.spouse) {
+                            Label("\(sp.emoji) \(sp.name)", systemImage: "heart.fill")
+                                .font(.caption2.bold()).foregroundStyle(.pink)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(.pink.opacity(0.18), in: Capsule())
+                        }
+                        if let m = tnMount(game.s.activeMount) {
+                            Text("🐲 Cưỡi \(m.emoji) \(m.name)")
+                                .font(.caption2.bold()).foregroundStyle(.cyan)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(.cyan.opacity(0.18), in: Capsule())
+                        }
+                    }
+                }
+
                 // Chỉ số
                 VStack(spacing: 8) {
                     TNBar(value: game.s.hp, maxValue: game.s.hpMax, colors: [.green, .mint], label: "❤️")
@@ -810,6 +913,8 @@ struct TNHomeView: View {
                     Button { showArena = true } label: { bigBtn("🏆 Đấu Đài — Thách Đấu Cao Thủ", [.yellow, .orange]) }.buttonStyle(TNPress(glow: .yellow))
                     Button { showPvP = true } label: { bigBtn("⚔️ PvP Xếp Hạng — Đấu Danh Vọng", [.red, .pink]) }.buttonStyle(TNPress(glow: .red))
                     Button { showGuild = true } label: { bigBtn("🏯 Bang Hội — Gia Nhập Thế Lực", [.indigo, .cyan]) }.buttonStyle(TNPress(glow: .cyan))
+                    Button { showMount = true } label: { bigBtn("🐲 Thú Cưỡi Bay — Ngự Không Phi Hành", [.blue, .indigo]) }.buttonStyle(TNPress(glow: .blue))
+                    Button { showSpouse = true } label: { bigBtn("💞 Đạo Lữ — Kết Duyên Tu Tiên", [.pink, .red]) }.buttonStyle(TNPress(glow: .pink))
                     Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }.buttonStyle(TNPress(glow: .pink))
                 }
                 .padding(.horizontal)
@@ -832,6 +937,8 @@ struct TNHomeView: View {
         .sheet(isPresented: $showPets) { TNPetView(game: game) }
         .sheet(isPresented: $showGuild) { TNGuildView(game: game) }
         .fullScreenCover(isPresented: $showPvP) { TNPvPView(game: game) }
+        .sheet(isPresented: $showMount) { TNMountView(game: game) }
+        .sheet(isPresented: $showSpouse) { TNSpouseView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -1754,6 +1861,163 @@ struct TNPvPView: View {
             Spacer()
             Text(pts).font(.caption2.bold()).foregroundStyle(.white.opacity(0.6))
         }
+    }
+}
+
+// MARK: - Thú Cưỡi Bay (mua & cưỡi để tăng chỉ số + oai phong)
+struct TNMountView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("🐲 THÚ CƯỠI BAY").font(.title2.bold()).foregroundStyle(.blue)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal).padding(.top, 8)
+                    Text("Cưỡi thú bay để tăng chỉ số & ngự không phi hành khắp tiên giới.")
+                        .font(.caption).foregroundStyle(.white.opacity(0.6)).multilineTextAlignment(.center)
+                    if !game.s.activeMount.isEmpty {
+                        Button { game.rideMount("") } label: {
+                            Text("Đang cưỡi: \(tnMount(game.s.activeMount)?.emoji ?? "") \(tnMount(game.s.activeMount)?.name ?? "") — bấm để XUỐNG")
+                                .font(.caption).foregroundStyle(.yellow)
+                        }
+                    }
+                    ForEach(TN_MOUNTS) { m in
+                        let owned = game.s.ownedMounts.contains(m.id)
+                        let active = game.s.activeMount == m.id
+                        HStack(spacing: 12) {
+                            Text(m.emoji).font(.system(size: 34))
+                                .frame(width: 56, height: 56)
+                                .background(m.color.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(m.name).font(.headline).foregroundStyle(.white)
+                                Text(m.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                                Text("⚔️+\(m.atk) 🛡️+\(m.def) ❤️+\(m.hp)")
+                                    .font(.system(size: 10, weight: .bold)).foregroundStyle(m.color)
+                            }
+                            Spacer()
+                            if active { Text("Đang cưỡi").font(.caption.bold()).foregroundStyle(.green) }
+                            else if owned {
+                                Button("Cưỡi") { game.rideMount(m.id) }.font(.caption.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 7).background(.blue, in: Capsule())
+                            } else {
+                                Button("💎\(m.price)") { flash(game.buyMount(m) ? "✅ Đã thu phục \(m.name)!" : "❌ Không đủ linh thạch!") }
+                                    .font(.caption.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .background(game.s.linhThach >= m.price ? Color.orange : Color.gray, in: Capsule())
+                                    .buttonStyle(TNPress(glow: .orange))
+                            }
+                        }
+                        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                    }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.04,green:0.06,blue:0.14), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Thú Cưỡi").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+        }
+    }
+    private func flash(_ m: String) {
+        withAnimation { msg = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Đạo Lữ (kết duyên tu tiên · tặng quà tăng thân mật)
+struct TNSpouseView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    @State private var hearts = false
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("💞 ĐẠO LỮ").font(.title2.bold()).foregroundStyle(.pink)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal).padding(.top, 8)
+
+                    if let sp = tnSpouse(game.s.spouse) {
+                        VStack(spacing: 8) {
+                            Text(sp.emoji).font(.system(size: 56)).scaleEffect(hearts ? 1.12 : 1.0)
+                            Text("💐 \(sp.name)").font(.title3.bold()).foregroundStyle(sp.color)
+                            Text(sp.title).font(.caption).foregroundStyle(.white.opacity(0.75))
+                            Text("💖 Thân mật: \(game.s.affinity) · Bậc \(game.s.affinityTier)/5")
+                                .font(.subheadline.bold()).foregroundStyle(.pink)
+                            Text("Buff đạo lữ: ⚔️ +\(game.s.affinityTier*12) công · ❤️ +\(game.s.affinityTier*60) máu")
+                                .font(.caption2).foregroundStyle(.white.opacity(0.7))
+                            HStack(spacing: 10) {
+                                Button {
+                                    flash(game.giftSpouse())
+                                    withAnimation(.spring()) { hearts = true }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { hearts = false }
+                                } label: {
+                                    Text("🎁 Tặng quà (150)").font(.caption.bold()).foregroundStyle(.white)
+                                        .padding(.horizontal, 16).padding(.vertical, 9)
+                                        .background(.pink, in: Capsule())
+                                }.buttonStyle(TNPress(glow: .pink))
+                                Button { game.divorce(); flash("Đã hoà li, duyên phận đã hết.") } label: {
+                                    Text("Hoà li").font(.caption.bold()).foregroundStyle(.white)
+                                        .padding(.horizontal, 16).padding(.vertical, 9)
+                                        .background(.gray.opacity(0.7), in: Capsule())
+                                }.buttonStyle(TNPress(glow: .gray))
+                            }
+                        }
+                        .padding(16).frame(maxWidth: .infinity)
+                        .background(sp.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 18))
+                        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(sp.color.opacity(0.6), lineWidth: 1))
+                        .padding(.horizontal)
+                    } else {
+                        Text("Kết duyên đạo lữ để đồng tu song hành — tình thâm càng sâu, chỉ số càng mạnh.")
+                            .font(.caption).foregroundStyle(.white.opacity(0.65))
+                            .multilineTextAlignment(.center).padding(.horizontal)
+                    }
+
+                    Text(game.s.spouse.isEmpty ? "Chọn đạo lữ để kết duyên" : "Đổi đạo lữ (kết duyên lại)")
+                        .font(.caption.bold()).foregroundStyle(.white.opacity(0.6))
+                    ForEach(TN_SPOUSES) { sp in
+                        let cur = game.s.spouse == sp.id
+                        HStack(spacing: 12) {
+                            Text(sp.emoji).font(.system(size: 34))
+                                .frame(width: 56, height: 56)
+                                .background(sp.color.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(sp.name).font(.headline).foregroundStyle(.white)
+                                Text(sp.title).font(.caption2.bold()).foregroundStyle(sp.color)
+                                Text(sp.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                            }
+                            Spacer()
+                            if cur { Text("Đạo lữ").font(.caption.bold()).foregroundStyle(.green) }
+                            else {
+                                Button("💍 \(sp.dowry)") { flash(game.marry(sp)) }
+                                    .font(.caption.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .background(game.s.linhThach >= sp.dowry ? sp.color : Color.gray, in: Capsule())
+                                    .buttonStyle(TNPress(glow: sp.color))
+                            }
+                        }
+                        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                    }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.12,green:0.04,blue:0.09), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Đạo Lữ").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+        }
+    }
+    private func flash(_ m: String) {
+        withAnimation { msg = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
     }
 }
 
