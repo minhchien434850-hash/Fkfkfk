@@ -28,7 +28,7 @@ struct CertInfo {
 // Admin nhập chứng chỉ của admin → tài khoản khác trên cùng máy KHÔNG thấy.
 enum CertVault {
     static var docs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
-    static func key(_ store: AppStore) -> String { String(store.userId ?? 0) }
+    @MainActor static func key(_ store: AppStore) -> String { String(store.userId ?? 0) }
     static func p12(_ owner: String) -> URL { docs.appendingPathComponent("cert_\(owner).p12") }
     static func provision(_ owner: String) -> URL { docs.appendingPathComponent("cert_\(owner).mobileprovision") }
     static func passwordKey(_ owner: String) -> String { "cert_p12_password_\(owner)" }
