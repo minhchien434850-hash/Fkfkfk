@@ -5086,6 +5086,208 @@ def _tg_start_music(token, chat_id, arg) -> None:
     import threading
     threading.Thread(target=_tg_music_task, args=(token, chat_id, arg), daemon=True).start()
 
+# ---------- 🎬 TẢI VIDEO (nhanh + cắt phần khi quá dung lượng) ----------
+_TG_VIDEO_LIMIT = 49 * 1024 * 1024
+
+def _tg_yt_video(query: str):
+    """Tải video mp4 (≤720p cho NHANH) bằng yt-dlp với 8 luồng song song. Trả (path, title, err)."""
+    if not shutil.which("yt-dlp"):
+        return None, "", "Máy chủ chưa cài yt-dlp"
+    import tempfile as _tf, glob as _glob
+    d = _tf.mkdtemp(prefix="tgv_")
+    src = query if query.lower().startswith("http") else f"ytsearch1:{query}"
+    out = os.path.join(d, "%(title).80s.%(ext)s")
+    cmd = ["yt-dlp", "-N", "8", "--no-playlist", "--no-warnings",
+           "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/b[ext=mp4]/best",
+           "--merge-output-format", "mp4", "-o", out, src]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    except Exception as e:
+        shutil.rmtree(d, ignore_errors=True); return None, "", str(e)
+    fs = [f for f in _glob.glob(os.path.join(d, "*"))
+          if os.path.splitext(f)[1].lower() in (".mp4", ".mkv", ".webm", ".mov")]
+    if not fs:
+        err = ((r.stderr or "") + (r.stdout or ""))[-300:]
+        shutil.rmtree(d, ignore_errors=True); return None, "", err or "không tải được"
+    p = max(fs, key=os.path.getsize)
+    return p, os.path.splitext(os.path.basename(p))[0], ""
+
+def _tg_fit_video(path: str) -> list:
+    """Chia video >50MB thành nhiều khúc ≤ ~46MB (cắt nhanh không mã hoá lại)."""
+    try:
+        if os.path.getsize(path) <= _TG_VIDEO_LIMIT:
+            return [path]
+    except Exception:
+        return [path]
+    if not shutil.which("ffmpeg"):
+        return [path]
+    import glob as _glob
+    d = os.path.dirname(path); base = os.path.splitext(os.path.basename(path))[0]
+    size = os.path.getsize(path); dur = _tg_audio_duration(path)
+    if dur <= 0 or size <= 0:
+        return [path]
+    seg = max(15, int(dur * (44 * 1024 * 1024) / size))   # thời lượng/khúc để ~44MB
+    segpat = os.path.join(d, base + "_v%03d.mp4")
+    try:
+        subprocess.run(["ffmpeg", "-y", "-v", "quiet", "-i", path, "-c", "copy", "-map", "0",
+                        "-f", "segment", "-segment_time", str(seg), "-reset_timestamps", "1", segpat],
+                       capture_output=True, timeout=1800)
+    except Exception:
+        pass
+    parts = sorted(_glob.glob(os.path.join(d, base + "_v*.mp4")))
+    return parts if parts else [path]
+
+def _tg_send_video(token: str, chat_id, path: str, caption: str) -> bool:
+    import httpx
+    try:
+        with open(path, "rb") as f:
+            r = httpx.post(f"https://api.telegram.org/bot{token}/sendVideo",
+                           data={"chat_id": str(chat_id), "caption": ("🎬 " + caption)[:1000],
+                                 "supports_streaming": "true"},
+                           files={"video": (os.path.basename(path), f, "video/mp4")}, timeout=600)
+        return bool(r.json().get("ok"))
+    except Exception as e:
+        log.warning("tg sendVideo lỗi: %s", e); return False
+
+def _tg_video_task(token: str, chat_id, arg: str) -> None:
+    import html as _h
+    arg = (arg or "").strip()
+    if not arg:
+        _tg_send(token, chat_id, "🎬 Gửi: <code>/video &lt;link hoặc tên video&gt;</code> (YouTube/TikTok/FB…)"); return
+    _tg_call(token, "sendChatAction", chat_id=chat_id, action="upload_video")
+    _tg_send(token, chat_id, "🎬 Đang tải video (nhanh, 8 luồng)…")
+    path, title, err = _tg_yt_video(arg)
+    if not path:
+        _tg_send(token, chat_id, "❌ Không tải được video.\n" + _h.escape((err or "")[:300])); return
+    try:
+        parts = _tg_fit_video(path)
+        sendable = [p for p in parts if os.path.getsize(p) <= _TG_VIDEO_LIMIT]
+        if sendable:
+            n = len(sendable)
+            if n > 1:
+                _tg_send(token, chat_id, f"🎬 <b>{_h.escape(title)}</b>\nVideo lớn nên chia làm <b>{n}</b> phần 👇")
+            fail = 0
+            for i, p in enumerate(sendable, 1):
+                _tg_call(token, "sendChatAction", chat_id=chat_id, action="upload_video")
+                cap = f"{title} ({i}/{n})" if n > 1 else title
+                if not _tg_send_video(token, chat_id, p, cap):
+                    fail += 1
+            if fail:
+                _tg_send(token, chat_id, f"⚠️ Có {fail} phần gửi chưa được, thử lại /video nhé.")
+        else:
+            tk = secrets.token_hex(8)
+            dst = os.path.join(_IPA_DIR, f"tgvid_{tk}.mp4")
+            shutil.copy(path, dst)
+            base = _ipa_base_url() or "https://app.kenios.store"
+            _tg_send(token, chat_id, f"🎬 <b>{_h.escape(title)}</b>\nFile lớn — tải tại:\n{base}/ipa/dl/tgvid_{tk}.mp4")
+    except Exception as e:
+        log.warning("tg video gửi lỗi: %s", e)
+        _tg_send(token, chat_id, "❌ Có lỗi khi gửi video.")
+    finally:
+        try: shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        except Exception: pass
+
+def _tg_start_video(token, chat_id, arg) -> None:
+    import threading
+    threading.Thread(target=_tg_video_task, args=(token, chat_id, arg), daemon=True).start()
+
+# ---------- 🛡️ QUÉT LINK: kiểm tra virus / lừa đảo + thông tin đầy đủ ----------
+def _tg_vn_now() -> str:
+    import datetime as _dt
+    return (_dt.datetime.utcnow() + _dt.timedelta(hours=7)).strftime("%H:%M:%S %d/%m/%Y")
+
+def _tg_first_url(text: str) -> str:
+    import re as _re
+    m = _re.search(r"(https?://[^\s]+|(?:www\.|t\.me/)[^\s]+)", text or "", _re.I)
+    return m.group(1) if m else ""
+
+def _tg_scan_link(url: str):
+    """Quét 1 link: mở redirect → domain/IP/HTTPS/mã, quét VirusTotal (nếu có key).
+    Trả (report_html, danger_bool)."""
+    import httpx, socket, html as _h, re as _re
+    from urllib.parse import urlparse
+    u = (url or "").strip()
+    if not _re.match(r"^https?://", u, _re.I):
+        u = "http://" + u
+    danger = False
+    final, status, server = u, "?", ""
+    try:
+        with httpx.Client(follow_redirects=True, timeout=15,
+                          headers={"User-Agent": "Mozilla/5.0"}) as c:
+            r = c.get(u)
+            final = str(r.url); status = r.status_code; server = r.headers.get("server", "")
+    except Exception as e:
+        return ("⚠️ Không mở được link này (có thể chết/chặn): " + _h.escape(str(e)[:120]) +
+                "\n🕐 " + _tg_vn_now()), True
+    host = (urlparse(final).hostname or "")
+    try:
+        ip = socket.gethostbyname(host) if host else "?"
+    except Exception:
+        ip = "?"
+    https = final.lower().startswith("https://")
+    warn = []
+    if not https:
+        warn.append("không mã hoá HTTPS")
+    if _re.match(r"^https?://\d+\.\d+\.\d+\.\d+", final):
+        warn.append("dùng IP thay tên miền")
+    shortener = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "cutt.ly",
+                 "shorturl.at", "zpr.io", "rebrand.ly", "shorten.asia"}
+    if host in shortener or (urlparse(u).hostname in shortener):
+        warn.append("link rút gọn (ẩn đích thật)")
+    bad_tld = (".zip", ".mov", ".xyz", ".top", ".tk", ".ml", ".ga", ".cf", ".gq",
+               ".click", ".country", ".work", ".rest", ".sbs")
+    if any(host.endswith(t) for t in bad_tld):
+        warn.append("tên miền lạ/hay bị lạm dụng")
+    # VirusTotal (nếu admin đặt key)
+    vt = ""
+    key = (get_setting("tg_vt_key", "") or "").strip()
+    if key:
+        try:
+            with httpx.Client(timeout=25, headers={"x-apikey": key}) as c:
+                aid = c.post("https://www.virustotal.com/api/v3/urls",
+                             data={"url": final}).json().get("data", {}).get("id", "")
+                time.sleep(3)
+                if aid:
+                    st = (c.get(f"https://www.virustotal.com/api/v3/analyses/{aid}").json()
+                          .get("data", {}).get("attributes", {}).get("stats", {}))
+                    mal, susp, harm = st.get("malicious", 0), st.get("suspicious", 0), st.get("harmless", 0)
+                    if mal or susp:
+                        danger = True
+                        vt = f"🦠 VirusTotal: <b>{mal} nơi báo ĐỘC HẠI</b>, {susp} nghi ngờ, {harm} an toàn."
+                    else:
+                        vt = f"✅ VirusTotal: không phát hiện độc hại ({harm} nơi báo an toàn)."
+        except Exception as e:
+            vt = "ℹ️ VirusTotal chưa quét được (" + _h.escape(str(e)[:60]) + ")."
+    head = "🚨 <b>CẢNH BÁO — LINK CÓ THỂ NGUY HIỂM</b>" if danger else "🔎 <b>Kết quả quét link</b>"
+    rep = [head,
+           f"🔗 Đích thật: <code>{_h.escape(final[:200])}</code>",
+           f"🌐 Tên miền: <code>{_h.escape(host)}</code> · IP: <code>{ip}</code>",
+           f"🔐 HTTPS: {'✅ có' if https else '❌ không'} · HTTP {status}" + (f" · {_h.escape(server[:40])}" if server else "")]
+    if final.rstrip("/") != u.rstrip("/"):
+        rep.append("↪️ Link gốc có CHUYỂN HƯỚNG sang địa chỉ trên.")
+    if vt:
+        rep.append(vt)
+    if warn:
+        rep.append("⚠️ Lưu ý: " + ", ".join(warn) + ".")
+    rep.append("🕐 " + _tg_vn_now())
+    if not key:
+        rep.append("💡 Bật quét virus SÂU: admin đặt VirusTotal API key (miễn phí ở virustotal.com) bằng <code>/setvt &lt;key&gt;</code>.")
+    return "\n".join(rep), danger
+
+def _tg_scan_link_task(token, chat_id, url, reply_to=None) -> None:
+    try:
+        rep, danger = _tg_scan_link(url)
+    except Exception as e:
+        log.warning("scan link lỗi: %s", e); return
+    params = {"chat_id": chat_id, "text": rep, "parse_mode": "HTML", "disable_web_page_preview": True}
+    if reply_to:
+        params["reply_to_message_id"] = reply_to
+    _tg_call(token, "sendMessage", **params)
+
+def _tg_start_scan_link(token, chat_id, url, reply_to=None) -> None:
+    import threading
+    threading.Thread(target=_tg_scan_link_task, args=(token, chat_id, url, reply_to), daemon=True).start()
+
 # ============================================================================
 #  🎮 GÓC GIẢI TRÍ & TIỆN ÍCH NHÓM — trò chơi · hài hước · bói vui · công cụ
 #  (35+ lệnh công khai, ai cũng dùng được — trong nhóm & chat riêng)
@@ -6457,7 +6659,8 @@ _TG_RESERVED = {
     "stop", "filters", "save", "clear", "notes", "setrules", "rules", "clean", "nightmode",
     "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
     "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
-    "modon", "modoff", "autodel", "modadmin",
+    "modon", "modoff", "autodel", "modadmin", "scanlink", "setvt",
+    "video", "taivideo", "quetlink", "checklink", "scan",
     # 🎮 lệnh giải trí & tiện ích (không cho lệnh riêng ghi đè)
     "xucxac", "slot", "phitieu", "bongda", "bongro", "bowling", "tungxu", "oantuti", "keobuabao",
     "doanso", "doan", "random", "chon", "xoso", "cuoi", "joke", "cakhia", "khen", "triethly",
@@ -7881,32 +8084,77 @@ def _tg_warn(token: str, chat_id: str, frm: dict, reason: str) -> None:
         _tg_send(token, chat_id, f"⚠️ {_tg_mention(frm)} bị cảnh báo ({n}/{limit}) — {reason}. Tin đã bị xoá.")
         _tg_log(token, f"WARN {_tg_name(frm)} ({n}/{limit}) tại {chat_id}: {reason}.")
 
+def _tg_user_avatar_file_id(token: str, user_id) -> str:
+    """Lấy file_id ảnh đại diện của thành viên (để gửi kèm chào/tạm biệt)."""
+    try:
+        r = _tg_call(token, "getUserProfilePhotos", user_id=user_id, limit=1)
+        photos = (r.get("result") or {}).get("photos") or []
+        if photos and photos[0]:
+            return photos[0][-1].get("file_id", "")   # cỡ lớn nhất
+    except Exception:
+        pass
+    return ""
+
+def _tg_member_count(token: str, chat_id) -> int:
+    try:
+        r = _tg_call(token, "getChatMemberCount", chat_id=chat_id)
+        return int(r.get("result", 0)) if r.get("ok") else 0
+    except Exception:
+        return 0
+
+def _tg_user_info_block(m: dict, count: int = 0) -> str:
+    """Khối thông tin đầy đủ: ID · username · ngày giờ · số thành viên."""
+    import html as _h
+    uid = m.get("id", "?")
+    uname = m.get("username", "")
+    lines = [f"🆔 ID: <code>{uid}</code>",
+             f"👤 Tên: {_tg_mention(m)}"]
+    if uname:
+        lines.append(f"🔗 Username: @{_h.escape(uname)}")
+    lines.append(f"📅 {_tg_vn_now()} (giờ VN)")
+    if count:
+        lines.append(f"👥 Nhóm hiện có: <b>{count}</b> thành viên")
+    return "\n".join(lines)
+
 def _tg_welcome_members(token: str, chat: dict, members: list) -> None:
     if get_setting("tg_welcome_on", "1") != "1": return
-    tmpl = get_setting("tg_welcome_group", "👋 Chào mừng {name} đã vào {group}!")
-    # Nút link dưới lời chào: NHIỀU nút (tg_welcome_btns, mỗi dòng 'Nhãn | link'),
-    # tương thích cấu hình cũ 1 nút (tg_welcome_btn_text/url).
+    tmpl = get_setting("tg_welcome_group", "🎉 Chào mừng {name} đã vào {group}!")
     buttons = _tg_parse_btns(get_setting("tg_welcome_btns", ""))
     if not buttons:
         bt, bu = get_setting("tg_welcome_btn_text", ""), get_setting("tg_welcome_btn_url", "")
         buttons = [[{"text": bt, "url": bu}]] if bt and bu else None
-    photo = get_setting("tg_welcome_group_photo", "").strip()
+    custom_photo = get_setting("tg_welcome_group_photo", "").strip()
     gname = chat.get("title", "nhóm")
+    chat_id = str(chat.get("id"))
+    count = _tg_member_count(token, chat_id)
     for m in members:
         if m.get("is_bot"): continue
         txt = tmpl.replace("{name}", _tg_mention(m)).replace("{group}", gname)
+        # THÔNG TIN ĐẦY ĐỦ: ID · username · ngày giờ · số thành viên
+        txt += "\n\n" + _tg_user_info_block(m, count)
+        # ẢNH: ưu tiên avatar CỦA NGƯỜI MỚI; không có thì dùng ảnh admin đặt.
+        photo = _tg_user_avatar_file_id(token, m.get("id")) or custom_photo
         if photo:
-            params = {"chat_id": str(chat.get("id")), "photo": photo, "caption": txt, "parse_mode": "HTML"}
+            params = {"chat_id": chat_id, "photo": photo, "caption": txt, "parse_mode": "HTML"}
             if buttons:
                 params["reply_markup"] = {"inline_keyboard": buttons}
             if _tg_call(token, "sendPhoto", **params).get("ok"):
                 continue
-        _tg_send(token, str(chat.get("id")), txt, buttons=buttons)
+        _tg_send(token, chat_id, txt, buttons=buttons)
 
 def _tg_goodbye_member(token: str, chat: dict, m: dict) -> None:
     if get_setting("tg_goodbye_on", "1") != "1" or m.get("is_bot"): return
     tmpl = get_setting("tg_goodbye", "👋 Tạm biệt {name}, hẹn gặp lại!")
-    _tg_send(token, str(chat.get("id")), tmpl.replace("{name}", _tg_mention(m)).replace("{group}", chat.get("title", "nhóm")))
+    chat_id = str(chat.get("id"))
+    count = _tg_member_count(token, chat_id)
+    txt = tmpl.replace("{name}", _tg_mention(m)).replace("{group}", chat.get("title", "nhóm"))
+    txt += "\n\n" + _tg_user_info_block(m, count)
+    photo = _tg_user_avatar_file_id(token, m.get("id"))
+    if photo:
+        params = {"chat_id": chat_id, "photo": photo, "caption": txt, "parse_mode": "HTML"}
+        if _tg_call(token, "sendPhoto", **params).get("ok"):
+            return
+    _tg_send(token, chat_id, txt)
 
 def _tg_on_join(token: str, chat: dict, msg: dict) -> None:
     chat_id = str(chat.get("id"))
@@ -8279,6 +8527,15 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
                      "(Telegram không cho bot cấm chat chủ nhóm — chỉ xoá tin được.)")
         else:
             _tg_send(token, chat_id, "👑 Kiểm duyệt CẢ ADMIN: <b>TẮT</b> — admin được miễn như bình thường.")
+    elif cmd == "scanlink":
+        a = args.strip().lower()
+        cur = get_setting("tg_scanlink_on", "1") == "1"
+        new = True if a in ("on", "bat", "bật", "1") else False if a in ("off", "tat", "tắt", "0") else not cur
+        set_setting("tg_scanlink_on", "1" if new else "0")
+        _tg_send(token, chat_id,
+                 ("🛡️ Tự quét link admin gửi: <b>BẬT</b> — admin dán link, bot tự kiểm tra virus/lừa đảo + báo thông tin đầy đủ."
+                  if new else "🛡️ Tự quét link admin gửi: <b>TẮT</b>.") +
+                 ("\n💡 Quét virus SÂU: đặt VirusTotal key bằng /setvt <key>." if new and not (get_setting("tg_vt_key","") or "").strip() else ""))
     elif cmd == "autodel":
         a = args.strip().lower()
         if a in ("off", "tat", "tắt", "0"):
@@ -8415,6 +8672,14 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
             _tg_with_autodel(token, chat_id, mid,
                              lambda: _tg_dispatch_command(token, chat_id, msg, text, uid, frm))
         return
+
+    # 🛡️ TỰ ĐỘNG QUÉT LINK admin gửi: admin dán link vào nhóm → bot tự kiểm tra virus/lừa đảo
+    # + trả thông tin đầy đủ (reply vào tin đó). Bật/tắt: /scanlink on|off (mặc định BẬT).
+    if (text and not text.startswith("/") and get_setting("tg_scanlink_on", "1") == "1"
+            and _tg_has_link(msg) and _tg_is_privileged(token, chat_id, msg)):
+        _u = _tg_first_url(text)
+        if _u:
+            _tg_start_scan_link(token, chat_id, _u, reply_to=mid)
 
     # FameRank: đếm tin nhắn · AutoReact: thả cảm xúc (chạy NỀN — không chặn vòng lặp)
     if uid:
@@ -8566,6 +8831,34 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         _p = _tgtxt.split(None, 1)
         _tg_start_music(token, chat_id, _p[1] if len(_p) > 1 else "")
         return
+    # 🎬 Tải video (nhanh + cắt phần nếu quá dung lượng)
+    if _tgtxt.startswith("/video") or _tgtxt.startswith("/taivideo"):
+        _pv = _tgtxt.split(None, 1)
+        _tg_start_video(token, chat_id, _pv[1] if len(_pv) > 1 else "")
+        return
+    # 🛡️ Quét link virus/lừa đảo (/quetlink) + đặt VirusTotal key (/setvt, admin)
+    if _tgtxt.startswith("/quetlink") or _tgtxt.startswith("/checklink") or _tgtxt.startswith("/scan"):
+        _pl = _tgtxt.split(None, 1)
+        _url = _pl[1].strip() if len(_pl) > 1 else _tg_first_url(((msg.get("reply_to_message") or {}).get("text") or ""))
+        if _url:
+            _tg_start_scan_link(token, chat_id, _url)
+        else:
+            _tg_send(token, chat_id, "🛡️ Dùng: <code>/quetlink https://link-can-kiem-tra</code> (hoặc reply vào tin có link).")
+        return
+    if _tgtxt.startswith("/setvt"):
+        _uid3 = (msg.get("from") or {}).get("id")
+        _vtadmin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
+            ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _uid3))
+        if not _vtadmin:
+            _tg_send(token, chat_id, "🔒 Chỉ ADMIN mới đặt được VirusTotal key."); return
+        _pk = _tgtxt.split(None, 1)
+        if len(_pk) > 1 and _pk[1].strip():
+            set_setting("tg_vt_key", _pk[1].strip())
+            _tg_send(token, chat_id, "✅ Đã lưu VirusTotal key — quét link giờ có kiểm tra virus SÂU. 🦠")
+        else:
+            set_setting("tg_vt_key", "")
+            _tg_send(token, chat_id, "🗑️ Đã xoá VirusTotal key (chỉ còn quét cơ bản). Lấy key miễn phí ở virustotal.com.")
+        return
 
     # 🤖 Trợ lý AI (/ai bật-tắt · /hoiai hỏi · /aikey /aimodel… cấu hình) — chạy ở nhóm & chat riêng.
     if _tgtxt.startswith("/") and _tgtxt.split():
@@ -8691,7 +8984,8 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                    "/filter", "/stop", "/filters", "/setrules", "/rules", "/clean", "/nightmode", "/antiflood",
                    "/captcha", "/autoreact", "/slowmode", "/log", "/diemdanh", "/top", "/report", "/save",
                    "/clear", "/notes", "/id", "/setwelcome", "/welcome", "/setwelcomebtn", "/setwelcomephoto",
-                   "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats", "/autodel", "/modadmin"}
+                   "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats", "/autodel", "/modadmin",
+                   "/scanlink"}
     if text.startswith("/") and text.split("@")[0].split()[0].lower() in _GROUP_CMDS:
         _tg_send(token, chat_id,
                  "🔧 Lệnh này dùng trong <b>NHÓM</b>, không chạy khi nhắn riêng bot.\n\n"
@@ -8783,7 +9077,8 @@ def _tg_register_commands(token: str) -> None:
         ("help", "Menu & danh sách lệnh"), ("menu", "Mở menu nút bấm"),
         ("tuvan", "🛒 Tư vấn chọn bản (bảng giá)"), ("banggia", "💰 Xem bảng giá"),
         ("hoiai", "🤖 Hỏi trợ lý AI"),
-        ("nhac", "Lấy nhạc YouTube/TikTok"),
+        ("nhac", "Lấy nhạc YouTube/TikTok"), ("video", "🎬 Tải video (cắt phần nếu lớn)"),
+        ("quetlink", "🛡️ Quét link virus/lừa đảo"),
         ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"),
         ("report", "Báo cáo admin (reply)"), ("rules", "Xem nội quy"),
         ("afk", "Báo bận"), ("id", "Xem Chat/User ID"),
@@ -8844,7 +9139,8 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
     greet = (f"👋 Chào {_h.escape(name)}, tôi là <b>{_h.escape(bot)}</b>.\n\n" if name
              else f"👋 Xin chào, tôi là <b>{_h.escape(bot)}</b>.\n\n")
     pub = ("🤖 <b>Trợ lý AI:</b> /hoiai &lt;câu hỏi&gt; — hỏi mọi câu khó, toán, lập trình (admin bật bằng /ai)\n"
-           "🎵 <b>/nhac</b> &lt;link hoặc tên bài&gt; — lấy nhạc YouTube/TikTok\n"
+           "🎵 <b>/nhac</b> &lt;bài&gt; — lấy nhạc · 🎬 <b>/video</b> &lt;link/tên&gt; — tải video (tự cắt phần nếu lớn)\n"
+           "🛡️ <b>/quetlink</b> &lt;link&gt; — kiểm tra virus/lừa đảo + thông tin đầy đủ\n"
            "🧠 <b>Đố vui CÓ ĐIỂM:</b> /dovui (+10đ/câu đúng, ~1080 câu) · /goiy · /boqua · /dungdo · 🏆 /diemdo\n"
            "🃏 <b>Game bài:</b> /baicao · /xidach (/rut /dan) · /baucua bầu — thắng +5 điểm\n"
            "🎮 <b>Trò chơi:</b> /xucxac /slot /phitieu /bongda /bongro /bowling /tungxu /oantuti /doanso /random /chon /xoso\n"
@@ -8861,6 +9157,7 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
             "🤖 <b>Trợ lý AI:</b> /ai on|off · /aiall on|off (nhóm trả lời mọi tin) · /aidm on|off (chat riêng tự trả lời) · /aikey &lt;khoá&gt; · /aiprovider · /aiurl · /aimodel · /aiset\n"
+            "🛡️ <b>Quét link:</b> /scanlink on|off (tự quét link admin gửi) · /setvt &lt;key&gt; (VirusTotal — quét virus sâu)\n"
             "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /modadmin · /config\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
