@@ -439,7 +439,16 @@ struct AdminView: View {
 
     private func reload() async {
         do { users = try await store.api.adminUsers() }
-        catch { self.error = error.localizedDescription }
+        catch {
+            // Mạng chập chờn / máy chủ đang khởi động lại: THỬ LẠI 1 lần sau 1,2s
+            // trước khi báo — tránh bung popup "Lỗi" ngay khi vừa mở Quản trị.
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            do { users = try await store.api.adminUsers() }
+            catch {
+                // Đã có danh sách từ trước → giữ nguyên, không làm phiền.
+                if users.isEmpty { self.error = error.localizedDescription }
+            }
+        }
     }
 
     private func loadStats() async {
