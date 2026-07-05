@@ -5172,12 +5172,14 @@ def _tg_fit_video(path: str) -> list:
         return [path]
     if not shutil.which("ffmpeg"):
         return [path]
-    import glob as _glob
+    import glob as _glob, math as _math
     d = os.path.dirname(path); base = os.path.splitext(os.path.basename(path))[0]
     size = os.path.getsize(path); dur = _tg_audio_duration(path)
     if dur <= 0 or size <= 0:
         return [path]
-    seg = max(15, int(dur * (48 * 1024 * 1024) / size))   # thời lượng/khúc để ~48MB (sát 50MB)
+    # Số phần = trần(size / 46MB) → chắc chắn chia ĐỦ nhiều khúc; giây/khúc = tổng giây / số phần.
+    nparts = max(2, _math.ceil(size / (46 * 1024 * 1024)))
+    seg = max(8, int(dur / nparts))
     segpat = os.path.join(d, base + "_v%03d.mp4")
     try:
         subprocess.run(["ffmpeg", "-y", "-v", "quiet", "-i", path, "-c", "copy", "-map", "0",
@@ -7112,36 +7114,70 @@ def _tg_send_voice(token: str, chat_id, ogg_path: str, caption: str = "") -> boo
     except Exception as e:
         log.warning("sendVoice lỗi: %s", e); return False
 
+def _tg_split_text(text: str, n: int = 900) -> list:
+    """Chia văn bản thành nhiều đoạn ≤ n ký tự theo CÂU (để đọc voice từng phần)."""
+    import re as _re
+    sents = _re.split(r'(?<=[\.\!\?…])\s+|\n+', (text or "").strip())
+    chunks, cur = [], ""
+    for s in sents:
+        s = s.strip()
+        if not s:
+            continue
+        if len(cur) + len(s) + 1 <= n:
+            cur = (cur + " " + s).strip()
+        else:
+            if cur:
+                chunks.append(cur)
+            if len(s) <= n:
+                cur = s
+            else:
+                for i in range(0, len(s), n):
+                    chunks.append(s[i:i + n])
+                cur = ""
+    if cur:
+        chunks.append(cur)
+    return chunks or [(text or "")[:n]]
+
 def _tg_voice_reply(token, chat_id, request: str, story: bool = True) -> None:
-    """Nền: AI tạo nội dung → đọc thành GIỌNG NÓI → gửi VOICE. story=True → kể chuyện."""
+    """Nền: AI tạo nội dung → đọc thành GIỌNG NÓI → gửi VOICE.
+    Chuyện DÀI → chia NHIỀU đoạn voice, gửi HẾT (đánh số 1/n)."""
     import tempfile, os as _os, shutil as _sh
     try:
         _tg_call(token, "sendChatAction", chat_id=chat_id, action="record_voice")
     except Exception:
         pass
     if story:
-        prompt = (f"{request}\n\nHãy KỂ một câu chuyện hoàn chỉnh bằng TIẾNG VIỆT, hấp dẫn, có mở đầu – diễn biến – "
-                  "kết thúc, khoảng 150–250 từ. CHỈ kể chuyện; KHÔNG thêm lời dẫn, KHÔNG markdown, KHÔNG emoji.")
+        prompt = (f"{request}\n\nHãy KỂ một câu chuyện HOÀN CHỈNH và DÀI bằng TIẾNG VIỆT, thật hấp dẫn, "
+                  "có mở đầu – diễn biến – cao trào – kết thúc, khoảng 500–900 từ, nhiều tình tiết sinh động. "
+                  "CHỈ kể chuyện; KHÔNG thêm lời dẫn, KHÔNG markdown, KHÔNG emoji.")
     else:
-        prompt = (f"{request}\n\n(Trả lời NGẮN GỌN bằng TIẾNG VIỆT để đọc thành giọng nói, tối đa ~150 từ, "
+        prompt = (f"{request}\n\n(Trả lời bằng TIẾNG VIỆT để đọc thành giọng nói, đầy đủ ý, "
                   "không markdown, không emoji.)")
     content = _ai_answer(prompt)
     if not content or content.startswith("⚠️") or content.startswith("✍️"):
         _tg_send(token, chat_id, content or "😅 Xin lỗi, giờ mình chưa kể được. Thử lại sau nhé.")
         return
+
     d = tempfile.mkdtemp(prefix="voice_")
-    mp3 = _os.path.join(d, "v.mp3"); ogg = _os.path.join(d, "v.ogg")
     try:
-        if not _tts_vi(content, mp3):
+        chunks = _tg_split_text(content, 900)
+        n = len(chunks)
+        base_cap = "🎙️ <b>Chuyện kể cho bạn nghe</b>" if story else "🎙️ <b>Giọng đọc</b>"
+        sent = 0
+        for i, ch in enumerate(chunks, 1):
+            mp3 = _os.path.join(d, f"v{i}.mp3"); ogg = _os.path.join(d, f"v{i}.ogg")
+            if not _tts_vi(ch, mp3):
+                continue
+            cap = f"{base_cap} (phần {i}/{n})" if n > 1 else base_cap
+            _tg_call(token, "sendChatAction", chat_id=chat_id, action="record_voice")
+            if (_mp3_to_ogg(mp3, ogg) and _tg_send_voice(token, chat_id, ogg, cap)) \
+               or _tg_send_voice(token, chat_id, mp3, cap) \
+               or _tg_send_audio(token, chat_id, mp3, f"Chuyện kể ({i}/{n})" if n > 1 else "Chuyện kể"):
+                sent += 1
+        if sent == 0:
             _tg_send(token, chat_id,
                      "🔇 <b>Chưa gửi được giọng nói</b> — máy chủ thiếu công cụ đọc (edge-tts/gTTS).\n"
                      "👉 Admin chạy lại <code>capnhat-vps.sh</code> để cài, rồi thử /kechuyen lại nhé.\n\n📖 Tạm đọc bản chữ:\n\n" + content[:3500])
-            return
-        cap = "🎙️ <b>Chuyện kể cho bạn nghe</b>" if story else "🎙️ <b>Giọng đọc</b>"
-        # Ưu tiên bong bóng VOICE (ogg/opus); không đổi được thì gửi file audio mp3.
-        if not (_mp3_to_ogg(mp3, ogg) and _tg_send_voice(token, chat_id, ogg, cap)):
-            if not _tg_send_voice(token, chat_id, mp3, cap):   # thử gửi thẳng mp3 dạng voice
-                _tg_send_audio(token, chat_id, mp3, "Chuyện kể" if story else "Giọng đọc")
     finally:
         _sh.rmtree(d, ignore_errors=True)
 
