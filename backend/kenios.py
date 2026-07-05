@@ -6659,7 +6659,7 @@ _TG_RESERVED = {
     "stop", "filters", "save", "clear", "notes", "setrules", "rules", "clean", "nightmode",
     "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
     "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
-    "modon", "modoff", "autodel", "modadmin", "scanlink", "setvt",
+    "modon", "modoff", "autodel", "modadmin", "scanlink", "setvt", "kenios",
     "video", "taivideo", "quetlink", "checklink", "scan", "chaosang", "chaotoi",
     # 🎮 lệnh giải trí & tiện ích (không cho lệnh riêng ghi đè)
     "xucxac", "slot", "phitieu", "bongda", "bongro", "bowling", "tungxu", "oantuti", "keobuabao",
@@ -8880,6 +8880,16 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         else:
             _tg_send(token, chat_id, "🛡️ Dùng: <code>/quetlink https://link-can-kiem-tra</code> (hoặc reply vào tin có link).")
         return
+    # 🎊 /kenios — lệnh DUY NHẤT quản lý chào sáng/tối + chúc mọi ngày lễ (chỉ admin)
+    if _tgtxt.startswith("/kenios"):
+        _uidk = (msg.get("from") or {}).get("id")
+        _kadmin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
+            ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _uidk))
+        if not _kadmin:
+            _tg_send(token, chat_id, "🔒 Chỉ ADMIN mới dùng được <b>/kenios</b>."); return
+        _pk2 = _tgtxt.split(None, 1)
+        _tg_kenios_cmd(token, chat_id, _pk2[1] if len(_pk2) > 1 else "")
+        return
     if _tgtxt.startswith("/setvt"):
         _uid3 = (msg.get("from") or {}).get("id")
         _vtadmin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
@@ -9151,7 +9161,7 @@ def _tg_register_commands(token: str) -> None:
         ("setwelcome", "Sửa lời chào TV mới"), ("welcome", "Bật/tắt chào mừng"),
         ("setwelcomebtn", "Nút link lời chào"), ("setwelcomephoto", "Ảnh lời chào"),
         ("setgoodbye", "Lời tạm biệt"), ("testwelcome", "Xem thử lời chào"),
-        ("chaosang", "☀️ Chào buổi sáng đúng giờ"), ("chaotoi", "🌙 Chào buổi tối đúng giờ"),
+        ("kenios", "🎊 Tự chúc sáng/tối + MỌI ngày lễ"),
         ("modon", "BẬT kiểm duyệt nhóm"), ("modoff", "TẮT kiểm duyệt nhóm"),
         ("modadmin", "Kiểm duyệt cả admin on|off"),
         ("stats", "Thống kê nhóm"),
@@ -9192,16 +9202,250 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
-            "⏰ <b>Chào theo giờ:</b> /chaosang [giờ|on|off|nội dung] · /chaotoi [giờ|on|off|nội dung] — tự gửi ĐÚNG GIỜ mỗi ngày (giờ VN)\n"
+            "🎊 <b>/kenios</b> — 1 LỆNH DUY NHẤT: tự chào SÁNG + TỐI + chúc MỌI NGÀY LỄ (dương & âm lịch) đúng giờ.\n"
+            "   • /kenios on|off · /kenios sang 6:30 · /kenios toi 21:00 · /kenios le 8:00 · /kenios test\n"
             "🤖 <b>Trợ lý AI:</b> /ai on|off · /aiall on|off (nhóm trả lời mọi tin) · /aidm on|off (chat riêng tự trả lời) · /aikey &lt;khoá&gt; · /aiprovider · /aiurl · /aimodel · /aiset\n"
             "🛡️ <b>Quét link:</b> /scanlink on|off (tự quét link admin gửi) · /setvt &lt;key&gt; (VirusTotal — quét virus sâu)\n"
             "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /modadmin · /config\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
-# ---------- ⏰ CHÀO BUỔI SÁNG / BUỔI TỐI tự động ĐÚNG GIỜ (giờ VN) ----------
+# ---------- ⏰ CHÀO SÁNG/TỐI + 🎊 CHÚC MỌI NGÀY LỄ tự động (giờ VN) ----------
 _TG_MORNING_DEFAULT = "☀️ Chào buổi sáng cả nhà! Chúc mọi người một ngày mới tràn đầy năng lượng, may mắn và thật nhiều niềm vui nhé! 🌸"
 _TG_EVENING_DEFAULT = "🌙 Chào buổi tối cả nhà! Chúc mọi người buổi tối vui vẻ, ấm áp bên gia đình và nghỉ ngơi thật tốt nhé! ✨"
 _tg_sched_thread = None
+
+# ===== Lịch âm (thuật toán Hồ Ngọc Đức) để chúc đúng các ngày lễ ÂM LỊCH =====
+def _jd(dd, mm, yy):
+    import math
+    a = int((14 - mm) / 12); y = yy + 4800 - a; m = mm + 12 * a - 3
+    jd = dd + int((153 * m + 2) / 5) + 365 * y + int(y / 4) - int(y / 100) + int(y / 400) - 32045
+    if jd < 2299161:
+        jd = dd + int((153 * m + 2) / 5) + 365 * y + int(y / 4) - 32083
+    return jd
+
+def _new_moon(k):
+    import math
+    T = k / 1236.85; T2 = T * T; T3 = T2 * T; dr = math.pi / 180
+    J1 = 2415020.75933 + 29.53058868 * k + 0.0001178 * T2 - 0.000000155 * T3
+    J1 = J1 + 0.00033 * math.sin((166.56 + 132.87 * T - 0.009173 * T2) * dr)
+    M = 359.2242 + 29.10535608 * k - 0.0000333 * T2 - 0.00000347 * T3
+    Mpr = 306.0253 + 385.81691806 * k + 0.0107306 * T2 + 0.00001236 * T3
+    F = 21.2964 + 390.67050646 * k - 0.0016528 * T2 - 0.00000239 * T3
+    C1 = (0.1734 - 0.000393 * T) * math.sin(M * dr) + 0.0021 * math.sin(2 * dr * M)
+    C1 = C1 - 0.4068 * math.sin(Mpr * dr) + 0.0161 * math.sin(dr * 2 * Mpr)
+    C1 = C1 - 0.0004 * math.sin(dr * 3 * Mpr)
+    C1 = C1 + 0.0104 * math.sin(dr * 2 * F) - 0.0051 * math.sin(dr * (M + Mpr))
+    C1 = C1 - 0.0074 * math.sin(dr * (M - Mpr)) + 0.0004 * math.sin(dr * (2 * F + M))
+    C1 = C1 - 0.0004 * math.sin(dr * (2 * F - M)) - 0.0006 * math.sin(dr * (2 * F + Mpr))
+    C1 = C1 + 0.0010 * math.sin(dr * (2 * F - Mpr)) + 0.0005 * math.sin(dr * (2 * Mpr + M))
+    deltat = (0.001 + 0.000839 * T + 0.0002261 * T2 - 0.00000845 * T3 - 0.000000081 * T * T3
+              if T < -11 else -0.000278 + 0.000265 * T + 0.000262 * T2)
+    return J1 + C1 - deltat
+
+def _sun_long(jdn):
+    import math
+    T = (jdn - 2451545.0) / 36525; T2 = T * T; dr = math.pi / 180
+    M = 357.52910 + 35999.05030 * T - 0.0001559 * T2 - 0.00000048 * T * T2
+    L0 = 280.46645 + 36000.76983 * T + 0.0003032 * T2
+    DL = (1.914600 - 0.004817 * T - 0.000014 * T2) * math.sin(dr * M)
+    DL = DL + (0.019993 - 0.000101 * T) * math.sin(dr * 2 * M) + 0.000290 * math.sin(dr * 3 * M)
+    L = (L0 + DL) * dr
+    return L - math.pi * 2 * int(L / (math.pi * 2))
+
+def _nm_day(k, tz=7):
+    import math
+    return int(_new_moon(k) + 0.5 + tz / 24.0)
+
+def _sun_long6(dn, tz=7):
+    import math
+    return int(_sun_long(dn - 0.5 - tz / 24.0) / math.pi * 6)
+
+def _lunar_m11(yy, tz=7):
+    off = _jd(31, 12, yy) - 2415021
+    k = int(off / 29.530588853)
+    nm = _nm_day(k, tz)
+    if _sun_long6(nm, tz) >= 9:
+        nm = _nm_day(k - 1, tz)
+    return nm
+
+def _leap_offset(a11, tz=7):
+    k = int((a11 - 2415021.076998695) / 29.530588853 + 0.5)
+    i = 1; arc = _sun_long6(_nm_day(k + i, tz), tz)
+    while True:
+        last = arc; i += 1
+        arc = _sun_long6(_nm_day(k + i, tz), tz)
+        if not (arc != last and i < 14):
+            break
+    return i - 1
+
+def _solar2lunar(dd, mm, yy, tz=7):
+    """Trả (ngày âm, tháng âm, năm âm, nhuận?) của 1 ngày dương."""
+    dn = _jd(dd, mm, yy)
+    k = int((dn - 2415021.076998695) / 29.530588853)
+    monthStart = _nm_day(k + 1, tz)
+    if monthStart > dn:
+        monthStart = _nm_day(k, tz)
+    a11 = _lunar_m11(yy, tz); b11 = a11
+    if a11 >= monthStart:
+        lunarYear = yy; a11 = _lunar_m11(yy - 1, tz)
+    else:
+        lunarYear = yy + 1; b11 = _lunar_m11(yy + 1, tz)
+    lunarDay = dn - monthStart + 1
+    diff = int((monthStart - a11) / 29)
+    leap = 0; lunarMonth = diff + 11
+    if b11 - a11 > 365:
+        lo = _leap_offset(a11, tz)
+        if diff >= lo:
+            lunarMonth = diff + 10
+            if diff == lo:
+                leap = 1
+    if lunarMonth > 12:
+        lunarMonth -= 12
+    if lunarMonth >= 11 and diff < 4:
+        lunarYear -= 1
+    return lunarDay, lunarMonth, lunarYear, leap
+
+# ===== Bảng NGÀY LỄ — dương lịch + âm lịch (chúc TẤT CẢ) =====
+_TG_SOLAR_HOLIDAYS = {
+    (1, 1):  "🎉 <b>CHÚC MỪNG NĂM MỚI!</b> 🎊\nChúc cả nhà năm mới an khang, thịnh vượng, vạn sự như ý! 🥂",
+    (1, 6):  "🎖️ Chúc mừng ngày truyền thống — chúc mọi người ngày mới nhiều năng lượng!",
+    (2, 3):  "🌟 Kỷ niệm ngày thành lập Đảng Cộng sản Việt Nam (3/2) — chúc cả nhà ngày tốt lành!",
+    (2, 14): "💘 <b>HAPPY VALENTINE!</b>\nChúc các cặp đôi mãi ngọt ngào, ai độc thân sớm gặp 'ý trung nhân' nhé! 🌹",
+    (3, 8):  "💐 <b>MỪNG NGÀY QUỐC TẾ PHỤ NỮ 8/3!</b>\nChúc các bà, các mẹ, các chị em luôn xinh đẹp, hạnh phúc và được yêu thương! 🌸",
+    (3, 20): "😊 Ngày Quốc tế Hạnh phúc 20/3 — chúc cả nhà luôn vui vẻ, bình an!",
+    (3, 26): "🔥 Chúc mừng ngày thành lập Đoàn TNCS Hồ Chí Minh 26/3 — tuổi trẻ nhiệt huyết!",
+    (4, 1):  "🤡 <b>Cá tháng Tư!</b> Hôm nay coi chừng bị 'lừa' dễ thương nha cả nhà! 😜",
+    (4, 30): "🇻🇳 <b>Mừng ngày Giải phóng miền Nam 30/4!</b>\nChúc cả nhà kỳ nghỉ lễ vui vẻ, an toàn! 🎉",
+    (5, 1):  "🛠️ <b>Mừng ngày Quốc tế Lao động 1/5!</b>\nChúc mọi người nghỉ lễ thật thảnh thơi, vui khỏe!",
+    (5, 7):  "🎖️ Kỷ niệm Chiến thắng Điện Biên Phủ 7/5 — tự hào Việt Nam!",
+    (5, 19): "🌺 Kỷ niệm ngày sinh Chủ tịch Hồ Chí Minh 19/5 — chúc cả nhà ngày ý nghĩa!",
+    (6, 1):  "🎈 <b>Quốc tế Thiếu nhi 1/6!</b>\nChúc các bé luôn khỏe mạnh, ngoan ngoãn và thật nhiều niềm vui! 🧸",
+    (6, 21): "📰 Chúc mừng ngày Báo chí Cách mạng Việt Nam 21/6!",
+    (6, 28): "👨‍👩‍👧‍👦 Ngày Gia đình Việt Nam 28/6 — chúc mọi nhà luôn đầm ấm, yêu thương!",
+    (7, 27): "🕯️ Ngày Thương binh - Liệt sĩ 27/7 — tưởng nhớ và tri ân các anh hùng.",
+    (8, 19): "🇻🇳 Kỷ niệm Cách mạng Tháng Tám 19/8 — chúc cả nhà ngày tốt lành!",
+    (9, 2):  "🇻🇳 <b>MỪNG QUỐC KHÁNH 2/9!</b>\nChúc cả nhà kỳ nghỉ lễ vui vẻ, hạnh phúc bên người thân! 🎆",
+    (10, 10):"🏙️ Kỷ niệm ngày Giải phóng Thủ đô 10/10 — chúc cả nhà ngày đẹp!",
+    (10, 13):"💼 Chúc mừng ngày Doanh nhân Việt Nam 13/10 — chúc quý doanh nhân phát tài!",
+    (10, 20):"🌷 <b>Mừng ngày Phụ nữ Việt Nam 20/10!</b>\nChúc một nửa thế giới luôn tươi trẻ, xinh đẹp và hạnh phúc! 💖",
+    (10, 31):"🎃 <b>HAPPY HALLOWEEN!</b> Trick or Treat! Chúc cả nhà một đêm ma quái vui nhộn! 👻",
+    (11, 20):"👩‍🏫 <b>Mừng ngày Nhà giáo Việt Nam 20/11!</b>\nTri ân và chúc các thầy cô luôn mạnh khỏe, hạnh phúc! 🌹",
+    (12, 1): "🎗️ Ngày Thế giới phòng chống AIDS 1/12 — chung tay vì cộng đồng.",
+    (12, 22):"🎖️ Chúc mừng ngày thành lập Quân đội Nhân dân Việt Nam 22/12!",
+    (12, 24):"🎄 <b>ĐÊM GIÁNG SINH AN LÀNH!</b>\nMerry Christmas Eve — chúc cả nhà một đêm ấm áp, hạnh phúc! 🔔",
+    (12, 25):"🎅 <b>MERRY CHRISTMAS!</b>\nChúc cả nhà Giáng sinh vui vẻ, tràn đầy yêu thương và quà nè! 🎁",
+    (12, 31):"🎆 <b>Đêm giao thừa năm mới!</b> Chúc cả nhà khép lại năm cũ trọn vẹn, đón năm mới rực rỡ! 🥳",
+}
+_TG_LUNAR_HOLIDAYS = {
+    (1, 1):  "🧧 <b>CHÚC MỪNG NĂM MỚI — TẾT NGUYÊN ĐÁN!</b> 🎊\nChúc cả nhà năm mới AN KHANG THỊNH VƯỢNG, VẠN SỰ NHƯ Ý, tiền vào như nước! 🥳🧨",
+    (1, 2):  "🧧 <b>Mùng 2 Tết!</b> Chúc cả nhà năm mới sức khỏe dồi dào, làm ăn phát đạt! 🎉",
+    (1, 3):  "🧧 <b>Mùng 3 Tết!</b> Chúc mọi người một năm bình an, may mắn và nhiều tài lộc! 🍊",
+    (1, 15): "🏮 <b>Tết Nguyên Tiêu (Rằm tháng Giêng)!</b>\nChúc cả nhà một năm bình an, gia đạo hưng thịnh! 🙏",
+    (3, 3):  "🍡 <b>Tết Hàn Thực (3/3 âm)!</b> Nhớ ăn bánh trôi bánh chay, chúc cả nhà ngày ngọt ngào!",
+    (3, 10): "🇻🇳 <b>GIỖ TỔ HÙNG VƯƠNG (10/3 âm)!</b>\n'Dù ai đi ngược về xuôi, nhớ ngày Giỗ Tổ mùng mười tháng ba.' Chúc cả nhà nghỉ lễ vui vẻ! 🙏",
+    (4, 15): "🪷 <b>Đại lễ Phật Đản (15/4 âm)!</b> Kính chúc cả nhà thân tâm an lạc, vạn sự cát tường! 🙏",
+    (5, 5):  "🍶 <b>Tết Đoan Ngọ (5/5 âm) — Tết diệt sâu bọ!</b> Chúc cả nhà mạnh khỏe, mọi điều tốt lành! 🌿",
+    (7, 15): "🌸 <b>Lễ Vu Lan Báo Hiếu (Rằm tháng 7)!</b>\nChúc cả nhà luôn hiếu thảo, gia đình bình an, cha mẹ khỏe mạnh! 🙏❤️",
+    (8, 15): "🥮 <b>TẾT TRUNG THU!</b> 🏮\nChúc các bé và cả nhà một đêm rằm ấm áp, đoàn viên, ngập tràn bánh nướng bánh dẻo! 🌕",
+    (12, 23):"🐟 <b>Ông Công Ông Táo về trời (23 tháng Chạp)!</b> Chúc cả nhà dọn nhà đón Tết vui vẻ, chuẩn bị năm mới sung túc! 🧧",
+}
+
+def _tg_holiday_today(now):
+    """Trả lời chúc mừng nếu HÔM NAY (giờ VN) là ngày lễ (dương hoặc âm); None nếu không."""
+    d, m = now.day, now.month
+    sol = _TG_SOLAR_HOLIDAYS.get((m, d))
+    if sol:
+        return sol
+    # Lễ theo Chủ nhật: Ngày của Mẹ (CN thứ 2 tháng 5), Ngày của Cha (CN thứ 3 tháng 6)
+    if m == 5 and now.weekday() == 6 and 8 <= d <= 14:
+        return "💐 <b>NGÀY CỦA MẸ!</b> Gửi lời yêu thương nhất tới Mẹ — chúc các Mẹ luôn mạnh khỏe, hạnh phúc! ❤️"
+    if m == 6 and now.weekday() == 6 and 15 <= d <= 21:
+        return "👔 <b>NGÀY CỦA CHA!</b> Cảm ơn và chúc các Cha luôn khỏe mạnh, là chỗ dựa vững chắc của gia đình! 💙"
+    try:
+        ld, lm, ly, leap = _solar2lunar(d, m, now.year)
+        if not leap:
+            lun = _TG_LUNAR_HOLIDAYS.get((lm, ld))
+            if lun:
+                return lun
+            # Giao thừa: hôm nay là ngày cuối tháng Chạp âm (mai là mùng 1 Tết)
+            if lm == 12 and ld >= 29:
+                import datetime as _dt2
+                _tm = now + _dt2.timedelta(days=1)
+                nxt = _solar2lunar(_tm.day, _tm.month, _tm.year)
+                if nxt[0] == 1 and nxt[1] == 1:
+                    return "🎆 <b>ĐÊM GIAO THỪA!</b> 🧨\nChúc cả nhà khoảnh khắc chuyển giao an lành, năm mới AN KHANG THỊNH VƯỢNG, VẠN SỰ NHƯ Ý! 🥳🧧"
+    except Exception:
+        pass
+    return None
+
+def _tg_kenios_cmd(token, chat_id, args) -> None:
+    """Lệnh DUY NHẤT /kenios (admin): quản lý chào sáng/tối + chúc mọi ngày lễ."""
+    import re as _re, datetime as _dt
+    a = (args or "").strip()
+    parts = a.split(None, 1)
+    sub = parts[0].lower() if parts else ""
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    _tg_greet_register(chat_id)
+
+    def _status():
+        master = get_setting("tg_greet_master", "1") == "1"
+        now = _dt.datetime.utcnow() + _dt.timedelta(hours=7)
+        hol = _tg_holiday_today(now)
+        s = ("🎊 <b>KENIOS — Tự động chúc mừng</b> (chỉ admin)\n"
+             f"Tổng: {'🟢 BẬT' if master else '🔴 TẮT'}\n"
+             f"☀️ Chào sáng: {'BẬT' if get_setting('tg_greet_morning_on','1')=='1' else 'tắt'} lúc <b>{get_setting('tg_greet_morning_time','07:00')}</b>\n"
+             f"🌙 Chào tối: {'BẬT' if get_setting('tg_greet_evening_on','1')=='1' else 'tắt'} lúc <b>{get_setting('tg_greet_evening_time','20:00')}</b>\n"
+             f"🎉 Ngày lễ: {'BẬT' if get_setting('tg_greet_holiday_on','1')=='1' else 'tắt'} lúc <b>{get_setting('tg_greet_holiday_time','08:00')}</b> — tự chúc <b>MỌI</b> ngày lễ (dương & âm lịch)")
+        if hol:
+            s += "\n\n📌 Hôm nay là ngày lễ: " + hol.split("\n")[0]
+        s += ("\n\n<b>Cách dùng (chỉ 1 lệnh):</b>\n"
+              "• <code>/kenios on|off</code> — bật/tắt toàn bộ\n"
+              "• <code>/kenios sang 6:30</code> · <code>/kenios toi 21:00</code> · <code>/kenios le 8:00</code> — đổi giờ\n"
+              "• <code>/kenios sang on|off</code> · <code>toi</code> · <code>le</code> — bật/tắt từng loại\n"
+              "• <code>/kenios sang &lt;lời chào&gt;</code> · <code>/kenios toi &lt;lời chào&gt;</code> — đổi nội dung\n"
+              "• <code>/kenios test</code> — gửi thử ngay")
+        return s
+
+    if not sub:
+        _tg_send(token, chat_id, _status()); return
+    if sub in ("on", "bat", "bật", "1"):
+        set_setting("tg_greet_master", "1")
+        _tg_send(token, chat_id, "🟢 ĐÃ BẬT tự động chúc mừng: chào sáng + chào tối + <b>tất cả ngày lễ</b>. Nhóm này sẽ nhận. 🎉"); return
+    if sub in ("off", "tat", "tắt", "0"):
+        set_setting("tg_greet_master", "0")
+        _tg_send(token, chat_id, "🔴 ĐÃ TẮT toàn bộ tự động chúc mừng."); return
+    if sub == "test":
+        now = _dt.datetime.utcnow() + _dt.timedelta(hours=7)
+        _tg_send(token, chat_id, get_setting("tg_greet_morning_text", "") or _TG_MORNING_DEFAULT)
+        _tg_send(token, chat_id, get_setting("tg_greet_evening_text", "") or _TG_EVENING_DEFAULT)
+        hol = _tg_holiday_today(now)
+        _tg_send(token, chat_id, hol if hol else "📅 Hôm nay không phải ngày lễ — khi tới ngày lễ (dương/âm) bot sẽ tự chúc nhé!")
+        return
+    if sub in ("sang", "sáng", "toi", "tối", "le", "lễ", "le"):
+        slot = "morning" if sub in ("sang", "sáng") else ("evening" if sub in ("toi", "tối") else "holiday")
+        on_key, time_key, text_key = f"tg_greet_{slot}_on", f"tg_greet_{slot}_time", f"tg_greet_{slot}_text"
+        deftime = {"morning": "07:00", "evening": "20:00", "holiday": "08:00"}[slot]
+        label = {"morning": "☀️ Chào sáng", "evening": "🌙 Chào tối", "holiday": "🎉 Chúc ngày lễ"}[slot]
+        if not rest:
+            _tg_send(token, chat_id, f"{label}: {'BẬT' if get_setting(on_key,'1')=='1' else 'tắt'} lúc <b>{get_setting(time_key, deftime)}</b> (giờ VN)."); return
+        if rest.lower() in ("on", "bat", "bật", "1"):
+            set_setting(on_key, "1"); set_setting("tg_greet_master", "1")
+            _tg_send(token, chat_id, f"{label}: BẬT lúc <b>{get_setting(time_key, deftime)}</b> (giờ VN)."); return
+        if rest.lower() in ("off", "tat", "tắt", "0"):
+            set_setting(on_key, "0"); _tg_send(token, chat_id, f"{label}: TẮT."); return
+        if _re.match(r"^\d{1,2}:\d{2}$", rest):
+            hh, mm = int(rest.split(":")[0]), int(rest.split(":")[1])
+            if 0 <= hh <= 23 and 0 <= mm <= 59:
+                set_setting(time_key, f"{hh:02d}:{mm:02d}"); set_setting(on_key, "1"); set_setting("tg_greet_master", "1")
+                _tg_send(token, chat_id, f"⏰ {label} sẽ gửi lúc <b>{hh:02d}:{mm:02d}</b> mỗi ngày (giờ VN). ✅")
+            else:
+                _tg_send(token, chat_id, f"Giờ không hợp lệ. VD: <code>/kenios {sub} 6:30</code>")
+            return
+        if slot == "holiday":
+            _tg_send(token, chat_id, "🎉 Lời chúc ngày lễ do bot TỰ soạn theo từng lễ (không cần nhập). Chỉ đổi GIỜ: <code>/kenios le 8:00</code>."); return
+        set_setting(text_key, rest[:1000]); set_setting(on_key, "1")
+        _tg_send(token, chat_id, f"✅ Đã đặt nội dung {label}."); return
+    _tg_send(token, chat_id, _status())
 
 def _tg_greet_register(chat_id) -> None:
     """Ghi nhớ nhóm để gửi lời chào sáng/tối (lưu bền, sống qua restart)."""
@@ -9229,8 +9473,18 @@ def _tg_scheduler_loop() -> None:
             token = (get_setting("tg_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
             if not token or get_setting("tg_bot_enabled", "0") != "1":
                 time.sleep(20); continue
+            if get_setting("tg_greet_master", "1") != "1":   # công tắc TỔNG (/kenios on|off)
+                time.sleep(20); continue
             now = _dt.datetime.utcnow() + _dt.timedelta(hours=7)   # giờ Việt Nam (UTC+7)
             today = now.strftime("%Y-%m-%d")
+
+            def _fire(txt):
+                for cid in _tg_greet_chats():
+                    try: _tg_send(token, cid, txt)
+                    except Exception: pass
+                    time.sleep(0.1)
+
+            # Chào sáng / tối
             for on_key, time_key, text_key, last_key, deftime, deftext in slots:
                 if get_setting(on_key, "1") != "1":
                     continue
@@ -9239,16 +9493,23 @@ def _tg_scheduler_loop() -> None:
                     th, tm = int(t.split(":")[0]), int(t.split(":")[1])
                 except Exception:
                     continue
-                if now.hour != th or now.minute != tm:
+                if now.hour != th or now.minute != tm or get_setting(last_key, "") == today:
                     continue
-                if get_setting(last_key, "") == today:      # đã gửi hôm nay rồi
-                    continue
-                set_setting(last_key, today)                # chốt trước khi gửi (chống gửi trùng)
-                txt = get_setting(text_key, "") or deftext
-                for cid in _tg_greet_chats():
-                    try: _tg_send(token, cid, txt)
-                    except Exception: pass
-                    time.sleep(0.1)
+                set_setting(last_key, today)                # chốt trước khi gửi (chống trùng)
+                _fire(get_setting(text_key, "") or deftext)
+
+            # 🎊 Chúc NGÀY LỄ (dương & âm lịch) — đúng giờ đặt (mặc định 08:00)
+            if get_setting("tg_greet_holiday_on", "1") == "1":
+                ht = (get_setting("tg_greet_holiday_time", "08:00") or "08:00").strip()
+                try:
+                    hh, hm = int(ht.split(":")[0]), int(ht.split(":")[1])
+                except Exception:
+                    hh, hm = 8, 0
+                if now.hour == hh and now.minute == hm and get_setting("tg_greet_holiday_last", "") != today:
+                    set_setting("tg_greet_holiday_last", today)
+                    hol = _tg_holiday_today(now)
+                    if hol:
+                        _fire(hol)
         except Exception:
             pass
         time.sleep(25)
