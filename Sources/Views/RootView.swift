@@ -127,10 +127,11 @@ struct MainTabView: View {
     static var appBuild: Int {
         Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
     }
-    // Quy số build (run_number) → số phiên bản hiển thị, ĐỒNG BỘ công thức CI: 3.(build − 810).
-    // Nhờ vậy popup cập nhật hiện "3.16" thay vì "build 826".
+    // Quy số build (run_number) → phiên bản hiển thị dạng X.Y ĐẸP: phần lẻ chạy 0–9 rồi lên số lớn.
+    // VD: …3.8 → 3.9 → 4.0 → 4.1… (không còn kiểu xấu "3.104"). Mỗi build CI = +0.1.
     static func versionFromBuild(_ build: Int) -> String {
-        "3.\(max(1, build - 810))"
+        let idx = max(0, build - 884)          // build 913 → 3.9 · build 914 → 4.0
+        return "\(1 + idx / 10).\(idx % 10)"
     }
 
     // Tự dò bản mới trên GitHub Release (repo công khai, không cần khoá).

@@ -14,15 +14,12 @@ struct AppInfoView: View {
             ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
             ?? "KENIOS"
     }
-    private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    // Phiên bản hiển thị dạng X.Y ĐẸP (…3.9 → 4.0 → 4.1…) suy từ số build — ĐỒNG BỘ với popup cập nhật.
+    private var versionDisplay: String {
+        let b = Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
+        let idx = max(0, b - 884)          // build 913 → 3.9 · build 914 → 4.0
+        return "\(1 + idx / 10).\(idx % 10)"
     }
-    private var build: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
-    }
-    // Phiên bản hiển thị: chỉ số phiên bản (đã TỰ TĂNG 3.1, 3.2... theo mỗi bản build mới),
-    // bỏ "(build N)" cố định cho gọn.
-    private var versionDisplay: String { version }
     private let publisher = "KENIOS"
 
     // Ngày sản xuất ≈ ngày build (lấy theo thời điểm sửa Info.plist trong gói app).
