@@ -23,22 +23,62 @@ struct CertInfo {
     var deviceCount: Int?             // số UDID trong provision
 }
 
+// ---------- Két chứng chỉ THEO TÀI KHOẢN ----------
+// Mỗi người đăng nhập có chứng chỉ RIÊNG (file + mật khẩu gắn theo user id).
+// Admin nhập chứng chỉ của admin → tài khoản khác trên cùng máy KHÔNG thấy.
+enum CertVault {
+    static var docs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
+    static func key(_ store: AppStore) -> String { String(store.userId ?? 0) }
+    static func p12(_ owner: String) -> URL { docs.appendingPathComponent("cert_\(owner).p12") }
+    static func provision(_ owner: String) -> URL { docs.appendingPathComponent("cert_\(owner).mobileprovision") }
+    static func passwordKey(_ owner: String) -> String { "cert_p12_password_\(owner)" }
+    static func password(_ owner: String) -> String { Keychain.load(passwordKey(owner)) ?? "" }
+    static func ready(_ owner: String) -> Bool {
+        FileManager.default.fileExists(atPath: p12(owner).path)
+            && FileManager.default.fileExists(atPath: provision(owner).path)
+            && !password(owner).isEmpty
+    }
+    /// Chuyển chứng chỉ kiểu CŨ (lưu chung cả máy) sang tài khoản hiện tại — chạy 1 lần,
+    /// để người đã nhập trước đây (thường là chủ máy) không phải nhập lại.
+    static func migrateLegacy(to owner: String) {
+        guard owner != "0" else { return }
+        let fm = FileManager.default
+        let oldP12 = docs.appendingPathComponent("cert.p12")
+        let oldProv = docs.appendingPathComponent("cert.mobileprovision")
+        if fm.fileExists(atPath: oldP12.path), !fm.fileExists(atPath: p12(owner).path) {
+            try? fm.moveItem(at: oldP12, to: p12(owner))
+        }
+        if fm.fileExists(atPath: oldProv.path), !fm.fileExists(atPath: provision(owner).path) {
+            try? fm.moveItem(at: oldProv, to: provision(owner))
+        }
+        if let old = Keychain.load("cert_p12_password"), !old.isEmpty, password(owner).isEmpty {
+            Keychain.save(passwordKey(owner), old)
+            Keychain.delete("cert_p12_password")
+        }
+    }
+}
+
 @MainActor
 final class CertificateStore: ObservableObject {
     @Published var info = CertInfo()
     @Published var message: String?
     @Published var checking = false
 
-    private let kPassword = "cert_p12_password"
-    private var docs: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    // Chủ sở hữu chứng chỉ = user id đang đăng nhập ("0" = chưa đăng nhập)
+    var owner: String = "0"
+
+    func configure(owner: String) {
+        self.owner = owner
+        CertVault.migrateLegacy(to: owner)
+        refresh()
     }
-    var p12URL: URL { docs.appendingPathComponent("cert.p12") }
-    var provisionURL: URL { docs.appendingPathComponent("cert.mobileprovision") }
+
+    var p12URL: URL { CertVault.p12(owner) }
+    var provisionURL: URL { CertVault.provision(owner) }
 
     var savedPassword: String {
-        get { Keychain.load(kPassword) ?? "" }
-        set { Keychain.save(kPassword, newValue) }
+        get { Keychain.load(CertVault.passwordKey(owner)) ?? "" }
+        set { Keychain.save(CertVault.passwordKey(owner), newValue) }
     }
 
     var hasP12: Bool { FileManager.default.fileExists(atPath: p12URL.path) }
@@ -137,7 +177,7 @@ final class CertificateStore: ObservableObject {
         let fm = FileManager.default
         try? fm.removeItem(at: p12URL)
         try? fm.removeItem(at: provisionURL)
-        Keychain.delete(kPassword)
+        Keychain.delete(CertVault.passwordKey(owner))
         info = CertInfo()
         message = "Đã xoá chứng chỉ khỏi ứng dụng."
     }
@@ -306,7 +346,8 @@ struct CertificateImportView: View {
             .navigationTitle(store.t("Chứng chỉ ký", "Signing Cert"))
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                certs.refresh()
+                // Chứng chỉ RIÊNG theo tài khoản đang đăng nhập (không dùng chung cả máy)
+                certs.configure(owner: CertVault.key(store))
                 password = certs.savedPassword
                 if certs.hasP12 && !password.isEmpty { certs.validatePassword() }
             }

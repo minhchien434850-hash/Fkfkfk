@@ -219,16 +219,12 @@ struct IPALibraryView: View {
     @State private var lastPublicLink: String?
     @State private var linkCopied = false
 
-    // Chứng chỉ đã nhập (ở màn "Chứng chỉ ký") — cùng app, cùng Documents.
-    private var certDocs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
-    private var certP12: URL { certDocs.appendingPathComponent("cert.p12") }
-    private var certProvision: URL { certDocs.appendingPathComponent("cert.mobileprovision") }
-    private var certPassword: String { Keychain.load("cert_p12_password") ?? "" }
-    private var certReady: Bool {
-        FileManager.default.fileExists(atPath: certP12.path)
-            && FileManager.default.fileExists(atPath: certProvision.path)
-            && !certPassword.isEmpty
-    }
+    // Chứng chỉ đã nhập (ở màn "Chứng chỉ ký") — RIÊNG theo tài khoản đang đăng nhập.
+    private var certOwner: String { CertVault.key(store) }
+    private var certP12: URL { CertVault.p12(certOwner) }
+    private var certProvision: URL { CertVault.provision(certOwner) }
+    private var certPassword: String { CertVault.password(certOwner) }
+    private var certReady: Bool { CertVault.ready(certOwner) }
 
     var body: some View {
         NavigationStack {
@@ -430,7 +426,10 @@ struct IPALibraryView: View {
             }
             .navigationTitle(store.t("Kho IPA", "IPA Library"))
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear { ipa.refresh() }
+            .onAppear {
+                ipa.refresh()
+                CertVault.migrateLegacy(to: certOwner)   // chuyển chứng chỉ kiểu cũ về tài khoản này (1 lần)
+            }
             .task {
                 if store.isAdmin, let s = try? await store.api.adminGetIpaBase() {
                     ipaBase = s.base; hasZsign = s.hasZsign
