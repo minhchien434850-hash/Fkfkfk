@@ -143,19 +143,50 @@ struct TNPet: Identifiable {
 }
 let TN_PETS: [TNPet] = [
     TNPet(id: "tieuhuyen", name: "Tiểu Huyền", emoji: "🐱", price: 200, atk: 10, def: 6, hp: 60, assist: 0.10,
-          desc: "Linh thú tinh nghịch · cân bằng, dễ nuôi."),
+          desc: "Linh thú tinh nghịch · cân bằng, dễ nuôi.", color: .cyan),
     TNPet(id: "banghо",    name: "Băng Hổ", emoji: "🐯", price: 600, atk: 15, def: 22, hp: 120, assist: 0.12,
-          desc: "Thánh thú băng hàn · phòng thủ vượt trội."),
+          desc: "Thánh thú băng hàn · phòng thủ vượt trội.", color: .teal),
     TNPet(id: "loiung",    name: "Lôi Ưng", emoji: "🦅", price: 800, atk: 26, def: 8, hp: 80, assist: 0.22,
-          desc: "Thánh thú sấm sét · tiếp sức đòn đánh cực mạnh."),
+          desc: "Thánh thú sấm sét · tiếp sức đòn đánh cực mạnh.", color: .yellow),
     TNPet(id: "thanhlong", name: "Thanh Long", emoji: "🐉", price: 1400, atk: 40, def: 20, hp: 180, assist: 0.20,
-          desc: "Thánh thú uy nghiêm · công thủ toàn diện."),
+          desc: "Thánh thú uy nghiêm · công thủ toàn diện.", color: .blue),
     TNPet(id: "hoaphuong", name: "Hỏa Phượng", emoji: "🔥", price: 1800, atk: 48, def: 15, hp: 160, assist: 0.28,
-          desc: "Thánh thú lửa thiêng · sát thương tiếp sức bùng nổ."),
+          desc: "Thánh thú lửa thiêng · sát thương tiếp sức bùng nổ.", color: .red),
     TNPet(id: "kimo",      name: "Kim Ô", emoji: "🐦‍🔥", price: 3200, atk: 70, def: 35, hp: 300, assist: 0.30,
-          desc: "Thần điểu bất phàm · mạnh nhất, đồng hành tối thượng."),
+          desc: "Thần điểu bất phàm · mạnh nhất, đồng hành tối thượng.", color: .orange),
 ]
 func tnPet(_ id: String) -> TNPet? { TN_PETS.first { $0.id == id } }
+
+// MARK: - Bang hội (guild) — gia nhập nhận buff, cống hiến lên cấp bang
+struct TNGuild: Identifiable {
+    let id: String; let name: String; let emoji: String
+    let atkBuff: Double; let hpBuff: Double   // % cộng thêm chỉ số
+    let members: Int; let desc: String; let color: Color
+}
+let TN_GUILDS: [TNGuild] = [
+    TNGuild(id: "thienmon", name: "Thiên Môn Bang", emoji: "🏯", atkBuff: 0.08, hpBuff: 0.05,
+            members: 128, desc: "Đại bang chính đạo · công thủ cân bằng, đông đảo cao thủ.", color: .cyan),
+    TNGuild(id: "huyetma",  name: "Huyết Ma Giáo", emoji: "🩸", atkBuff: 0.15, hpBuff: 0.0,
+            members: 96,  desc: "Ma đạo hung tàn · tăng công kích cực mạnh, không nể ai.", color: .red),
+    TNGuild(id: "vandao",   name: "Vạn Đạo Sơn Trang", emoji: "⛩️", atkBuff: 0.05, hpBuff: 0.14,
+            members: 152, desc: "Ẩn thế thế gia · phòng ngự và sinh tồn vượt trội.", color: .green),
+    TNGuild(id: "lonhoi",   name: "Luân Hồi Điện", emoji: "🕯️", atkBuff: 0.12, hpBuff: 0.12,
+            members: 64,  desc: "Bang hội thần bí · buff toàn diện nhưng khó gia nhập.", color: .purple),
+]
+func tnGuild(_ id: String) -> TNGuild? { TN_GUILDS.first { $0.id == id } }
+
+// MARK: - Bậc danh vọng PvP (theo điểm)
+struct TNRank { let name: String; let emoji: String; let color: Color }
+func tnPvpRank(_ pts: Int) -> TNRank {
+    switch pts {
+    case ..<100:    return TNRank(name: "Luyện Khí Sĩ", emoji: "🥉", color: .brown)
+    case 100..<300: return TNRank(name: "Đấu Giả", emoji: "🥈", color: .gray)
+    case 300..<600: return TNRank(name: "Chiến Tướng", emoji: "🥇", color: .yellow)
+    case 600..<1000: return TNRank(name: "Đại Năng", emoji: "💠", color: .cyan)
+    case 1000..<1600: return TNRank(name: "Tôn Giả", emoji: "👑", color: .orange)
+    default:        return TNRank(name: "Chí Tôn Thiên Hạ", emoji: "🔱", color: .red)
+    }
+}
 
 // MARK: - Bản đồ vùng (khám phá theo cảnh giới)
 struct TNZone: Identifiable {
@@ -238,6 +269,11 @@ struct TNSave: Codable {
     var khoangThach = 0      // nguyên liệu: khoáng thạch (luyện khí)
     var ownedPets: [String] = []
     var activePet = ""       // thú cưng đang đồng hành
+    var guild = ""           // bang hội đang gia nhập
+    var guildContrib = 0     // cống hiến bang
+    var pvpPoints = 0        // điểm danh vọng PvP
+    var pvpWins = 0
+    var pvpLosses = 0
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -255,9 +291,11 @@ struct TNSave: Codable {
     private var petAtkB: Int { tnPet(activePet)?.atk ?? 0 }
     private var petDefB: Int { tnPet(activePet)?.def ?? 0 }
     private var petHpB: Int { tnPet(activePet)?.hp ?? 0 }
-    var hpMax: Int { Int(Double(120 + tier * 70 + level * 22) * sectHp) + danHp + petHpB }
+    private var guildAtkMul: Double { 1 + (tnGuild(guild)?.atkBuff ?? 0) }
+    private var guildHpMul: Double { 1 + (tnGuild(guild)?.hpBuff ?? 0) }
+    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB)) * guildHpMul) }
     var mpMax: Int { 60 + tier * 40 + level * 6 }
-    var atk: Int { Int(Double(18 + tier * 12 + level * 4) * sectAtk) + weaponLv * 15 + danAtk + petAtkB }
+    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB)) * guildAtkMul) }
     var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
@@ -482,6 +520,45 @@ final class TNGame: ObservableObject {
         if id.isEmpty || s.ownedPets.contains(id) { s.activePet = id; s.hp = min(s.hp, s.hpMax); save() }
     }
 
+    // Bang hội: gia nhập / rời / cống hiến
+    func joinGuild(_ g: TNGuild) {
+        s.guild = g.id
+        s.hp = min(s.hp, s.hpMax)   // buff HP đổi max → giữ hợp lệ
+        save()
+    }
+    func leaveGuild() { s.guild = ""; s.guildContrib = 0; s.hp = min(s.hp, s.hpMax); save() }
+    func contributeGuild() -> String {
+        let cost = 100
+        guard s.linhThach >= cost else { return "❌ Thiếu linh thạch (cần \(cost))." }
+        s.linhThach -= cost
+        s.guildContrib += 10
+        save()
+        return "🎖️ Cống hiến +10! Tổng cống hiến: \(s.guildContrib)."
+    }
+
+    // PvP xếp hạng: đấu đối thủ mô phỏng theo lực chiến, thắng/thua cộng-trừ điểm
+    func pvpFight() -> (win: Bool, msg: String) {
+        // Lực chiến người chơi
+        let myPower = Double(s.atk) * 2 + Double(s.hpMax) + Double(s.def) * 3
+        // Đối thủ mạnh dần theo điểm danh vọng hiện tại
+        let foePower = myPower * Double.random(in: 0.8...1.25) * (1 + Double(s.pvpPoints) / 4000)
+        let win = myPower >= foePower
+        if win {
+            let gain = Int.random(in: 18...30)
+            s.pvpPoints += gain
+            s.pvpWins += 1
+            s.linhThach += 60
+            save()
+            return (true, "🏆 THẮNG! +\(gain) điểm danh vọng · +60 linh thạch.")
+        } else {
+            let loss = min(s.pvpPoints, Int.random(in: 8...16))
+            s.pvpPoints -= loss
+            s.pvpLosses += 1
+            save()
+            return (false, "💥 Thua trận · -\(loss) điểm. Rèn luyện thêm rồi tái chiến!")
+        }
+    }
+
     // Tạo nhân vật mới (server + tên + môn phái)
     func createCharacter(name: String, server: String, sect: TNSect) {
         var v = TNSave()
@@ -653,6 +730,8 @@ struct TNHomeView: View {
     @State private var showForge = false
     @State private var showMap = false
     @State private var showPets = false
+    @State private var showGuild = false
+    @State private var showPvP = false
 
     var body: some View {
         ScrollView {
@@ -729,6 +808,8 @@ struct TNHomeView: View {
                     Button { tab = 1 } label: { bigBtn("📖 Đi Theo Cốt Truyện", [.brown, .orange]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showForge = true } label: { bigBtn("⚒️ Chế Tạo — Luyện Khí · Luyện Đan", [.gray, .brown]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showArena = true } label: { bigBtn("🏆 Đấu Đài — Thách Đấu Cao Thủ", [.yellow, .orange]) }.buttonStyle(TNPress(glow: .yellow))
+                    Button { showPvP = true } label: { bigBtn("⚔️ PvP Xếp Hạng — Đấu Danh Vọng", [.red, .pink]) }.buttonStyle(TNPress(glow: .red))
+                    Button { showGuild = true } label: { bigBtn("🏯 Bang Hội — Gia Nhập Thế Lực", [.indigo, .cyan]) }.buttonStyle(TNPress(glow: .cyan))
                     Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }.buttonStyle(TNPress(glow: .pink))
                 }
                 .padding(.horizontal)
@@ -749,6 +830,8 @@ struct TNHomeView: View {
         .sheet(isPresented: $showForge) { TNForgeView(game: game) }
         .fullScreenCover(isPresented: $showMap) { TNMapView(game: game) }
         .sheet(isPresented: $showPets) { TNPetView(game: game) }
+        .sheet(isPresented: $showGuild) { TNGuildView(game: game) }
+        .fullScreenCover(isPresented: $showPvP) { TNPvPView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -1499,6 +1582,178 @@ struct TNArenaView: View {
                        atk: Int(Double(game.s.atk) * 0.75 * f.atkMul),
                        def: Int(Double(game.s.def) * 0.85),
                        reward: 150 + foeIdx * 120, exp: 120 + foeIdx * 60, isBoss: true)
+    }
+}
+
+// MARK: - Bang Hội (gia nhập thế lực nhận buff · cống hiến)
+struct TNGuildView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("🏯 BANG HỘI").font(.title2.bold()).foregroundStyle(.cyan)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal).padding(.top, 8)
+
+                    if let g = tnGuild(game.s.guild) {
+                        // Thẻ bang hiện tại
+                        VStack(spacing: 8) {
+                            Text("\(g.emoji) \(g.name)").font(.title3.bold()).foregroundStyle(g.color)
+                            Text("Buff: ⚔️ +\(Int(g.atkBuff*100))% công · ❤️ +\(Int(g.hpBuff*100))% máu")
+                                .font(.caption).foregroundStyle(.white.opacity(0.85))
+                            Text("🎖️ Cống hiến của bạn: \(game.s.guildContrib)")
+                                .font(.subheadline.bold()).foregroundStyle(.yellow)
+                            HStack(spacing: 10) {
+                                Button { flash(game.contributeGuild()) } label: {
+                                    Text("💎 Cống hiến (100)").font(.caption.bold()).foregroundStyle(.white)
+                                        .padding(.horizontal, 16).padding(.vertical, 9)
+                                        .background(.green, in: Capsule())
+                                }.buttonStyle(TNPress(glow: .green))
+                                Button { game.leaveGuild(); flash("Đã rời bang hội.") } label: {
+                                    Text("Rời bang").font(.caption.bold()).foregroundStyle(.white)
+                                        .padding(.horizontal, 16).padding(.vertical, 9)
+                                        .background(.red.opacity(0.8), in: Capsule())
+                                }.buttonStyle(TNPress(glow: .red))
+                            }
+                        }
+                        .padding(16).frame(maxWidth: .infinity)
+                        .background(g.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 18))
+                        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(g.color.opacity(0.6), lineWidth: 1))
+                        .padding(.horizontal)
+                    } else {
+                        Text("Gia nhập một bang hội để nhận buff chỉ số vĩnh viễn khi còn là thành viên.")
+                            .font(.caption).foregroundStyle(.white.opacity(0.65))
+                            .multilineTextAlignment(.center).padding(.horizontal)
+                    }
+
+                    ForEach(TN_GUILDS) { g in
+                        let joined = game.s.guild == g.id
+                        HStack(spacing: 12) {
+                            Text(g.emoji).font(.system(size: 34))
+                                .frame(width: 56, height: 56)
+                                .background(g.color.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(g.name).font(.headline).foregroundStyle(.white)
+                                Text(g.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                                Text("⚔️+\(Int(g.atkBuff*100))% ❤️+\(Int(g.hpBuff*100))% · 👥 \(g.members) thành viên")
+                                    .font(.system(size: 10, weight: .bold)).foregroundStyle(g.color)
+                            }
+                            Spacer()
+                            if joined { Text("Đang ở").font(.caption.bold()).foregroundStyle(.green) }
+                            else {
+                                Button("Gia nhập") { game.joinGuild(g); flash("✅ Đã gia nhập \(g.name)!") }
+                                    .font(.caption.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 7)
+                                    .background(g.color, in: Capsule())
+                                    .buttonStyle(TNPress(glow: g.color))
+                            }
+                        }
+                        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                    }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.05,green:0.08,blue:0.12), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Bang Hội").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+        }
+    }
+    private func flash(_ m: String) {
+        withAnimation { msg = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - PvP Xếp Hạng (đấu danh vọng leo bậc)
+struct TNPvPView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var fighting = false
+    @State private var result: String?
+    @State private var resultWin = false
+    @State private var shake = false
+
+    var body: some View {
+        let rank = tnPvpRank(game.s.pvpPoints)
+        ZStack {
+            LinearGradient(colors: [Color(red:0.12,green:0.03,blue:0.06), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            TNCloudsBG()
+            ScrollView {
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("⚔️ PvP XẾP HẠNG").font(.title2.bold()).foregroundStyle(.red)
+                        Spacer()
+                        Button("Đóng") { dismiss() }.foregroundStyle(.white)
+                    }.padding(.horizontal).padding(.top, 10)
+
+                    // Bảng danh vọng
+                    VStack(spacing: 6) {
+                        Text(rank.emoji).font(.system(size: 54))
+                        Text(rank.name).font(.title3.bold()).foregroundStyle(rank.color)
+                        Text("\(game.s.pvpPoints) điểm danh vọng").font(.headline).foregroundStyle(.white)
+                        Text("🏆 Thắng \(game.s.pvpWins) · 💥 Thua \(game.s.pvpLosses)")
+                            .font(.caption).foregroundStyle(.white.opacity(0.7))
+                    }
+                    .padding(20).frame(maxWidth: .infinity)
+                    .background(rank.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(rank.color.opacity(0.6), lineWidth: 1))
+                    .padding(.horizontal)
+                    .scaleEffect(shake ? 1.03 : 1.0)
+
+                    // Bậc danh vọng
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Các bậc danh vọng").font(.caption.bold()).foregroundStyle(.white.opacity(0.7))
+                        rankRow("🥉 Luyện Khí Sĩ", "0+", .brown)
+                        rankRow("🥈 Đấu Giả", "100+", .gray)
+                        rankRow("🥇 Chiến Tướng", "300+", .yellow)
+                        rankRow("💠 Đại Năng", "600+", .cyan)
+                        rankRow("👑 Tôn Giả", "1000+", .orange)
+                        rankRow("🔱 Chí Tôn Thiên Hạ", "1600+", .red)
+                    }
+                    .padding(14).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal)
+
+                    Button {
+                        let r = game.pvpFight()
+                        resultWin = r.win; result = r.msg
+                        TNHaptic.hit(r.win ? .heavy : .light)
+                        withAnimation(.default.repeatCount(3, autoreverses: true).speed(4)) { shake = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { shake = false }
+                    } label: {
+                        Text("⚔️ TÌM ĐỐI THỦ — GIAO ĐẤU!").font(.headline).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 16)
+                            .background(LinearGradient(colors: [.red, .pink], startPoint: .leading, endPoint: .trailing),
+                                        in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .buttonStyle(TNPress(glow: .red)).padding(.horizontal)
+                    .shadow(color: .red.opacity(0.5), radius: 8)
+
+                    if let result {
+                        Text(result).font(.subheadline.bold())
+                            .foregroundStyle(resultWin ? .green : .orange)
+                            .multilineTextAlignment(.center)
+                            .padding(12).background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+                            .padding(.horizontal)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    Color.clear.frame(height: 20)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+    private func rankRow(_ name: String, _ pts: String, _ c: Color) -> some View {
+        HStack {
+            Text(name).font(.caption).foregroundStyle(c)
+            Spacer()
+            Text(pts).font(.caption2.bold()).foregroundStyle(.white.opacity(0.6))
+        }
     }
 }
 
