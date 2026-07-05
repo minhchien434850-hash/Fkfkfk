@@ -227,6 +227,19 @@ let TN_DAILIES: [TNDaily] = [
             hint: "Giao đấu PvP xếp hạng 1 lần."),
 ]
 
+// MARK: - Cửa hàng nạp Linh Thạch (gói nạp trong game)
+struct TNRecharge: Identifiable {
+    let id: String; let name: String; let emoji: String
+    let price: String; let linhThach: Int; let bonus: Int; let tag: String; let color: Color
+}
+let TN_RECHARGES: [TNRecharge] = [
+    TNRecharge(id: "p1", name: "Gói Khởi Đầu", emoji: "💠", price: "20.000đ", linhThach: 500, bonus: 0, tag: "", color: .cyan),
+    TNRecharge(id: "p2", name: "Gói Tu Sĩ", emoji: "💎", price: "50.000đ", linhThach: 1300, bonus: 130, tag: "+10%", color: .blue),
+    TNRecharge(id: "p3", name: "Gói Chân Nhân", emoji: "🔷", price: "100.000đ", linhThach: 2800, bonus: 560, tag: "HOT +20%", color: .indigo),
+    TNRecharge(id: "p4", name: "Gói Đại Năng", emoji: "🟣", price: "200.000đ", linhThach: 6000, bonus: 1800, tag: "+30%", color: .purple),
+    TNRecharge(id: "p5", name: "Gói Chí Tôn", emoji: "👑", price: "500.000đ", linhThach: 16000, bonus: 6400, tag: "ĐỈNH +40%", color: .orange),
+]
+
 // MARK: - Bậc danh vọng PvP (theo điểm)
 struct TNRank { let name: String; let emoji: String; let color: Color }
 func tnPvpRank(_ pts: Int) -> TNRank {
@@ -335,6 +348,8 @@ struct TNSave: Codable {
     var dailyClaimed: [String] = []      // nhiệm vụ ngày đã lĩnh thưởng
     var dailyStreak = 0      // chuỗi ngày hoàn thành liên tiếp
     var lastStreakDate = ""  // ngày cuối cộng streak (tránh cộng trùng)
+    var lastFreeGift = ""    // ngày (yyyy-MM-dd) đã nhận quà miễn phí ở cửa hàng nạp
+    var totalRecharged = 0   // tổng linh thạch đã nạp (mốc VIP)
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -712,6 +727,28 @@ final class TNGame: ObservableObject {
         return "🎁 +\(d.rewardLT) linh thạch · +\(d.rewardExp) EXP\(extra)"
     }
 
+    // ===== Cửa hàng nạp Linh Thạch =====
+    var freeGiftReady: Bool { s.lastFreeGift != todayStr() }
+    var vipLevel: Int { min(s.totalRecharged / 5000, 6) }   // mốc VIP theo tổng nạp
+    @discardableResult
+    func claimFreeGift() -> String {
+        guard freeGiftReady else { return "Hôm nay đã nhận quà rồi, mai quay lại nhé." }
+        s.lastFreeGift = todayStr()
+        let amount = 100 + vipLevel * 20
+        s.linhThach += amount
+        save()
+        return "🎉 Nhận quà miễn phí: +\(amount) linh thạch!"
+    }
+    func recharge(_ pkg: TNRecharge) -> String {
+        let total = pkg.linhThach + pkg.bonus
+        s.linhThach += total
+        s.totalRecharged += total
+        s.hp = min(s.hp, s.hpMax)
+        save()
+        let vip = pkg.bonus > 0 ? " (gồm +\(pkg.bonus) thưởng)" : ""
+        return "✅ Nạp thành công +\(total) linh thạch\(vip)! VIP \(vipLevel)"
+    }
+
     // Tạo nhân vật mới (server + tên + môn phái)
     func createCharacter(name: String, server: String, sect: TNSect) {
         var v = TNSave()
@@ -887,6 +924,7 @@ struct TNHomeView: View {
     @State private var showPvP = false
     @State private var showMount = false
     @State private var showSpouse = false
+    @State private var showRecharge = false
 
     var body: some View {
         ScrollView {
@@ -985,6 +1023,7 @@ struct TNHomeView: View {
                     Button { showGuild = true } label: { bigBtn("🏯 Bang Hội — Gia Nhập Thế Lực", [.indigo, .cyan]) }.buttonStyle(TNPress(glow: .cyan))
                     Button { showMount = true } label: { bigBtn("🐲 Thú Cưỡi Bay — Ngự Không Phi Hành", [.blue, .indigo]) }.buttonStyle(TNPress(glow: .blue))
                     Button { showSpouse = true } label: { bigBtn("💞 Đạo Lữ — Kết Duyên Tu Tiên", [.pink, .red]) }.buttonStyle(TNPress(glow: .pink))
+                    Button { showRecharge = true } label: { bigBtn("💰 Nạp Linh Thạch — Cửa Hàng", [.yellow, .green]) }.buttonStyle(TNPress(glow: .green))
                     Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }.buttonStyle(TNPress(glow: .pink))
                 }
                 .padding(.horizontal)
@@ -1009,6 +1048,7 @@ struct TNHomeView: View {
         .fullScreenCover(isPresented: $showPvP) { TNPvPView(game: game) }
         .sheet(isPresented: $showMount) { TNMountView(game: game) }
         .sheet(isPresented: $showSpouse) { TNSpouseView(game: game) }
+        .sheet(isPresented: $showRecharge) { TNRechargeView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -2088,6 +2128,112 @@ struct TNSpouseView: View {
     private func flash(_ m: String) {
         withAnimation { msg = m }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Cửa hàng nạp Linh Thạch (quà miễn phí + gói nạp)
+struct TNRechargeView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    @State private var pending: TNRecharge?      // gói đang chờ xác nhận nạp
+    @State private var shine = false
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    // Số dư + VIP
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("💎 \(game.s.linhThach)").font(.title3.bold()).foregroundStyle(.cyan)
+                            Text("Số dư linh thạch").font(.caption2).foregroundStyle(.white.opacity(0.6))
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("👑 VIP \(game.vipLevel)").font(.headline.bold()).foregroundStyle(.orange)
+                            Text("Tổng nạp \(game.s.totalRecharged)").font(.caption2).foregroundStyle(.white.opacity(0.6))
+                        }
+                    }
+                    .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal).padding(.top, 8)
+
+                    // Quà miễn phí mỗi ngày
+                    Button {
+                        msg = game.claimFreeGift(); TNHaptic.success()
+                    } label: {
+                        HStack {
+                            Text("🎁").font(.system(size: 30))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Quà Miễn Phí Mỗi Ngày").font(.subheadline.bold()).foregroundStyle(.white)
+                                Text(game.freeGiftReady ? "Nhận ngay +\(100 + game.vipLevel*20) linh thạch!" : "Đã nhận hôm nay · mai quay lại")
+                                    .font(.caption2).foregroundStyle(.white.opacity(0.7))
+                            }
+                            Spacer()
+                            Text(game.freeGiftReady ? "NHẬN" : "✓")
+                                .font(.caption.bold()).foregroundStyle(.white)
+                                .padding(.horizontal, 16).padding(.vertical, 9)
+                                .background(game.freeGiftReady ? Color.green : Color.gray, in: Capsule())
+                        }
+                        .padding(12)
+                        .background(LinearGradient(colors: [.green.opacity(0.2), .clear], startPoint: .leading, endPoint: .trailing),
+                                    in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.green.opacity(0.4), lineWidth: 1))
+                    }
+                    .disabled(!game.freeGiftReady)
+                    .buttonStyle(TNPress(glow: .green)).padding(.horizontal)
+
+                    Text("🛒 GÓI NẠP LINH THẠCH").font(.subheadline.bold()).foregroundStyle(.yellow)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
+
+                    ForEach(TN_RECHARGES) { pkg in
+                        Button { pending = pkg } label: {
+                            HStack(spacing: 12) {
+                                Text(pkg.emoji).font(.system(size: 34))
+                                    .frame(width: 56, height: 56)
+                                    .background(pkg.color.opacity(0.22), in: RoundedRectangle(cornerRadius: 14))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 6) {
+                                        Text(pkg.name).font(.headline).foregroundStyle(.white)
+                                        if !pkg.tag.isEmpty {
+                                            Text(pkg.tag).font(.system(size: 9, weight: .heavy)).foregroundStyle(.white)
+                                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                                .background(.red, in: Capsule())
+                                        }
+                                    }
+                                    Text("💎 \(pkg.linhThach)\(pkg.bonus > 0 ? " + \(pkg.bonus) thưởng" : "")")
+                                        .font(.caption.bold()).foregroundStyle(pkg.color)
+                                }
+                                Spacer()
+                                Text(pkg.price).font(.subheadline.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 8)
+                                    .background(LinearGradient(colors: [pkg.color, pkg.color.opacity(0.6)], startPoint: .top, endPoint: .bottom), in: Capsule())
+                            }
+                            .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+                        }
+                        .buttonStyle(TNPress(glow: pkg.color)).padding(.horizontal)
+                    }
+
+                    Text("Cửa hàng nạp trong game — linh thạch dùng để mua skin, thú cưng, thú cưỡi, đạo lữ, rèn trang bị…")
+                        .font(.caption2).foregroundStyle(.white.opacity(0.5))
+                        .multilineTextAlignment(.center).padding(.horizontal)
+
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center).padding(.horizontal) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.08,green:0.1,blue:0.05), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Nạp Linh Thạch").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+            .alert("Xác nhận nạp", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
+                Button("Nạp \(pending?.price ?? "")") {
+                    if let p = pending { msg = game.recharge(p); TNHaptic.success() }
+                    pending = nil
+                }
+                Button("Huỷ", role: .cancel) { pending = nil }
+            } message: {
+                Text("Nạp gói \(pending?.name ?? "") — nhận \(( (pending?.linhThach ?? 0) + (pending?.bonus ?? 0) )) linh thạch.")
+            }
+        }
     }
 }
 
