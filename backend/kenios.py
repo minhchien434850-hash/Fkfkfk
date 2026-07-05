@@ -6669,8 +6669,8 @@ def _tg_ai_wants(chat_id, msg, text, low) -> int:
     st = text.strip()
     if st.endswith("?") or st.endswith("？"):
         return 1
-    # Chế độ trả lời tất cả: chat thẳng như DM, nhưng bỏ qua tin quá ngắn (ok/haha/emoji)
-    if _tg_ai_all_on(chat_id) and (len(st) >= 6 or len(st.split()) >= 2):
+    # Chế độ trả lời tất cả: chat thẳng như DM. Chỉ bỏ qua tin RỖNG / 1 ký tự / toàn emoji-icon.
+    if _tg_ai_all_on(chat_id) and len(st) >= 2 and any(c.isalnum() for c in st):
         return 2
     return 0
 
