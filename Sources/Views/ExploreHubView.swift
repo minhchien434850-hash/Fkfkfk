@@ -5,11 +5,12 @@ import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, winApp, remoteDesktop, remoteServer
+    case tienNghich, liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, winApp, remoteDesktop, remoteServer
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .tienNghich:     return "Tiên Nghịch"
         case .liveNow:        return "Live Now"
         case .fileTools:      return "Công cụ tệp"
         case .library:        return "Thư viện"
@@ -32,6 +33,7 @@ enum HubDest: String, Identifiable {
     }
     var subtitle: String {
         switch self {
+        case .tienNghich:     return "Game tu tiên · chiến đấu · skill"
         case .liveNow:        return "Phát trực tiếp · TikTok · FB · YouTube"
         case .fileTools:      return "PDF · Âm thanh · Quét · Ảnh"
         case .library:        return "Video · file đã tải"
@@ -54,6 +56,7 @@ enum HubDest: String, Identifiable {
     }
     var titleEN: String {
         switch self {
+        case .tienNghich:     return "Tiên Nghịch"
         case .liveNow:        return "Live Now"
         case .fileTools:      return "File Tools"
         case .library:        return "Library"
@@ -76,6 +79,7 @@ enum HubDest: String, Identifiable {
     }
     var subtitleEN: String {
         switch self {
+        case .tienNghich:     return "Cultivation RPG · battle · skills"
         case .liveNow:        return "Go live · TikTok · FB · YouTube"
         case .fileTools:      return "PDF · Audio · Scan · Image"
         case .library:        return "Videos · downloaded files"
@@ -98,6 +102,7 @@ enum HubDest: String, Identifiable {
     }
     var icon: String {
         switch self {
+        case .tienNghich:     return "flame.circle.fill"
         case .liveNow:        return "dot.radiowaves.left.and.right"
         case .fileTools:      return "doc.badge.gearshape.fill"
         case .library:        return "clock.arrow.circlepath"
@@ -120,6 +125,7 @@ enum HubDest: String, Identifiable {
     }
     var colors: [Color] {
         switch self {
+        case .tienNghich:     return [Color(red: 0.95, green: 0.6, blue: 0.1), Color(red: 0.6, green: 0.1, blue: 0.5)]
         case .liveNow:        return [Color(red: 0.98, green: 0.2, blue: 0.25), Color(red: 0.8, green: 0.05, blue: 0.2)]
         case .fileTools:      return [Color(red: 0.0, green: 0.7, blue: 0.65), Color(red: 0.0, green: 0.45, blue: 0.7)]
         case .library:        return [Color(red: 0.0, green: 0.6, blue: 0.95), Color(red: 0.0, green: 0.4, blue: 0.85)]
@@ -151,7 +157,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .winApp, .remoteDesktop, .remoteServer, .certImport, .ipaLibrary, .settings]
+        var a: [HubDest] = [.tienNghich, .liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .winApp, .remoteDesktop, .remoteServer, .certImport, .ipaLibrary, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -204,6 +210,7 @@ struct ExploreHubView: View {
     @ViewBuilder
     private func destView(_ d: HubDest) -> some View {
         switch d {
+        case .tienNghich:     TienNghichGameView()
         case .liveNow:        LiveNowHubView()
         case .fileTools:      FileToolsView()
         case .library:        LibraryView()
