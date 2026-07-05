@@ -6839,6 +6839,77 @@ def _tg_ai_route(token, chat_id, msg, text) -> bool:
 
     return False
 
+def _tg_ai_admin_route(token, chat_id, msg, low) -> bool:
+    """👮 Admin nói TỰ NHIÊN trong nhóm → bot chạy lệnh QUẢN TRỊ (mute/ban/kick/warn/pin/del/purge/lock…).
+    Chỉ chạy khi: AI đang bật cho nhóm + người gõ là ADMIN. Lệnh nhắm người cần REPLY vào tin của họ.
+    Trả True nếu đã xử lý (khỏi để AI trả lời)."""
+    import re as _re
+    if not low or not _tg_ai_is_on(chat_id):
+        return False
+    if low.strip().endswith("?") or low.strip().endswith("？"):
+        return False   # câu hỏi ('làm sao khóa link?') → để AI trả lời, không thao tác
+    if not _tg_is_privileged(token, chat_id, msg):
+        return False   # CHỈ admin mới điều khiển được
+    has_reply = bool((msg.get("reply_to_message") or {}).get("from"))
+
+    def run(cmd, args=""):
+        _tg_admin_command(token, chat_id, msg, cmd, args)
+        return True
+
+    def need_reply(việc):
+        _tg_send(token, chat_id, f"↩️ <b>Reply</b> vào tin của người cần {việc} rồi nói lại nhé (vd reply xong gõ 'mute 10 phút').")
+        return True
+
+    # Số phút cho mute
+    mm = _re.search(r'(\d+)\s*(phút|phut|giờ|gio|tiếng|tieng|\bp\b|\bh\b)', low)
+    minutes = ""
+    if mm:
+        n = int(mm.group(1))
+        minutes = str(n * 60) if mm.group(2) in ("giờ", "gio", "tiếng", "tieng", "h") else str(n)
+
+    # ---- Lệnh NHẮM NGƯỜI (thứ tự: bản phủ định / unX trước) ----
+    if _re.search(r'\bunmute\b|mở chat|mo chat|mở mồm|mo mom|mở mõm|cho nói|cho noi|cho chat|bỏ cấm chat|bo cam chat|mở tiếng|mo tieng|gỡ cấm chat|go cam chat|cho nói lại', low):
+        return run("unmute") if has_reply else need_reply("mở chat")
+    if _re.search(r'\bmute\b|cấm chat|cam chat|khóa mồm|khoa mom|khóa mõm|khoa mom|khóa chat|khoa chat|im lặng|im lang|cấm nói|cam noi|bịt mồm|bit mom|cấm mồm|cam mom|khóa miệng|khoa mieng|cấm nó nói|cấm nhắn', low):
+        return run("mute", minutes) if has_reply else need_reply("cấm chat")
+    if _re.search(r'\bunwarn\b|bỏ cảnh cáo|bo canh cao|xóa cảnh cáo|xoa canh cao|gỡ cảnh cáo|go canh cao|bỏ cảnh báo|bo canh bao', low):
+        return run("unwarn") if has_reply else need_reply("bỏ cảnh cáo")
+    if _re.search(r'\bwarn\b|cảnh cáo|canh cao|cảnh báo|canh bao', low):
+        return run("warn") if has_reply else need_reply("cảnh cáo")
+    if _re.search(r'\bkick\b|đá ra|da ra|đá khỏi|da khoi|đuổi|duoi|đá bay|da bay|tống cổ|tong co|cho ra khỏi nhóm|đá nó|da no|đá thằng|da thang|đá con', low):
+        return run("kick") if has_reply else need_reply("đá khỏi nhóm")
+    if _re.search(r'\bban\b|\bblock\b|cấm vĩnh viễn|cam vinh vien|cấm luôn|cam luon|chặn nó|chan no|cấm nó|cam no|cấm thằng|cam thang|cấm con|cấm khỏi nhóm|cam khoi nhom|cấm nick|cấm người này', low):
+        return run("ban") if has_reply else need_reply("cấm (ban)")
+    if _re.search(r'\bunpin\b|bỏ ghim|bo ghim|gỡ ghim|go ghim|hủy ghim|huy ghim', low):
+        return run("unpin")
+    if _re.search(r'\bpin\b|ghim tin|ghim lại|ghim cái|ghim nó|ghim này|ghim lên|ghim giúp', low) or low.strip() in ("ghim", "ghim đi", "ghim nhé"):
+        return run("pin") if has_reply else need_reply("ghim")
+    if _re.search(r'\bpurge\b|dọn tin|don tin|xóa hàng loạt|xoa hang loat|dọn dẹp từ đây|don dep tu day|xóa từ đây|xoa tu day|xóa hết từ|dọn nhóm', low):
+        return run("purge") if has_reply else need_reply("bắt đầu dọn (reply vào tin đầu)")
+    if _re.search(r'\bdel\b|xóa tin|xoa tin|gỡ tin|go tin|xóa cái này|xoa cai nay|xóa nó đi|xoa no di|xóa tin nhắn|xoa tin nhan|gỡ cái này|xóa dùm|xóa giúp', low):
+        return run("del") if has_reply else need_reply("xoá (reply vào tin)")
+    if _re.search(r'xem cảnh cáo|mấy cảnh cáo|bao nhiêu cảnh cáo|số cảnh cáo|kiểm tra cảnh cáo', low):
+        return run("warns") if has_reply else need_reply("xem cảnh cáo")
+    if _re.search(r'thông tin người này|info người này|xem id|user id|id người này|id thằng này|id của nó', low):
+        return run("info") if has_reply else need_reply("xem thông tin")
+
+    # ---- KHÓA / MỞ KHÓA nội dung (không cần reply) ----
+    lk = None
+    for word, tp in (("liên kết", "link"), ("link", "link"), ("ảnh động", "gif"), ("gif", "gif"),
+                     ("ảnh", "photo"), ("hình ", "photo"), ("photo", "photo"), ("sticker", "sticker"),
+                     ("nhãn dán", "sticker"), ("video", "video"), ("chuyển tiếp", "forward"), ("forward", "forward"),
+                     ("tag", "mention"), ("mention", "mention"), ("tất cả", "all"), ("toàn bộ", "all")):
+        if word in low:
+            lk = tp
+            break
+    if lk:
+        if _re.search(r'mở khóa|mo khoa|bỏ khóa|bo khoa|cho phép|cho phep|cho gửi|cho gui|mở lại|mo lai|cho đăng', low):
+            return run("unlock", lk)
+        if _re.search(r'khóa|khoa|cấm|cam|chặn|chan|không cho|khong cho|chặn gửi', low):
+            return run("lock", lk)
+
+    return False
+
 # ======================== 😌 Đối đáp văn minh khi bị chửi (nhẹ nhàng mà thấm) ========================
 import re as _ins_re
 # Cụm rõ ràng tục/xúc phạm (khớp trực tiếp).
@@ -8252,6 +8323,9 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
                     kwargs={"chat_id": chat_id, "message_id": mid,
                             "reaction": [{"type": "emoji", "emoji": get_setting("tg_autoreact_emoji", "👍")}]},
                     daemon=True).start()
+    # 👮 ADMIN nói tự nhiên → chạy lệnh quản trị (mute/ban/kick/warn/pin/del/lock…) khi AI bật + là admin.
+    if text and not text.startswith("/") and _tg_ai_admin_route(token, chat_id, msg, low):
+        return
     # 🛒 KHÁCH HỎI TƯ VẤN trong nhóm ("bản nào an toàn", "chơi ok nhất"…) → mở luồng chọn OS → game.
     if text and not text.startswith("/") and _kenios_wants_support(low):
         _kenios_support_start(token, chat_id)
