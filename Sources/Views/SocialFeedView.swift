@@ -126,9 +126,10 @@ struct SocialFeedView: View {
         do {
             var fileId = 0
             if attachKind == "video", let url = attachVideoURL {
-                // Video → đăng kèm, hiển thị ở Reels
+                // Video → nén H.264 720p trước (tải lên nhanh + phát mượt) rồi đăng, hiển thị ở Reels
+                let upURL = await VideoUploadHelper.compressForUpload(url)
                 let up = try await store.api.uploadFileRaw(
-                    name: "v_\(Int(Date().timeIntervalSince1970)).mp4", category: "media", fileURL: url)
+                    name: "v_\(Int(Date().timeIntervalSince1970)).mp4", category: "media", fileURL: upURL)
                 fileId = up.id
             } else if attachKind == "image", let img = attachImage,
                       let data = img.jpegData(compressionQuality: 0.85) {

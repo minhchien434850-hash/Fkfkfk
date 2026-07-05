@@ -237,9 +237,11 @@ struct ComposeVideoView: View {
                 error = store.t("Không đọc được video.", "Cannot read video.")
                 posting = false; return
             }
+            // Nén H.264 720p trước khi tải lên → tải nhanh hơn nhiều & phát mượt.
+            let upURL = await VideoUploadHelper.compressForUpload(movie.url)
             let up = try await store.api.uploadFileRaw(
                 name: "video_\(Int(Date().timeIntervalSince1970)).mp4",
-                category: "video", fileURL: movie.url)
+                category: "video", fileURL: upURL)
             _ = try await store.api.createPost(fileId: up.id, caption: caption, isPublic: isPublic)
             self.picker = nil; caption = ""
             dismiss()
