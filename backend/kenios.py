@@ -6151,8 +6151,8 @@ def _tg_pts_top(chat_id, n=10) -> list:
         return [(r["name"], r["points"]) for r in c.execute(
             "SELECT name,points FROM tg_fun_points WHERE chat_id=? ORDER BY points DESC LIMIT ?", (str(chat_id), n)).fetchall()]
 
-def _tg_quiz_post(token, chat_id, auto=True) -> None:
-    """Ra 1 câu đố NGẪU NHIÊN cho nhóm (tránh trùng câu vừa hỏi ở lần trước)."""
+def _tg_quiz_post(token, chat_id, auto=True, first=False) -> None:
+    """Ra 1 câu đố NGẪU NHIÊN (tránh trùng câu vừa hỏi). first=True → kèm HƯỚNG DẪN CÁCH CHƠI."""
     import random as _rd
     bank = _tg_quiz_bank()
     last = _TG_QUIZ_LAST.get(chat_id)
@@ -6163,9 +6163,19 @@ def _tg_quiz_post(token, chat_id, auto=True) -> None:
         q, a = _rd.choice(bank)
     _TG_QUIZ_LAST[chat_id] = q
     _TG_QUIZ[chat_id] = {"q": q, "a": a, "auto": auto}
-    _tg_send(token, chat_id, f"🧠 <b>CÂU ĐỐ</b> (+10 điểm cho người trả lời đúng đầu tiên):\n\n{q}\n\n"
-                             "✍️ <b>Gõ thẳng đáp án vào khung chat</b> để trả lời — KHÔNG cần lệnh!\n"
-                             "💡 /goiy — gợi ý · /boqua — đáp án &amp; câu mới · /dungdo — dừng")
+    guide = ""
+    if first:
+        guide = ("📖 <b>CÁCH CHƠI:</b>\n"
+                 "1️⃣ Bot ra câu đố — AI CŨNG được trả lời\n"
+                 "2️⃣ <b>NHẮN THẲNG đáp án</b> vào khung chat (KHÔNG cần dấu /)\n"
+                 "     VD: câu hỏi \"1 + 1 = ?\" → chỉ cần gõ: <b>2</b>\n"
+                 "3️⃣ Ai đúng ĐẦU TIÊN được <b>+10 điểm</b> 🎉 — bot tự ra câu tiếp\n"
+                 "4️⃣ Gõ không dấu vẫn tính đúng (vd: <i>ha noi</i> = Hà Nội)\n"
+                 "💡 /goiy — gợi ý · ⏭️ /boqua — đáp án & câu mới · 🛑 /dungdo — dừng · 🏆 /diemdo — bảng vàng\n"
+                 "➖➖➖➖➖➖➖➖➖➖\n\n")
+    _tg_send(token, chat_id, f"{guide}🧠 <b>CÂU ĐỐ</b> (+10 điểm cho người đúng đầu tiên):\n\n{q}\n\n"
+                             "✍️ <b>Gõ thẳng đáp án vào khung chat</b> — KHÔNG cần lệnh!\n"
+                             "💡 /goiy · ⏭️ /boqua · 🛑 /dungdo")
 
 def _tg_quiz_try(token, chat_id, msg, text) -> bool:
     """Kiểm tra đáp án đố vui. Trả True nếu ĐÚNG (đã xử lý + ra câu mới)."""
@@ -6228,7 +6238,7 @@ def _tg_game_command(token, chat_id, msg, cmd, args) -> bool:
 
     # ---------- 🧠 ĐỐ VUI CÓ ĐIỂM ----------
     if cmd == "dovui":
-        _tg_quiz_post(token, chat_id, auto=True)
+        _tg_quiz_post(token, chat_id, auto=True, first=True)
         return True
     if cmd == "goiy":
         qz = _TG_QUIZ.get(chat_id)
@@ -6819,9 +6829,10 @@ _TG_FEAT = {
                     "/baucua bầu — bầu cua tôm cá gà nai (trúng +3đ/con)\n"
                     "📊 /diemdo — bảng vàng điểm vui"),
     "🧠 Đố vui": ("🧠 <b>Đố vui CÓ ĐIỂM</b> — ~1080 câu, 20+ thể loại (thủ đô, cờ các nước, toán nhanh,\n"
-                  "dãy số, kiến thức, đố mẹo, tục ngữ):\n"
-                  "/dovui — ra câu đố, AI TRẢ LỜI ĐÚNG ĐẦU TIÊN +10 điểm + lời chúc mừng 🎉\n"
-                  "(trả lời đúng xong bot tự ra câu tiếp — đấu liên tục cả nhóm)\n"
+                  "dãy số, kiến thức, đố mẹo, đố chữ, ca dao tục ngữ…).\n\n"
+                  "📖 <b>Cách chơi:</b> gõ /dovui → bot ra câu đố → <b>NHẮN THẲNG đáp án</b> vào khung chat\n"
+                  "(không cần dấu /, gõ không dấu vẫn tính). Ai đúng ĐẦU TIÊN +10 điểm + lời chúc 🎉,\n"
+                  "bot tự ra câu tiếp — cả nhóm đấu liên tục!\n"
                   "/goiy — gợi ý · /boqua — hiện đáp án, câu mới · /dungdo — dừng\n"
                   "📊 /diemdo — BẢNG VÀNG xếp hạng điểm"),
     "😂 Giải trí": ("😂 <b>Giải trí</b>:\n"
@@ -7483,15 +7494,20 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
             if "all" in locks and _kill("", warn=False): return
 
     # ============ 2) Tin đã "sạch" → tiện ích, menu, lệnh ============
-    # 🧠 ĐỐ VUI: nhóm đang có câu đố → kiểm tra đáp án (đúng = +10 điểm · sai = báo ❌)
-    if text and not text.startswith("/") and chat_id in _TG_QUIZ:
-        if _tg_quiz_try(token, chat_id, msg, text):
+    # 🧠 ĐỐ VUI: nhóm đang có câu đố → kiểm tra đáp án (đúng = +10 điểm · sai = báo ❌).
+    # Chấp nhận cả kiểu gõ nhầm "/30" — miễn không trùng lệnh thật của bot.
+    if text and chat_id in _TG_QUIZ:
+        _qtxt = text
+        if _qtxt.startswith("/"):
+            _qc = _qtxt.split()[0].lstrip("/").split("@")[0].lower()
+            _qtxt = _qtxt.lstrip("/ ") if _qc not in _TG_RESERVED else ""
+        if _qtxt and _tg_quiz_try(token, chat_id, msg, _qtxt):
             return
         # Trả lời SAI: chỉ báo khi tin nhắn TRÔNG GIỐNG một câu trả lời (ngắn ≤ 6 từ) để
         # không làm phiền hội thoại thường. Thả 👎 lên tin + nhắc thử lại (tin nhắc tự xoá
         # sau 8s; tối đa ~1 nhắc/4s mỗi nhóm để tránh spam).
         _qz = _TG_QUIZ.get(chat_id)
-        if _qz is not None and 0 < len(text.split()) <= 6 and mid:
+        if _qz is not None and _qtxt and 0 < len(_qtxt.split()) <= 6 and mid:
             _now = time.time()
             if _now - _qz.get("lastwrong", 0) >= 4:
                 _qz["lastwrong"] = _now
@@ -7552,6 +7568,10 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
 
 def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, frm: dict) -> None:
     cmd0 = text.split()[0].lstrip("/#").split("@")[0].lower() if text.split() else ""
+    # Đang chơi ĐỐ VUI: "/34" là đoán sai (đã thử làm đáp án ở trên) → im lặng,
+    # không báo "lệnh chỉ dành cho quản trị viên" gây rối.
+    if chat_id in _TG_QUIZ and cmd0 not in _TG_RESERVED:
+        return
     # ---- Công khai (engagement) — MỌI thành viên dùng được ----
     if cmd0 in ("diemdanh", "checkin", "diem"):
         res = _checkin(chat_id, uid)
@@ -7706,10 +7726,16 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                       admin=bool(admin_chat) and chat_id == str(admin_chat)):
         return
     # 🧠 ĐỐ VUI trong chat riêng: đang có câu đố → coi tin nhắn là đáp án
-    if text and not text.startswith("/") and chat_id in _TG_QUIZ:
-        if not _tg_quiz_try(token, chat_id, msg, text):
-            _tg_send(token, chat_id, "❌ Chưa đúng, thử lại nào! (/goiy — gợi ý · /boqua — bỏ qua)")
-        return
+    # (chấp nhận cả kiểu gõ nhầm "/30" — miễn không trùng lệnh thật)
+    if text and chat_id in _TG_QUIZ:
+        _qtxt = text
+        if _qtxt.startswith("/"):
+            _qc = _qtxt.split()[0].lstrip("/").split("@")[0].lower()
+            _qtxt = _qtxt.lstrip("/ ") if _qc not in _TG_RESERVED else ""
+        if _qtxt:
+            if not _tg_quiz_try(token, chat_id, msg, _qtxt):
+                _tg_send(token, chat_id, "❌ Chưa đúng, thử lại nào! (✍️ nhắn thẳng đáp án · /goiy — gợi ý · /boqua — bỏ qua)")
+            return
     # 🤖 AI trong CHAT RIÊNG: nếu bật → trả lời thẳng mọi câu hỏi (trừ tin admin reply cho khách).
     if _tg_ai_is_on(chat_id) and text and not text.startswith("/") and text != "[media]":
         _reply_ai = msg.get("reply_to_message") or {}
