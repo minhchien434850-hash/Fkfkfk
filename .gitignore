@@ -16,3 +16,7 @@ backend/*.db-shm
 backend/uploads/
 backend/*.jsonl
 .env
+
+# Khoá mã hoá backend (KHÔNG commit)
+kenios_enc.key
+*.key
