@@ -6515,90 +6515,165 @@ def _ai_err(status: int, text: str) -> str:
                 "vd /aimodel gemini-2.5-flash (Gemini) hoặc /aimodel llama-3.3-70b-versatile (Groq).")
     return f"⚠️ AI báo lỗi {status}. Thử lại sau ít phút, hoặc gõ /aiset để kiểm tra cấu hình."
 
+# Base URL & model mặc định cho từng nhà cung cấp (dùng khi /aiadd không ghi rõ).
+_AI_PROVIDER_DEFAULTS = {
+    "gemini":     ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
+    "groq":       ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+    "openai":     ("https://api.openai.com/v1", "gpt-4o-mini"),
+    "deepseek":   ("https://api.deepseek.com/v1", "deepseek-chat"),
+    "openrouter": ("https://openrouter.ai/api/v1", "deepseek/deepseek-chat-v3-0324:free"),
+    "anthropic":  ("https://api.anthropic.com/v1", "claude-3-5-sonnet-latest"),
+}
+
+def _ai_norm_provider(p, key="", base="") -> str:
+    """Chuẩn hoá tên nhà cung cấp; tự đoán theo khoá/base nếu không ghi rõ."""
+    p = (p or "").strip().lower()
+    if p in ("google",):
+        p = "gemini"
+    if p in _AI_PROVIDER_DEFAULTS:
+        return p
+    key = (key or ""); base = (base or "")
+    if key.startswith("AIza") or key.startswith("AQ.") or "generativelanguage" in base:
+        return "gemini"
+    if key.startswith("sk-ant"):
+        return "anthropic"
+    if key.startswith("gsk_") or "groq.com" in base:
+        return "groq"
+    if key.startswith("sk-or-") or "openrouter" in base:
+        return "openrouter"
+    if "deepseek" in base:
+        return "deepseek"
+    return "openai"
+
+def _ai_system(prov: str) -> str:
+    """Prompt hệ thống (kèm ngày–giờ thực; riêng Gemini nhắc dùng Google Search)."""
+    import datetime as _dt
+    vn = _dt.datetime.utcnow() + _dt.timedelta(hours=7)
+    wd = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"][vn.weekday()]
+    nowstr = f"{wd}, ngày {vn.day:02d}/{vn.month:02d}/{vn.year}, lúc {vn.hour:02d}:{vn.minute:02d} (giờ Việt Nam, UTC+7)"
+    s = ("Bạn là 'TRẦN MINH CHIẾN' — trợ lý AI siêu thông minh, uyên bác và giàu logic của KENIOS trên Telegram. "
+         "Bạn TRẢ LỜI MỌI tin nhắn và mọi câu hỏi của người dùng: giải đáp thắc mắc, toán khó, lập trình, khoa học, "
+         "đời sống, tư vấn… Suy luận từng bước khi cần và đưa ra đáp án CHÍNH XÁC, đầy đủ. Trả lời bằng TIẾNG VIỆT "
+         "tự nhiên, rõ ràng, thân thiện. Không bịa đặt; nếu không chắc thì nói thẳng. Với bài toán: trình bày ngắn gọn "
+         "các bước rồi nêu ĐÁP SỐ rõ ràng.\n"
+         f"THỜI GIAN THỰC HIỆN TẠI: {nowstr}.\n"
+         "Khi người dùng hỏi 'hôm nay ngày mấy', 'thứ mấy', 'bây giờ mấy giờ', 'năm nay năm bao nhiêu'… BẮT BUỘC dùng "
+         "đúng mốc thời gian thực ở trên để trả lời, tuyệt đối không đoán sai. Độ dài trả lời trong khoảng 3500 ký tự.")
+    if prov == "gemini":
+        s += ("\nBạn CÓ công cụ Google Search để tra thông tin THỜI GIAN THỰC (thời tiết, tin tức, tỷ giá, giá vàng/coin, "
+              "kết quả bóng đá, sự kiện mới…). Khi người dùng hỏi những thứ này, HÃY TRA GOOGLE và trả lời số liệu cụ thể, "
+              "mới nhất. TUYỆT ĐỐI KHÔNG nói 'tôi không truy cập được dữ liệu thời gian thực' — vì bạn tra được.")
+    return s
+
+def _ai_call_one(prov, base, model, key, q):
+    """Gọi 1 nhà cung cấp. Trả (ok, text): ok=True nếu có trả lời; ok=False (kèm lỗi) để nhảy con kế tiếp."""
+    import httpx as _hx
+    system = _ai_system(prov)
+    base = (base or "").rstrip("/")
+    if prov == "gemini":
+        gbase = base[:-7] if base.endswith("/openai") else base
+        hdr = {"x-goog-api-key": key, "content-type": "application/json"}
+
+        def _g(mdl, tools):
+            b = {"systemInstruction": {"parts": [{"text": system}]},
+                 "contents": [{"role": "user", "parts": [{"text": q}]}],
+                 "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.4}}
+            if tools:
+                b["tools"] = [{"google_search": {}}]
+            return _hx.post(f"{gbase}/models/{mdl}:generateContent", timeout=90, headers=hdr, json=b)
+
+        r = _g(model, True)
+        if r.status_code == 400:
+            r = _g(model, False)
+        if r.status_code == 429:   # model chính hết lượt → thử các model Gemini nhẹ (hạn mức riêng)
+            for alt in ("gemini-flash-lite-latest", "gemini-2.0-flash-lite", "gemini-2.5-flash-lite"):
+                if alt == model:
+                    continue
+                ra = _g(alt, True)
+                if ra.status_code == 400:
+                    ra = _g(alt, False)
+                if ra.status_code < 400:
+                    r = ra
+                    break
+        if r.status_code >= 400:
+            return False, _ai_err(r.status_code, r.text)
+        d = r.json()
+        c = d.get("candidates") or []
+        parts = ((c[0].get("content") or {}).get("parts") or []) if c else []
+        txt = "".join(p.get("text", "") for p in parts if "text" in p).strip()
+        return (bool(txt), txt or "(AI không trả lời)")
+    if prov == "anthropic":
+        r = _hx.post(base + "/messages", timeout=90,
+                     headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                     json={"model": model, "max_tokens": 2000, "system": system, "messages": [{"role": "user", "content": q}]})
+        if r.status_code >= 400:
+            return False, _ai_err(r.status_code, r.text)
+        d = r.json()
+        txt = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip()
+        return (bool(txt), txt or "(AI không trả lời)")
+    # OpenAI-compatible: groq / openai / deepseek / openrouter
+    r = _hx.post(base + "/chat/completions", timeout=90,
+                 headers={"Authorization": "Bearer " + key, "content-type": "application/json"},
+                 json={"model": model, "temperature": 0.4, "max_tokens": 2000,
+                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": q}]})
+    if r.status_code >= 400:
+        return False, _ai_err(r.status_code, r.text)
+    d = r.json()
+    txt = ((d.get("choices") or [{}])[0].get("message", {}).get("content", "") or "").strip()
+    return (bool(txt), txt or "(AI không trả lời)")
+
+def _ai_backends() -> list:
+    """CHUỖI AI theo thứ tự: AI chính (/aikey) → các AI phụ (/aiadd) → khoá từ ENV. Con nào lỗi/429
+    thì bot tự nhảy con kế tiếp. Trả list các (provider, base, model, key), đã loại trùng khoá."""
+    import json as _json, os as _os
+    out = []
+    p, b, m, k = _ai_cfg()
+    if k:
+        out.append((p, b, m, k))
+    try:
+        for e in _json.loads(get_setting("tg_ai_backends", "[]") or "[]"):
+            k2 = (e.get("k") or "").strip()
+            if not k2:
+                continue
+            p2 = _ai_norm_provider(e.get("p"), k2, e.get("b"))
+            db, dm = _AI_PROVIDER_DEFAULTS.get(p2, _AI_PROVIDER_DEFAULTS["openai"])
+            out.append((p2, (e.get("b") or db), (e.get("m") or dm), k2))
+    except Exception:
+        pass
+    for env, pv in (("GROQ_API_KEY", "groq"), ("OPENAI_API_KEY", "openai"),
+                    ("ANTHROPIC_API_KEY", "anthropic"), ("GEMINI_API_KEY", "gemini")):
+        v = _os.getenv(env, "").strip()
+        if v:
+            db, dm = _AI_PROVIDER_DEFAULTS[pv]
+            out.append((pv, db, dm, v))
+    seen, uniq = set(), []
+    for e in out:
+        if e[3] in seen:
+            continue
+        seen.add(e[3]); uniq.append(e)
+    return uniq
+
 def _ai_answer(question: str) -> str:
-    """Gọi API AI trả lời 1 câu hỏi (chạy trong thread nền — KHÔNG chặn vòng lặp bot)."""
-    prov, base, model, key = _ai_cfg()
-    if not key:
-        return ("⚠️ Chưa cấu hình khoá AI.\n\n"
-                "Admin lấy khoá MIỄN PHÍ tại https://console.groq.com (Create API Key), rồi nhắn RIÊNG cho bot:\n"
-                "/aikey KHOÁ_CỦA_BẠN\n\n"
-                "Muốn dùng AI khác (OpenAI/DeepSeek/OpenRouter): /aiprovider openai · /aiurl <base> · /aimodel <model> · /aikey <key>")
+    """Trả lời 1 câu hỏi qua CHUỖI AI: hết lượt con này TỰ nhảy con kế tiếp (chạy ở thread nền)."""
     q = (question or "").strip()[:4000]
     if not q:
         return "✍️ Bạn hãy nhập câu hỏi."
-    # Nạp NGÀY–GIỜ THỰC (giờ Việt Nam UTC+7) vào não AI để hỏi ngày/giờ nó trả lời đúng.
-    import datetime as _dt
-    _vn = _dt.datetime.utcnow() + _dt.timedelta(hours=7)
-    _wd = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"][_vn.weekday()]
-    _nowstr = (f"{_wd}, ngày {_vn.day:02d}/{_vn.month:02d}/{_vn.year}, lúc "
-               f"{_vn.hour:02d}:{_vn.minute:02d} (giờ Việt Nam, UTC+7)")
-    system = (
-        "Bạn là 'TRẦN MINH CHIẾN' — trợ lý AI siêu thông minh, uyên bác và giàu logic của KENIOS trên Telegram. "
-        "Bạn TRẢ LỜI MỌI tin nhắn và mọi câu hỏi của người dùng: giải đáp thắc mắc, toán khó, lập trình, khoa học, "
-        "đời sống, tư vấn… Suy luận từng bước khi cần và đưa ra đáp án CHÍNH XÁC, đầy đủ. Trả lời bằng TIẾNG VIỆT "
-        "tự nhiên, rõ ràng, thân thiện. Không bịa đặt; nếu không chắc thì nói thẳng. Với bài toán: trình bày ngắn gọn "
-        "các bước rồi nêu ĐÁP SỐ rõ ràng.\n"
-        f"THỜI GIAN THỰC HIỆN TẠI: {_nowstr}.\n"
-        "Khi người dùng hỏi 'hôm nay ngày mấy', 'thứ mấy', 'bây giờ mấy giờ', 'năm nay năm bao nhiêu'… BẮT BUỘC dùng "
-        "đúng mốc thời gian thực ở trên để trả lời, tuyệt đối không đoán sai. Độ dài trả lời trong khoảng 3500 ký tự.")
-    if prov == "gemini":
-        system += ("\nBạn CÓ công cụ Google Search để tra thông tin THỜI GIAN THỰC (thời tiết, tin tức, tỷ giá, giá vàng/coin, "
-                   "kết quả bóng đá, sự kiện mới…). Khi người dùng hỏi những thứ này, HÃY TRA GOOGLE và trả lời số liệu cụ thể, "
-                   "mới nhất. TUYỆT ĐỐI KHÔNG nói 'tôi không truy cập được dữ liệu thời gian thực' — vì bạn tra được.")
-    try:
-        import httpx as _hx
-        if prov == "gemini":
-            # NATIVE Gemini + Google Search grounding → trả lời được dữ liệu THỰC (thời tiết, tin tức, giá cả…).
-            gbase = base[:-7] if base.endswith("/openai") else base   # bỏ đuôi /openai nếu có
-            _hdr = {"x-goog-api-key": key, "content-type": "application/json"}
-
-            def _gcall(mdl: str, use_tools: bool):
-                b = {"systemInstruction": {"parts": [{"text": system}]},
-                     "contents": [{"role": "user", "parts": [{"text": q}]}],
-                     "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.4}}
-                if use_tools:
-                    b["tools"] = [{"google_search": {}}]
-                return _hx.post(f"{gbase}/models/{mdl}:generateContent", timeout=90, headers=_hdr, json=b)
-
-            r = _gcall(model, True)
-            if r.status_code == 400:               # model không nhận grounding → gọi lại không grounding
-                r = _gcall(model, False)
-            # Bị GIỚI HẠN (429) → TỰ ĐỘNG đổi tạm sang model nhẹ (hạn mức riêng) để khách vẫn có trả lời.
-            if r.status_code == 429:
-                for _alt in ("gemini-flash-lite-latest", "gemini-2.0-flash-lite", "gemini-2.5-flash-lite"):
-                    if _alt == model:
-                        continue
-                    ra = _gcall(_alt, True)
-                    if ra.status_code == 400:
-                        ra = _gcall(_alt, False)
-                    if ra.status_code < 400:
-                        r = ra
-                        break
-            if r.status_code >= 400:
-                return _ai_err(r.status_code, r.text)
-            d = r.json()
-            cands = d.get("candidates") or []
-            parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
-            return "".join(p.get("text", "") for p in parts if "text" in p).strip() or "(AI không trả lời)"
-        if prov == "anthropic":
-            r = _hx.post(base + "/messages", timeout=90,
-                         headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                         json={"model": model, "max_tokens": 2000, "system": system,
-                               "messages": [{"role": "user", "content": q}]})
-            if r.status_code >= 400:
-                return _ai_err(r.status_code, r.text)
-            d = r.json()
-            return "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip() or "(AI không trả lời)"
-        r = _hx.post(base + "/chat/completions", timeout=90,
-                     headers={"Authorization": "Bearer " + key, "content-type": "application/json"},
-                     json={"model": model, "temperature": 0.4, "max_tokens": 2000,
-                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": q}]})
-        if r.status_code >= 400:
-            return _ai_err(r.status_code, r.text)
-        d = r.json()
-        return ((d.get("choices") or [{}])[0].get("message", {}).get("content", "") or "").strip() or "(AI không trả lời)"
-    except Exception as e:
-        return f"⚠️ Không gọi được AI: {e}"
+    backends = _ai_backends()
+    if not backends:
+        return ("⚠️ Chưa cấu hình khoá AI.\n\n"
+                "Admin nhắn RIÊNG cho bot:\n/aikey KHOÁ  (khoá chính)\n"
+                "hoặc thêm nhiều AI dự phòng: /aiadd <nhà cung cấp> <khoá>\n"
+                "VD: /aiadd gemini AQ...  ·  /aiadd groq gsk_...  ·  /aiadd openai sk-...")
+    last = ""
+    for (prov, base, model, key) in backends:
+        try:
+            ok, text = _ai_call_one(prov, base, model, key, q)
+        except Exception as e:
+            ok, text = False, f"⚠️ Không gọi được AI ({prov}): {e}"
+        if ok:
+            return text
+        last = text
+    return last or "⚠️ Tất cả AI đều đang bận (hết lượt). Thử lại sau ít phút nhé."
 
 def _ai_split(t: str, n: int = 3800) -> list:
     """Chia câu trả lời dài theo giới hạn 4096 ký tự của Telegram."""
@@ -6631,7 +6706,7 @@ def _tg_ai_dm_on(chat_id) -> bool:
         return False
     if get_setting("tg_ai_dm", "1") != "1":
         return False
-    return bool(_ai_cfg()[3])   # chỉ tự bật khi đã cấu hình khoá
+    return bool(_ai_backends())   # chỉ tự bật khi đã có ít nhất 1 khoá trong chuỗi AI
 
 def _tg_ai_active(chat_id, ctype: str) -> bool:
     """AI có đang phục vụ ở đây không: chat riêng dùng mặc-định-bật, nhóm cần /ai on."""
@@ -7021,8 +7096,8 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
                  f"Trạng thái ở đây: <b>{'ĐANG BẬT ✅' if _tg_ai_active(chat_id, ctype) else 'ĐANG TẮT ✖️'}</b>\n"
                  f"Chat riêng tự động trả lời: <b>{'BẬT' if dm_default else 'TẮT'}</b> (đổi bằng /aidm on|off)\n"
                  f"Nhóm trả lời TẤT CẢ tin: <b>{'BẬT' if _tg_ai_all_on(chat_id) else 'TẮT'}</b> (đổi bằng /aiall on|off)\n"
-                 f"Khoá: <b>{'đã đặt' if key else 'CHƯA đặt'}</b> · Nhà cung cấp: <b>{prov}</b>\n"
-                 f"Model: <code>{model}</code>\nBase: <code>{base}</code>\n\n"
+                 f"🔗 Chuỗi AI dự phòng: <b>{len(_ai_backends())}</b> con (hết lượt tự nhảy con kế) — xem /ailist · thêm /aiadd\n"
+                 f"AI chính: <b>{prov}</b> · Model: <code>{model}</code> · Khoá: <b>{'đã đặt' if key else 'CHƯA đặt'}</b>\n\n"
                  "⚙️ <b>Bật trong 2 bước:</b>\n"
                  "1️⃣ Lấy khoá MIỄN PHÍ ở https://console.groq.com → nhắn RIÊNG bot: <code>/aikey KHOÁ</code>\n"
                  "2️⃣ Nhắn riêng bot là AI trả lời THẲNG (khỏi cần lệnh). Trong nhóm gõ <code>/ai on</code>, "
@@ -7033,9 +7108,56 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
                  "<code>/aimodel gpt-4o-mini</code> · <code>/aikey sk-...</code>")
         return
     # 3) Cấu hình KHOÁ/model/nhà cung cấp/tự-trả-lời-DM/trả-lời-tất-cả — CHỈ admin thật
-    if cmd in ("aikey", "aimodel", "aiprovider", "aiurl", "aidm", "aiall"):
+    if cmd in ("aikey", "aimodel", "aiprovider", "aiurl", "aidm", "aiall", "aiadd", "ailist", "aiclear"):
         if not is_admin:
             _tg_send(token, chat_id, "🔒 Cấu hình AI chỉ dành cho <b>quản trị viên bot</b>.")
+            return
+        if cmd == "aiadd":
+            import json as _json
+            sp = args.split()
+            if not sp:
+                _tg_send(token, chat_id,
+                         "➕ <b>Thêm AI dự phòng</b> (hết lượt con này bot tự nhảy con kế tiếp):\n"
+                         "<code>/aiadd &lt;nhà cung cấp&gt; &lt;khoá&gt; [model]</code>\n\n"
+                         "VD:\n<code>/aiadd gemini AQ....</code>\n<code>/aiadd groq gsk_....</code>\n"
+                         "<code>/aiadd openai sk-....</code>\n<code>/aiadd openrouter sk-or-....</code>\n"
+                         "Chọn 1 trong: gemini · groq · openai · deepseek · openrouter · anthropic")
+                return
+            # /aiadd <provider> <key> [model]  — hoặc chỉ /aiadd <key> [model] (tự đoán nhà cung cấp)
+            _known = set(_AI_PROVIDER_DEFAULTS) | {"google"}
+            if len(sp) >= 2 and sp[0].lower() in _known:
+                pv, key2 = _ai_norm_provider(sp[0]), sp[1]
+                model2 = sp[2] if len(sp) > 2 else ""
+            else:
+                key2 = sp[0]
+                pv = _ai_norm_provider("", key2)
+                model2 = sp[1] if len(sp) > 1 else ""
+            lst = _json.loads(get_setting("tg_ai_backends", "[]") or "[]")
+            lst.append({"p": pv, "k": key2, "m": model2})
+            set_setting("tg_ai_backends", _json.dumps(lst))
+            try:
+                _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=msg.get("message_id"))
+            except Exception:
+                pass
+            _tg_send(token, chat_id, f"✅ Đã thêm AI dự phòng: <b>{pv}</b>"
+                                     + (f" · model <code>{model2}</code>" if model2 else "")
+                                     + f". Chuỗi hiện có <b>{len(_ai_backends())}</b> AI. Xem: /ailist")
+            return
+        if cmd == "ailist":
+            bs = _ai_backends()
+            if not bs:
+                _tg_send(token, chat_id, "Chưa có AI nào. Thêm: <code>/aikey KHOÁ</code> hoặc <code>/aiadd &lt;nhà cung cấp&gt; &lt;khoá&gt;</code>.")
+                return
+            lines = []
+            for i, (p, b, m, k) in enumerate(bs, 1):
+                mask = (k[:6] + "…" + k[-4:]) if len(k) > 12 else "••••"
+                lines.append(f"{i}. <b>{p}</b> · <code>{m}</code> · <code>{mask}</code>")
+            _tg_send(token, chat_id, "🔗 <b>CHUỖI AI</b> (hết lượt con trên → tự nhảy con dưới):\n" + "\n".join(lines)
+                     + "\n\n➕ Thêm: <code>/aiadd</code> · 🗑️ Xoá các AI phụ: <code>/aiclear</code>")
+            return
+        if cmd == "aiclear":
+            set_setting("tg_ai_backends", "[]")
+            _tg_send(token, chat_id, "🗑️ Đã xoá các AI dự phòng (giữ lại AI chính đặt bằng /aikey).")
             return
         if cmd == "aidm":
             on = argl not in ("off", "tat", "tắt", "0")
@@ -8250,7 +8372,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     # 🤖 Trợ lý AI (/ai bật-tắt · /hoiai hỏi · /aikey /aimodel… cấu hình) — chạy ở nhóm & chat riêng.
     if _tgtxt.startswith("/") and _tgtxt.split():
         _aic = _tgtxt.split()[0].lstrip("/").split("@")[0].lower()
-        if _aic in ("ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp", "aidm", "aiall"):
+        if _aic in ("ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp", "aidm", "aiall", "aiadd", "ailist", "aiclear"):
             _uid2 = (msg.get("from") or {}).get("id")
             _aiadmin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
                 ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _uid2))
