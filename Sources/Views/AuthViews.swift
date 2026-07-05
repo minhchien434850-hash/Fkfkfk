@@ -8,7 +8,6 @@ struct LoginView: View {
     @State private var error: String?
     @State private var goRegister = false
     @State private var showConnections = false
-    @State private var showServerFallback = false   // chỉ bật khi có LỖI KẾT NỐI (ẩn với khách bình thường)
     @State private var remember = false
     @State private var didAutoTry = false
     @State private var googleClientId = ""   // lấy từ máy chủ; rỗng = ẩn nút Google
@@ -134,24 +133,9 @@ struct LoginView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal).padding(.top, 2)
 
-                    // 🔧 ĐƯỜNG LUI — CHỈ hiện khi có LỖI KẾT NỐI. Khách bình thường KHÔNG thấy,
-                    // và chỉ có 1 nút chuyển sang máy chủ dự phòng HỢP LỆ (không có ô gõ URL → không thể nhập bậy).
-                    if showServerFallback && store.baseURL.lowercased() != APIClient.fallbackBase {
-                        Button {
-                            store.saveServer(url: APIClient.fallbackBase, type: "VPS")
-                            Task { await loadGoogleClientId(); await doLogin() }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                Text(store.t("Không kết nối được? Thử máy chủ dự phòng",
-                                             "Can't connect? Try backup server"))
-                            }
-                            .font(.caption).foregroundStyle(.orange)
-                            .frame(maxWidth: .infinity).padding(.vertical, 11)
-                            .background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        }.padding(.horizontal)
-                    }
+                    // Không hiển thị cấu hình máy chủ / nút dự phòng cho khách. Khi domain hoặc
+                    // proxy lỗi (502/không kết nối), APIClient TỰ né sang IP VPS trong nền —
+                    // người dùng không cần và không thấy bất kỳ nút "máy chủ dự phòng" nào.
                 }
             }
             .sheet(isPresented: $showConnections) { ConnectionsView() }
@@ -223,11 +207,8 @@ struct LoginView: View {
             await store.loadProviders(); await store.loadKeys()
         } catch {
             self.error = error.localizedDescription
-            // Chỉ khi lỗi KẾT NỐI (không phải sai mật khẩu) mới lộ nút máy chủ dự phòng.
-            let m = error.localizedDescription.lowercased()
-            if m.contains("không kết nối") || m.contains("502") || m.contains("503") || m.contains("504") {
-                showServerFallback = true
-            }
+            // Không lộ UI máy chủ dự phòng — APIClient đã tự né sang IP VPS trong nền khi
+            // domain/proxy lỗi. Khách chỉ thấy thông báo lỗi gọn, không thấy cấu hình máy chủ.
         }
         loading = false
     }
