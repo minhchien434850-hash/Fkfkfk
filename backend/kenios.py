@@ -6519,9 +6519,12 @@ def _ai_err(status: int, text: str) -> str:
 _AI_PROVIDER_DEFAULTS = {
     "gemini":     ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
     "groq":       ("https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+    "cerebras":   ("https://api.cerebras.ai/v1", "llama-3.3-70b"),
     "openai":     ("https://api.openai.com/v1", "gpt-4o-mini"),
     "deepseek":   ("https://api.deepseek.com/v1", "deepseek-chat"),
     "openrouter": ("https://openrouter.ai/api/v1", "deepseek/deepseek-chat-v3-0324:free"),
+    "mistral":    ("https://api.mistral.ai/v1", "mistral-large-latest"),
+    "together":   ("https://api.together.xyz/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
     "anthropic":  ("https://api.anthropic.com/v1", "claude-3-5-sonnet-latest"),
 }
 
@@ -6539,10 +6542,16 @@ def _ai_norm_provider(p, key="", base="") -> str:
         return "anthropic"
     if key.startswith("gsk_") or "groq.com" in base:
         return "groq"
+    if key.startswith("csk-") or "cerebras" in base:
+        return "cerebras"
     if key.startswith("sk-or-") or "openrouter" in base:
         return "openrouter"
     if "deepseek" in base:
         return "deepseek"
+    if "mistral" in base:
+        return "mistral"
+    if "together" in base:
+        return "together"
     return "openai"
 
 def _ai_system(prov: str) -> str:
@@ -7118,30 +7127,43 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
             if not sp:
                 _tg_send(token, chat_id,
                          "➕ <b>Thêm AI dự phòng</b> (hết lượt con này bot tự nhảy con kế tiếp):\n"
-                         "<code>/aiadd &lt;nhà cung cấp&gt; &lt;khoá&gt; [model]</code>\n\n"
+                         "<code>/aiadd &lt;nhà cung cấp&gt; &lt;khoá&gt; [model] [base_url]</code>\n\n"
                          "VD:\n<code>/aiadd gemini AQ....</code>\n<code>/aiadd groq gsk_....</code>\n"
-                         "<code>/aiadd openai sk-....</code>\n<code>/aiadd openrouter sk-or-....</code>\n"
-                         "Chọn 1 trong: gemini · groq · openai · deepseek · openrouter · anthropic")
+                         "<code>/aiadd cerebras csk-....</code>\n<code>/aiadd openrouter sk-or-....</code>\n"
+                         "<code>/aiadd openai sk-....</code>\n\n"
+                         "Hỗ trợ: gemini · groq · cerebras · openai · deepseek · openrouter · mistral · together · anthropic")
                 return
+            # Tách base_url (nếu có token bắt đầu bằng http) khỏi các tham số còn lại
+            base2 = ""
+            rest = []
+            for tok in sp:
+                if tok.startswith("http://") or tok.startswith("https://"):
+                    base2 = tok.rstrip("/")
+                else:
+                    rest.append(tok)
             # /aiadd <provider> <key> [model]  — hoặc chỉ /aiadd <key> [model] (tự đoán nhà cung cấp)
             _known = set(_AI_PROVIDER_DEFAULTS) | {"google"}
-            if len(sp) >= 2 and sp[0].lower() in _known:
-                pv, key2 = _ai_norm_provider(sp[0]), sp[1]
-                model2 = sp[2] if len(sp) > 2 else ""
+            if len(rest) >= 2 and rest[0].lower() in _known:
+                pv, key2 = _ai_norm_provider(rest[0]), rest[1]
+                model2 = rest[2] if len(rest) > 2 else ""
+            elif rest:
+                key2 = rest[0]
+                pv = _ai_norm_provider("", key2, base2)
+                model2 = rest[1] if len(rest) > 1 else ""
             else:
-                key2 = sp[0]
-                pv = _ai_norm_provider("", key2)
-                model2 = sp[1] if len(sp) > 1 else ""
+                _tg_send(token, chat_id, "🔑 Thiếu khoá. VD: <code>/aiadd cerebras csk-....</code>")
+                return
             lst = _json.loads(get_setting("tg_ai_backends", "[]") or "[]")
-            lst.append({"p": pv, "k": key2, "m": model2})
+            lst.append({"p": pv, "k": key2, "m": model2, "b": base2})
             set_setting("tg_ai_backends", _json.dumps(lst))
             try:
                 _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=msg.get("message_id"))
             except Exception:
                 pass
-            _tg_send(token, chat_id, f"✅ Đã thêm AI dự phòng: <b>{pv}</b>"
-                                     + (f" · model <code>{model2}</code>" if model2 else "")
-                                     + f". Chuỗi hiện có <b>{len(_ai_backends())}</b> AI. Xem: /ailist")
+            _db, _dm = _AI_PROVIDER_DEFAULTS.get(pv, _AI_PROVIDER_DEFAULTS["openai"])
+            _tg_send(token, chat_id, f"✅ Đã thêm AI dự phòng: <b>{pv}</b> · model <code>{model2 or _dm}</code>\n"
+                                     f"🌐 Server: <code>{base2 or _db}</code>\n"
+                                     f"Chuỗi hiện có <b>{len(_ai_backends())}</b> AI. Xem: /ailist")
             return
         if cmd == "ailist":
             bs = _ai_backends()
@@ -7151,7 +7173,8 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
             lines = []
             for i, (p, b, m, k) in enumerate(bs, 1):
                 mask = (k[:6] + "…" + k[-4:]) if len(k) > 12 else "••••"
-                lines.append(f"{i}. <b>{p}</b> · <code>{m}</code> · <code>{mask}</code>")
+                host = b.split("//")[-1].split("/")[0]
+                lines.append(f"{i}. <b>{p}</b> · <code>{m}</code>\n     🔑 <code>{mask}</code> · 🌐 {host}")
             _tg_send(token, chat_id, "🔗 <b>CHUỖI AI</b> (hết lượt con trên → tự nhảy con dưới):\n" + "\n".join(lines)
                      + "\n\n➕ Thêm: <code>/aiadd</code> · 🗑️ Xoá các AI phụ: <code>/aiclear</code>")
             return
