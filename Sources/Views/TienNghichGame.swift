@@ -299,6 +299,58 @@ let TN_VIP_TIERS: [TNVipTier] = [
               perks: ["⚔️ +108 công · ❤️ +600 máu", "💰 +30% linh thạch & EXP", "🎊 Rương VIP đỉnh cấp", "🌟 Đặc quyền tối thượng"]),
 ]
 
+// MARK: - Danh hiệu (đeo cạnh tên · cộng uy danh)
+struct TNTitle: Identifiable {
+    let id: String; let name: String; let color: Color; let atk: Int; let hp: Int
+}
+let TN_TITLES: [TNTitle] = [
+    TNTitle(id: "tanbinh",   name: "Tân Binh Nhập Đạo", color: .gray,   atk: 5,  hp: 30),
+    TNTitle(id: "sathu",     name: "Sát Thủ Yêu Ma",    color: .red,    atk: 20, hp: 60),
+    TNTitle(id: "chienthan", name: "Bách Chiến Chiến Thần", color: .orange, atk: 45, hp: 150),
+    TNTitle(id: "kimdan",    name: "Kim Đan Chân Nhân",  color: .yellow, atk: 25, hp: 120),
+    TNTitle(id: "nguyenanh", name: "Nguyên Anh Lão Tổ",  color: .purple, atk: 40, hp: 220),
+    TNTitle(id: "dokiep",    name: "Độ Kiếp Cường Giả",  color: .indigo, atk: 70, hp: 400),
+    TNTitle(id: "cothan",    name: "Cổ Thần Bất Diệt",   color: Color(red:1,green:0.85,blue:0.2), atk: 120, hp: 800),
+    TNTitle(id: "dangphong", name: "Đăng Phong Tạo Cực", color: .mint,   atk: 60, hp: 300),
+    TNTitle(id: "kiemvuong", name: "Luận Kiếm Chi Vương", color: .cyan,  atk: 55, hp: 200),
+    TNTitle(id: "nguthu",    name: "Ngự Thú Đại Sư",     color: .green,  atk: 30, hp: 180),
+    TNTitle(id: "quyenlu",   name: "Thần Tiên Quyến Lữ", color: .pink,   atk: 28, hp: 160),
+    TNTitle(id: "haophu",    name: "Hào Phú Nhất Phương", color: .orange, atk: 35, hp: 200),
+]
+func tnTitle(_ id: String) -> TNTitle? { TN_TITLES.first { $0.id == id } }
+
+// MARK: - Thành tựu (đạt điều kiện → lĩnh thưởng & mở khoá danh hiệu)
+struct TNAchievement: Identifiable {
+    let id: String; let name: String; let emoji: String; let desc: String
+    let rewardLT: Int; let titleId: String; let check: (TNSave) -> Bool
+}
+let TN_ACHIEVEMENTS: [TNAchievement] = [
+    TNAchievement(id: "a_win1",  name: "Khai Sát Giới", emoji: "🗡️", desc: "Thắng trận chiến đầu tiên.",
+                  rewardLT: 100, titleId: "tanbinh") { $0.totalWins >= 1 },
+    TNAchievement(id: "a_win50", name: "Sát Thủ Thành Danh", emoji: "☠️", desc: "Thắng 50 trận chiến.",
+                  rewardLT: 400, titleId: "sathu") { $0.totalWins >= 50 },
+    TNAchievement(id: "a_win200", name: "Bách Chiến Bách Thắng", emoji: "⚔️", desc: "Thắng 200 trận chiến.",
+                  rewardLT: 1200, titleId: "chienthan") { $0.totalWins >= 200 },
+    TNAchievement(id: "a_kimdan", name: "Ngưng Kết Kim Đan", emoji: "🟡", desc: "Đột phá tới cảnh giới Kết Đan.",
+                  rewardLT: 300, titleId: "kimdan") { $0.realm >= 2 },
+    TNAchievement(id: "a_nguyenanh", name: "Nguyên Anh Xuất Thế", emoji: "👶", desc: "Đột phá tới cảnh giới Nguyên Anh.",
+                  rewardLT: 600, titleId: "nguyenanh") { $0.realm >= 3 },
+    TNAchievement(id: "a_dokiep", name: "Vượt Thiên Kiếp", emoji: "🌩️", desc: "Đột phá tới cảnh giới Độ Kiếp.",
+                  rewardLT: 1500, titleId: "dokiep") { $0.realm >= 8 },
+    TNAchievement(id: "a_cothan", name: "Thành Tựu Cổ Thần", emoji: "🌌", desc: "Đạt cảnh giới tối thượng Cổ Thần.",
+                  rewardLT: 5000, titleId: "cothan") { $0.realm >= 14 },
+    TNAchievement(id: "a_maxlv", name: "Đăng Phong Tạo Cực", emoji: "💯", desc: "Đạt cấp độ tối đa 100.",
+                  rewardLT: 2000, titleId: "dangphong") { $0.level >= 100 },
+    TNAchievement(id: "a_pvp", name: "Luận Kiếm Xưng Vương", emoji: "🏆", desc: "Đạt 1000 điểm danh vọng PvP.",
+                  rewardLT: 1000, titleId: "kiemvuong") { $0.pvpPoints >= 1000 },
+    TNAchievement(id: "a_pets", name: "Vạn Thú Quy Thuận", emoji: "🐾", desc: "Thu phục đủ 6 thú cưng.",
+                  rewardLT: 800, titleId: "nguthu") { $0.ownedPets.count >= 6 },
+    TNAchievement(id: "a_married", name: "Kết Tóc Se Duyên", emoji: "💞", desc: "Kết duyên đạo lữ.",
+                  rewardLT: 500, titleId: "quyenlu") { !$0.spouse.isEmpty },
+    TNAchievement(id: "a_vip", name: "Đại Hào Khách", emoji: "👑", desc: "Đạt VIP 3 trở lên.",
+                  rewardLT: 1000, titleId: "haophu") { $0.vip >= 3 },
+]
+
 // MARK: - Bậc danh vọng PvP (theo điểm)
 struct TNRank { let name: String; let emoji: String; let color: Color }
 func tnPvpRank(_ pts: Int) -> TNRank {
@@ -414,6 +466,10 @@ struct TNSave: Codable {
     var activeWing = ""      // thời trang cánh đang đeo
     var ownedHalos: [String] = []
     var activeHalo = ""      // hào quang đang khoác
+    var claimedAch: [String] = []   // thành tựu đã lĩnh thưởng
+    var unlockedTitles: [String] = []  // danh hiệu đã mở khoá
+    var activeTitle = ""     // danh hiệu đang dùng
+    var totalWins = 0        // tổng số trận thắng (thống kê thành tựu)
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -449,9 +505,12 @@ struct TNSave: Codable {
     private var wingHpB: Int { tnWing(activeWing)?.hp ?? 0 }
     private var haloAtkB: Int { tnHalo(activeHalo)?.atk ?? 0 }
     private var haloDefB: Int { tnHalo(activeHalo)?.def ?? 0 }
-    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB + vipHpB + wingHpB)) * guildHpMul) }
+    // Danh hiệu: đang dùng cộng chỉ số uy danh
+    private var titleAtkB: Int { tnTitle(activeTitle)?.atk ?? 0 }
+    private var titleHpB: Int { tnTitle(activeTitle)?.hp ?? 0 }
+    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB + vipHpB + wingHpB + titleHpB)) * guildHpMul) }
     var mpMax: Int { 60 + tier * 40 + level * 6 }
-    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB + vipAtkB + wingAtkB + haloAtkB)) * guildAtkMul) }
+    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB + vipAtkB + wingAtkB + haloAtkB + titleAtkB)) * guildAtkMul) }
     var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB + mountDefB + haloDefB }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
@@ -634,8 +693,28 @@ final class TNGame: ObservableObject {
         gainLevelExp(xp)             // đánh quái cũng lên CẤP
         s.linhThao += Int.random(in: 1...3)      // rơi nguyên liệu luyện đan
         s.khoangThach += Int.random(in: 1...3)   // rơi nguyên liệu luyện khí
+        s.totalWins += 1             // thống kê thành tựu
         logDaily("hunt")             // thắng trận → tiến độ nhiệm vụ ngày
         save()
+    }
+    // ===== Thành tựu & Danh hiệu =====
+    func achievementDone(_ a: TNAchievement) -> Bool { a.check(s) }
+    var pendingAchievements: Int { TN_ACHIEVEMENTS.filter { $0.check(s) && !s.claimedAch.contains($0.id) }.count }
+    @discardableResult
+    func claimAchievement(_ a: TNAchievement) -> String {
+        guard a.check(s) else { return "❌ Chưa đạt điều kiện." }
+        guard !s.claimedAch.contains(a.id) else { return "Đã lĩnh thưởng rồi." }
+        s.claimedAch.append(a.id)
+        s.linhThach += a.rewardLT
+        if !s.unlockedTitles.contains(a.titleId) { s.unlockedTitles.append(a.titleId) }
+        if s.activeTitle.isEmpty { s.activeTitle = a.titleId }   // tự đeo danh hiệu đầu tiên
+        s.hp = min(s.hp, s.hpMax)
+        save()
+        let t = tnTitle(a.titleId)?.name ?? ""
+        return "🎉 +\(a.rewardLT) linh thạch · Mở khoá danh hiệu「\(t)」!"
+    }
+    func setTitle(_ id: String) {
+        if id.isEmpty || s.unlockedTitles.contains(id) { s.activeTitle = id; s.hp = min(s.hp, s.hpMax); save() }
     }
     // Luyện khí: nâng cấp vũ khí/giáp
     func forge(weapon: Bool) -> String {
@@ -1067,6 +1146,7 @@ struct TNHomeView: View {
     @State private var showRecharge = false
     @State private var showVip = false
     @State private var showFashion = false
+    @State private var showAchieve = false
 
     var body: some View {
         ScrollView {
@@ -1095,6 +1175,10 @@ struct TNHomeView: View {
                     .scaleEffect(meditating ? 1.06 : 1.0)
 
                 Text(game.s.name).font(.title2.bold()).foregroundStyle(.white)
+                if let tt = tnTitle(game.s.activeTitle) {
+                    Text("『 \(tt.name) 』").font(.caption.bold()).foregroundStyle(tt.color)
+                        .shadow(color: tt.color.opacity(0.7), radius: 4)
+                }
                 HStack(spacing: 8) {
                     Text(game.s.realmEnum.name).bold()
                         .padding(.horizontal, 12).padding(.vertical, 5)
@@ -1175,6 +1259,15 @@ struct TNHomeView: View {
                     Button { showSpouse = true } label: { bigBtn("💞 Đạo Lữ — Kết Duyên Tu Tiên", [.pink, .red]) }.buttonStyle(TNPress(glow: .pink))
                     Button { showRecharge = true } label: { bigBtn("💰 Nạp Linh Thạch — Cửa Hàng", [.yellow, .green]) }.buttonStyle(TNPress(glow: .green))
                     Button { showVip = true } label: { bigBtn("👑 VIP Đặc Quyền", [.orange, .yellow]) }.buttonStyle(TNPress(glow: .orange))
+                    Button { showAchieve = true } label: {
+                        ZStack(alignment: .topTrailing) {
+                            bigBtn("🏅 Thành Tựu & Danh Hiệu", [.teal, .green])
+                            if game.pendingAchievements > 0 {
+                                Text("\(game.pendingAchievements)").font(.caption2.bold()).foregroundStyle(.white)
+                                    .padding(6).background(.red, in: Circle()).offset(x: -8, y: -8)
+                            }
+                        }
+                    }.buttonStyle(TNPress(glow: .green))
                     Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }.buttonStyle(TNPress(glow: .pink))
                 }
                 .padding(.horizontal)
@@ -1202,6 +1295,7 @@ struct TNHomeView: View {
         .sheet(isPresented: $showRecharge) { TNRechargeView(game: game) }
         .sheet(isPresented: $showVip) { TNVipView(game: game) }
         .sheet(isPresented: $showFashion) { TNFashionView(game: game) }
+        .sheet(isPresented: $showAchieve) { TNAchieveView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -2580,6 +2674,106 @@ struct TNFashionView: View {
     private func flash(_ m: String) {
         withAnimation { msg = m }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Thành Tựu & Danh Hiệu (lĩnh thưởng · chọn danh hiệu đeo)
+struct TNAchieveView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab = 0            // 0: thành tựu · 1: danh hiệu
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("🏅 THÀNH TỰU").font(.title3.bold()).foregroundStyle(.green)
+                        Spacer()
+                        Text("Đã đạt \(game.s.claimedAch.count)/\(TN_ACHIEVEMENTS.count)")
+                            .font(.caption.bold()).foregroundStyle(.white.opacity(0.7))
+                    }.padding(.horizontal).padding(.top, 8)
+
+                    Picker("", selection: $tab) {
+                        Text("Thành Tựu").tag(0); Text("Danh Hiệu").tag(1)
+                    }.pickerStyle(.segmented).padding(.horizontal)
+
+                    if tab == 0 {
+                        ForEach(TN_ACHIEVEMENTS) { a in achRow(a) }
+                    } else {
+                        titleSection
+                    }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center).padding(.horizontal) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.04,green:0.1,blue:0.08), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Thành Tựu").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+        }
+    }
+
+    @ViewBuilder private func achRow(_ a: TNAchievement) -> some View {
+        let done = game.achievementDone(a)
+        let claimed = game.s.claimedAch.contains(a.id)
+        HStack(spacing: 12) {
+            Text(a.emoji).font(.system(size: 30)).frame(width: 50, height: 50)
+                .background((done ? Color.green.opacity(0.2) : Color.white.opacity(0.06)), in: RoundedRectangle(cornerRadius: 12))
+                .grayscale(done ? 0 : 0.9)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(a.name).font(.subheadline.bold()).foregroundStyle(.white)
+                Text(a.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                Text("🎁 +\(a.rewardLT) 💎 · 🏷️ \(tnTitle(a.titleId)?.name ?? "")")
+                    .font(.system(size: 10, weight: .bold)).foregroundStyle(.teal)
+            }
+            Spacer()
+            Button {
+                msg = game.claimAchievement(a); TNHaptic.success()
+            } label: {
+                Text(claimed ? "✓" : (done ? "Lĩnh" : "🔒"))
+                    .font(.caption.bold()).foregroundStyle(.white)
+                    .frame(width: 50).padding(.vertical, 8)
+                    .background(claimed ? Color.gray.opacity(0.5) : (done ? Color.green : Color.gray), in: Capsule())
+            }
+            .disabled(claimed || !done)
+            .buttonStyle(TNPress(glow: .green))
+        }
+        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+    }
+
+    private var titleSection: some View {
+        VStack(spacing: 10) {
+            Text("Chọn danh hiệu để đeo cạnh tên — cộng chỉ số uy danh.")
+                .font(.caption2).foregroundStyle(.white.opacity(0.55)).padding(.horizontal)
+            // Bỏ danh hiệu
+            Button { game.setTitle("") } label: {
+                Text(game.s.activeTitle.isEmpty ? "• Không đeo danh hiệu (đang chọn)" : "Bỏ đeo danh hiệu")
+                    .font(.caption.bold()).foregroundStyle(game.s.activeTitle.isEmpty ? .green : .white.opacity(0.7))
+            }
+            ForEach(TN_TITLES) { t in
+                let unlocked = game.s.unlockedTitles.contains(t.id)
+                let active = game.s.activeTitle == t.id
+                HStack(spacing: 12) {
+                    Text("🏷️").font(.system(size: 24)).frame(width: 44, height: 44)
+                        .background(t.color.opacity(0.2), in: RoundedRectangle(cornerRadius: 12)).grayscale(unlocked ? 0 : 1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("『 \(t.name) 』").font(.subheadline.bold()).foregroundStyle(unlocked ? t.color : .white.opacity(0.4))
+                        Text("⚔️+\(t.atk) ❤️+\(t.hp)").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.6))
+                    }
+                    Spacer()
+                    if active { Text("Đang đeo").font(.caption.bold()).foregroundStyle(.green) }
+                    else if unlocked {
+                        Button("Đeo") { game.setTitle(t.id) }.font(.caption.bold()).foregroundStyle(.white)
+                            .padding(.horizontal, 14).padding(.vertical, 7).background(t.color, in: Capsule())
+                    } else {
+                        Text("🔒 Khoá").font(.caption2).foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                .opacity(unlocked ? 1 : 0.6)
+            }
+        }
     }
 }
 
