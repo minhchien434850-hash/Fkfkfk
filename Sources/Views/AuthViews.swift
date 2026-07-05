@@ -130,32 +130,31 @@ struct LoginView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal).padding(.top, 2)
 
-                    // Ẩn hoàn toàn phần liên kết máy chủ khi đã cài sẵn URL mặc định (Config.defaultServerURL)
-                    if Config.defaultServerURL.isEmpty {
-                        if store.baseURL.isEmpty {
-                            NavigationLink { ServerSetupView() } label: {
-                                HStack {
-                                    Image(systemName: "globe").foregroundStyle(.orange)
-                                    Text(store.t("Chưa có máy chủ — bấm để kết nối", "No server — tap to connect")).font(.caption)
-                                }
-                                .padding().frame(maxWidth: .infinity)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            }.padding(.horizontal)
-                        } else {
-                            HStack(spacing: 8) {
-                                Image(systemName: "globe").foregroundStyle(Theme.accent)
-                                VStack(alignment: .leading) {
-                                    Text(store.t("Máy chủ", "Server") + " \(store.serverType)").font(.caption).foregroundStyle(.secondary)
-                                    Text(store.baseURL).font(.caption).foregroundStyle(Theme.accent).lineLimit(1)
-                                }
-                                Spacer()
-                                Button(store.t("Đổi", "Change")) { showConnections = true }.font(.caption)
+                    // 🔧 Máy chủ — LUÔN hiện + có ĐƯỜNG LUI, để không bị khoá ngoài khi domain lỗi (SSL…).
+                    VStack(spacing: 10) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "globe").foregroundStyle(Theme.accent)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(store.t("Máy chủ", "Server") + " \(store.serverType)")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                Text(store.baseURL.isEmpty ? Config.defaultServerURL : store.baseURL)
+                                    .font(.caption).foregroundStyle(Theme.accent).lineLimit(1)
                             }
-                            .padding().background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
+                            Spacer()
+                            Button(store.t("Đổi", "Change")) { showConnections = true }.font(.caption.bold())
+                        }
+                        // Đường lui: domain lỗi (SSL/nginx) → dùng thẳng IP máy chủ (cổng 80, không cần SSL).
+                        Button {
+                            store.saveServer(url: "http://103.131.56.11", type: "VPS")
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text(store.t("Không kết nối được? Dùng IP dự phòng", "Can't connect? Use backup IP"))
+                            }.font(.caption2).foregroundStyle(.orange).frame(maxWidth: .infinity)
                         }
                     }
+                    .padding().background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
                 }
             }
             .sheet(isPresented: $showConnections) { ConnectionsView() }
