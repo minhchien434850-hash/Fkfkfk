@@ -6471,19 +6471,28 @@ _TG_RESERVED = {
 
 # ======================== 🤖 Trợ lý AI trong bot (bật/tắt bằng /ai) ========================
 def _ai_cfg():
-    """Trả về (provider, base_url, model, key). Tự đoán nhà cung cấp theo khoá nếu chưa đặt.
-    Mặc định dùng Groq (OpenAI-compatible, có bậc MIỄN PHÍ) — admin chỉ cần dán khoá."""
+    """Trả về (provider, base_url, model, key). Tự đoán nhà cung cấp.
+    - Gemini (khoá AIza…/AQ.… hoặc base generativelanguage) → 'gemini' NATIVE có tra Google (grounding).
+    - Khoá sk-ant… → 'anthropic'. Còn lại → 'openai' (OpenAI-compatible, mặc định Groq free)."""
     key = (get_setting("tg_ai_key", "") or os.getenv("AI_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
-           or os.getenv("OPENAI_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")).strip()
+           or os.getenv("OPENAI_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")).strip()
     prov = (get_setting("tg_ai_provider", "") or "").strip().lower()
     base = (get_setting("tg_ai_base", "") or "").strip().rstrip("/")
     model = (get_setting("tg_ai_model", "") or "").strip()
-    if not prov:
+    is_gemini_key = key.startswith("AIza") or key.startswith("AQ.")
+    # Khoá/base Gemini → luôn dùng NATIVE (để bật được Google Search grounding), kể cả khi lỡ đặt provider=openai.
+    if prov in ("gemini", "google") or is_gemini_key or "generativelanguage" in base:
+        prov = "gemini"
+    elif not prov:
         prov = "anthropic" if key.startswith("sk-ant") else "openai"
     if not base:
-        base = "https://api.anthropic.com/v1" if prov == "anthropic" else "https://api.groq.com/openai/v1"
+        base = ("https://api.anthropic.com/v1" if prov == "anthropic"
+                else "https://generativelanguage.googleapis.com/v1beta" if prov == "gemini"
+                else "https://api.groq.com/openai/v1")
     if not model:
-        model = "claude-3-5-sonnet-latest" if prov == "anthropic" else "llama-3.3-70b-versatile"
+        model = ("claude-3-5-sonnet-latest" if prov == "anthropic"
+                 else "gemini-2.5-flash" if prov == "gemini"
+                 else "llama-3.3-70b-versatile")
     return prov, base, model, key
 
 def _ai_err(status: int, text: str) -> str:
@@ -6530,8 +6539,36 @@ def _ai_answer(question: str) -> str:
         f"THỜI GIAN THỰC HIỆN TẠI: {_nowstr}.\n"
         "Khi người dùng hỏi 'hôm nay ngày mấy', 'thứ mấy', 'bây giờ mấy giờ', 'năm nay năm bao nhiêu'… BẮT BUỘC dùng "
         "đúng mốc thời gian thực ở trên để trả lời, tuyệt đối không đoán sai. Độ dài trả lời trong khoảng 3500 ký tự.")
+    if prov == "gemini":
+        system += ("\nBạn CÓ công cụ Google Search để tra thông tin THỜI GIAN THỰC (thời tiết, tin tức, tỷ giá, giá vàng/coin, "
+                   "kết quả bóng đá, sự kiện mới…). Khi người dùng hỏi những thứ này, HÃY TRA GOOGLE và trả lời số liệu cụ thể, "
+                   "mới nhất. TUYỆT ĐỐI KHÔNG nói 'tôi không truy cập được dữ liệu thời gian thực' — vì bạn tra được.")
     try:
         import httpx as _hx
+        if prov == "gemini":
+            # NATIVE Gemini + Google Search grounding → trả lời được dữ liệu THỰC (thời tiết, tin tức, giá cả…).
+            gbase = base[:-7] if base.endswith("/openai") else base   # bỏ đuôi /openai nếu có
+            url = f"{gbase}/models/{model}:generateContent"
+            body = {
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": [{"text": q}]}],
+                "tools": [{"google_search": {}}],   # cho AI tra Google khi cần
+                "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.4},
+            }
+            r = _hx.post(url, timeout=90,
+                         headers={"x-goog-api-key": key, "content-type": "application/json"}, json=body)
+            if r.status_code >= 400:
+                # Model cũ không hỗ trợ google_search → thử lại KHÔNG grounding cho chắc.
+                if r.status_code == 400 and "google_search" in (r.text or ""):
+                    body.pop("tools", None)
+                    r = _hx.post(url, timeout=90,
+                                 headers={"x-goog-api-key": key, "content-type": "application/json"}, json=body)
+                if r.status_code >= 400:
+                    return _ai_err(r.status_code, r.text)
+            d = r.json()
+            cands = d.get("candidates") or []
+            parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
+            return "".join(p.get("text", "") for p in parts if "text" in p).strip() or "(AI không trả lời)"
         if prov == "anthropic":
             r = _hx.post(base + "/messages", timeout=90,
                          headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
