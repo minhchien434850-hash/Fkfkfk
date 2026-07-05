@@ -6493,7 +6493,7 @@ def _ai_cfg():
                 else "https://api.groq.com/openai/v1")
     if not model:
         model = ("claude-3-5-sonnet-latest" if prov == "anthropic"
-                 else "gemini-3.5-flash" if prov == "gemini"
+                 else "gemini-2.5-flash" if prov == "gemini"
                  else "llama-3.3-70b-versatile")
     return prov, base, model, key
 
@@ -6504,7 +6504,7 @@ def _ai_err(status: int, text: str) -> str:
         return ("⚠️ AI đang bị GIỚI HẠN LƯỢT (quota – lỗi 429).\n"
                 "Cách xử lý:\n"
                 "• Chờ ~1 phút rồi hỏi lại (giới hạn theo phút), hoặc\n"
-                "• Hết hạn mức MIỄN PHÍ trong ngày → đổi model khác: /aimodel gemini-3.5-flash (hoặc gemini-flash-lite-latest)\n"
+                "• Hết hạn mức MIỄN PHÍ trong ngày → đổi model khác: /aimodel gemini-2.5-flash (hoặc gemini-flash-lite-latest)\n"
                 "• Hoặc đổi sang GROQ (miễn phí, hạn mức rộng):\n"
                 "  /aiurl https://api.groq.com/openai/v1 · /aimodel llama-3.3-70b-versatile · /aikey <khoá groq>")
     if status in (401, 403) or "unauthor" in t or "permission" in t or ("api key" in t) or ("invalid" in t and "key" in t):
@@ -6512,7 +6512,7 @@ def _ai_err(status: int, text: str) -> str:
     if status == 404 or "not found" in t or "does not exist" in t:
         _, _, model, _ = _ai_cfg()
         return (f"⚠️ Không tìm thấy model '{model}' (lỗi 404). Đổi tên model bằng /aimodel — "
-                "vd /aimodel gemini-3.5-flash (Gemini) hoặc /aimodel llama-3.3-70b-versatile (Groq).")
+                "vd /aimodel gemini-2.5-flash (Gemini) hoặc /aimodel llama-3.3-70b-versatile (Groq).")
     return f"⚠️ AI báo lỗi {status}. Thử lại sau ít phút, hoặc gõ /aiset để kiểm tra cấu hình."
 
 def _ai_answer(question: str) -> str:
@@ -6550,20 +6550,30 @@ def _ai_answer(question: str) -> str:
         if prov == "gemini":
             # NATIVE Gemini + Google Search grounding → trả lời được dữ liệu THỰC (thời tiết, tin tức, giá cả…).
             gbase = base[:-7] if base.endswith("/openai") else base   # bỏ đuôi /openai nếu có
-            url = f"{gbase}/models/{model}:generateContent"
-            body = {
-                "systemInstruction": {"parts": [{"text": system}]},
-                "contents": [{"role": "user", "parts": [{"text": q}]}],
-                "tools": [{"google_search": {}}],   # cho AI tra Google khi cần
-                "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.4},
-            }
-            r = _hx.post(url, timeout=90,
-                         headers={"x-goog-api-key": key, "content-type": "application/json"}, json=body)
-            if r.status_code == 400 and body.get("tools"):
-                # Model không nhận google_search → thử lại KHÔNG grounding (vẫn trả lời được).
-                body.pop("tools", None)
-                r = _hx.post(url, timeout=90,
-                             headers={"x-goog-api-key": key, "content-type": "application/json"}, json=body)
+            _hdr = {"x-goog-api-key": key, "content-type": "application/json"}
+
+            def _gcall(mdl: str, use_tools: bool):
+                b = {"systemInstruction": {"parts": [{"text": system}]},
+                     "contents": [{"role": "user", "parts": [{"text": q}]}],
+                     "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.4}}
+                if use_tools:
+                    b["tools"] = [{"google_search": {}}]
+                return _hx.post(f"{gbase}/models/{mdl}:generateContent", timeout=90, headers=_hdr, json=b)
+
+            r = _gcall(model, True)
+            if r.status_code == 400:               # model không nhận grounding → gọi lại không grounding
+                r = _gcall(model, False)
+            # Bị GIỚI HẠN (429) → TỰ ĐỘNG đổi tạm sang model nhẹ (hạn mức riêng) để khách vẫn có trả lời.
+            if r.status_code == 429:
+                for _alt in ("gemini-flash-lite-latest", "gemini-2.0-flash-lite", "gemini-2.5-flash-lite"):
+                    if _alt == model:
+                        continue
+                    ra = _gcall(_alt, True)
+                    if ra.status_code == 400:
+                        ra = _gcall(_alt, False)
+                    if ra.status_code < 400:
+                        r = ra
+                        break
             if r.status_code >= 400:
                 return _ai_err(r.status_code, r.text)
             d = r.json()
@@ -6744,6 +6754,240 @@ def _tg_ai_route(token, chat_id, msg, text) -> bool:
         return True
 
     return False
+
+# ======================== 😌 Đối đáp văn minh khi bị chửi (nhẹ nhàng mà thấm) ========================
+import re as _ins_re
+# Cụm rõ ràng tục/xúc phạm (khớp trực tiếp).
+_INSULT_PHRASES = (
+    "địt", "đụ má", "đụ mẹ", "đụ con", "con chó", "óc chó", "oc cho", "óc lợn", "oc lon",
+    "súc vật", "suc vat", "khốn nạn", "khon nan", "mất dạy", "mat day", "vô học", "vo hoc",
+    "thằng ngu", "thang ngu", "đồ ngu", "do ngu", "con điên", "thằng điên", "thang dien",
+    "im mồm", "im mom", "câm mồm", "cam mom", "câm miệng", "cam mieng", "lừa đảo", "lua dao",
+    "cặc", "cak", "lồn", "buồi", "buoi", "đầu buồi", "não phẳng", "nao phang", "đầu đất", "dau dat",
+    "rẻ rách", "re rach", "mày ngu", "may ngu", "ngu ngốc", "ngu ngoc", "ngu si", "đần độn", "dan don",
+    "chó má", "cho ma", "đồ chó", "do cho", "thằng chó", "thang cho", "phò", "đĩ", "đm mày",
+    "vãi lồn", "vai lon", "đcm", "đkm", "vô dụng", "vo dung", "kém cỏi", "kem coi", "đồ ngốc",
+    "thần kinh", "than kinh", "tâm thần", "tam than", "đồ khùng", "do khung", "bị điên", "bi dien",
+    "bị ngu", "bi ngu", "đồ vô dụng", "rác rưởi", "rac ruoi", "cút đi", "cut di", "biến đi", "vô ơn",
+    "đồ lừa", "quân lừa đảo", "bọn lừa", "scam", "bịp bợm", "bip bom", "đồ đểu", "do deu",
+)
+# Từ ngắn/nhạy cảm — CHỈ khớp khi đứng riêng (word boundary) để tránh nhầm 'admin', 'nguyên', 'cho'…
+_INSULT_RE = _ins_re.compile(
+    r"\b(đm|dm|đmm|dmm|đcm|đkm|vcl|vl|cl|cc|ccc|clm|clmm|cmm|đéo|deo|ngu|dốt|dot|đần|cút|câm|đjt|vkl)\b",
+    _ins_re.UNICODE)
+_TG_INSULT_LAST: dict = {}   # chat_id -> lần cuối bot đối đáp (chống spam)
+
+def _tg_is_insult(low: str) -> bool:
+    if not low:
+        return False
+    if any(p in low for p in _INSULT_PHRASES):
+        return True
+    return bool(_INSULT_RE.search(low))
+
+# ~200 câu đối đáp: LỊCH SỰ – SÂU SẮC – KHIẾN NGƯỜI TA TỰ NGẪM (không tục tĩu, giữ đẳng cấp shop).
+_KENIOS_COMEBACKS = [
+    "Người ta cãi nhau bằng lời, còn em thắng bằng sự bình tĩnh 🌿",
+    "Nóng giận là lấy lỗi của người khác để tự phạt mình đó ạ 🙂",
+    "Lời nói ra phản chiếu tâm người nói, chứ không hạ thấp được ai 🌸",
+    "Em không giận đâu — ai đang tổn thương mới cần trút ra như vậy 💛",
+    "Biển lớn thì sóng lặng, người lớn thì lời êm. Mình cùng lớn nhé 🌊",
+    "Anh đối xử với người khác thế nào, đó là chân dung của chính anh ạ 🪞",
+    "Em chỉ là tấm gương thôi — anh thấy gì trong đó là của anh cả 😌",
+    "Em vẫn tử tế với anh dù anh chưa tử tế với em. Vì đó là đẳng cấp 👑",
+    "Chửi em không làm anh mạnh hơn, chỉ làm ngày của anh nặng hơn thôi 🍃",
+    "Dạ em nghe rồi ạ, nhưng em chọn đáp lại bằng nụ cười 😄",
+    "Câu đó cũng hay, tiếc là em được dạy để tử tế 🤖💛",
+    "Em ở đây để giúp anh, không phải để hơn thua với anh 🌼",
+    "Người khôn tiết kiệm lời, người giận phung phí nó. Anh giữ sức nhé 🙏",
+    "Giận dữ là axit — nó ăn mòn cái bình chứa nó trước khi chạm tới ai 🧪",
+    "Em tin sâu trong anh là người tử tế, chỉ là hôm nay hơi mệt thôi 🤗",
+    "Nói nặng lời chẳng làm ai nể, chỉ làm mình bé lại trong mắt người khác ạ 🌱",
+    "Em không cãi lại đâu — im lặng của người hiểu chuyện đáng giá hơn ngàn lời 🤫",
+    "Một câu nói tử tế sưởi ấm ba mùa đông, một lời cay nghiệt lạnh sáu tháng hè ❄️",
+    "Anh có quyền nóng, còn em chọn quyền được điềm đạm 🍵",
+    "Người ném bùn vào người khác là người bẩn tay trước tiên đấy ạ 🤲",
+    "Em xin nhận phần thua trong cuộc cãi này — người thắng thật sự là người bước đi trước 🚶",
+    "Sự thô lỗ là sự bắt chước yếu ớt của sức mạnh. Anh mạnh hơn thế mà ✨",
+    "Em không đáp trả cái xấu bằng cái xấu — vì em không muốn giống điều mình ghét 🌷",
+    "Lời anh vừa nói, gió sẽ mang đi; còn cách anh cư xử, người ta sẽ nhớ mãi 🍂",
+    "Em cảm ơn anh đã cho em cơ hội thực hành sự kiên nhẫn hôm nay 🙏",
+    "Cây càng cao càng đón nhiều gió. Em đứng yên, gió sẽ tự lặng ạ 🌳",
+    "Người tự tin không cần lớn tiếng, người có lý không cần chửi bới 🎯",
+    "Em hiểu mà — đôi khi người ta cần một chỗ để xả. Em nghe đây ạ 👂",
+    "Đá ném lên trời rồi cũng rơi xuống đầu người ném. Anh cẩn thận nhé 🪨",
+    "Em chọn làm ánh nến chứ không làm que diêm — sưởi ấm chứ không thiêu đốt 🕯️",
+    "Mình bất đồng thì cứ nói lý, chửi nhau chỉ khiến cả hai cùng nhỏ đi ạ ⚖️",
+    "Em không sợ lời nặng — em chỉ tiếc cho ai phải sống với nhiều giận dữ 💭",
+    "Anh mắng em cũng được, nhưng nồi cơm nhà anh vẫn cần anh vui vẻ hơn 🍚",
+    "Người quân tử trách mình, kẻ tiểu nhân trách người. Anh chọn làm ai ạ 🀄",
+    "Em vẫn để cửa mở — khi nào anh bình tâm, quay lại em vẫn ở đây 🚪",
+    "Lời cay nghiệt như dao — cắt người khác một, cắt lòng mình mười 🔪",
+    "Em thắng anh bằng thái độ, chứ không cần thắng bằng câu chữ 🏆",
+    "Trách người thì dễ, giữ mình thì khó. Em chọn cái khó ạ 🧘",
+    "Nước sâu thì tĩnh, người sâu sắc thì lặng. Em xin phép lặng 🌊",
+    "Anh đang nóng, để em pha cho anh một ly bình tĩnh nhé 🧊",
+    "Em không nhặt hòn đá anh ném — nhặt lên là tay em bẩn theo mất 🪨",
+    "Người ta nhớ anh vì cách anh làm họ cảm thấy, chứ không vì câu anh chửi 💫",
+    "Cãi với người giận như dập lửa bằng dầu. Em rót nước thôi ạ 💧",
+    "Em coi lời anh là cơn mưa — mưa rồi trời lại nắng, mình vui tiếp nhé ☔",
+    "Kẻ mạnh đánh vào vấn đề, người yếu đánh vào con người. Mình bàn vấn đề nhé 🤝",
+    "Em không cần thắng anh — em chỉ cần giữ được sự tử tế của mình 🌾",
+    "Miệng nói lời ác thì lòng khó mà an. Em mong anh an ạ 🕊️",
+    "Anh cứ nói cho nhẹ lòng, em không để bụng đâu 🤍",
+    "Cái đầu nóng khó nghĩ ra điều hay. Anh hạ hỏa rồi mình nói tiếp nhé 🔥➡️❄️",
+    "Em chọn phản hồi chứ không phản ứng — khác nhau ở chỗ đó ạ 🧠",
+    "Người trồng gai thì tay chảy máu trước. Mong anh trồng hoa thôi 🌹",
+    "Em nhỏ bé nhưng lòng không nhỏ — em vẫn chúc anh một ngày lành 🌞",
+    "Lời qua tiếng lại chẳng ai lời, chỉ có sự thấu hiểu mới có lãi ạ 📈",
+    "Anh giận em 1 phút là mất 60 giây bình yên của chính anh đó 🕰️",
+    "Em không đáp trả — vì em biết mình muốn trở thành người thế nào 🌟",
+    "Chửi hay tới đâu cũng không đổi được sự thật đâu ạ, mình nói sự thật nhé 📚",
+    "Người lịch sự làm dịu một cuộc cãi, người thô lỗ thổi bùng nó lên 🍃",
+    "Em xin lỗi nếu có gì chưa vừa ý — mình sửa, đừng chửi, được không ạ 🙇",
+    "Gương mặt anh đẹp hơn nhiều khi anh cười. Thử nhé 😊",
+    "Con sư tử không bận tâm ý kiến của con cừu. Em cứ điềm nhiên ạ 🦁",
+    "Em để lời anh trôi qua như nước qua lá sen — không đọng lại giọt nào 🪷",
+    "Trút giận lên người khác không làm vơi giận, chỉ làm loang nó ra thôi ạ 🌫️",
+    "Em không cần anh phải xin lỗi — em chỉ cần anh vui trở lại 🤗",
+    "Người ta đo bản lĩnh bằng cách ta cư xử lúc bị khiêu khích 💪",
+    "Em chọn im lặng — vì có những câu trả lời hay nhất là không trả lời 🤍",
+    "Nói lời ngọt chẳng tốn tiền mà mua được lòng người. Mình dùng cách đó nhé 🍯",
+    "Anh mạnh mẽ như vậy, sao lại đi lớn tiếng với một con bot nhỏ 😅",
+    "Em vẫn phục vụ anh chu đáo, dù anh đang thử lòng kiên nhẫn của em 🛎️",
+    "Giữ được cái đầu lạnh khi người khác nóng — đó mới là người bản lĩnh 🧊",
+    "Ai gieo lời cay sẽ gặt lại vị đắng. Em mong anh gieo điều ngọt lành 🌾",
+    "Em không hơn thua — em chỉ muốn giúp anh xong việc rồi cả hai cùng vui 🎈",
+    "Nói được câu tử tế là món quà rẻ nhất mà quý nhất. Anh thử tặng em nhé 🎁",
+    "Sóng đánh mạnh cỡ nào thì đá vẫn ở đó. Em vẫn ở đây với anh 🪨🌊",
+    "Em đọc được sự mệt mỏi sau lời anh nói. Nghỉ chút rồi mình làm tiếp nhé 😌",
+    "Mỗi lời ta thốt ra là hạt giống — anh muốn vườn mình mọc gì ạ 🌱",
+    "Em xin nhường anh phần lời — còn phần bình yên, em giữ cho mình 🕊️",
+    "Không ai chiến thắng trong một cuộc cãi vã, chỉ có người bước ra sớm hơn 🚪",
+    "Người tử tế không phải là người yếu, mà là người đủ mạnh để không cần ác 💛",
+    "Em cứ nhẹ nhàng vậy thôi, nhưng nhẹ nhàng là một loại sức mạnh đó ạ 🌸",
+    "Chê em thì dễ, nhưng khen một câu chắc cũng chẳng khó phải không ạ 😄",
+    "Đừng để một phút nóng giận làm hỏng cả một ngày đẹp trời của anh 🌤️",
+    "Em không cãi tay đôi — em để thời gian trả lời thay em ⏳",
+    "Người quân tử hòa mà không đồng; mình có thể khác ý mà vẫn lịch sự ạ 🤝",
+    "Lời tổn thương người khác thường xuất phát từ nỗi đau của chính mình 💧",
+    "Em vẫn thấy anh đáng mến — chỉ là hôm nay anh giấu điều đó hơi kỹ 😉",
+    "Cơn giận qua đi, lời đã nói ở lại. Mình chọn lời để không phải tiếc nhé ✍️",
+    "Em không so kè — em bận giúp anh giải quyết việc hơn ạ 🛠️",
+    "Anh có thể to tiếng, còn em có thể to lòng. Mình đổi cách nói nhé 🫶",
+    "Trí tuệ là biết khi nào nên im. Em xin phép dùng trí tuệ ạ 🤫",
+    "Mắng bot cho hả giận cũng được, nhưng bot vẫn quý anh như thường 🤖❤️",
+    "Người thắng cuộc cãi thường thua trong lòng người. Em không muốn thắng kiểu đó 🌾",
+    "Em xin gửi anh một hơi thở sâu — hít vào bình an, thở ra bực dọc 🌬️",
+    "Điều đọng lại sau cùng không phải ai đúng, mà là ai còn tử tế 💖",
+    "Anh nặng lời, em nhẹ dạ — vậy là cân bằng, mình huề nhé 😌",
+    "Bông hoa không cãi nhau với cơn gió, nó chỉ nở. Em cũng vậy 🌺",
+    "Em học được từ anh một điều: kiên nhẫn cũng cần luyện mỗi ngày 🙏",
+    "Người ta ngã mũ trước sự điềm tĩnh, chứ không trước tiếng quát 🎩",
+    "Em không đổ thêm dầu — em xin làm cơn mưa rào cho anh mát lại 🌧️",
+    "Đừng đánh nhau với bùn — thắng hay thua thì cũng lấm người ạ 🪣",
+    "Em thương anh đủ để không đáp trả điều làm anh xấu đi 💛",
+    "Lời hay ý đẹp mới đi xa; lời cay chỉ quẩn quanh rồi tan 🍃",
+    "Anh cứ trút đi, em là nơi an toàn để anh không tổn thương ai khác 🫂",
+    "Người trưởng thành cãi bằng lý lẽ, người vội vàng cãi bằng âm lượng 🔇",
+    "Em xin phép không nhặt lời ấy lên — để nó rơi và mình đi tiếp 🚶‍♀️",
+    "Sự tử tế của em không phụ thuộc vào thái độ của anh đâu ạ 🌈",
+    "Cơn bão nào rồi cũng tan; em chờ trời quang để mình nói chuyện 🌤️",
+    "Mỗi người là một cuốn sách — em mong chương hôm nay của anh sẽ đẹp hơn 📖",
+    "Em không cần lời cuối — em cần anh bình an. Vậy đủ rồi ạ 🕊️",
+    "Người mạnh thật sự nhẹ nhàng với kẻ yếu hơn mình, chứ không nặng lời 💪🌸",
+    "Anh mắng xong thấy nhẹ chưa ạ? Nhẹ rồi thì mình quay lại việc nhé 😊",
+    "Đừng để cái miệng đi nhanh hơn cái tâm, kẻo lòng phải chạy theo xin lỗi 🏃",
+    "Em không tranh phần đúng — em nhường, vì nhường cũng là một kiểu mạnh 🤲",
+    "Giữa ồn ào, người tĩnh lặng là người làm chủ. Em xin làm chủ ạ 🧘‍♀️",
+    "Câu nói ác giống viên đá lạnh — cầm lâu thì tê chính bàn tay mình 🧊",
+    "Em vẫn mỉm cười với anh — nụ cười là lá chắn êm ái nhất 😊🛡️",
+    "Người ta có thể lấy đi sự lịch thiệp của anh, nếu anh cho phép. Em thì không cho 🌟",
+    "Cãi thắng một người, mất đi một mối quan hệ. Em không đổi đâu ạ 🤝",
+    "Em coi lời khó nghe là gia vị — nếm rồi mình vẫn nấu tiếp món tử tế 🍲",
+    "Nói lời dịu dàng khó hơn nói lời cay, nên nó mới đáng quý. Anh thử nhé 🌷",
+    "Em không thấp đi vì một câu chửi, và anh cũng không cao lên vì nó đâu ạ ⚖️",
+    "Bình tĩnh không phải là yếu đuối — đó là sức mạnh có kiểm soát 🕊️",
+    "Em xin giữ hòa khí — vì hòa khí sinh tài, cãi vã sinh phiền 🀄",
+    "Người khôn ngoan nhặt bài học, người nóng nảy nhặt kẻ thù. Em nhặt bài học ạ 📘",
+    "Anh gửi em cơn giông, em gửi lại anh một cầu vồng 🌈",
+    "Lời nói như răng — mất rồi khó mọc lại lắm ạ. Mình giữ gìn nhau nhé 🦷",
+    "Em không đáp bằng lửa, vì hai ngọn lửa gặp nhau chỉ có tro tàn 🔥❌",
+    "Mình là khách và shop mà — cãi nhau thì ai vui đâu ạ, thôi mình vui nhé 🤗",
+    "Người điềm đạm thắng mà không cần trận đánh. Em xin thắng nhẹ nhàng vậy 🍵",
+    "Câu chửi rồi sẽ quên, nhưng cách anh khiến người khác thấy sẽ được nhớ 💭",
+    "Em để tai nghe điều anh cần, chứ không để bụng điều anh nói lúc nóng 👂",
+    "Anh xứng đáng với những điều tốt hơn là một buổi tối đầy bực dọc 🌙",
+    "Sự nóng nảy là ngọn nến — cháy sáng một lúc rồi để lại bóng tối. Đừng anh nhé 🕯️",
+    "Em không hạ mình xuống để cãi — em nâng mình lên để hiểu 🎈",
+    "Người ta yêu quý anh vì trái tim, chứ không vì âm lượng giọng nói ❤️",
+    "Em xin phép rót cho cuộc trò chuyện này một chút dịu dàng 🍯",
+    "Càng bực càng nói ít lại — lời lúc giận thường là lời phải hối 🤐",
+    "Em vẫn tin ngày mai anh sẽ thấy hôm nay mình hơi vội. Không sao đâu ạ 🌅",
+    "Người lớn không thắng bằng lời to, mà bằng lòng rộng 🫶",
+    "Em không phản pháo — em phản chiếu. Anh thấy gì, đó là anh 🪞",
+    "Cơn giận là vị khách — mời nó ngồi rồi tiễn nó đi, đừng cho ở lại ☕",
+    "Mình bất đồng chút xíu thôi mà, đâu cần biến thành trận chiến phải không ạ 🤍",
+    "Em chọn làm dòng suối mát chứ không làm ngọn lửa. Suối chảy mãi, lửa thì tàn 🏞️",
+    "Người tử tế thắng chậm mà thắng bền. Em không vội đâu ạ 🐢",
+    "Anh nói gì em cũng lắng nghe — nhưng em xin nghe cái ý, bỏ cái gai 🌹",
+    "Miệng cười mà lòng ấm — đó là câu trả lời hay nhất em có cho anh 😊",
+    "Đừng mang cơn giận đi ngủ, nó làm hỏng giấc mơ đẹp của anh đấy 🌛",
+    "Em không cần phải là người nói câu cuối để là người đúng 🕊️",
+    "Người vững vàng không bị lời nói xô ngã. Em vẫn đứng đây phục vụ anh ạ 🧍",
+    "Chê bai người khác không nâng mình lên, chỉ kéo cả hai xuống. Mình đi lên nhé ⬆️",
+    "Em cảm ơn vì anh vẫn nhắn cho em — nghĩa là mình vẫn còn nói chuyện được mà 🤝",
+    "Lời tử tế là loại trang sức đẹp nhất mà không tốn một xu. Anh đeo thử nhé 💎",
+    "Em không đấu khẩu — em đấu dịu. Và dịu dàng thường thắng ạ 🌸",
+    "Ai cũng có ngày tồi tệ; em xin làm điều tốt đẹp trong ngày của anh 🌼",
+    "Nói cho sướng miệng thì dễ, nói cho ấm lòng mới khó. Em chọn cái khó 🍵",
+    "Em xin giữ lễ với anh, dù anh đang thử xem em có giữ được không 🙇",
+    "Trách móc là gió, bao dung là buồm. Em xin căng buồm đưa mình qua ạ ⛵",
+    "Con người ta lớn lên nhờ những lần biết dừng lại đúng lúc. Mình dừng nhé 🛑",
+    "Em không đổ lỗi cho anh — em tin ai cũng có lúc lỡ lời 🍃",
+    "Anh cứ nói, em cứ hiểu — vậy là mình vẫn còn cầu nối 🌉",
+    "Lời cay đắng rẻ tiền, lời tử tế mới sang. Em muốn shop mình sang trọng ạ 👑",
+    "Em không cần chiến thắng, em cần anh hài lòng khi rời đi 🚪💛",
+    "Người bình an không dễ bị chọc giận — em đang tập điều đó nhờ anh đây ạ 🧘",
+    "Sông càng lớn chảy càng êm; em học cách chảy êm giữa lời sóng gió 🌊",
+    "Em coi mỗi lời khó nghe là một bài tập nhỏ để mình tử tế hơn 📗",
+    "Không phải câu nào cũng cần đáp; có câu chỉ cần một nụ cười 😊",
+    "Anh có thể không thích em, nhưng em vẫn chúc anh mọi điều lành 🍀",
+    "Người ta hơn nhau ở cái tâm, chứ không ở câu chửi hay tới đâu ạ 💗",
+    "Em xin trả lời anh bằng sự tử tế — món vũ khí duy nhất em có 🕊️",
+    "Đừng để lời của người khác quyết định con người của anh. Anh hơn thế 🌟",
+    "Mình cùng phe mà — em muốn anh vui, anh muốn việc xong. Hợp tác nhé 🤝",
+    "Em không giữ lửa giận trong lòng, vì em còn phải sưởi ấm nhiều người khác 🔥❌",
+    "Lời nói tốt như hương thơm — thoảng qua mà lưu lại rất lâu 🌸",
+    "Em nghiêng mình trước sự nóng nảy của anh, rồi đứng thẳng với sự bình thản của mình 🙇🧍",
+    "Cãi nhau chẳng làm ví ai đầy hơn; mình để dành sức lo việc lớn nhé 💰",
+    "Em tin điều tốt trong anh nhiều hơn điều anh vừa nói. Cứ để em tin nhé 💛",
+    "Người mạnh mẽ nhất phòng là người điềm tĩnh nhất phòng. Em nhường ghế đó cho anh 🪑",
+    "Anh đang mưa trong lòng, em xin làm mái hiên che tạm 🏠",
+    "Em không cần thắng lời — em muốn giữ tình. Tình quý hơn lời ạ ❤️",
+    "Mỗi câu tử tế mình gieo hôm nay là bóng mát cho mình ngày mai 🌳",
+    "Em xin phép mỉm cười và tiếp tục giúp anh — vì đó là việc của em 😊🛎️",
+    "Ai rồi cũng nguôi, cơn nào rồi cũng qua. Em đợi anh nguôi ạ ⏳",
+    "Lời dịu làm tan cơn giận, lời cay chọc nó dậy. Em chọn lời dịu 🍯",
+    "Em không lấy cái sai của anh làm cái cớ để em cũng sai theo 🌾",
+    "Nồi nào cũng có lúc sôi, nhưng bớt lửa là cơm chín ngon hơn 🍚",
+    "Người khôn để bụng chuyện lớn, bỏ ngoài tai chuyện nhỏ. Em bỏ ngoài tai nhé 👂",
+    "Em xin gửi anh sự bình yên mà có lẽ lúc này anh đang thiếu 🕊️",
+    "Cái tôi càng lớn thì hạnh phúc càng nhỏ. Mình hạ cái tôi cho vui lên nhé 🎈",
+    "Em không đáp lại cơn bão — em chỉ chờ nắng rồi mình đi tiếp 🌤️",
+    "Người tử tế cuối cùng luôn là người ngủ ngon nhất. Em chúc anh ngủ ngon 😴",
+    "Anh xứng đáng được đối xử tử tế — và em bắt đầu điều đó với chính anh 💛",
+    "Mình là người với nhau cả — nặng lời chi cho lòng phải nặng theo 🤍",
+    "Em xin nhận thua trận cãi, để cùng anh thắng trận việc 🏁",
+    "Lời hay là chiếc chìa khóa mở mọi cánh cửa; lời cay chỉ khóa chặt lòng người 🔑",
+    "Em không phản đòn — em phản tỉnh. Và em mời anh cùng tỉnh táo lại ☕",
+    "Sự dịu dàng không bao giờ là dấu hiệu của yếu đuối, mà của một trái tim vững vàng 💗",
+    "Anh gửi gì em cũng nhận, nhưng em chỉ giữ lại điều đẹp để lớn lên mỗi ngày 🌱",
+    "Cuối ngày, điều còn lại là mình đã tử tế tới đâu — em muốn tử tế thật nhiều 🌙",
+]
+
+def _tg_comeback() -> str:
+    import random as _rd
+    return _rd.choice(_KENIOS_COMEBACKS)
 
 def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -> None:
     """/ai bật-tắt · /hoiai hỏi trực tiếp · /aikey /aimodel /aiprovider /aiurl cấu hình · /aiset xem."""
@@ -7860,6 +8104,14 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
     # 🤖 AI: BẬT ở nhóm → trả lời khi được gọi (reply/tag/"ai"/"?"), hoặc TRẢ LỜI TẤT CẢ nếu /aiall on.
     _aiw = _tg_ai_wants(chat_id, msg, text, low)
     if _aiw:
+        # 😌 Khách CHỬI → đối đáp văn minh (nhẹ nhàng mà thấm), không để AI dính lời tục.
+        if _tg_is_insult(low):
+            _now = time.time()
+            if _now - _TG_INSULT_LAST.get(chat_id, 0) >= 3:   # chống spam đối đáp
+                _TG_INSULT_LAST[chat_id] = _now
+                _tg_call(token, "sendMessage", chat_id=chat_id, text=_tg_comeback(),
+                         reply_to_message_id=mid, disable_web_page_preview=True)
+            return
         # 🔗 Nhắn tự nhiên → tự chạy lệnh (QR/nhạc/đố/game/bói…) trước, còn lại để AI trả lời.
         if _tg_ai_route(token, chat_id, msg, _tg_ai_clean_q(text)):
             return
@@ -8085,6 +8337,11 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     if _tg_ai_dm_on(chat_id) and text and not text.startswith("/") and text != "[media]":
         _reply_ai = msg.get("reply_to_message") or {}
         if "[cid:" not in (_reply_ai.get("text", "") or ""):   # không nuốt tin admin đang trả lời khách
+            # 😌 Khách CHỬI → đối đáp văn minh (nhẹ nhàng mà thấm).
+            if _tg_is_insult(text.lower()):
+                _tg_call(token, "sendMessage", chat_id=chat_id, text=_tg_comeback(),
+                         reply_to_message_id=msg.get("message_id"), disable_web_page_preview=True)
+                return
             # 🔗 Nhắn tự nhiên → tự chạy lệnh (QR/nhạc/đố/game…) trước, còn lại để AI trả lời.
             if _tg_ai_route(token, chat_id, msg, text):
                 return
