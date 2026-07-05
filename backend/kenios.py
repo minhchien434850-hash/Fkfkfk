@@ -4953,26 +4953,68 @@ def _tg_menu_buttons() -> list:
             [{"text": "ℹ️ Giới thiệu", "callback_data": "about"}]]
 
 # ---------- Lấy nhạc YouTube/TikTok (/nhac) — không giới hạn dung lượng ----------
+_AUDIO_VIDEO_EXTS = (".mp3", ".m4a", ".aac", ".opus", ".ogg", ".webm", ".wav", ".flac", ".mp4", ".mkv", ".mov")
+
 def _tg_yt_audio(query: str):
-    """Tải nhạc mp3 từ YouTube/TikTok bằng yt-dlp. Trả (path, title, err)."""
+    """Tải nhạc mp3 từ YouTube/TikTok. Trích mp3 trực tiếp; nếu trích lỗi thì
+    TỰ chuyển file đã tải sang mp3 bằng ffmpeg (khắc phục 'tải xong mà không ra mp3')."""
     if not shutil.which("yt-dlp"):
         return None, "", "Máy chủ chưa cài yt-dlp"
     import tempfile as _tf, glob as _glob
     d = _tf.mkdtemp(prefix="tgm_")
     src = query if query.lower().startswith("http") else f"ytsearch1:{query}"
     out = os.path.join(d, "%(title).80s.%(ext)s")
-    cmd = ["yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
-           "--no-playlist", "--no-warnings", "-o", out, src]
+    base = ["yt-dlp", "--no-playlist", "--no-warnings", "--no-part", "--no-mtime",
+            "--socket-timeout", "15", "--retries", "5", "-o", out]
+    if shutil.which("aria2c"):
+        base += ["--downloader", "aria2c", "--downloader-args", "aria2c:-x16 -s16 -k1M --file-allocation=none"]
+    else:
+        base += ["-N", "16"]
+
+    def _media_files():
+        return [f for f in _glob.glob(os.path.join(d, "*"))
+                if os.path.splitext(f)[1].lower() in _AUDIO_VIDEO_EXTS]
+
+    r = None
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        # (1) Trích mp3 trực tiếp (nhanh khi ffmpeg trích được)
+        r = subprocess.run(base + ["-x", "--audio-format", "mp3", "--audio-quality", "0", src],
+                           capture_output=True, text=True, timeout=600)
     except Exception as e:
         shutil.rmtree(d, ignore_errors=True); return None, "", str(e)
-    fs = _glob.glob(os.path.join(d, "*.mp3"))
-    if not fs:
-        err = ((r.stderr or "") + (r.stdout or ""))[-300:]
-        shutil.rmtree(d, ignore_errors=True); return None, "", err or "không tải được"
-    p = fs[0]
-    return p, os.path.splitext(os.path.basename(p))[0], ""
+
+    mp3s = _glob.glob(os.path.join(d, "*.mp3"))
+    if mp3s:
+        p = mp3s[0]
+        return p, os.path.splitext(os.path.basename(p))[0], ""
+
+    # (2) Không ra mp3 → nếu chưa tải được file nào, tải lại bestaudio thô
+    media = _media_files()
+    if not media:
+        try:
+            subprocess.run(base + ["-f", "bestaudio/best", src], capture_output=True, text=True, timeout=600)
+        except Exception:
+            pass
+        media = _media_files()
+
+    # (3) Có file media → TỰ chuyển sang mp3 bằng ffmpeg
+    if media and shutil.which("ffmpeg"):
+        srcf = max(media, key=os.path.getsize)
+        title = os.path.splitext(os.path.basename(srcf))[0]
+        mp3 = os.path.join(d, "audio_out.mp3")
+        try:
+            subprocess.run(["ffmpeg", "-y", "-v", "quiet", "-i", srcf, "-vn", "-b:a", "192k", mp3],
+                           capture_output=True, timeout=600)
+        except Exception:
+            pass
+        if os.path.exists(mp3) and os.path.getsize(mp3) > 1000:
+            return mp3, title, ""
+
+    err = (((r.stderr if r else "") or "") + ((r.stdout if r else "") or ""))
+    # Bỏ các dòng progress [download] để báo lỗi cho SẠCH
+    err = "\n".join(l for l in err.splitlines() if "[download]" not in l and l.strip())[-200:]
+    shutil.rmtree(d, ignore_errors=True)
+    return None, "", err or "không trích được nhạc (thử link khác)"
 
 def _tg_send_audio(token: str, chat_id, path: str, title: str) -> bool:
     import httpx
