@@ -6687,6 +6687,64 @@ def _tg_ai_clean_q(text: str) -> str:
             return q[len(p):].strip() or q
     return q
 
+def _tg_ai_route(token, chat_id, msg, text) -> bool:
+    """🔗 NL → TỰ CHẠY LỆNH: khi AI bật, nhắn tự nhiên là bot tự dùng chức năng mà AI KHÔNG
+    tự làm được (tạo QR, phát nhạc, ra câu đố, chơi game, bói, bình chọn…). Trả True nếu đã
+    nhận diện & chạy 1 lệnh (khỏi để AI trả lời). Hỏi kiến thức/thời tiết… vẫn để AI lo."""
+    import re as _re
+    t = (text or "").strip()
+    low = t.lower()
+    mk = r'(?:tạo|tao|làm|lam|in|xuất ra|xuat ra|vẽ|ve|generate|gen)'   # động từ "tạo ra"
+
+    # 🔳 MÃ QR — "tạo mã qr <nội dung>" (không kích hoạt khi hỏi 'qr là gì')
+    if _re.search(mk + r'\b.{0,15}\bqr\b', low) or low.startswith("qr "):
+        parts = _re.split(r'\bqr\b(?:\s*code)?\s*(?:cho|của|cua|:|=|nội dung|noi dung)?\s*', t, maxsplit=1, flags=_re.I)
+        _tg_fun_command(token, chat_id, msg, "qr", (parts[-1].strip() if len(parts) > 1 else ""))
+        return True
+
+    # 🎵 NHẠC — "mở/phát/tải/nghe bài/nhạc <tên>"
+    if _re.search(r'(mở|mo|phát|phat|bật|bat|tải|tai|nghe|kiếm|kiem|tìm|tim|chơi|choi|play|open)\b.{0,10}'
+                  r'(nhạc|nhac|bài hát|bai hat|ca khúc|ca khuc|bài|bai|bản nhạc|ban nhac)\b', low):
+        q = _re.sub(r'^.*?(bài hát|bai hat|ca khúc|ca khuc|bản nhạc|ban nhac|bài nhạc|bai nhac|nhạc|nhac|bài|bai)\s*',
+                    '', t, count=1, flags=_re.I)
+        q = _re.sub(r'^\s*(tên|ten|của|cua|là|la|:|-)\s*', '', q, flags=_re.I).strip()
+        if len(q) >= 2:
+            _tg_start_music(token, chat_id, q)
+            return True
+
+    # 🔐 MẬT KHẨU ngẫu nhiên
+    if _re.search(mk + r'\b.{0,12}(mật khẩu|mat khau|password)', low) or _re.search(r'(mật khẩu|password)\s*(mạnh|manh|ngẫu nhiên|ngau nhien|random)', low):
+        _tg_fun_command(token, chat_id, msg, "password", "")
+        return True
+
+    # 🧠 ĐỐ VUI
+    if _re.search(r'(câu đố|cau do|đố vui|do vui|chơi đố|choi do|đố (em|tôi|toi|đi|di|1|một|mot)|ra (câu )?đố|ra cau do)', low):
+        _tg_game_command(token, chat_id, msg, "dovui", "")
+        return True
+
+    # 🃏 GAME
+    if 'bầu cua' in low or 'bau cua' in low:
+        _tg_game_command(token, chat_id, msg, "baucua", ""); return True
+    if 'bài cào' in low or 'bai cao' in low:
+        _tg_game_command(token, chat_id, msg, "baicao", ""); return True
+    if 'xì dách' in low or 'xi dach' in low or 'xì zách' in low:
+        _tg_game_command(token, chat_id, msg, "xidach", ""); return True
+    if _re.search(r'(tung|gieo|lắc|lac|thảy|thay)\b.{0,8}(xúc xắc|xuc xac|xí ngầu|xi ngau|dice)', low):
+        _tg_fun_command(token, chat_id, msg, "xucxac", ""); return True
+
+    # 🔮 BÓI
+    if _re.search(r'(bói tình|boi tinh|tình duyên|tinh duyen)', low):
+        _tg_fun_command(token, chat_id, msg, "tinhduyen", ""); return True
+    if _re.search(r'(xem bói|xem boi|coi bói|coi boi|bói cho|boi cho|bói đi|boi di|bói 1|bói một|tử vi|tu vi|bói quẻ|boi que)', low):
+        _tg_fun_command(token, chat_id, msg, "boi", ""); return True
+
+    # 🗳️ BÌNH CHỌN
+    if _re.search(mk + r'\b.{0,12}(bình chọn|binh chon|poll|khảo sát|khao sat)', low):
+        _tg_fun_command(token, chat_id, msg, "binhchon", "")
+        return True
+
+    return False
+
 def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -> None:
     """/ai bật-tắt · /hoiai hỏi trực tiếp · /aikey /aimodel /aiprovider /aiurl cấu hình · /aiset xem."""
     import threading
@@ -7802,6 +7860,9 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
     # 🤖 AI: BẬT ở nhóm → trả lời khi được gọi (reply/tag/"ai"/"?"), hoặc TRẢ LỜI TẤT CẢ nếu /aiall on.
     _aiw = _tg_ai_wants(chat_id, msg, text, low)
     if _aiw:
+        # 🔗 Nhắn tự nhiên → tự chạy lệnh (QR/nhạc/đố/game/bói…) trước, còn lại để AI trả lời.
+        if _tg_ai_route(token, chat_id, msg, _tg_ai_clean_q(text)):
+            return
         if _aiw == 2:   # chế độ trả lời tất cả → giới hạn ~1 trả lời/5s mỗi nhóm, tránh spam & tốn quota
             _now = time.time()
             if _now - _TG_AI_LAST.get(chat_id, 0) < 5:
@@ -8024,6 +8085,9 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     if _tg_ai_dm_on(chat_id) and text and not text.startswith("/") and text != "[media]":
         _reply_ai = msg.get("reply_to_message") or {}
         if "[cid:" not in (_reply_ai.get("text", "") or ""):   # không nuốt tin admin đang trả lời khách
+            # 🔗 Nhắn tự nhiên → tự chạy lệnh (QR/nhạc/đố/game…) trước, còn lại để AI trả lời.
+            if _tg_ai_route(token, chat_id, msg, text):
+                return
             import threading as _thrp
             _thrp.Thread(target=_tg_ai_reply, args=(token, chat_id, msg, text), daemon=True).start()
             return
