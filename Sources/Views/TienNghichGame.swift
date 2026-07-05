@@ -240,6 +240,27 @@ let TN_RECHARGES: [TNRecharge] = [
     TNRecharge(id: "p5", name: "Gói Chí Tôn", emoji: "👑", price: "500.000đ", linhThach: 16000, bonus: 6400, tag: "ĐỈNH +40%", color: .orange),
 ]
 
+// MARK: - VIP đặc quyền (bậc 0–6, mốc theo tổng nạp linh thạch)
+struct TNVipTier: Identifiable {
+    let id: Int; let name: String; let need: Int; let color: Color; let perks: [String]
+}
+let TN_VIP_TIERS: [TNVipTier] = [
+    TNVipTier(id: 0, name: "Phàm Nhân", need: 0, color: .gray,
+              perks: ["Chưa có đặc quyền — nạp linh thạch để mở khoá VIP."]),
+    TNVipTier(id: 1, name: "VIP 1 · Nhập Môn", need: 5000, color: .green,
+              perks: ["⚔️ +18 công · ❤️ +100 máu", "🎁 Quà ngày +20 linh thạch", "🎊 Mở rương đặc quyền VIP mỗi ngày", "💰 +5% linh thạch & EXP mọi trận"]),
+    TNVipTier(id: 2, name: "VIP 2 · Tu Sĩ", need: 10000, color: .cyan,
+              perks: ["⚔️ +36 công · ❤️ +200 máu", "🎁 Quà ngày +40 linh thạch", "💰 +10% linh thạch & EXP", "🎊 Rương VIP hạng 2"]),
+    TNVipTier(id: 3, name: "VIP 3 · Chân Nhân", need: 15000, color: .blue,
+              perks: ["⚔️ +54 công · ❤️ +300 máu", "💰 +15% linh thạch & EXP", "🎊 Rương VIP hạng 3", "👑 Danh hiệu VIP hiện ở màn chính"]),
+    TNVipTier(id: 4, name: "VIP 4 · Đại Năng", need: 20000, color: .indigo,
+              perks: ["⚔️ +72 công · ❤️ +400 máu", "💰 +20% linh thạch & EXP", "🎊 Rương VIP hạng 4"]),
+    TNVipTier(id: 5, name: "VIP 5 · Tôn Giả", need: 25000, color: .purple,
+              perks: ["⚔️ +90 công · ❤️ +500 máu", "💰 +25% linh thạch & EXP", "🎊 Rương VIP hạng 5"]),
+    TNVipTier(id: 6, name: "VIP 6 · Chí Tôn", need: 30000, color: .orange,
+              perks: ["⚔️ +108 công · ❤️ +600 máu", "💰 +30% linh thạch & EXP", "🎊 Rương VIP đỉnh cấp", "🌟 Đặc quyền tối thượng"]),
+]
+
 // MARK: - Bậc danh vọng PvP (theo điểm)
 struct TNRank { let name: String; let emoji: String; let color: Color }
 func tnPvpRank(_ pts: Int) -> TNRank {
@@ -350,6 +371,7 @@ struct TNSave: Codable {
     var lastStreakDate = ""  // ngày cuối cộng streak (tránh cộng trùng)
     var lastFreeGift = ""    // ngày (yyyy-MM-dd) đã nhận quà miễn phí ở cửa hàng nạp
     var totalRecharged = 0   // tổng linh thạch đã nạp (mốc VIP)
+    var lastVipGift = ""     // ngày đã nhận rương đặc quyền VIP
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -376,9 +398,13 @@ struct TNSave: Codable {
     var affinityTier: Int { min(affinity / 100, 5) }
     private var spouseAtkB: Int { spouse.isEmpty ? 0 : affinityTier * 12 }
     private var spouseHpB: Int { spouse.isEmpty ? 0 : affinityTier * 60 }
-    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB)) * guildHpMul) }
+    // VIP: bậc tính theo tổng linh thạch đã nạp (0–6) → đặc quyền cộng chỉ số
+    var vip: Int { min(totalRecharged / 5000, 6) }
+    private var vipAtkB: Int { vip * 18 }
+    private var vipHpB: Int { vip * 100 }
+    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB + vipHpB)) * guildHpMul) }
     var mpMax: Int { 60 + tier * 40 + level * 6 }
-    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB)) * guildAtkMul) }
+    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB + vipAtkB)) * guildAtkMul) }
     var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB + mountDefB }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
@@ -553,9 +579,12 @@ final class TNGame: ObservableObject {
         return up
     }
     func reward(linhThach: Int, exp: Int) {
-        s.linhThach += linhThach
-        s.exp = min(s.exp + exp, s.expMax)
-        gainLevelExp(exp)            // đánh quái cũng lên CẤP
+        // Đặc quyền VIP: cộng thêm % linh thạch & EXP
+        let lt = Int(Double(linhThach) * vipRewardMul)
+        let xp = Int(Double(exp) * vipRewardMul)
+        s.linhThach += lt
+        s.exp = min(s.exp + xp, s.expMax)
+        gainLevelExp(xp)             // đánh quái cũng lên CẤP
         s.linhThao += Int.random(in: 1...3)      // rơi nguyên liệu luyện đan
         s.khoangThach += Int.random(in: 1...3)   // rơi nguyên liệu luyện khí
         logDaily("hunt")             // thắng trận → tiến độ nhiệm vụ ngày
@@ -729,7 +758,8 @@ final class TNGame: ObservableObject {
 
     // ===== Cửa hàng nạp Linh Thạch =====
     var freeGiftReady: Bool { s.lastFreeGift != todayStr() }
-    var vipLevel: Int { min(s.totalRecharged / 5000, 6) }   // mốc VIP theo tổng nạp
+    var vipLevel: Int { s.vip }                              // mốc VIP theo tổng nạp
+    var vipRewardMul: Double { 1 + Double(s.vip) * 0.05 }    // đặc quyền: +5% thưởng mỗi bậc
     @discardableResult
     func claimFreeGift() -> String {
         guard freeGiftReady else { return "Hôm nay đã nhận quà rồi, mai quay lại nhé." }
@@ -738,6 +768,21 @@ final class TNGame: ObservableObject {
         s.linhThach += amount
         save()
         return "🎉 Nhận quà miễn phí: +\(amount) linh thạch!"
+    }
+    // ===== VIP đặc quyền =====
+    var vipGiftReady: Bool { s.vip >= 1 && s.lastVipGift != todayStr() }
+    @discardableResult
+    func claimVipGift() -> String {
+        guard s.vip >= 1 else { return "❌ Cần đạt VIP 1 (nạp 5.000 linh thạch tích luỹ)." }
+        guard vipGiftReady else { return "Hôm nay đã mở rương VIP rồi, mai quay lại." }
+        s.lastVipGift = todayStr()
+        let lt = s.vip * 150
+        let mat = s.vip * 2
+        s.linhThach += lt
+        s.linhThao += mat
+        s.khoangThach += mat
+        save()
+        return "🎊 Rương đặc quyền VIP \(s.vip): +\(lt) linh thạch · +\(mat) 🌿 · +\(mat) ⛏️!"
     }
     func recharge(_ pkg: TNRecharge) -> String {
         let total = pkg.linhThach + pkg.bonus
@@ -925,6 +970,7 @@ struct TNHomeView: View {
     @State private var showMount = false
     @State private var showSpouse = false
     @State private var showRecharge = false
+    @State private var showVip = false
 
     var body: some View {
         ScrollView {
@@ -962,6 +1008,12 @@ struct TNHomeView: View {
                         .padding(.horizontal, 10).padding(.vertical, 4)
                         .background(Color.yellow.opacity(0.25), in: Capsule())
                         .overlay(Capsule().strokeBorder(.yellow, lineWidth: 1))
+                    if game.s.vip >= 1 {
+                        Text("👑 VIP \(game.s.vip)").font(.caption.bold())
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(Color.orange.opacity(0.3), in: Capsule())
+                            .overlay(Capsule().strokeBorder(.orange, lineWidth: 1))
+                    }
                 }
                 .foregroundStyle(.white)
 
@@ -1024,6 +1076,7 @@ struct TNHomeView: View {
                     Button { showMount = true } label: { bigBtn("🐲 Thú Cưỡi Bay — Ngự Không Phi Hành", [.blue, .indigo]) }.buttonStyle(TNPress(glow: .blue))
                     Button { showSpouse = true } label: { bigBtn("💞 Đạo Lữ — Kết Duyên Tu Tiên", [.pink, .red]) }.buttonStyle(TNPress(glow: .pink))
                     Button { showRecharge = true } label: { bigBtn("💰 Nạp Linh Thạch — Cửa Hàng", [.yellow, .green]) }.buttonStyle(TNPress(glow: .green))
+                    Button { showVip = true } label: { bigBtn("👑 VIP Đặc Quyền", [.orange, .yellow]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }.buttonStyle(TNPress(glow: .pink))
                 }
                 .padding(.horizontal)
@@ -1049,6 +1102,7 @@ struct TNHomeView: View {
         .sheet(isPresented: $showMount) { TNMountView(game: game) }
         .sheet(isPresented: $showSpouse) { TNSpouseView(game: game) }
         .sheet(isPresented: $showRecharge) { TNRechargeView(game: game) }
+        .sheet(isPresented: $showVip) { TNVipView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -2233,6 +2287,97 @@ struct TNRechargeView: View {
             } message: {
                 Text("Nạp gói \(pending?.name ?? "") — nhận \(( (pending?.linhThach ?? 0) + (pending?.bonus ?? 0) )) linh thạch.")
             }
+        }
+    }
+}
+
+// MARK: - VIP Đặc Quyền (bậc VIP · rương ngày · quyền lợi)
+struct TNVipView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    @State private var glow = false
+    private var curTier: TNVipTier { TN_VIP_TIERS[min(game.s.vip, TN_VIP_TIERS.count - 1)] }
+    private var nextTier: TNVipTier? { game.s.vip < 6 ? TN_VIP_TIERS[game.s.vip + 1] : nil }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Huy hiệu VIP hiện tại
+                    VStack(spacing: 8) {
+                        Text("👑").font(.system(size: 54)).scaleEffect(glow ? 1.1 : 1.0)
+                            .shadow(color: curTier.color, radius: glow ? 16 : 6)
+                        Text(curTier.name).font(.title2.bold()).foregroundStyle(curTier.color)
+                        Text("Tổng nạp tích luỹ: \(game.s.totalRecharged) linh thạch")
+                            .font(.caption).foregroundStyle(.white.opacity(0.7))
+                        if let nt = nextTier {
+                            let need = max(0, nt.need - game.s.totalRecharged)
+                            TNBar(value: game.s.totalRecharged, maxValue: nt.need, colors: [curTier.color, .orange], label: "")
+                                .frame(height: 16).padding(.horizontal, 30)
+                            Text("Còn \(need) nữa để lên \(nt.name)").font(.caption2).foregroundStyle(.white.opacity(0.6))
+                        } else {
+                            Text("🌟 Đã đạt VIP tối đa — Chí Tôn!").font(.caption.bold()).foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(20).frame(maxWidth: .infinity)
+                    .background(curTier.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(curTier.color.opacity(0.6), lineWidth: 1))
+                    .padding(.horizontal).onAppear { withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { glow = true } }
+
+                    // Rương đặc quyền VIP mỗi ngày
+                    Button {
+                        msg = game.claimVipGift(); TNHaptic.success()
+                    } label: {
+                        HStack {
+                            Text("🎊").font(.system(size: 30))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Rương Đặc Quyền VIP").font(.subheadline.bold()).foregroundStyle(.white)
+                                Text(game.s.vip < 1 ? "Cần VIP 1 để mở khoá"
+                                     : (game.vipGiftReady ? "Nhận +\(game.s.vip*150) linh thạch + nguyên liệu!" : "Đã nhận hôm nay · mai quay lại"))
+                                    .font(.caption2).foregroundStyle(.white.opacity(0.7))
+                            }
+                            Spacer()
+                            Text(game.vipGiftReady ? "MỞ" : "✓").font(.caption.bold()).foregroundStyle(.white)
+                                .padding(.horizontal, 16).padding(.vertical, 9)
+                                .background(game.vipGiftReady ? Color.orange : Color.gray, in: Capsule())
+                        }
+                        .padding(12)
+                        .background(LinearGradient(colors: [.orange.opacity(0.2), .clear], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.orange.opacity(0.4), lineWidth: 1))
+                    }
+                    .disabled(!game.vipGiftReady)
+                    .buttonStyle(TNPress(glow: .orange)).padding(.horizontal)
+
+                    // Bảng đặc quyền các bậc
+                    Text("📜 BẢNG ĐẶC QUYỀN VIP").font(.subheadline.bold()).foregroundStyle(.yellow)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
+                    ForEach(TN_VIP_TIERS.dropFirst()) { t in
+                        let reached = game.s.vip >= t.id
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(t.name).font(.subheadline.bold()).foregroundStyle(reached ? t.color : .white.opacity(0.5))
+                                Spacer()
+                                Text(reached ? "✅ Đã đạt" : "Nạp \(t.need)")
+                                    .font(.caption2.bold()).foregroundStyle(reached ? .green : .white.opacity(0.5))
+                            }
+                            ForEach(t.perks, id: \.self) { p in
+                                Text("• \(p)").font(.caption2).foregroundStyle(.white.opacity(reached ? 0.85 : 0.5))
+                            }
+                        }
+                        .padding(12)
+                        .background((reached ? t.color.opacity(0.12) : Color.white.opacity(0.04)), in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(reached ? t.color.opacity(0.5) : .clear, lineWidth: 1))
+                        .padding(.horizontal)
+                    }
+
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center).padding(.horizontal) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.12,green:0.09,blue:0.02), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("VIP Đặc Quyền").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
         }
     }
 }
