@@ -6781,6 +6781,94 @@ def _tg_ai_clean_q(text: str) -> str:
             return q[len(p):].strip() or q
     return q
 
+# ---------- 🎙️ Chữ → GIỌNG NÓI tiếng Việt (kể chuyện gửi voice) ----------
+def _tts_vi(text: str, path_mp3: str) -> bool:
+    """Chữ → giọng nói TIẾNG VIỆT (mp3). edge-tts (giọng đẹp) → gTTS → Google translate_tts (dự phòng)."""
+    import shutil as _sh, subprocess as _sp, os as _os
+    txt = (text or "").strip()[:3500]
+    if not txt:
+        return False
+    if _sh.which("edge-tts"):
+        try:
+            _sp.run(["edge-tts", "--voice", "vi-VN-HoaiMyNeural", "--text", txt, "--write-media", path_mp3],
+                    timeout=150, capture_output=True)
+            if _os.path.exists(path_mp3) and _os.path.getsize(path_mp3) > 800:
+                return True
+        except Exception:
+            pass
+    try:
+        from gtts import gTTS
+        gTTS(txt, lang="vi").save(path_mp3)
+        if _os.path.exists(path_mp3) and _os.path.getsize(path_mp3) > 800:
+            return True
+    except Exception:
+        pass
+    try:
+        import httpx as _hx, re as _re2, urllib.parse as _up
+        parts = _re2.findall(r'.{1,190}(?:\s|$)', txt) or [txt[:190]]
+        with open(path_mp3, "wb") as f:
+            for p in parts:
+                if not p.strip():
+                    continue
+                u = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=" + _up.quote(p.strip())
+                r = _hx.get(u, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+                if r.status_code == 200:
+                    f.write(r.content)
+        return _os.path.exists(path_mp3) and _os.path.getsize(path_mp3) > 800
+    except Exception:
+        return False
+
+def _mp3_to_ogg(mp3: str, ogg: str) -> bool:
+    """Chuyển mp3 → ogg/opus để gửi dạng VOICE (bong bóng ghi âm) trên Telegram."""
+    import shutil as _sh, subprocess as _sp, os as _os
+    if not _sh.which("ffmpeg"):
+        return False
+    try:
+        _sp.run(["ffmpeg", "-y", "-i", mp3, "-c:a", "libopus", "-b:a", "48k", ogg], timeout=90, capture_output=True)
+        return _os.path.exists(ogg) and _os.path.getsize(ogg) > 300
+    except Exception:
+        return False
+
+def _tg_send_voice(token: str, chat_id, ogg_path: str, caption: str = "") -> bool:
+    import httpx as _hx
+    try:
+        with open(ogg_path, "rb") as f:
+            r = _hx.post(f"https://api.telegram.org/bot{token}/sendVoice",
+                         data={"chat_id": str(chat_id), "caption": caption[:1000], "parse_mode": "HTML"},
+                         files={"voice": ("voice.ogg", f, "audio/ogg")}, timeout=180)
+        return bool(r.json().get("ok"))
+    except Exception as e:
+        log.warning("sendVoice lỗi: %s", e); return False
+
+def _tg_voice_reply(token, chat_id, request: str, story: bool = True) -> None:
+    """Nền: AI tạo nội dung → đọc thành GIỌNG NÓI → gửi VOICE. story=True → kể chuyện."""
+    import tempfile, os as _os, shutil as _sh
+    try:
+        _tg_call(token, "sendChatAction", chat_id=chat_id, action="record_voice")
+    except Exception:
+        pass
+    if story:
+        prompt = (f"{request}\n\nHãy KỂ một câu chuyện hoàn chỉnh bằng TIẾNG VIỆT, hấp dẫn, có mở đầu – diễn biến – "
+                  "kết thúc, khoảng 150–250 từ. CHỈ kể chuyện; KHÔNG thêm lời dẫn, KHÔNG markdown, KHÔNG emoji.")
+    else:
+        prompt = (f"{request}\n\n(Trả lời NGẮN GỌN bằng TIẾNG VIỆT để đọc thành giọng nói, tối đa ~150 từ, "
+                  "không markdown, không emoji.)")
+    content = _ai_answer(prompt)
+    if not content or content.startswith("⚠️") or content.startswith("✍️"):
+        _tg_send(token, chat_id, content or "😅 Xin lỗi, giờ mình chưa kể được. Thử lại sau nhé.")
+        return
+    d = tempfile.mkdtemp(prefix="voice_")
+    mp3 = _os.path.join(d, "v.mp3"); ogg = _os.path.join(d, "v.ogg")
+    try:
+        if not _tts_vi(content, mp3):
+            _tg_send(token, chat_id, "🎙️ (Máy chủ chưa cài công cụ giọng nói — cập nhật VPS để có TTS)\n\n" + content[:3500])
+            return
+        cap = "🎙️ <b>Chuyện kể cho bạn nghe</b>" if story else "🎙️ <b>Giọng đọc</b>"
+        if not (_mp3_to_ogg(mp3, ogg) and _tg_send_voice(token, chat_id, ogg, cap)):
+            _tg_send_audio(token, chat_id, mp3, "Chuyện kể" if story else "Giọng đọc")
+    finally:
+        _sh.rmtree(d, ignore_errors=True)
+
 def _tg_ai_route(token, chat_id, msg, text) -> bool:
     """🔗 NL → TỰ CHẠY LỆNH: khi AI bật, nhắn tự nhiên là bot tự dùng chức năng mà AI KHÔNG
     tự làm được (tạo QR, phát nhạc, ra câu đố, chơi game, bói, bình chọn…). Trả True nếu đã
@@ -6789,6 +6877,19 @@ def _tg_ai_route(token, chat_id, msg, text) -> bool:
     t = (text or "").strip()
     low = t.lower()
     mk = r'(?:tạo|tao|làm|lam|in|xuất ra|xuat ra|vẽ|ve|generate|gen)'   # động từ "tạo ra"
+
+    # 🎙️ KỂ CHUYỆN bằng GIỌNG NÓI (voice) — "kể chuyện", "kể cho anh nghe câu chuyện", "đọc truyện"…
+    if _re.search(r'\b(kể|ke|đọc|doc)\b.{0,30}(chuyện|chuyen|truyện|truyen|cổ tích|co tich|sự tích|su tich|'
+                  r'thần thoại|than thoai|ngụ ngôn|ngu ngon)', low):
+        import threading as _th
+        _th.Thread(target=_tg_voice_reply, args=(token, chat_id, t, True), daemon=True).start()
+        return True
+    # 🔊 Yêu cầu trả lời bằng GIỌNG NÓI (voice) cho câu hỏi bất kỳ
+    if _re.search(r'(trả lời|tra loi|đọc|doc|nói|noi).{0,12}(bằng giọng|bang giong|bằng voice|bang voice|giọng nói|giong noi|voice)|gửi voice|gui voice|đọc bằng giọng|doc bang giong', low):
+        req = _re.sub(r'(bằng|bang)?\s*(giọng nói|giong noi|voice|giọng|giong)\b', '', t, flags=_re.I).strip()
+        import threading as _th
+        _th.Thread(target=_tg_voice_reply, args=(token, chat_id, req or t, False), daemon=True).start()
+        return True
 
     # 🔳 MÃ QR — "tạo mã qr <nội dung>" (không kích hoạt khi hỏi 'qr là gì')
     if _re.search(mk + r'\b.{0,15}\bqr\b', low) or low.startswith("qr "):
