@@ -13775,7 +13775,9 @@ def _call_guard(cid: str, uid: int) -> dict:
     return cl
 
 def _log_call_once(cl: dict, status: str) -> None:
-    """Ghi 1 dòng lịch sử cuộc gọi khi kết thúc (answered/missed/declined)."""
+    """Ghi 1 dòng lịch sử cuộc gọi khi kết thúc (answered/missed/declined)
+    + tự chèn 1 TIN NHẮN vào đoạn chat (như Zalo/Messenger) để lịch sử gọi
+    nằm ngay trong phần tin nhắn với người đó."""
     if cl.get("logged"):
         return
     cl["logged"] = True
@@ -13789,6 +13791,19 @@ def _log_call_once(cl: dict, status: str) -> None:
                       "VALUES(?,?,?,?,?,?)",
                       (cl["from"], cl["to"], 1 if cl["video"] else 0, status,
                        int(cl.get("created", time.time())), dur))
+            # Dòng cuộc gọi trong ĐOẠN CHAT (người gọi là "người gửi")
+            icon = "📹" if cl["video"] else "📞"
+            kind = "video" if cl["video"] else "thoại"
+            if status == "answered":
+                content = f"{icon} Cuộc gọi {kind} · {dur // 60:02d}:{dur % 60:02d}"
+            elif status == "declined":
+                content = f"{icon} Cuộc gọi {kind} bị từ chối"
+            else:
+                content = f"{icon} Cuộc gọi {kind} nhỡ"
+            c.execute("INSERT INTO direct_messages(sender_id, receiver_id, content, created_at, is_read) "
+                      "VALUES(?,?,?,?,?)",
+                      (cl["from"], cl["to"], content, int(time.time()),
+                       1 if status == "answered" else 0))   # nhỡ/từ chối = chưa đọc → hiện chấm đỏ
     except Exception as e:
         log.warning("log_call lỗi: %s", e)
 
@@ -13872,12 +13887,15 @@ def call_frame_put(cid: str, b: CallFrameIn, user=Depends(get_user)) -> dict[str
     return {"ok": True}
 
 @app.get("/calls/{cid}/frame")
-def call_frame_get(cid: str, user=Depends(get_user)) -> dict[str, Any]:
+def call_frame_get(cid: str, after: float = 0, user=Depends(get_user)) -> dict[str, Any]:
+    """Lấy khung hình đối phương. after=ts lần trước → chỉ trả khi CÓ HÌNH MỚI
+    (tránh tải lại cùng 1 khung làm nghẽn mạng → hết giật hình)."""
     with _calls_lock:
         cl = _call_guard(cid, user["id"])
         other = _call_other(cl, user["id"])
         f = cl["frames"].get(other)
-    if not f: return {"jpg": ""}
+    if not f or (after and f[0] <= after):
+        return {"jpg": ""}
     return {"jpg": f[1], "ts": f[0]}
 
 @app.post("/calls/{cid}/audio")
@@ -13892,12 +13910,21 @@ def call_audio_put(cid: str, b: CallAudioIn, user=Depends(get_user)) -> dict[str
 
 @app.get("/calls/{cid}/audio")
 def call_audio_get(cid: str, after: int = 0, user=Depends(get_user)) -> dict[str, Any]:
-    with _calls_lock:
-        cl = _call_guard(cid, user["id"])
-        other = _call_other(cl, user["id"])
-        buf = cl["audio"].get(other, [])
-        out = [{"seq": s, "pcm": p} for (s, p) in buf if s > after]
-    return {"chunks": out}
+    """Lấy gói âm thanh mới. LONG-POLL tới ~0,9s: có gói mới là trả NGAY —
+    tiếng đến liền tai, ít request → hết rè/đứt tiếng."""
+    deadline = time.time() + 0.9
+    while True:
+        with _calls_lock:
+            cl = _calls.get(cid)
+            if not cl or user["id"] not in (cl["from"], cl["to"]):
+                raise HTTPException(status_code=404, detail="Cuộc gọi không tồn tại.")
+            other = _call_other(cl, user["id"])
+            buf = cl["audio"].get(other, [])
+            out = [{"seq": s, "pcm": p} for (s, p) in buf if s > after]
+            state = cl["state"]
+        if out or state != "active" or time.time() >= deadline:
+            return {"chunks": out}
+        time.sleep(0.05)
 
 
 @app.get("/calls/history")

@@ -101,8 +101,9 @@ extension APIClient {
     func callPutFrame(_ cid: String, jpgBase64: String) async throws {
         _ = try await send("/calls/\(cid)/frame", method: "POST", json: ["jpg": jpgBase64])
     }
-    func callGetFrame(_ cid: String) async throws -> CallFrame {
-        try decode(try await send("/calls/\(cid)/frame"))
+    /// after = mốc thời gian khung trước — máy chủ chỉ trả khi CÓ HÌNH MỚI (đỡ nghẽn mạng).
+    func callGetFrame(_ cid: String, after: Double = 0) async throws -> CallFrame {
+        try decode(try await send("/calls/\(cid)/frame?after=\(after)"))
     }
     func callPutAudio(_ cid: String, pcmBase64: String) async throws {
         _ = try await send("/calls/\(cid)/audio", method: "POST", json: ["pcm": pcmBase64])

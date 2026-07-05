@@ -42,25 +42,31 @@ struct FriendsView: View {
                     .padding(.horizontal)
                     .padding(.top, 8)
 
-                // Segmented picker
+                // Segmented picker — có tab CUỘC GỌI ngay trong phần tin nhắn (như Zalo/Messenger)
                 Picker("", selection: $selectedSegment) {
                     Text(store.t("Bạn bè", "Friends")).tag(0)
                     Text(store.t("Lời mời", "Requests")).tag(1)
                     Text(store.t("Tìm kiếm", "Search")).tag(2)
+                    Text(missedCount > 0
+                         ? store.t("Cuộc gọi (\(missedCount))", "Calls (\(missedCount))")
+                         : store.t("Cuộc gọi", "Calls")).tag(3)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
                 .padding(.top)
 
-                myAvatarRow
+                if selectedSegment != 3 { myAvatarRow }
 
                 Group {
                     if selectedSegment == 0 {
                         friendsPane
                     } else if selectedSegment == 1 {
                         requestsPane
-                    } else {
+                    } else if selectedSegment == 2 {
                         searchPane
+                    } else {
+                        // Lịch sử cuộc gọi nằm NGAY trong phần tin nhắn
+                        CallHistoryView()
                     }
                 }
                 
@@ -100,6 +106,9 @@ struct FriendsView: View {
             .onChange(of: avatarItem) { item in
                 guard let item else { return }
                 Task { await uploadAvatar(item) }
+            }
+            .onChange(of: selectedSegment) { seg in
+                if seg == 3 { missedCount = 0 }   // mở tab Cuộc gọi → đã xem cuộc gọi nhỡ
             }
         }
     }

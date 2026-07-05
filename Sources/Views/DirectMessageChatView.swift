@@ -213,6 +213,23 @@ struct DirectMessageChatView: View {
                         .cornerRadius(14)
                 }
             }
+        } else if msg.content.hasPrefix("📞 Cuộc gọi") || msg.content.hasPrefix("📹 Cuộc gọi") {
+            // Dòng CUỘC GỌI trong đoạn chat (như Zalo/Messenger): icon + trạng thái/thời lượng
+            let missed = msg.content.contains("nhỡ") || msg.content.contains("từ chối")
+            HStack(spacing: 10) {
+                Image(systemName: msg.content.hasPrefix("📹") ? "video.fill" : "phone.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(missed ? .red : .green)
+                    .frame(width: 34, height: 34)
+                    .background((missed ? Color.red : Color.green).opacity(0.14))
+                    .clipShape(Circle())
+                Text(msg.content.dropFirst(2))   // bỏ emoji đầu (đã có icon)
+                    .font(.subheadline)
+                    .foregroundStyle(missed ? .red : .primary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(18)
         } else {
             Text(msg.content)
                 .padding(.horizontal, 16).padding(.vertical, 10)

@@ -297,6 +297,23 @@ struct LiveImageView: UIViewRepresentable {
     func updateUIView(_ v: UIImageView, context: Context) { v.image = image }
 }
 
+// Cờ "đang gửi" an toàn đa luồng — chống XẾP CHỒNG request (nguyên nhân giật hình/đứt tiếng):
+// request trước chưa xong thì BỎ khung/gói mới thay vì dồn hàng đợi.
+final class InFlightFlag {
+    private let lock = NSLock()
+    private var busy = false
+    func tryBegin() -> Bool { lock.lock(); defer { lock.unlock() }; if busy { return false }; busy = true; return true }
+    func end() { lock.lock(); busy = false; lock.unlock() }
+}
+
+// Gom gói âm thanh nhỏ thành 1 lần gửi (0,25s/lần) — giảm ~21 request/giây còn 4.
+final class AudioOutBuffer {
+    private let lock = NSLock()
+    private var data = Data()
+    func append(_ d: Data) { lock.lock(); data.append(d); if data.count > 64_000 { data.removeFirst(data.count - 64_000) }; lock.unlock() }
+    func take() -> Data { lock.lock(); defer { lock.unlock() }; let d = data; data = Data(); return d }
+}
+
 // MARK: - Phiên gọi (điều phối tín hiệu + media)
 @MainActor
 final class CallSession: ObservableObject {
@@ -327,6 +344,13 @@ final class CallSession: ObservableObject {
     private var startedAt: Date?
     private var ended = false
     private var ringPlayer: AVAudioPlayer?
+    // Chống nghẽn: mỗi kênh chỉ 1 request tại 1 thời điểm + gom âm thanh gửi theo lô
+    private let frameUp = InFlightFlag()
+    private let audioUp = InFlightFlag()
+    private var pullingFrame = false
+    private var pullingAudio = false
+    private var lastFrameTs: Double = 0
+    private let outAudio = AudioOutBuffer()
 
     init(callId: String, peerName: String, isVideo: Bool, isCaller: Bool,
          api: APIClient, onClose: @escaping () -> Void) {
@@ -383,22 +407,24 @@ final class CallSession: ObservableObject {
         writeBroadcastConfig()   // để Broadcast Extension biết cuộc gọi nào mà đẩy khung hình
         if isVideo { startCamera() }
         startAudio()
-        // Gửi/nhận khung hình (capture giá trị cục bộ vì closure chạy trên luồng camera)
+        // Gửi/nhận khung hình (capture giá trị cục bộ vì closure chạy trên luồng camera).
+        // Mỗi kênh chỉ 1 request 1 lúc: đang gửi thì BỎ khung mới (mạng chậm không dồn đống).
         let api = self.api
         let cid = self.callId
         if isVideo {
+            let up = self.frameUp
             camera.onFrameJPEG = { data in
+                guard up.tryBegin() else { return }
                 let b64 = data.base64EncodedString()
-                Task { try? await api.callPutFrame(cid, jpgBase64: b64) }
+                Task { try? await api.callPutFrame(cid, jpgBase64: b64); up.end() }
             }
-            addTimer(0.12) { [weak self] in Task { await self?.pullFrame() } }
+            addTimer(0.15) { [weak self] in Task { await self?.pullFrame() } }
         }
-        // Âm thanh
-        audio.onChunk = { data in
-            let b64 = data.base64EncodedString()
-            Task { try? await api.callPutAudio(cid, pcmBase64: b64) }
-        }
-        addTimer(0.2) { [weak self] in Task { await self?.pullAudio() } }
+        // Âm thanh: mic gom vào bộ đệm → gửi 1 LÔ mỗi 0,25s (thay vì ~21 request/giây)
+        let outBuf = self.outAudio
+        audio.onChunk = { data in outBuf.append(data) }
+        addTimer(0.25) { [weak self] in self?.flushAudioUp() }
+        addTimer(0.15) { [weak self] in Task { await self?.pullAudio() } }
         // Đồng hồ
         addTimer(1.0) { [weak self] in self?.tick() }
     }
@@ -406,17 +432,38 @@ final class CallSession: ObservableObject {
     private func startCamera() { camera.beauty = beauty; camera.effect = effect; camera.enabled = cameraOn; camera.start() }
     private func startAudio() { audio.muted = muted; audio.start(speaker: speakerOn) }
 
+    // Gửi lô âm thanh đã gom (bỏ lô mới nếu lô trước còn đang gửi — không dồn trễ).
+    private func flushAudioUp() {
+        guard phase == .active else { return }
+        let data = outAudio.take()
+        guard !data.isEmpty, audioUp.tryBegin() else { return }
+        let api = self.api, cid = self.callId
+        let b64 = data.base64EncodedString()
+        Task { try? await api.callPutAudio(cid, pcmBase64: b64); self.audioUp.end() }
+    }
+
     private func pullFrame() async {
-        guard phase == .active, let f = try? await api.callGetFrame(callId), !f.jpg.isEmpty,
+        guard phase == .active, !pullingFrame else { return }
+        pullingFrame = true
+        defer { pullingFrame = false }
+        // Chỉ nhận khi CÓ HÌNH MỚI (after=ts) → không tải trùng khung, hình mượt hơn hẳn.
+        guard let f = try? await api.callGetFrame(callId, after: lastFrameTs), !f.jpg.isEmpty,
               let data = Data(base64Encoded: f.jpg), let img = UIImage(data: data) else { return }
+        lastFrameTs = f.ts ?? lastFrameTs
         remoteImage = img
     }
     private func pullAudio() async {
-        guard phase == .active, let r = try? await api.callGetAudio(callId, after: lastAudioSeq) else { return }
+        guard phase == .active, !pullingAudio else { return }
+        pullingAudio = true
+        defer { pullingAudio = false }
+        // Máy chủ long-poll ~0,9s: có tiếng là trả NGAY → tiếng đến liền, không rè.
+        guard let r = try? await api.callGetAudio(callId, after: lastAudioSeq) else { return }
+        var pcm = Data()   // ghép các gói thành 1 buffer liền mạch → phát mượt, không khựng
         for ch in r.chunks {
             if ch.seq > lastAudioSeq { lastAudioSeq = ch.seq }
-            if let d = Data(base64Encoded: ch.pcm) { audio.play(int16: d) }
+            if let d = Data(base64Encoded: ch.pcm) { pcm.append(d) }
         }
+        if !pcm.isEmpty { audio.play(int16: pcm) }
     }
 
     private func tick() {
