@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+// Rung phản hồi khi tung chiêu (cho game "đã tay")
+enum TNHaptic {
+    static func hit(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
+        let g = UIImpactFeedbackGenerator(style: style); g.prepare(); g.impactOccurred()
+    }
+    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+}
+
 // Hiệu ứng NHẤN nút: thu nhỏ + phát sáng khi bấm (áp cho nút skill, điều hướng…)
 struct TNPress: ButtonStyle {
     var glow: Color = .white
@@ -158,6 +166,7 @@ struct TNSave: Codable {
     var hp = 120
     var linhThach = 0
     var chapter = 0          // cốt truyện đã qua
+    var arenaRank = 0        // số cao thủ đã hạ ở Đấu Đài
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -528,6 +537,7 @@ struct TNHomeView: View {
     @State private var meditating = false
     @State private var showBattle = false
     @State private var showChars = false
+    @State private var showArena = false
 
     var body: some View {
         ScrollView {
@@ -600,6 +610,7 @@ struct TNHomeView: View {
 
                     Button { showBattle = true } label: { bigBtn("⚔️ Phiêu Lưu — Luyện Yêu Thú", [.purple, .indigo]) }.buttonStyle(TNPress(glow: .purple))
                     Button { tab = 1 } label: { bigBtn("📖 Đi Theo Cốt Truyện", [.brown, .orange]) }.buttonStyle(TNPress(glow: .orange))
+                    Button { showArena = true } label: { bigBtn("🏆 Đấu Đài — Thách Đấu Cao Thủ", [.yellow, .orange]) }.buttonStyle(TNPress(glow: .yellow))
                     Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }.buttonStyle(TNPress(glow: .pink))
                 }
                 .padding(.horizontal)
@@ -616,6 +627,7 @@ struct TNHomeView: View {
             TNBattleView(game: game, enemy: makeWildEnemy(), storyMode: false, onDone: { _ in })
         }
         .sheet(isPresented: $showChars) { TNCharactersView() }
+        .fullScreenCover(isPresented: $showArena) { TNArenaView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -788,6 +800,7 @@ struct TNBattleView: View {
     private func basicAttack() {
         let d = max(3, Int(Double(game.s.atk) * Double.random(in: 0.7...0.95)) - enemy.def)
         fx = (.gray, "👊")
+        TNHaptic.hit(.light)
         hitEnemy(d, "\(game.s.name) vung quyền!", .white)
     }
     private func useSkill(_ sk: TNSkill) {
@@ -795,6 +808,7 @@ struct TNBattleView: View {
         mp -= sk.mp
         var d = max(5, Int(Double(game.s.atk) * sk.power * Double.random(in: 0.9...1.15)) - enemy.def)
         fx = (sk.color, sk.icon)
+        TNHaptic.hit(sk.element == "than" ? .heavy : .medium)
         var extra = ""
         switch sk.element {
         case "loi":   if Bool.random() { enemy.stunned = true; extra = " ⚡Địch bị choáng!" }
@@ -821,6 +835,7 @@ struct TNBattleView: View {
         if enemy.hp <= 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 game.reward(linhThach: enemy.reward, exp: enemy.exp)
+                TNHaptic.success()
                 win = true; ended = true
             }
             return
@@ -1048,6 +1063,112 @@ struct TNShopView: View {
     private func flash(_ m: String) {
         withAnimation { msg = m }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Đấu Đài (leo tháp thách đấu cao thủ roster)
+struct TNArenaFoe { let name: String; let emoji: String; let title: String; let hpMul: Double; let atkMul: Double }
+let TN_ARENA: [TNArenaFoe] = [
+    TNArenaFoe(name: "Trịnh Hạo", emoji: "🤴", title: "Thiên kiêu phong lưu", hpMul: 0.8, atkMul: 0.7),
+    TNArenaFoe(name: "Mục Trần", emoji: "🧔", title: "Nguyên Anh hậu kỳ", hpMul: 1.1, atkMul: 0.85),
+    TNArenaFoe(name: "Tử Linh", emoji: "💃", title: "Yêu khí nguy hiểm", hpMul: 1.3, atkMul: 1.0),
+    TNArenaFoe(name: "Lâm Thiên", emoji: "🗡️", title: "Thiên tài kiếm đạo", hpMul: 1.6, atkMul: 1.15),
+    TNArenaFoe(name: "An Huyền", emoji: "🦹", title: "Ma tu tà ác", hpMul: 2.0, atkMul: 1.3),
+    TNArenaFoe(name: "La Sát", emoji: "🗡️", title: "Ma tu chiến thần", hpMul: 2.5, atkMul: 1.45),
+    TNArenaFoe(name: "Thiên Hỏa Tôn Giả", emoji: "🔥", title: "Hỏa đạo cường giả", hpMul: 3.2, atkMul: 1.6),
+    TNArenaFoe(name: "Tứ Diện Ma Nữ", emoji: "😈", title: "Ma tộc mỹ nhân", hpMul: 4.0, atkMul: 1.8),
+    TNArenaFoe(name: "Cổ Thần", emoji: "👁️", title: "Thiên tài kiêu ngạo", hpMul: 5.0, atkMul: 2.0),
+    TNArenaFoe(name: "Thiên Đạo", emoji: "🌪️", title: "Quy tắc chí cao", hpMul: 6.5, atkMul: 2.3),
+]
+
+struct TNArenaView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var showBattle = false
+    @State private var foeIdx = 0
+    @State private var toast: String?
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red:0.1,green:0.07,blue:0.02), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            TNCloudsBG()
+            VStack(spacing: 0) {
+                HStack {
+                    Text("🏆 ĐẤU ĐÀI").font(.title2.bold()).foregroundStyle(.yellow)
+                    Spacer()
+                    Button("Đóng") { dismiss() }.foregroundStyle(.white)
+                }.padding()
+                Text("Đã hạ \(game.s.arenaRank)/\(TN_ARENA.count) cao thủ — Danh hiệu: \(rankTitle)")
+                    .font(.caption).foregroundStyle(.white.opacity(0.8)).padding(.bottom, 6)
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(TN_ARENA.indices, id: \.self) { i in
+                            let f = TN_ARENA[i]
+                            let locked = i > game.s.arenaRank
+                            let cleared = i < game.s.arenaRank
+                            HStack(spacing: 12) {
+                                Text(f.emoji).font(.system(size: 32))
+                                    .frame(width: 54, height: 54)
+                                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(locked ? Image(systemName: "lock.fill").foregroundStyle(.white.opacity(0.7)) : nil)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Ải \(i+1): \(f.name)").font(.subheadline.bold()).foregroundStyle(.white)
+                                    Text(f.title).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                                }
+                                Spacer()
+                                if cleared { Image(systemName: "checkmark.seal.fill").foregroundStyle(.green) }
+                                else if locked { Text("🔒").font(.caption) }
+                                else {
+                                    Button("Thách đấu") { foeIdx = i; showBattle = true }
+                                        .font(.caption.bold()).foregroundStyle(.white)
+                                        .padding(.horizontal, 14).padding(.vertical, 8)
+                                        .background(.orange, in: Capsule())
+                                        .buttonStyle(TNPress(glow: .orange))
+                                }
+                            }
+                            .padding(12)
+                            .background((cleared ? Color.green.opacity(0.12) : Color.white.opacity(0.05)), in: RoundedRectangle(cornerRadius: 14))
+                            .opacity(locked ? 0.5 : 1)
+                            .padding(.horizontal)
+                        }
+                        Color.clear.frame(height: 20)
+                    }
+                }
+                if let toast {
+                    Text(toast).font(.footnote.bold()).foregroundStyle(.yellow)
+                        .padding(10).background(.black.opacity(0.6), in: Capsule()).padding(.bottom, 10)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .fullScreenCover(isPresented: $showBattle) {
+            TNBattleView(game: game, enemy: arenaEnemy(TN_ARENA[foeIdx]), storyMode: true) { won in
+                if won && foeIdx == game.s.arenaRank {
+                    game.s.arenaRank += 1; game.save()
+                    withAnimation { toast = "🎉 Hạ gục \(TN_ARENA[foeIdx].name)! Danh hiệu mới: \(rankTitle)" }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { withAnimation { toast = nil } }
+                }
+            }
+        }
+    }
+    private var rankTitle: String {
+        switch game.s.arenaRank {
+        case 0: return "Vô Danh Tiểu Tốt"
+        case 1...2: return "Sơ Nhập Giang Hồ"
+        case 3...4: return "Tiểu Hữu Danh Khí"
+        case 5...6: return "Nhất Phương Cao Thủ"
+        case 7...8: return "Danh Chấn Thiên Hạ"
+        case 9: return "Chí Tôn Cường Giả"
+        default: return "🌟 NGHỊCH THIÊN ĐẠI ĐẾ"
+        }
+    }
+    private func arenaEnemy(_ f: TNArenaFoe) -> TNEnemy {
+        let base = Double(game.s.hpMax)
+        let hp = Int(base * f.hpMul)
+        return TNEnemy(name: f.name, emoji: f.emoji, hp: hp, hpMax: hp,
+                       atk: Int(Double(game.s.atk) * 0.75 * f.atkMul),
+                       def: Int(Double(game.s.def) * 0.85),
+                       reward: 150 + foeIdx * 120, exp: 120 + foeIdx * 60, isBoss: true)
     }
 }
 
