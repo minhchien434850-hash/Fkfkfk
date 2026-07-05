@@ -11,6 +11,9 @@ struct APIClient {
     let baseURL: String
     var token: String?
 
+    // Địa chỉ VPS TRỰC TIẾP (IPv4) — dùng để TỰ ĐỘNG né khi domain/proxy hỏng (502/không kết nối).
+    static let fallbackBase = "http://103.131.56.11"
+
     var root: String {
         var s = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if !s.lowercased().hasPrefix("http") { s = "http://" + s }
@@ -25,9 +28,32 @@ struct APIClient {
         return u
     }
 
+    // Gợi ý thử lại: shouldFallback=true khi lỗi có thể do domain/proxy (nên gọi thẳng IP VPS).
+    private struct RetryHint: Error { let shouldFallback: Bool; let underlying: APIError }
+
     func send(_ path: String, method: String = "GET",
                       json: [String: Any]? = nil, auth: Bool = true) async throws -> Data {
-        var req = URLRequest(url: try makeURL(path))
+        do {
+            return try await sendTo(root, path, method: method, json: json, auth: auth)
+        } catch let hint as RetryHint {
+            // Domain/proxy hỏng (502/503/504 hoặc không kết nối) → gọi THẲNG IP VPS 1 lần.
+            if hint.shouldFallback && root.lowercased() != Self.fallbackBase {
+                do {
+                    return try await sendTo(Self.fallbackBase, path, method: method, json: json, auth: auth)
+                } catch let h2 as RetryHint {
+                    throw h2.underlying   // IP cũng hỏng → báo lỗi gốc
+                }
+            }
+            throw hint.underlying
+        }
+    }
+
+    private func sendTo(_ base: String, _ path: String, method: String,
+                        json: [String: Any]?, auth: Bool) async throws -> Data {
+        guard let url = URL(string: base + path) else {
+            throw APIError.message("URL máy chủ không hợp lệ.")
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 120
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -38,7 +64,8 @@ struct APIClient {
         do {
             (data, resp) = try await URLSession.shared.data(for: req)
         } catch {
-            throw APIError.message("Không kết nối được máy chủ. Kiểm tra IP/URL & mạng.")
+            throw RetryHint(shouldFallback: true,
+                            underlying: APIError.message("Không kết nối được máy chủ. Kiểm tra IP/URL & mạng."))
         }
         guard let http = resp as? HTTPURLResponse else {
             throw APIError.message("Phản hồi không hợp lệ.")
@@ -47,7 +74,9 @@ struct APIClient {
             var detail = "Lỗi máy chủ (\(http.statusCode))."
             if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let d = obj["detail"] as? String { detail = d }
-            throw APIError.message(detail)
+            // 502/503/504 = cổng/proxy hỏng → cho phép né sang IP trực tiếp.
+            let gateway = [502, 503, 504].contains(http.statusCode)
+            throw RetryHint(shouldFallback: gateway, underlying: APIError.message(detail))
         }
         return data
     }
