@@ -209,6 +209,24 @@ let TN_SPOUSES: [TNSpouse] = [
 ]
 func tnSpouse(_ id: String) -> TNSpouse? { TN_SPOUSES.first { $0.id == id } }
 
+// MARK: - Nhiệm vụ hằng ngày (làm mới mỗi ngày, hoàn thành nhận thưởng + chuỗi streak)
+struct TNDaily: Identifiable {
+    let id: String; let name: String; let emoji: String
+    let target: Int; let rewardLT: Int; let rewardExp: Int; let hint: String
+}
+let TN_DAILIES: [TNDaily] = [
+    TNDaily(id: "login", name: "Điểm Danh Nhập Đạo", emoji: "📅", target: 1, rewardLT: 50, rewardExp: 40,
+            hint: "Mở game mỗi ngày để điểm danh."),
+    TNDaily(id: "medi", name: "Bế Quan Thiền Định", emoji: "🧘", target: 5, rewardLT: 60, rewardExp: 60,
+            hint: "Thiền định 5 lần ở màn Tu Luyện."),
+    TNDaily(id: "hunt", name: "Trảm Yêu Diệt Ma", emoji: "⚔️", target: 3, rewardLT: 120, rewardExp: 100,
+            hint: "Thắng 3 trận chiến đấu bất kỳ."),
+    TNDaily(id: "quest", name: "Hành Hiệp Trượng Nghĩa", emoji: "📜", target: 4, rewardLT: 90, rewardExp: 80,
+            hint: "Làm 4 nhiệm vụ thường."),
+    TNDaily(id: "pvp", name: "Luận Kiếm Đài", emoji: "🏆", target: 1, rewardLT: 100, rewardExp: 90,
+            hint: "Giao đấu PvP xếp hạng 1 lần."),
+]
+
 // MARK: - Bậc danh vọng PvP (theo điểm)
 struct TNRank { let name: String; let emoji: String; let color: Color }
 func tnPvpRank(_ pts: Int) -> TNRank {
@@ -312,6 +330,11 @@ struct TNSave: Codable {
     var affinity = 0         // độ thân mật với đạo lữ (tặng quà tăng)
     var ownedMounts: [String] = []
     var activeMount = ""     // thú cưỡi đang cưỡi (thú bay)
+    var dailyDate = ""       // ngày (yyyy-MM-dd) của phiên nhiệm vụ hằng ngày hiện tại
+    var dailyProg: [String: Int] = [:]   // tiến độ từng nhiệm vụ ngày
+    var dailyClaimed: [String] = []      // nhiệm vụ ngày đã lĩnh thưởng
+    var dailyStreak = 0      // chuỗi ngày hoàn thành liên tiếp
+    var lastStreakDate = ""  // ngày cuối cộng streak (tránh cộng trùng)
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -465,6 +488,7 @@ final class TNGame: ObservableObject {
     func meditate() {
         let gain = max(6, s.expMax / 12)
         s.exp = min(s.exp + gain, s.expMax)
+        logDaily("medi")
         save()
     }
     // Đột phá cảnh giới
@@ -519,6 +543,7 @@ final class TNGame: ObservableObject {
         gainLevelExp(exp)            // đánh quái cũng lên CẤP
         s.linhThao += Int.random(in: 1...3)      // rơi nguyên liệu luyện đan
         s.khoangThach += Int.random(in: 1...3)   // rơi nguyên liệu luyện khí
+        logDaily("hunt")             // thắng trận → tiến độ nhiệm vụ ngày
         save()
     }
     // Luyện khí: nâng cấp vũ khí/giáp
@@ -583,6 +608,7 @@ final class TNGame: ObservableObject {
 
     // PvP xếp hạng: đấu đối thủ mô phỏng theo lực chiến, thắng/thua cộng-trừ điểm
     func pvpFight() -> (win: Bool, msg: String) {
+        logDaily("pvp")             // tham gia PvP → tiến độ nhiệm vụ ngày
         // Lực chiến người chơi
         let myPower = Double(s.atk) * 2 + Double(s.hpMax) + Double(s.def) * 3
         // Đối thủ mạnh dần theo điểm danh vọng hiện tại
@@ -641,6 +667,50 @@ final class TNGame: ObservableObject {
         return "🎁 Tặng quà — thân mật +40 (hiện \(s.affinity))\(up)"
     }
     func divorce() { s.spouse = ""; s.affinity = 0; s.hp = min(s.hp, s.hpMax); save() }
+
+    // ===== Nhiệm vụ hằng ngày =====
+    static let dailyFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "vi_VN"); return f
+    }()
+    private func todayStr() -> String { TNGame.dailyFmt.string(from: Date()) }
+    // Sang ngày mới → reset tiến độ & đã lĩnh; điểm danh tự động.
+    func rolloverDaily() {
+        let today = todayStr()
+        if s.dailyDate != today {
+            s.dailyDate = today
+            s.dailyProg = [:]
+            s.dailyClaimed = []
+            s.dailyProg["login"] = 1        // mở game = điểm danh
+            save()
+        }
+    }
+    // Ghi nhận tiến độ khi người chơi hành động (thiền/đánh/nhiệm vụ/pvp).
+    func logDaily(_ key: String, _ n: Int = 1) {
+        rolloverDaily()
+        s.dailyProg[key, default: 0] += n
+        save()
+    }
+    func dailyDone(_ d: TNDaily) -> Bool { (s.dailyProg[d.id] ?? 0) >= d.target }
+    @discardableResult
+    func claimDaily(_ d: TNDaily) -> String {
+        rolloverDaily()
+        guard !s.dailyClaimed.contains(d.id) else { return "Đã lĩnh thưởng rồi." }
+        guard dailyDone(d) else { return "❌ Chưa đạt yêu cầu." }
+        s.dailyClaimed.append(d.id)
+        s.linhThach += d.rewardLT
+        gainLevelExp(d.rewardExp)
+        var extra = ""
+        // Hoàn thành TẤT CẢ nhiệm vụ ngày → cộng chuỗi streak + rương thưởng (1 lần/ngày)
+        if TN_DAILIES.allSatisfy({ s.dailyClaimed.contains($0.id) }) && s.lastStreakDate != s.dailyDate {
+            s.lastStreakDate = s.dailyDate
+            s.dailyStreak += 1
+            let chest = 200 + s.dailyStreak * 20
+            s.linhThach += chest
+            extra = " · 🎊 Trọn ngày! Chuỗi \(s.dailyStreak) ngày — rương thưởng +\(chest) linh thạch!"
+        }
+        save()
+        return "🎁 +\(d.rewardLT) linh thạch · +\(d.rewardExp) EXP\(extra)"
+    }
 
     // Tạo nhân vật mới (server + tên + môn phái)
     func createCharacter(name: String, server: String, sect: TNSect) {
@@ -2180,7 +2250,10 @@ struct TNQuestView: View {
                 }
                 .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
 
-                Text("Làm nhiệm vụ để tăng EXP lên cấp (tối đa cấp 100).")
+                // ===== NHIỆM VỤ HẰNG NGÀY =====
+                dailySection
+
+                Text("Nhiệm vụ thường — làm để tăng EXP lên cấp (tối đa cấp 100).")
                     .font(.caption).foregroundStyle(.white.opacity(0.6))
 
                 ForEach(quests, id: \.0) { q in
@@ -2218,6 +2291,60 @@ struct TNQuestView: View {
                 if won { flash("🎉 Hoàn thành! Nhận EXP + linh thạch.") }
             }
         }
+        .onAppear { game.rolloverDaily() }
+    }
+
+    // Bảng nhiệm vụ hằng ngày (làm mới mỗi ngày · hoàn thành cả bảng nhận rương + streak)
+    private var dailySection: some View {
+        let allClaimed = TN_DAILIES.allSatisfy { game.s.dailyClaimed.contains($0.id) }
+        return VStack(spacing: 10) {
+            HStack {
+                Text("🗓️ NHIỆM VỤ HẰNG NGÀY").font(.subheadline.bold()).foregroundStyle(.cyan)
+                Spacer()
+                Text("🔥 Chuỗi \(game.s.dailyStreak) ngày").font(.caption.bold()).foregroundStyle(.orange)
+            }
+            Text("Làm mới mỗi ngày · hoàn thành cả bảng nhận thêm rương thưởng.")
+                .font(.caption2).foregroundStyle(.white.opacity(0.55)).frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(TN_DAILIES) { d in
+                let prog = min(game.s.dailyProg[d.id] ?? 0, d.target)
+                let done = prog >= d.target
+                let claimed = game.s.dailyClaimed.contains(d.id)
+                HStack(spacing: 10) {
+                    Text(d.emoji).font(.system(size: 26)).frame(width: 40)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(d.name).font(.subheadline.bold()).foregroundStyle(.white)
+                        Text(d.hint).font(.caption2).foregroundStyle(.white.opacity(0.55))
+                        HStack(spacing: 6) {
+                            TNBar(value: prog, maxValue: d.target, colors: [.cyan, .blue], label: "")
+                            Text("\(prog)/\(d.target)").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7))
+                        }
+                        Text("🎁 +\(d.rewardLT) 💎 · +\(d.rewardExp) EXP").font(.system(size: 10, weight: .bold)).foregroundStyle(.orange)
+                    }
+                    Button {
+                        let r = game.claimDaily(d)
+                        flash(r)
+                        TNHaptic.success()
+                    } label: {
+                        Text(claimed ? "✓" : (done ? "Lĩnh" : "🔒"))
+                            .font(.caption.bold()).foregroundStyle(.white)
+                            .frame(width: 52).padding(.vertical, 8)
+                            .background(claimed ? Color.gray.opacity(0.5) : (done ? Color.green : Color.gray),
+                                        in: Capsule())
+                    }
+                    .disabled(claimed || !done)
+                    .buttonStyle(TNPress(glow: .green))
+                }
+                .padding(10)
+                .background((claimed ? Color.green.opacity(0.1) : Color.white.opacity(0.05)), in: RoundedRectangle(cornerRadius: 12))
+            }
+            if allClaimed {
+                Text("🎊 Đã hoàn thành toàn bộ nhiệm vụ hôm nay — hẹn gặp lại ngày mai!")
+                    .font(.caption.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center)
+            }
+        }
+        .padding(14).background(.cyan.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.cyan.opacity(0.3), lineWidth: 1))
+        .padding(.horizontal)
     }
 
     private func cooldownLeft(_ id: String) -> Int {
@@ -2227,6 +2354,7 @@ struct TNQuestView: View {
     private func doQuest(_ q: (String, String, String, Int, Int, String)) {
         let up = game.gainLevelExp(q.3)
         game.s.linhThach += q.4
+        game.logDaily("quest")       // làm nhiệm vụ thường → tiến độ nhiệm vụ ngày
         game.save()
         cooldowns[q.0] = Date()
         flash(up > 0 ? "🎉 LÊN CẤP \(game.s.level)! " : "✨ +\(q.3) EXP · 💎 +\(q.4)")
