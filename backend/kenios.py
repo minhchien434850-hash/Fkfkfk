@@ -6465,7 +6465,7 @@ _TG_RESERVED = {
     "poll", "gio", "dem", "password",
     "dovui", "goiy", "boqua", "dungdo", "diemdo", "baicao", "xidach", "rut", "dan", "baucua",
     # 🤖 Trợ lý AI
-    "ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp",
+    "ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp", "aidm",
 }
 
 # ======================== 🤖 Trợ lý AI trong bot (bật/tắt bằng /ai) ========================
@@ -6484,6 +6484,24 @@ def _ai_cfg():
     if not model:
         model = "claude-3-5-sonnet-latest" if prov == "anthropic" else "llama-3.3-70b-versatile"
     return prov, base, model, key
+
+def _ai_err(status: int, text: str) -> str:
+    """Đổi lỗi API thô (JSON dài) thành thông báo tiếng Việt gọn, kèm cách xử lý."""
+    t = (text or "").lower()
+    if status == 429 or "quota" in t or "rate limit" in t or "exceed" in t or "resource_exhausted" in t:
+        return ("⚠️ AI đang bị GIỚI HẠN LƯỢT (quota – lỗi 429).\n"
+                "Cách xử lý:\n"
+                "• Chờ ~1 phút rồi hỏi lại (giới hạn theo phút), hoặc\n"
+                "• Hết hạn mức MIỄN PHÍ trong ngày → đổi model nhẹ hơn: /aimodel gemini-2.0-flash-lite\n"
+                "• Hoặc đổi sang GROQ (miễn phí, hạn mức rộng):\n"
+                "  /aiurl https://api.groq.com/openai/v1 · /aimodel llama-3.3-70b-versatile · /aikey <khoá groq>")
+    if status in (401, 403) or "unauthor" in t or "permission" in t or ("api key" in t) or ("invalid" in t and "key" in t):
+        return f"⚠️ Khoá AI SAI hoặc chưa kích hoạt (lỗi {status}). Dán lại bằng /aikey (đúng & đủ khoá)."
+    if status == 404 or "not found" in t or "does not exist" in t:
+        _, _, model, _ = _ai_cfg()
+        return (f"⚠️ Không tìm thấy model '{model}' (lỗi 404). Đổi tên model bằng /aimodel — "
+                "vd /aimodel gemini-2.0-flash (Gemini) hoặc /aimodel llama-3.3-70b-versatile (Groq).")
+    return f"⚠️ AI báo lỗi {status}. Thử lại sau ít phút, hoặc gõ /aiset để kiểm tra cấu hình."
 
 def _ai_answer(question: str) -> str:
     """Gọi API AI trả lời 1 câu hỏi (chạy trong thread nền — KHÔNG chặn vòng lặp bot)."""
@@ -6508,7 +6526,7 @@ def _ai_answer(question: str) -> str:
                          json={"model": model, "max_tokens": 1600, "system": system,
                                "messages": [{"role": "user", "content": q}]})
             if r.status_code >= 400:
-                return f"⚠️ AI báo lỗi {r.status_code}: {r.text[:300]}"
+                return _ai_err(r.status_code, r.text)
             d = r.json()
             return "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip() or "(AI không trả lời)"
         r = _hx.post(base + "/chat/completions", timeout=90,
@@ -6516,7 +6534,7 @@ def _ai_answer(question: str) -> str:
                      json={"model": model, "temperature": 0.4, "max_tokens": 1600,
                            "messages": [{"role": "system", "content": system}, {"role": "user", "content": q}]})
         if r.status_code >= 400:
-            return f"⚠️ AI báo lỗi {r.status_code}: {r.text[:300]}"
+            return _ai_err(r.status_code, r.text)
         d = r.json()
         return ((d.get("choices") or [{}])[0].get("message", {}).get("content", "") or "").strip() or "(AI không trả lời)"
     except Exception as e:
@@ -6540,6 +6558,24 @@ def _tg_ai_is_on(chat_id) -> bool:
 
 def _tg_ai_set(chat_id, on: bool) -> None:
     set_setting("tg_ai_on_" + str(chat_id), "1" if on else "0")
+
+def _tg_ai_dm_on(chat_id) -> bool:
+    """CHAT RIÊNG: mặc định BẬT AI (khi đã có khoá) để chat thẳng khỏi cần lệnh.
+    - Đã /ai on cho DM này  → luôn bật
+    - Đã /ai off cho DM này → luôn tắt (ưu tiên ý người dùng)
+    - Chưa đặt gì           → theo công tắc chung tg_ai_dm (mặc định bật) & phải có khoá."""
+    per = get_setting("tg_ai_on_" + str(chat_id), "")   # "" = chưa đặt riêng
+    if per == "1":
+        return True
+    if per == "0":
+        return False
+    if get_setting("tg_ai_dm", "1") != "1":
+        return False
+    return bool(_ai_cfg()[3])   # chỉ tự bật khi đã cấu hình khoá
+
+def _tg_ai_active(chat_id, ctype: str) -> bool:
+    """AI có đang phục vụ ở đây không: chat riêng dùng mặc-định-bật, nhóm cần /ai on."""
+    return _tg_ai_dm_on(chat_id) if ctype == "private" else _tg_ai_is_on(chat_id)
 
 def _tg_ai_reply(token, chat_id, msg, question) -> None:
     """Chạy nền: báo 'đang gõ…', gọi AI, gửi trả lời (reply vào tin người hỏi). Gửi PLAIN
@@ -6597,7 +6633,7 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
     ask_direct = cmd in ("hoiai", "ask") or (
         cmd == "ai" and args.strip() and argl not in ("on", "off", "bat", "tat", "bật", "tắt", "status", "help", "?"))
     if ask_direct:
-        if not _tg_ai_is_on(chat_id):
+        if not _tg_ai_active(chat_id, ctype):
             _tg_send(token, chat_id, "🤖 AI đang <b>TẮT</b> ở đây. Admin gõ <code>/ai on</code> để bật.")
             return
         threading.Thread(target=_tg_ai_reply, args=(token, chat_id, msg, args.strip()), daemon=True).start()
@@ -6605,23 +6641,33 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
     # 2) Xem cấu hình/hướng dẫn — ai cũng xem được
     if cmd in ("aiset", "aihelp"):
         prov, base, model, key = _ai_cfg()
+        dm_default = get_setting("tg_ai_dm", "1") == "1"
         _tg_send(token, chat_id,
                  "🤖 <b>Trợ lý AI</b>\n"
-                 f"Trạng thái ở đây: <b>{'ĐANG BẬT ✅' if _tg_ai_is_on(chat_id) else 'ĐANG TẮT ✖️'}</b>\n"
+                 f"Trạng thái ở đây: <b>{'ĐANG BẬT ✅' if _tg_ai_active(chat_id, ctype) else 'ĐANG TẮT ✖️'}</b>\n"
+                 f"Chat riêng tự động trả lời: <b>{'BẬT' if dm_default else 'TẮT'}</b> (đổi bằng /aidm on|off)\n"
                  f"Khoá: <b>{'đã đặt' if key else 'CHƯA đặt'}</b> · Nhà cung cấp: <b>{prov}</b>\n"
                  f"Model: <code>{model}</code>\nBase: <code>{base}</code>\n\n"
                  "⚙️ <b>Bật trong 2 bước:</b>\n"
                  "1️⃣ Lấy khoá MIỄN PHÍ ở https://console.groq.com → nhắn RIÊNG bot: <code>/aikey KHOÁ</code>\n"
-                 "2️⃣ Gõ <code>/ai on</code>\n\n"
-                 "💬 Khi đã bật, hỏi bằng cách: <b>reply</b> vào bot · tag <b>@bot</b> · mở đầu \"<b>ai …</b>\" · "
+                 "2️⃣ Nhắn riêng bot là AI trả lời THẲNG (khỏi cần lệnh). Trong nhóm thì gõ <code>/ai on</code>.\n\n"
+                 "💬 Cách hỏi trong nhóm: <b>reply</b> vào bot · tag <b>@bot</b> · mở đầu \"<b>ai …</b>\" · "
                  "câu kết thúc \"<b>?</b>\" · hoặc <code>/hoiai câu hỏi</code>.\n\n"
                  "Đổi sang AI khác: <code>/aiprovider openai</code> · <code>/aiurl https://api.openai.com/v1</code> · "
                  "<code>/aimodel gpt-4o-mini</code> · <code>/aikey sk-...</code>")
         return
-    # 3) Cấu hình KHOÁ/model/nhà cung cấp — CHỈ admin thật (khoá dùng chung cho cả bot)
-    if cmd in ("aikey", "aimodel", "aiprovider", "aiurl"):
+    # 3) Cấu hình KHOÁ/model/nhà cung cấp/tự-trả-lời-DM — CHỈ admin thật (dùng chung cả bot)
+    if cmd in ("aikey", "aimodel", "aiprovider", "aiurl", "aidm"):
         if not is_admin:
             _tg_send(token, chat_id, "🔒 Cấu hình AI chỉ dành cho <b>quản trị viên bot</b>.")
+            return
+        if cmd == "aidm":
+            on = argl not in ("off", "tat", "tắt", "0")
+            set_setting("tg_ai_dm", "1" if on else "0")
+            _tg_send(token, chat_id,
+                     "💬 Chat riêng TỰ ĐỘNG trả lời bằng AI: <b>BẬT</b> — khách nhắn riêng bot là AI trả lời thẳng, khỏi cần lệnh."
+                     if on else
+                     "💬 Chat riêng tự động trả lời: <b>TẮT</b> — nhắn riêng sẽ quay lại chế độ hỗ trợ (chuyển tới admin).")
             return
         if cmd == "aikey":
             if not args.strip():
@@ -6651,14 +6697,14 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
         _tg_send(token, chat_id, "🔒 Bật/tắt AI trong nhóm chỉ dành cho <b>quản trị viên</b>.")
         return
     if argl == "status":
-        _tg_send(token, chat_id, f"🤖 AI ở đây đang <b>{'BẬT' if _tg_ai_is_on(chat_id) else 'TẮT'}</b>. (/aiset xem cấu hình)")
+        _tg_send(token, chat_id, f"🤖 AI ở đây đang <b>{'BẬT' if _tg_ai_active(chat_id, ctype) else 'TẮT'}</b>. (/aiset xem cấu hình)")
         return
     if argl in ("on", "bat", "bật", "1"):
         newon = True
     elif argl in ("off", "tat", "tắt", "0"):
         newon = False
     else:
-        newon = not _tg_ai_is_on(chat_id)   # /ai không tham số → đảo trạng thái
+        newon = not _tg_ai_active(chat_id, ctype)   # /ai không tham số → đảo trạng thái
     _tg_ai_set(chat_id, newon)
     if not newon:
         _tg_send(token, chat_id, "🤖 Đã <b>TẮT</b> trợ lý AI ở đây. Bật lại: <code>/ai on</code>.")
@@ -7670,7 +7716,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     # 🤖 Trợ lý AI (/ai bật-tắt · /hoiai hỏi · /aikey /aimodel… cấu hình) — chạy ở nhóm & chat riêng.
     if _tgtxt.startswith("/") and _tgtxt.split():
         _aic = _tgtxt.split()[0].lstrip("/").split("@")[0].lower()
-        if _aic in ("ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp"):
+        if _aic in ("ai", "aion", "aioff", "hoiai", "ask", "aikey", "aimodel", "aiprovider", "aiurl", "aiset", "aihelp", "aidm"):
             _uid2 = (msg.get("from") or {}).get("id")
             _aiadmin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
                 ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _uid2))
@@ -7736,8 +7782,9 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
             if not _tg_quiz_try(token, chat_id, msg, _qtxt):
                 _tg_send(token, chat_id, "❌ Chưa đúng, thử lại nào! (✍️ nhắn thẳng đáp án · /goiy — gợi ý · /boqua — bỏ qua)")
             return
-    # 🤖 AI trong CHAT RIÊNG: nếu bật → trả lời thẳng mọi câu hỏi (trừ tin admin reply cho khách).
-    if _tg_ai_is_on(chat_id) and text and not text.startswith("/") and text != "[media]":
+    # 🤖 AI trong CHAT RIÊNG: MẶC ĐỊNH BẬT (khi có khoá) → nhắn thẳng là AI trả lời, KHỎI CẦN LỆNH.
+    # (Trừ khi admin /aidm off, hoặc DM này /ai off; và không nuốt tin admin đang reply cho khách.)
+    if _tg_ai_dm_on(chat_id) and text and not text.startswith("/") and text != "[media]":
         _reply_ai = msg.get("reply_to_message") or {}
         if "[cid:" not in (_reply_ai.get("text", "") or ""):   # không nuốt tin admin đang trả lời khách
             import threading as _thrp
@@ -7924,7 +7971,7 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
-            "🤖 <b>Trợ lý AI:</b> /ai on|off (bật/tắt) · /aikey &lt;khoá&gt; · /aiprovider · /aiurl · /aimodel · /aiset (hướng dẫn)\n"
+            "🤖 <b>Trợ lý AI:</b> /ai on|off · /aidm on|off (chat riêng tự trả lời) · /aikey &lt;khoá&gt; · /aiprovider · /aiurl · /aimodel · /aiset\n"
             "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /modadmin · /config\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
