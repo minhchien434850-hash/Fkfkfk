@@ -8,6 +8,7 @@ struct LoginView: View {
     @State private var error: String?
     @State private var goRegister = false
     @State private var showConnections = false
+    @State private var showServerFallback = false   // chỉ bật khi có LỖI KẾT NỐI (ẩn với khách bình thường)
     @State private var remember = false
     @State private var didAutoTry = false
     @State private var googleClientId = ""   // lấy từ máy chủ; rỗng = ẩn nút Google
@@ -34,6 +35,9 @@ struct LoginView: View {
                         )
                         .shadow(color: Theme.purple.opacity(0.55), radius: 26, y: 12)
                         .padding(.top, 52)
+                        // 🔒 Ẩn: NHẤN GIỮ logo ~1 giây → mở cấu hình máy chủ (chỉ admin/kỹ thuật biết,
+                        // khách bình thường không chạm tới nên không đổi bậy URL được).
+                        .onLongPressGesture(minimumDuration: 1.0) { showConnections = true }
 
                     AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
                                       fontStyle: appLogoFont, anim: appLogoAnim, size: 40)
@@ -130,31 +134,24 @@ struct LoginView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center).padding(.horizontal).padding(.top, 2)
 
-                    // 🔧 Máy chủ — LUÔN hiện + có ĐƯỜNG LUI, để không bị khoá ngoài khi domain lỗi (SSL…).
-                    VStack(spacing: 10) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "globe").foregroundStyle(Theme.accent)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(store.t("Máy chủ", "Server") + " \(store.serverType)")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                Text(store.baseURL.isEmpty ? Config.defaultServerURL : store.baseURL)
-                                    .font(.caption).foregroundStyle(Theme.accent).lineLimit(1)
-                            }
-                            Spacer()
-                            Button(store.t("Đổi", "Change")) { showConnections = true }.font(.caption.bold())
-                        }
-                        // Đường lui: domain lỗi (SSL/nginx) → dùng thẳng IP máy chủ (cổng 80, không cần SSL).
+                    // 🔧 ĐƯỜNG LUI — CHỈ hiện khi có LỖI KẾT NỐI. Khách bình thường KHÔNG thấy,
+                    // và chỉ có 1 nút chuyển sang máy chủ dự phòng HỢP LỆ (không có ô gõ URL → không thể nhập bậy).
+                    if showServerFallback && store.baseURL.lowercased() != APIClient.fallbackBase {
                         Button {
-                            store.saveServer(url: "http://103.131.56.11", type: "VPS")
+                            store.saveServer(url: APIClient.fallbackBase, type: "VPS")
+                            Task { await doLogin() }
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "arrow.triangle.2.circlepath")
-                                Text(store.t("Không kết nối được? Dùng IP dự phòng", "Can't connect? Use backup IP"))
-                            }.font(.caption2).foregroundStyle(.orange).frame(maxWidth: .infinity)
-                        }
+                                Text(store.t("Không kết nối được? Thử máy chủ dự phòng",
+                                             "Can't connect? Try backup server"))
+                            }
+                            .font(.caption).foregroundStyle(.orange)
+                            .frame(maxWidth: .infinity).padding(.vertical, 11)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }.padding(.horizontal)
                     }
-                    .padding().background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
                 }
             }
             .sheet(isPresented: $showConnections) { ConnectionsView() }
@@ -215,7 +212,14 @@ struct LoginView: View {
             else { store.forgetCredentials() }
             store.setAuth(resp)
             await store.loadProviders(); await store.loadKeys()
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            self.error = error.localizedDescription
+            // Chỉ khi lỗi KẾT NỐI (không phải sai mật khẩu) mới lộ nút máy chủ dự phòng.
+            let m = error.localizedDescription.lowercased()
+            if m.contains("không kết nối") || m.contains("502") || m.contains("503") || m.contains("504") {
+                showServerFallback = true
+            }
+        }
         loading = false
     }
 }
