@@ -29,9 +29,10 @@ struct TNPress: ButtonStyle {
 //  "tn_<npc>") — game tự dùng nếu có, không thì vẽ hào quang thay thế.
 // ============================================================================
 
-// MARK: - Cảnh giới tu luyện
+// MARK: - Cảnh giới tu luyện (15 cảnh giới lớn theo GDD)
 enum TNRealm: Int, Codable, CaseIterable {
-    case luyenKhi, trucCo, ketDan, nguyenAnh, hoaThan, anhBien, vanDinh, coThan
+    case luyenKhi, trucCo, ketDan, nguyenAnh, hoaThan, anhBien, vanDinh,
+         daiThua, doKiep, diaTien, thienTien, kimTien, daiLa, chuanThanh, coThan
     var name: String {
         switch self {
         case .luyenKhi:  return "Luyện Khí"
@@ -41,6 +42,13 @@ enum TNRealm: Int, Codable, CaseIterable {
         case .hoaThan:   return "Hóa Thần"
         case .anhBien:   return "Anh Biến"
         case .vanDinh:   return "Vấn Đỉnh"
+        case .daiThua:   return "Đại Thừa"
+        case .doKiep:    return "Độ Kiếp"
+        case .diaTien:   return "Địa Tiên"
+        case .thienTien: return "Thiên Tiên"
+        case .kimTien:   return "Kim Tiên"
+        case .daiLa:     return "Đại La Kim Tiên"
+        case .chuanThanh:return "Chuẩn Thánh"
         case .coThan:    return "Cổ Thần"
         }
     }
@@ -53,6 +61,13 @@ enum TNRealm: Int, Codable, CaseIterable {
         case .hoaThan:   return Color(red: 0.95, green: 0.35, blue: 0.55)
         case .anhBien:   return Color(red: 0.2, green: 0.85, blue: 0.8)
         case .vanDinh:   return Color(red: 1.0, green: 0.55, blue: 0.1)
+        case .daiThua:   return Color(red: 0.4, green: 0.9, blue: 0.5)
+        case .doKiep:    return Color(red: 0.55, green: 0.55, blue: 0.95)
+        case .diaTien:   return Color(red: 0.3, green: 0.9, blue: 0.95)
+        case .thienTien: return Color(red: 0.85, green: 0.75, blue: 1.0)
+        case .kimTien:   return Color(red: 1.0, green: 0.8, blue: 0.35)
+        case .daiLa:     return Color(red: 1.0, green: 0.6, blue: 0.8)
+        case .chuanThanh:return Color(red: 0.7, green: 0.95, blue: 1.0)
         case .coThan:    return Color(red: 1.0, green: 0.85, blue: 0.2)
         }
     }
@@ -167,6 +182,12 @@ struct TNSave: Codable {
     var linhThach = 0
     var chapter = 0          // cốt truyện đã qua
     var arenaRank = 0        // số cao thủ đã hạ ở Đấu Đài
+    var weaponLv = 0         // Luyện Khí — cấp vũ khí (+công)
+    var armorLv = 0          // Luyện Khí — cấp giáp (+thủ)
+    var danAtk = 0           // Luyện Đan — cộng công vĩnh viễn
+    var danHp = 0            // Luyện Đan — cộng máu vĩnh viễn
+    var linhThao = 0         // nguyên liệu: linh thảo (luyện đan)
+    var khoangThach = 0      // nguyên liệu: khoáng thạch (luyện khí)
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -176,13 +197,15 @@ struct TNSave: Codable {
     private var sectDef: Double { tnSect(sect).defMul }
     private var sectHp: Double { tnSect(sect).hpMul }
 
+    var weaponName: String { weaponLv <= 0 ? "Tay không" : "Phi Kiếm +\(weaponLv)" }
+    var armorName: String { armorLv <= 0 ? "Vải thô" : "Linh Giáp +\(armorLv)" }
     var levelExpMax: Int { level * 120 }
     var isMaxLevel: Bool { level >= 100 }
     var expMax: Int { 80 + tier * 45 }
-    var hpMax: Int { Int(Double(120 + tier * 70 + level * 22) * sectHp) }
+    var hpMax: Int { Int(Double(120 + tier * 70 + level * 22) * sectHp) + danHp }
     var mpMax: Int { 60 + tier * 40 + level * 6 }
-    var atk: Int { Int(Double(18 + tier * 12 + level * 4) * sectAtk) }
-    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) }
+    var atk: Int { Int(Double(18 + tier * 12 + level * 4) * sectAtk) + weaponLv * 15 + danAtk }
+    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
     var powerScore: Int { atk * 3 + def * 5 + hpMax }
@@ -358,7 +381,30 @@ final class TNGame: ObservableObject {
         s.linhThach += linhThach
         s.exp = min(s.exp + exp, s.expMax)
         gainLevelExp(exp)            // đánh quái cũng lên CẤP
+        s.linhThao += Int.random(in: 1...3)      // rơi nguyên liệu luyện đan
+        s.khoangThach += Int.random(in: 1...3)   // rơi nguyên liệu luyện khí
         save()
+    }
+    // Luyện khí: nâng cấp vũ khí/giáp
+    func forge(weapon: Bool) -> String {
+        let lv = weapon ? s.weaponLv : s.armorLv
+        let costLT = (lv + 1) * 120
+        let costMat = (lv + 1) * 3
+        guard s.linhThach >= costLT else { return "❌ Thiếu linh thạch (cần \(costLT))." }
+        guard s.khoangThach >= costMat else { return "❌ Thiếu khoáng thạch (cần \(costMat))." }
+        s.linhThach -= costLT; s.khoangThach -= costMat
+        if weapon { s.weaponLv += 1 } else { s.armorLv += 1 }
+        save()
+        return weapon ? "🗡️ Vũ khí → \(s.weaponName) (+công)!" : "🛡️ Giáp → \(s.armorName) (+thủ)!"
+    }
+    // Luyện đan: tạo đan dược tăng chỉ số vĩnh viễn
+    func alchemy(_ kind: String) -> String {
+        let costMat = 5, costLT = 200
+        guard s.linhThao >= costMat else { return "❌ Thiếu linh thảo (cần \(costMat))." }
+        guard s.linhThach >= costLT else { return "❌ Thiếu linh thạch (cần \(costLT))." }
+        s.linhThao -= costMat; s.linhThach -= costLT
+        if kind == "atk" { s.danAtk += 8; save(); return "⚔️ Luyện thành Công Kích Đan — Công +8 vĩnh viễn!" }
+        else { s.danHp += 40; save(); return "❤️ Luyện thành Bổ Huyết Đan — Máu +40 vĩnh viễn!" }
     }
     func buySkin(_ skin: TNSkin) -> Bool {
         guard !s.ownedSkins.contains(skin.id), s.linhThach >= skin.price else { return false }
@@ -538,6 +584,7 @@ struct TNHomeView: View {
     @State private var showBattle = false
     @State private var showChars = false
     @State private var showArena = false
+    @State private var showForge = false
 
     var body: some View {
         ScrollView {
@@ -610,6 +657,7 @@ struct TNHomeView: View {
 
                     Button { showBattle = true } label: { bigBtn("⚔️ Phiêu Lưu — Luyện Yêu Thú", [.purple, .indigo]) }.buttonStyle(TNPress(glow: .purple))
                     Button { tab = 1 } label: { bigBtn("📖 Đi Theo Cốt Truyện", [.brown, .orange]) }.buttonStyle(TNPress(glow: .orange))
+                    Button { showForge = true } label: { bigBtn("⚒️ Chế Tạo — Luyện Khí · Luyện Đan", [.gray, .brown]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showArena = true } label: { bigBtn("🏆 Đấu Đài — Thách Đấu Cao Thủ", [.yellow, .orange]) }.buttonStyle(TNPress(glow: .yellow))
                     Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }.buttonStyle(TNPress(glow: .pink))
                 }
@@ -628,6 +676,7 @@ struct TNHomeView: View {
         }
         .sheet(isPresented: $showChars) { TNCharactersView() }
         .fullScreenCover(isPresented: $showArena) { TNArenaView(game: game) }
+        .sheet(isPresented: $showForge) { TNForgeView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -1063,6 +1112,81 @@ struct TNShopView: View {
     private func flash(_ m: String) {
         withAnimation { msg = m }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Chế Tạo (Luyện Khí nâng trang bị · Luyện Đan tăng chỉ số)
+struct TNForgeView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    // Kho nguyên liệu
+                    HStack(spacing: 14) {
+                        matChip("💎", game.s.linhThach, "Linh thạch")
+                        matChip("🌿", game.s.linhThao, "Linh thảo")
+                        matChip("⛏️", game.s.khoangThach, "Khoáng thạch")
+                    }.padding(.horizontal).padding(.top, 8)
+                    Text("Đánh quái / Đấu Đài để rơi thêm linh thảo & khoáng thạch.")
+                        .font(.caption2).foregroundStyle(.white.opacity(0.55))
+
+                    // Luyện Khí
+                    section("🗡️ Luyện Khí — Rèn trang bị") {
+                        forgeRow("🗡️ \(game.s.weaponName)", "Nâng vũ khí (+15 công/cấp)",
+                                 "💎\((game.s.weaponLv+1)*120) · ⛏️\((game.s.weaponLv+1)*3)") { flash(game.forge(weapon: true)) }
+                        forgeRow("🛡️ \(game.s.armorName)", "Nâng giáp (+8 thủ/cấp)",
+                                 "💎\((game.s.armorLv+1)*120) · ⛏️\((game.s.armorLv+1)*3)") { flash(game.forge(weapon: false)) }
+                    }
+                    // Luyện Đan
+                    section("⚗️ Luyện Đan — Đan dược vĩnh viễn") {
+                        forgeRow("⚔️ Công Kích Đan (Công +8)", "Tăng công vĩnh viễn · hiện +\(game.s.danAtk)",
+                                 "💎200 · 🌿5") { flash(game.alchemy("atk")) }
+                        forgeRow("❤️ Bổ Huyết Đan (Máu +40)", "Tăng máu vĩnh viễn · hiện +\(game.s.danHp)",
+                                 "💎200 · 🌿5") { flash(game.alchemy("hp")) }
+                    }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center).padding(.horizontal) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.08,green:0.07,blue:0.05), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Chế Tạo").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+        }
+    }
+    private func matChip(_ e: String, _ v: Int, _ t: String) -> some View {
+        VStack(spacing: 2) {
+            Text("\(e) \(v)").font(.subheadline.bold()).foregroundStyle(.white)
+            Text(t).font(.system(size: 9)).foregroundStyle(.white.opacity(0.6))
+        }.frame(maxWidth: .infinity).padding(.vertical, 10)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+    }
+    private func section(_ title: String, @ViewBuilder _ content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.headline).foregroundStyle(.yellow)
+            content()
+        }.padding(.horizontal)
+    }
+    private func forgeRow(_ name: String, _ desc: String, _ cost: String, _ action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name).font(.subheadline.bold()).foregroundStyle(.white)
+                Text(desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                Text("Giá: \(cost)").font(.system(size: 10, weight: .bold)).foregroundStyle(.orange)
+            }
+            Spacer()
+            Button("Làm", action: action).font(.caption.bold()).foregroundStyle(.white)
+                .padding(.horizontal, 16).padding(.vertical, 9)
+                .background(.green, in: Capsule()).buttonStyle(TNPress(glow: .green))
+        }
+        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+    }
+    private func flash(_ m: String) {
+        withAnimation { msg = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { withAnimation { if msg == m { msg = nil } } }
     }
 }
 
