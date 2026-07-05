@@ -6830,16 +6830,47 @@ def _kenios_catalog() -> dict:
         },
     }
 
-# Từ khoá khách hỏi tư vấn → kích hoạt luồng chọn OS/game.
+# Từ khoá khách hỏi tư vấn → kích hoạt luồng chọn OS/game (đủ biến thể CÓ DẤU & KHÔNG DẤU).
 _KENIOS_SUP_TRIGGERS = (
-    "an toàn", "bản nào", "ban nao", "bảng giá", "bang gia", "tư vấn", "tu van",
-    "chơi ok", "choi ok", "chơi oke", "ngon nhất", "ngon nhat", "nên mua", "nen mua",
-    "bản nào tốt", "bản nào ngon", "có bản nào", "co ban nao", "mua bản", "mua ban",
-    "bao nhiêu tiền", "giá bao nhiêu", "gia bao nhieu", "mua hack", "còn bản", "con ban",
+    # an toàn
+    "an toàn", "an toan", "antoan", "có an toàn", "co an toan",
+    # bản nào + tính từ
+    "bản nào", "ban nao", "bản nao", "ban nào", "bản gì", "ban gi",
+    "dùng bản nào", "dung ban nao", "xài bản nào", "xai ban nao", "nên dùng bản", "nen dung ban",
+    "chơi bản nào", "choi ban nao",
+    # ngon/tốt/ổn/uy tín/rẻ/xịn/mượt/chất
+    "ngon nhất", "ngon nhat", "bản ngon", "ban ngon", "tốt nhất", "tot nhat",
+    "bản tốt", "ban tot", "bản ổn", "ban on", "uy tín", "uy tin", "bản rẻ", "ban re",
+    "bản xịn", "ban xin", "mượt nhất", "muot nhat", "bản mượt", "ban muot", "chất nhất", "chat nhat",
+    # chơi ok / được
+    "chơi ok", "choi ok", "chơi oke", "choi oke", "chơi ổn", "choi on",
+    "chơi mượt", "choi muot", "chơi được", "choi duoc", "chơi tốt", "choi tot",
+    # khóa acc / ban / bay / chống tố
+    "khóa acc", "khoa acc", "khóa nick", "khoa nick", "bay acc", "bay màu", "bay mau",
+    "banned", "ban acc", "bị ban", "bi ban", "dính ban", "dinh ban", "không khóa", "khong khoa",
+    "chống tố", "chong to", "chống report", "chong report",
+    # tư vấn / hỏi
+    "tư vấn", "tu van", "cho hỏi", "cho hoi", "cho mình hỏi", "cho minh hoi",
+    "cho em hỏi", "cho em hoi", "shop ơi", "shop oi", "ad ơi", "ad oi", "admin ơi", "admin oi",
+    # giá / mua
+    "bảng giá", "bang gia", "giá cả", "gia ca", "giá sao", "gia sao", "bao nhiêu", "bao nhieu",
+    "nhiêu tiền", "nhieu tien", "giá bao nhiêu", "gia bao nhieu", "nên mua", "nen mua",
+    "muốn mua", "muon mua", "mua bản", "mua ban", "mua hack", "mua vip", "đăng ký", "dang ky",
+    "gia hạn", "gia han", "còn bản", "con ban", "còn hàng", "con hang", "cho thuê", "cho thue",
+    # sản phẩm
+    "có bản nào", "co ban nao", "bản mới", "ban moi", "hack nào", "hack nao", "tư vấn giúp", "tu van giup",
 )
 
+import re as _kenios_re
+# Chỉ cần có CHỮ "bản"/"ban" đứng riêng (như /"bản nào"…) là bot cũng hỏi luôn.
+_KENIOS_BAN_WORD = _kenios_re.compile(r"\b(bản|ban)\b", _kenios_re.UNICODE)
+
 def _kenios_wants_support(low: str) -> bool:
-    return bool(low) and any(k in low for k in _KENIOS_SUP_TRIGGERS)
+    if not low:
+        return False
+    if any(k in low for k in _KENIOS_SUP_TRIGGERS):
+        return True
+    return bool(_KENIOS_BAN_WORD.search(low))
 
 def _kenios_support_start(token, chat_id) -> None:
     _tg_send(token, chat_id,
