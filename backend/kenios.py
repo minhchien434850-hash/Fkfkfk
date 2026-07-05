@@ -5090,16 +5090,25 @@ def _tg_start_music(token, chat_id, arg) -> None:
 _TG_VIDEO_LIMIT = 49 * 1024 * 1024
 
 def _tg_yt_video(query: str):
-    """Tải video mp4 (≤720p cho NHANH) bằng yt-dlp với 8 luồng song song. Trả (path, title, err)."""
+    """Tải video mp4 THẬT NHANH: ưu tiên file 1 LUỒNG (khỏi ghép video+audio),
+    dùng aria2c 16 kết nối nếu có. Trả (path, title, err)."""
     if not shutil.which("yt-dlp"):
         return None, "", "Máy chủ chưa cài yt-dlp"
     import tempfile as _tf, glob as _glob
     d = _tf.mkdtemp(prefix="tgv_")
     src = query if query.lower().startswith("http") else f"ytsearch1:{query}"
     out = os.path.join(d, "%(title).80s.%(ext)s")
-    cmd = ["yt-dlp", "-N", "8", "--no-playlist", "--no-warnings",
-           "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/b[ext=mp4]/best",
-           "--merge-output-format", "mp4", "-o", out, src]
+    cmd = ["yt-dlp", "--no-playlist", "--no-warnings", "--no-part", "--no-mtime",
+           "--socket-timeout", "15", "--retries", "5", "--fragment-retries", "5",
+           # ƯU TIÊN file mp4 progressive (1 luồng, KHỎI ghép = nhanh nhất); rồi mới tới ghép.
+           "-f", "b[ext=mp4][height<=720]/b[height<=720]/bv*[height<=720][ext=mp4]+ba[ext=m4a]/b",
+           "--merge-output-format", "mp4"]
+    if shutil.which("aria2c"):
+        cmd += ["--downloader", "aria2c",
+                "--downloader-args", "aria2c:-x16 -s16 -k1M --file-allocation=none"]
+    else:
+        cmd += ["-N", "16"]   # 16 mảnh song song (khi không có aria2c)
+    cmd += ["-o", out, src]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
     except Exception as e:
@@ -5113,7 +5122,7 @@ def _tg_yt_video(query: str):
     return p, os.path.splitext(os.path.basename(p))[0], ""
 
 def _tg_fit_video(path: str) -> list:
-    """Chia video >50MB thành nhiều khúc ≤ ~46MB (cắt nhanh không mã hoá lại)."""
+    """Chia video >50MB thành nhiều khúc ≤ ~48MB (cắt COPY siêu nhanh, không mã hoá lại)."""
     try:
         if os.path.getsize(path) <= _TG_VIDEO_LIMIT:
             return [path]
@@ -5126,16 +5135,32 @@ def _tg_fit_video(path: str) -> list:
     size = os.path.getsize(path); dur = _tg_audio_duration(path)
     if dur <= 0 or size <= 0:
         return [path]
-    seg = max(15, int(dur * (44 * 1024 * 1024) / size))   # thời lượng/khúc để ~44MB
+    seg = max(15, int(dur * (48 * 1024 * 1024) / size))   # thời lượng/khúc để ~48MB (sát 50MB)
     segpat = os.path.join(d, base + "_v%03d.mp4")
     try:
         subprocess.run(["ffmpeg", "-y", "-v", "quiet", "-i", path, "-c", "copy", "-map", "0",
-                        "-f", "segment", "-segment_time", str(seg), "-reset_timestamps", "1", segpat],
+                        "-f", "segment", "-segment_time", str(seg),
+                        "-reset_timestamps", "1", "-movflags", "+faststart", segpat],
                        capture_output=True, timeout=1800)
     except Exception:
         pass
     parts = sorted(_glob.glob(os.path.join(d, base + "_v*.mp4")))
-    return parts if parts else [path]
+    # Nếu lỡ có khúc vẫn >50MB (keyframe thưa) → cắt nhỏ tiếp khúc đó theo nửa thời lượng.
+    fixed = []
+    for pth in parts:
+        if os.path.getsize(pth) <= _TG_VIDEO_LIMIT:
+            fixed.append(pth); continue
+        sub_seg = max(10, int(seg / 2))
+        subpat = os.path.join(d, os.path.splitext(os.path.basename(pth))[0] + "_s%02d.mp4")
+        try:
+            subprocess.run(["ffmpeg", "-y", "-v", "quiet", "-i", pth, "-c", "copy", "-map", "0",
+                            "-f", "segment", "-segment_time", str(sub_seg),
+                            "-reset_timestamps", "1", subpat], capture_output=True, timeout=900)
+            subs = sorted(_glob.glob(os.path.join(d, os.path.splitext(os.path.basename(pth))[0] + "_s*.mp4")))
+            fixed.extend(subs or [pth])
+        except Exception:
+            fixed.append(pth)
+    return fixed or parts or [path]
 
 def _tg_send_video(token: str, chat_id, path: str, caption: str) -> bool:
     import httpx
@@ -5155,17 +5180,18 @@ def _tg_video_task(token: str, chat_id, arg: str) -> None:
     if not arg:
         _tg_send(token, chat_id, "🎬 Gửi: <code>/video &lt;link hoặc tên video&gt;</code> (YouTube/TikTok/FB…)"); return
     _tg_call(token, "sendChatAction", chat_id=chat_id, action="upload_video")
-    _tg_send(token, chat_id, "🎬 Đang tải video (nhanh, 8 luồng)…")
+    _tg_send(token, chat_id, "🎬 Đang tải video tốc độ cao (16 luồng)…")
     path, title, err = _tg_yt_video(arg)
     if not path:
         _tg_send(token, chat_id, "❌ Không tải được video.\n" + _h.escape((err or "")[:300])); return
     try:
+        _mb = os.path.getsize(path) / (1024 * 1024)
         parts = _tg_fit_video(path)
         sendable = [p for p in parts if os.path.getsize(p) <= _TG_VIDEO_LIMIT]
         if sendable:
             n = len(sendable)
             if n > 1:
-                _tg_send(token, chat_id, f"🎬 <b>{_h.escape(title)}</b>\nVideo lớn nên chia làm <b>{n}</b> phần 👇")
+                _tg_send(token, chat_id, f"🎬 <b>{_h.escape(title)}</b> ({_mb:.0f}MB)\nĐã tải xong — chia làm <b>{n}</b> phần, đang gửi 👇")
             fail = 0
             for i, p in enumerate(sendable, 1):
                 _tg_call(token, "sendChatAction", chat_id=chat_id, action="upload_video")

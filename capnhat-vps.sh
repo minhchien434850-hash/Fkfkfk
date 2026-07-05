@@ -75,6 +75,15 @@ command -v yt-dlp >/dev/null 2>&1 \
   && echo "    ✓ yt-dlp: $(yt-dlp --version 2>/dev/null)." \
   || echo "    ⚠️ yt-dlp chưa cài được (lệnh /nhac sẽ báo tới khi cài)."
 
+# Cài aria2c — TĂNG TỐC tải video (16 kết nối song song); thiếu thì cài.
+echo "==> Đảm bảo aria2c (tải video nhanh 16 luồng)..."
+if ! command -v aria2c >/dev/null 2>&1; then
+  (apt-get install -y -qq aria2 >/dev/null 2>&1 && echo "    ✓ Đã cài aria2c.") \
+    || echo "    ⚠️ Cài aria2c chưa được (vẫn tải được nhưng chậm hơn)."
+else
+  echo "    ✓ aria2c đã có ($(aria2c --version 2>/dev/null | head -1))."
+fi
+
 # Cài công cụ GIỌNG NÓI (bot kể chuyện gửi voice): edge-tts (giọng VN đẹp) + gTTS dự phòng.
 echo "==> Đảm bảo TTS giọng nói (edge-tts + gTTS cho 'kể chuyện voice')..."
 if [ -x "$WORK/venv/bin/pip" ]; then
