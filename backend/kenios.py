@@ -6661,6 +6661,7 @@ _TG_RESERVED = {
     "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
     "modon", "modoff", "autodel", "modadmin", "scanlink", "setvt", "kenios",
     "video", "taivideo", "quetlink", "checklink", "scan", "chaosang", "chaotoi",
+    "kechuyen", "doctruyen", "truyen", "kechuyenma", "kevoice",
     # 🎮 lệnh giải trí & tiện ích (không cho lệnh riêng ghi đè)
     "xucxac", "slot", "phitieu", "bongda", "bongro", "bowling", "tungxu", "oantuti", "keobuabao",
     "doanso", "doan", "random", "chon", "xoso", "cuoi", "joke", "cakhia", "khen", "triethly",
@@ -7064,11 +7065,15 @@ def _tg_voice_reply(token, chat_id, request: str, story: bool = True) -> None:
     mp3 = _os.path.join(d, "v.mp3"); ogg = _os.path.join(d, "v.ogg")
     try:
         if not _tts_vi(content, mp3):
-            _tg_send(token, chat_id, "🎙️ (Máy chủ chưa cài công cụ giọng nói — cập nhật VPS để có TTS)\n\n" + content[:3500])
+            _tg_send(token, chat_id,
+                     "🔇 <b>Chưa gửi được giọng nói</b> — máy chủ thiếu công cụ đọc (edge-tts/gTTS).\n"
+                     "👉 Admin chạy lại <code>capnhat-vps.sh</code> để cài, rồi thử /kechuyen lại nhé.\n\n📖 Tạm đọc bản chữ:\n\n" + content[:3500])
             return
         cap = "🎙️ <b>Chuyện kể cho bạn nghe</b>" if story else "🎙️ <b>Giọng đọc</b>"
+        # Ưu tiên bong bóng VOICE (ogg/opus); không đổi được thì gửi file audio mp3.
         if not (_mp3_to_ogg(mp3, ogg) and _tg_send_voice(token, chat_id, ogg, cap)):
-            _tg_send_audio(token, chat_id, mp3, "Chuyện kể" if story else "Giọng đọc")
+            if not _tg_send_voice(token, chat_id, mp3, cap):   # thử gửi thẳng mp3 dạng voice
+                _tg_send_audio(token, chat_id, mp3, "Chuyện kể" if story else "Giọng đọc")
     finally:
         _sh.rmtree(d, ignore_errors=True)
 
@@ -8871,6 +8876,14 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         _pv = _tgtxt.split(None, 1)
         _tg_start_video(token, chat_id, _pv[1] if len(_pv) > 1 else "")
         return
+    # 🎙️ KỂ CHUYỆN bằng GIỌNG NÓI — luôn ra VOICE (không phụ thuộc AI bật/tắt).
+    _cc0 = _tgtxt.split()[0].lstrip("/").split("@")[0].lower() if _tgtxt.startswith("/") else ""
+    if _cc0 in ("kechuyen", "doctruyen", "truyen", "kechuyenma", "kevoice"):
+        import threading as _thv
+        _pv2 = _tgtxt.split(None, 1)
+        _topic = _pv2[1].strip() if len(_pv2) > 1 else ("kể một câu chuyện ma rùng rợn" if _cc0 == "kechuyenma" else "kể một câu chuyện hay, hấp dẫn")
+        _thv.Thread(target=_tg_voice_reply, args=(token, chat_id, "Kể chuyện: " + _topic, True), daemon=True).start()
+        return
     # 🛡️ Quét link virus/lừa đảo (/quetlink) + đặt VirusTotal key (/setvt, admin)
     if _tgtxt.startswith("/quetlink") or _tgtxt.startswith("/checklink") or _tgtxt.startswith("/scan"):
         _pl = _tgtxt.split(None, 1)
@@ -9124,6 +9137,7 @@ def _tg_register_commands(token: str) -> None:
         ("hoiai", "🤖 Hỏi trợ lý AI"),
         ("nhac", "Lấy nhạc YouTube/TikTok"), ("video", "🎬 Tải video (cắt phần nếu lớn)"),
         ("quetlink", "🛡️ Quét link virus/lừa đảo"),
+        ("kechuyen", "🎙️ Kể chuyện bằng giọng nói"),
         ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"),
         ("report", "Báo cáo admin (reply)"), ("rules", "Xem nội quy"),
         ("afk", "Báo bận"), ("id", "Xem Chat/User ID"),
@@ -9187,6 +9201,7 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
     pub = ("🤖 <b>Trợ lý AI:</b> /hoiai &lt;câu hỏi&gt; — hỏi mọi câu khó, toán, lập trình (admin bật bằng /ai)\n"
            "🎵 <b>/nhac</b> &lt;bài&gt; — lấy nhạc · 🎬 <b>/video</b> &lt;link/tên&gt; — tải video (tự cắt phần nếu lớn)\n"
            "🛡️ <b>/quetlink</b> &lt;link&gt; — kiểm tra virus/lừa đảo + thông tin đầy đủ\n"
+           "🎙️ <b>/kechuyen</b> [chủ đề] — bot KỂ CHUYỆN bằng GIỌNG NÓI (voice). VD /kechuyen ma\n"
            "🧠 <b>Đố vui CÓ ĐIỂM:</b> /dovui (+10đ/câu đúng, ~1080 câu) · /goiy · /boqua · /dungdo · 🏆 /diemdo\n"
            "🃏 <b>Game bài:</b> /baicao · /xidach (/rut /dan) · /baucua bầu — thắng +5 điểm\n"
            "🎮 <b>Trò chơi:</b> /xucxac /slot /phitieu /bongda /bongro /bowling /tungxu /oantuti /doanso /random /chon /xoso\n"
