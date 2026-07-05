@@ -8252,7 +8252,9 @@ def _tg_welcome_members(token: str, chat: dict, members: list) -> None:
         _tg_send(token, chat_id, txt, buttons=buttons)
 
 def _tg_goodbye_member(token: str, chat: dict, m: dict) -> None:
-    if get_setting("tg_goodbye_on", "1") != "1" or m.get("is_bot"): return
+    if get_setting("tg_goodbye_on", "1") != "1" or not m or m.get("is_bot"): return
+    # Chống tạm biệt 2 lần: khi rời/bị xoá có thể có CẢ left_chat_member LẪN chat_member.
+    if not _tg_greet_once(chat.get("id"), m.get("id"), "leave"): return
     tmpl = get_setting("tg_goodbye", "👋 Tạm biệt {name}, hẹn gặp lại!")
     chat_id = str(chat.get("id"))
     count = _tg_member_count(token, chat_id)
@@ -8269,13 +8271,13 @@ def _tg_goodbye_member(token: str, chat: dict, m: dict) -> None:
 # "new_chat_members" LẪN "chat_member" → nếu không lọc sẽ chào 2 lần.
 _tg_greet_seen: dict = {}   # (chat_id, uid) -> thời điểm đã chào
 
-def _tg_greet_once(chat_id, uid) -> bool:
-    """True nếu chưa chào người này trong ~20 giây gần đây (cho phép chào)."""
+def _tg_greet_once(chat_id, uid, action: str = "join") -> bool:
+    """True nếu chưa chào/tạm biệt người này trong ~20 giây gần đây (cho phép gửi)."""
     now = time.time()
     for k, ts in list(_tg_greet_seen.items()):
         if now - ts > 120:
             _tg_greet_seen.pop(k, None)
-    key = (str(chat_id), str(uid))
+    key = (str(chat_id), str(uid), action)
     if now - _tg_greet_seen.get(key, 0) < 20:
         return False
     _tg_greet_seen[key] = now
@@ -8309,15 +8311,15 @@ def _tg_on_join(token: str, chat: dict, msg: dict) -> None:
         _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=msg.get("message_id"))
 
 def _tg_on_chat_member(token: str, cm: dict) -> None:
-    """Sự kiện chat_member: bắt người VỪA VÀO nhóm qua LINK MỜI / tự vào nhóm công khai
-    (những kiểu này KHÔNG có new_chat_members). Chỉ chào khi chuyển từ 'ngoài nhóm'
-    sang 'thành viên'."""
+    """Sự kiện chat_member: bắt người VÀO/RỜI nhóm qua LINK MỜI / tự vào-ra nhóm công khai
+    (những kiểu này KHÔNG có new_chat_members / left_chat_member). Chào khi chuyển từ
+    'ngoài nhóm' → 'thành viên', tạm biệt khi 'thành viên' → 'ngoài nhóm'."""
     chat = cm.get("chat", {})
     if chat.get("type") not in ("group", "supergroup"):
         return
     old = cm.get("old_chat_member", {}) or {}
     new = cm.get("new_chat_member", {}) or {}
-    user = new.get("user", {}) or {}
+    user = new.get("user", {}) or old.get("user", {}) or {}
     if user.get("is_bot"):
         return
     def _inside(st: dict) -> bool:
@@ -8327,8 +8329,11 @@ def _tg_on_chat_member(token: str, cm: dict) -> None:
         if s == "restricted":
             return bool(st.get("is_member"))
         return False   # left | kicked | none
-    if _inside(new) and not _inside(old):
-        _tg_greet_or_captcha(token, chat, user)
+    was_in, now_in = _inside(old), _inside(new)
+    if now_in and not was_in:
+        _tg_greet_or_captcha(token, chat, user)      # vừa vào → chào
+    elif was_in and not now_in:
+        _tg_goodbye_member(token, chat, user)        # vừa rời → tạm biệt
 
 # ---------- Kho dữ liệu module (notes/filters/afk/flood/khoá/từ cấm) ----------
 _tg_flood: dict = {}
