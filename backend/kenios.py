@@ -6770,10 +6770,20 @@ _INSULT_PHRASES = (
     "thần kinh", "than kinh", "tâm thần", "tam than", "đồ khùng", "do khung", "bị điên", "bi dien",
     "bị ngu", "bi ngu", "đồ vô dụng", "rác rưởi", "rac ruoi", "cút đi", "cut di", "biến đi", "vô ơn",
     "đồ lừa", "quân lừa đảo", "bọn lừa", "scam", "bịp bợm", "bip bom", "đồ đểu", "do deu",
+    # họ hàng / "mày, mầy" — biến thể phổ biến
+    "con mẹ mày", "con mẹ mầy", "con me may", "con mẹ nó", "con me no",
+    "mẹ mày", "mẹ mầy", "me may",
+    "địt con mẹ", "dit con me", "địt con mẹ mày", "địt con mẹ mầy", "dit con me may",
+    "địt mẹ", "dit me", "địt mẹ mày", "địt mẹ mầy", "dit me may", "đm mẹ", "đm mày", "đm mầy",
+    "đụ mẹ mày", "đụ má mày", "du ma may", "du me may", "địt cụ", "dit cu", "địt bà", "dit ba",
+    "địt bố", "dit bo", "địt cha", "dit cha", "địt mẹ nhà mày", "mẹ cha mày", "me cha may",
+    "bố mày", "bo may", "cha mày", "cha may", "ông mày", "ong may", "thằng mày", "thang may",
+    "đầu buồi", "đầu bòi", "dau boi", "ngậm mồm", "ngam mom", "xàm lồn", "xam lon", "vãi cả lồn",
 )
 # Từ ngắn/nhạy cảm — CHỈ khớp khi đứng riêng (word boundary) để tránh nhầm 'admin', 'nguyên', 'cho'…
 _INSULT_RE = _ins_re.compile(
-    r"\b(đm|dm|đmm|dmm|đcm|đkm|vcl|vl|cl|cc|ccc|clm|clmm|cmm|đéo|deo|ngu|dốt|dot|đần|cút|câm|đjt|vkl)\b",
+    r"\b(đm|dm|đmm|dmm|đmmm|đcm|dcm|đcmm|dcmm|đkm|dkm|đkmm|dkmm|cdm|đmc|dmc|vcl|vkl|vl|cl|cc|ccc|"
+    r"clm|clmm|cmm|cmnr|clgt|đéo|deo|ngu|dốt|dot|đần|cút|câm|đjt|vloz)\b",
     _ins_re.UNICODE)
 _TG_INSULT_LAST: dict = {}   # chat_id -> lần cuối bot đối đáp (chống spam)
 
