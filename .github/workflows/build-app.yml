@@ -51,11 +51,11 @@ jobs:
       - name: Build (no code signing)
         run: |
           set -eo pipefail
-          # Phiên bản hiển thị TỰ TĂNG theo số build: 3.1, 3.2, 3.3... (không cố định 3.0).
-          # Số build (CURRENT_PROJECT_VERSION) vẫn dùng run_number để phát hiện bản mới.
-          VER_MINOR=$(( ${{ github.run_number }} - 810 ))
-          [ "$VER_MINOR" -lt 1 ] && VER_MINOR=1
-          APP_VERSION="3.$VER_MINOR"
+          # Phiên bản hiển thị dạng X.Y ĐẸP: phần lẻ chạy 0–9 rồi lên số lớn (…3.9 → 4.0 → 4.1…).
+          # Số build (CURRENT_PROJECT_VERSION) vẫn dùng run_number để phát hiện bản mới. (ĐỒNG BỘ Swift: BASE=937)
+          IDX=$(( ${{ github.run_number }} - 937 ))
+          [ "$IDX" -lt 0 ] && IDX=0
+          APP_VERSION="$(( 1 + IDX / 10 )).$(( IDX % 10 ))"
           echo "MARKETING_VERSION = $APP_VERSION"
           xcodebuild \
             -project KENIOS.xcodeproj \

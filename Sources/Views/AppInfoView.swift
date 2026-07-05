@@ -17,7 +17,7 @@ struct AppInfoView: View {
     // Phiên bản hiển thị dạng X.Y ĐẸP (…3.9 → 4.0 → 4.1…) suy từ số build — ĐỒNG BỘ với popup cập nhật.
     private var versionDisplay: String {
         let b = Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
-        let idx = max(0, b - 884)          // build 913 → 3.9 · build 914 → 4.0
+        let idx = max(0, b - 937)          // build 966 → 3.9 · build 967 → 4.0 · +1 build = +0.1
         return "\(1 + idx / 10).\(idx % 10)"
     }
     private let publisher = "KENIOS"

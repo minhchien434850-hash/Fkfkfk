@@ -130,7 +130,7 @@ struct MainTabView: View {
     // Quy số build (run_number) → phiên bản hiển thị dạng X.Y ĐẸP: phần lẻ chạy 0–9 rồi lên số lớn.
     // VD: …3.8 → 3.9 → 4.0 → 4.1… (không còn kiểu xấu "3.104"). Mỗi build CI = +0.1.
     static func versionFromBuild(_ build: Int) -> String {
-        let idx = max(0, build - 884)          // build 913 → 3.9 · build 914 → 4.0
+        let idx = max(0, build - 937)          // build 966 → 3.9 · build 967 → 4.0 · +1 build = +0.1
         return "\(1 + idx / 10).\(idx % 10)"
     }
 
