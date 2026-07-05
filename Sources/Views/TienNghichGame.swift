@@ -716,6 +716,45 @@ final class TNGame: ObservableObject {
     func setTitle(_ id: String) {
         if id.isEmpty || s.unlockedTitles.contains(id) { s.activeTitle = id; s.hp = min(s.hp, s.hpMax); save() }
     }
+
+    // ===== Chợ giao dịch (mô phỏng: bán nguyên liệu · mua từ tán tu khác) =====
+    func sellMaterial(_ kind: String, _ qty: Int) -> String {
+        let price = 40   // giá bán mỗi đơn vị nguyên liệu
+        if kind == "thao" {
+            let n = min(qty, s.linhThao)
+            guard n > 0 else { return "❌ Không còn linh thảo để bán." }
+            s.linhThao -= n; s.linhThach += n * price; save()
+            return "💰 Bán \(n) 🌿 linh thảo → +\(n * price) linh thạch."
+        } else {
+            let n = min(qty, s.khoangThach)
+            guard n > 0 else { return "❌ Không còn khoáng thạch để bán." }
+            s.khoangThach -= n; s.linhThach += n * price; save()
+            return "💰 Bán \(n) ⛏️ khoáng thạch → +\(n * price) linh thạch."
+        }
+    }
+    func buyListing(_ l: TNListing) -> String {
+        guard s.linhThach >= l.price else { return "❌ Thiếu linh thạch (cần \(l.price))." }
+        switch l.kind {
+        case "thao":  s.linhThao += l.qty
+        case "thach": s.khoangThach += l.qty
+        case "pet":
+            if s.ownedPets.contains(l.refId) { return "Bạn đã sở hữu \(l.name) rồi." }
+            s.ownedPets.append(l.refId)
+        case "skin":
+            if s.ownedSkins.contains(l.refId) { return "Bạn đã sở hữu \(l.name) rồi." }
+            s.ownedSkins.append(l.refId)
+        case "wing":
+            if s.ownedWings.contains(l.refId) { return "Bạn đã sở hữu \(l.name) rồi." }
+            s.ownedWings.append(l.refId)
+        case "mount":
+            if s.ownedMounts.contains(l.refId) { return "Bạn đã sở hữu \(l.name) rồi." }
+            s.ownedMounts.append(l.refId)
+        default: break
+        }
+        s.linhThach -= l.price
+        save()
+        return "✅ Mua \(l.name) từ \(l.seller) — giá \(l.price) linh thạch!"
+    }
     // Luyện khí: nâng cấp vũ khí/giáp
     func forge(weapon: Bool) -> String {
         let lv = weapon ? s.weaponLv : s.armorLv
@@ -1147,6 +1186,8 @@ struct TNHomeView: View {
     @State private var showVip = false
     @State private var showFashion = false
     @State private var showAchieve = false
+    @State private var showChat = false
+    @State private var showMarket = false
 
     var body: some View {
         ScrollView {
@@ -1250,6 +1291,8 @@ struct TNHomeView: View {
                     Button { showMap = true } label: { bigBtn("🗺️ Bản Đồ — Khám Phá Vùng Đất", [.green, .teal]) }.buttonStyle(TNPress(glow: .green))
                     Button { showPets = true } label: { bigBtn("🐾 Thú Cưng Đồng Hành", [.orange, .pink]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showFashion = true } label: { bigBtn("👗 Thời Trang — Cánh & Hào Quang", [.purple, .pink]) }.buttonStyle(TNPress(glow: .purple))
+                    Button { showChat = true } label: { bigBtn("💬 Thế Giới Chat — Giao Lưu", [.blue, .cyan]) }.buttonStyle(TNPress(glow: .cyan))
+                    Button { showMarket = true } label: { bigBtn("🏪 Chợ Giao Dịch — Mua Bán", [.brown, .orange]) }.buttonStyle(TNPress(glow: .orange))
                     Button { tab = 1 } label: { bigBtn("📖 Đi Theo Cốt Truyện", [.brown, .orange]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showForge = true } label: { bigBtn("⚒️ Chế Tạo — Luyện Khí · Luyện Đan", [.gray, .brown]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showArena = true } label: { bigBtn("🏆 Đấu Đài — Thách Đấu Cao Thủ", [.yellow, .orange]) }.buttonStyle(TNPress(glow: .yellow))
@@ -1296,6 +1339,8 @@ struct TNHomeView: View {
         .sheet(isPresented: $showVip) { TNVipView(game: game) }
         .sheet(isPresented: $showFashion) { TNFashionView(game: game) }
         .sheet(isPresented: $showAchieve) { TNAchieveView(game: game) }
+        .sheet(isPresented: $showChat) { TNChatView(game: game) }
+        .sheet(isPresented: $showMarket) { TNMarketView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -2774,6 +2819,217 @@ struct TNAchieveView: View {
                 .opacity(unlocked ? 1 : 0.6)
             }
         }
+    }
+}
+
+// MARK: - Dữ liệu Chat & Chợ (mô phỏng tán tu khác trong thế giới)
+let TN_BOT_NAMES = ["Hàn Lập", "Diệp Phàm", "Tiêu Viêm", "Đường Tam", "Lâm Động", "Mạnh Hạo",
+                    "Sở Phong", "La Phong", "Tần Vũ", "Cố Ẩn", "Bạch Tiểu Thuần", "Vân Vận",
+                    "Nam Cung Uyển", "Tuyết Nhi", "Hạ Hầu", "Vô Danh Kiếm Khách"]
+let TN_CHAT_LINES = [
+    "Có ai tổ đội đánh Boss Hắc Phong Lâm không?", "Vừa đột phá Kết Đan, phê quá 😎",
+    "Bán phi kiếm +5 giá hữu nghị, ib nhé.", "Bang ta đang tuyển thành viên chăm chỉ!",
+    "Ai chỉ mình cách luyện đan với 🙏", "PvP hôm nay khó quá, toàn cao thủ.",
+    "Vừa cưới đạo lữ, mời cả server ăn cỗ 🎉", "Rớt được Hỏa Phượng Cánh, hên xỉu!",
+    "Thiên Long Bang vô địch thiên hạ!", "Có ai bán khoáng thạch không, thu giá cao.",
+    "Mới lên VIP, quà ngon thật sự.", "Đấu Đài ải 8 khó nhằn quá anh em ơi.",
+    "Cày cấp 100 mỏi tay ghê 😅", "Thần thú Kim Ô mạnh vô đối!",
+    "Chúc cả server tu luyện tinh tấn 🙌", "Ai rảnh giao lưu tỷ thí không?"]
+
+// Một mục rao bán trên chợ
+struct TNListing: Identifiable {
+    let id = UUID()
+    let seller: String; let name: String; let emoji: String; let price: Int
+    let kind: String     // "thao","thach","pet","skin","wing","mount"
+    let refId: String; let qty: Int; let color: Color
+}
+// Sinh danh sách rao bán ngẫu nhiên từ "tán tu khác"
+func tnGenMarket() -> [TNListing] {
+    var out: [TNListing] = []
+    // Nguyên liệu
+    for _ in 0..<3 {
+        let q = Int.random(in: 5...20)
+        out.append(TNListing(seller: TN_BOT_NAMES.randomElement()!, name: "\(q) Linh Thảo", emoji: "🌿",
+                             price: q * Int.random(in: 30...45), kind: "thao", refId: "", qty: q, color: .green))
+        let q2 = Int.random(in: 5...20)
+        out.append(TNListing(seller: TN_BOT_NAMES.randomElement()!, name: "\(q2) Khoáng Thạch", emoji: "⛏️",
+                             price: q2 * Int.random(in: 30...45), kind: "thach", refId: "", qty: q2, color: .brown))
+    }
+    // Vật phẩm hiếm từ tán tu khác
+    if let p = TN_PETS.randomElement() {
+        out.append(TNListing(seller: TN_BOT_NAMES.randomElement()!, name: p.name, emoji: p.emoji,
+                             price: Int(Double(p.price) * Double.random(in: 0.8...1.1)), kind: "pet", refId: p.id, qty: 1, color: p.color))
+    }
+    if let w = TN_WINGS.filter({ $0.id != "none" }).randomElement() {
+        out.append(TNListing(seller: TN_BOT_NAMES.randomElement()!, name: w.name, emoji: w.emoji,
+                             price: Int(Double(w.price) * Double.random(in: 0.8...1.1)), kind: "wing", refId: w.id, qty: 1, color: w.colors.first!))
+    }
+    if let m = TN_MOUNTS.randomElement() {
+        out.append(TNListing(seller: TN_BOT_NAMES.randomElement()!, name: m.name, emoji: m.emoji,
+                             price: Int(Double(m.price) * Double.random(in: 0.8...1.1)), kind: "mount", refId: m.id, qty: 1, color: m.color))
+    }
+    if let sk = TN_SKINS.filter({ $0.price > 0 }).randomElement() {
+        out.append(TNListing(seller: TN_BOT_NAMES.randomElement()!, name: sk.name, emoji: "👘",
+                             price: Int(Double(sk.price) * Double.random(in: 0.8...1.1)), kind: "skin", refId: sk.id, qty: 1, color: sk.colors.first!))
+    }
+    return out.shuffled()
+}
+
+// MARK: - Thế Giới Chat (mô phỏng · có tán tu bot trò chuyện + gửi tin)
+struct TNChatMsg: Identifiable { let id = UUID(); let sender: String; let text: String; let me: Bool; let color: Color }
+struct TNChatView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msgs: [TNChatMsg] = []
+    @State private var input = ""
+    private let timer = Timer.publish(every: 4, on: .main, in: .common).autoconnect()
+    private let botColors: [Color] = [.cyan, .green, .orange, .pink, .yellow, .mint, .teal]
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Text("💬 Kênh Thế Giới · mô phỏng — trò chuyện cùng tán tu")
+                    .font(.caption2).foregroundStyle(.white.opacity(0.55)).padding(.vertical, 6)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(msgs) { m in
+                                HStack(alignment: .top, spacing: 6) {
+                                    if m.me { Spacer(minLength: 40) }
+                                    VStack(alignment: m.me ? .trailing : .leading, spacing: 2) {
+                                        Text(m.me ? "Ta" : m.sender).font(.system(size: 10, weight: .bold))
+                                            .foregroundStyle(m.me ? .yellow : m.color)
+                                        Text(m.text).font(.footnote).foregroundStyle(.white)
+                                            .padding(.horizontal, 10).padding(.vertical, 7)
+                                            .background(m.me ? Color.blue.opacity(0.5) : Color.white.opacity(0.08),
+                                                        in: RoundedRectangle(cornerRadius: 12))
+                                    }
+                                    if !m.me { Spacer(minLength: 40) }
+                                }.id(m.id)
+                            }
+                        }.padding(.horizontal)
+                    }
+                    .onChange(of: msgs.count) { _ in
+                        if let last = msgs.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    }
+                }
+                HStack(spacing: 8) {
+                    TextField("Nhập tin nhắn…", text: $input)
+                        .textFieldStyle(.plain).foregroundStyle(.white)
+                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        .background(.white.opacity(0.1), in: Capsule())
+                    Button {
+                        send()
+                    } label: {
+                        Image(systemName: "paperplane.fill").foregroundStyle(.white)
+                            .padding(11).background(input.trimmingCharacters(in: .whitespaces).isEmpty ? Color.gray : Color.blue, in: Circle())
+                    }.disabled(input.trimmingCharacters(in: .whitespaces).isEmpty)
+                }.padding(10)
+            }
+            .background(LinearGradient(colors: [Color(red:0.04,green:0.07,blue:0.13), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Thế Giới Chat").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+            .onAppear { if msgs.isEmpty { for _ in 0..<5 { addBot() } } }
+            .onReceive(timer) { _ in addBot() }
+        }
+    }
+    private func send() {
+        let t = input.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        msgs.append(TNChatMsg(sender: game.s.name, text: t, me: true, color: .yellow))
+        input = ""
+        // Đôi khi có tán tu đáp lời
+        if Bool.random() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 1...2.5)) { addBot() }
+        }
+    }
+    private func addBot() {
+        let name = TN_BOT_NAMES.randomElement()!
+        msgs.append(TNChatMsg(sender: name, text: TN_CHAT_LINES.randomElement()!, me: false, color: botColors.randomElement()!))
+        if msgs.count > 40 { msgs.removeFirst(msgs.count - 40) }
+    }
+}
+
+// MARK: - Chợ Giao Dịch (mô phỏng · bán nguyên liệu · mua vật phẩm từ tán tu khác)
+struct TNMarketView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var listings: [TNListing] = []
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("🏪 CHỢ GIAO DỊCH").font(.title3.bold()).foregroundStyle(.orange)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal).padding(.top, 8)
+                    Text("Mua bán mô phỏng với tán tu khác trong thế giới.")
+                        .font(.caption2).foregroundStyle(.white.opacity(0.55))
+
+                    // Bán nhanh nguyên liệu
+                    VStack(spacing: 8) {
+                        Text("💰 Bán nguyên liệu (40 💎/đơn vị)").font(.caption.bold()).foregroundStyle(.yellow)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 10) {
+                            sellBtn("🌿 Bán 5", "thao", 5); sellBtn("🌿 Bán tất cả", "thao", 999)
+                        }
+                        HStack(spacing: 10) {
+                            sellBtn("⛏️ Bán 5", "thach", 5); sellBtn("⛏️ Bán tất cả", "thach", 999)
+                        }
+                        Text("Kho: 🌿 \(game.s.linhThao) · ⛏️ \(game.s.khoangThach)")
+                            .font(.caption2).foregroundStyle(.white.opacity(0.6))
+                    }
+                    .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+
+                    HStack {
+                        Text("🛒 Rao bán từ tán tu khác").font(.caption.bold()).foregroundStyle(.orange)
+                        Spacer()
+                        Button { listings = tnGenMarket(); flash("🔄 Đã làm mới chợ.") } label: {
+                            Label("Làm mới", systemImage: "arrow.clockwise").font(.caption.bold()).foregroundStyle(.cyan)
+                        }
+                    }.padding(.horizontal)
+
+                    ForEach(listings) { l in
+                        HStack(spacing: 12) {
+                            Text(l.emoji).font(.system(size: 30)).frame(width: 50, height: 50)
+                                .background(l.color.opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(l.name).font(.subheadline.bold()).foregroundStyle(.white)
+                                Text("Người bán: \(l.seller)").font(.caption2).foregroundStyle(.white.opacity(0.55))
+                            }
+                            Spacer()
+                            Button("💎\(l.price)") { flash(game.buyListing(l)); TNHaptic.hit() }
+                                .font(.caption.bold()).foregroundStyle(.white)
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .background(game.s.linhThach >= l.price ? l.color : Color.gray, in: Capsule())
+                                .buttonStyle(TNPress(glow: l.color))
+                        }
+                        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                    }
+
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center).padding(.horizontal) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.1,green:0.07,blue:0.03), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Chợ Giao Dịch").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+            .onAppear { if listings.isEmpty { listings = tnGenMarket() } }
+        }
+    }
+    private func sellBtn(_ label: String, _ kind: String, _ qty: Int) -> some View {
+        Button { flash(game.sellMaterial(kind, qty)) } label: {
+            Text(label).font(.caption.bold()).foregroundStyle(.white)
+                .frame(maxWidth: .infinity).padding(.vertical, 9)
+                .background(.green.opacity(0.8), in: Capsule())
+        }.buttonStyle(TNPress(glow: .green))
+    }
+    private func flash(_ m: String) {
+        withAnimation { msg = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { withAnimation { if msg == m { msg = nil } } }
     }
 }
 
