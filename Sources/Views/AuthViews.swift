@@ -139,7 +139,7 @@ struct LoginView: View {
                     if showServerFallback && store.baseURL.lowercased() != APIClient.fallbackBase {
                         Button {
                             store.saveServer(url: APIClient.fallbackBase, type: "VPS")
-                            Task { await doLogin() }
+                            Task { await loadGoogleClientId(); await doLogin() }
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "arrow.triangle.2.circlepath")
@@ -161,9 +161,18 @@ struct LoginView: View {
     }
 
     /// Lấy Google Client ID từ máy chủ để quyết định có hiện nút "Đăng nhập bằng Google".
+    /// THỬ LẠI vài lần: nếu mạng chập chờn (vd lúc máy chủ đang khởi động) mà chỉ gọi 1 lần
+    /// thì nút Google sẽ bị ẩn luôn cho tới khi mở lại app. Thử lại giúp nút không bị "mất tiêu".
     private func loadGoogleClientId() async {
-        if let cfg = try? await store.api.storeConfig() {
-            googleClientId = cfg.googleClientId ?? ""
+        for attempt in 0..<4 {
+            if let cfg = try? await store.api.storeConfig() {
+                googleClientId = cfg.googleClientId ?? ""
+                return
+            }
+            // Chờ tăng dần rồi thử lại (0.6s, 1.2s, 1.8s) — bỏ qua lần chờ cuối.
+            if attempt < 3 {
+                try? await Task.sleep(nanoseconds: UInt64(600_000_000 * (attempt + 1)))
+            }
         }
     }
 
