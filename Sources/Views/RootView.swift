@@ -112,6 +112,7 @@ struct MainTabView: View {
     @State private var updateMsg = ""
     @State private var updateLink = ""
     @State private var updateVersion = ""
+    @State private var updateFound = false   // đã tìm thấy bản mới trong phiên này (để thử lại khi mở lại app)
     // §1.1 — Thông báo phát cho MỌI người (vd: sản phẩm mới) — đọc trong app, không cần APNs
     @AppStorage("lastSeenNotifId") private var lastSeenNotifId = 0
     @State private var showNotif = false
@@ -141,6 +142,9 @@ struct MainTabView: View {
         guard let url = URL(string: api) else { return nil }
         var req = URLRequest(url: url)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        // GitHub API BẮT BUỘC có User-Agent, thiếu là bị chặn 403 → không dò được bản mới.
+        req.setValue("KENIOS-App", forHTTPHeaderField: "User-Agent")
+        req.cachePolicy = .reloadIgnoringLocalCacheData   // luôn lấy danh sách release mới nhất
         req.timeoutInterval = 12
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
@@ -172,6 +176,42 @@ struct MainTabView: View {
             if x != y { return x > y }
         }
         return false
+    }
+
+    // §1.2 — Dò bản mới từ 3 nguồn rồi hiện popup. GỌI ĐƯỢC NHIỀU LẦN (mở app / quay lại app):
+    // nếu lần trước lỗi mạng / GitHub chặn thì lần sau bắt được → không còn cảnh "có build mới mà
+    // app không hiện thông báo". Đã tìm thấy rồi thì thôi (không hỏi lại sau khi bấm "Để sau").
+    private func checkAppUpdate() async {
+        if updateFound || showUpdate { return }
+        // Nguồn 1 — Bản KENIOS ĐÃ KÝ cài OTA 1 chạm (không cần ESign). Chỉ nhận đúng bundle & build cao hơn.
+        if let ota = try? await store.api.appOTAUpdate(), ota.available,
+           let otaLink = ota.installUrl, !otaLink.isEmpty,
+           (ota.bundleId ?? "") == (Bundle.main.bundleIdentifier ?? "com.kenios.codebox"),
+           (ota.build ?? 0) > Self.appBuild {
+            updateLink = otaLink
+            updateVersion = ota.version ?? Self.versionFromBuild(ota.build ?? 0)
+            updateMsg = store.t("Đã có bản cập nhật mới — bấm để cài trực tiếp (không cần ESign).",
+                                "A new update is available — tap to install directly (no ESign).")
+            updateFound = true; showUpdate = true; return
+        }
+        // Nguồn 2 — Admin đặt phiên bản thủ công trên máy chủ (nếu OTA chưa kích hoạt).
+        if let cfg = try? await store.api.storeConfig() {
+            let latest = (cfg.latestVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let link = (cfg.updateUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !latest.isEmpty, !link.isEmpty, Self.isNewer(latest, than: Self.appVersion) {
+                updateLink = link
+                updateMsg = (cfg.updateMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                updateVersion = latest
+                updateFound = true; showUpdate = true; return
+            }
+        }
+        // Nguồn 3 — TỰ ĐỘNG dò bản mới trên GitHub Release (chạy độc lập, không phụ thuộc máy chủ).
+        if let up = await Self.checkGitHubUpdate(), up.build > Self.appBuild {
+            updateLink = up.ipaURL
+            updateVersion = Self.versionFromBuild(up.build)
+            updateMsg = ""
+            updateFound = true; showUpdate = true
+        }
     }
 
     var body: some View {
@@ -223,29 +263,10 @@ struct MainTabView: View {
             // §1.3 + §1.2 — Lấy config server 1 lần: lời chào toàn cục + kiểm tra phiên bản mới
             if !welcomeChecked {
                 welcomeChecked = true
-                // ƯU TIÊN 1 — Bản KENIOS ĐÃ KÝ cài OTA 1 chạm (không cần ESign).
-                // Chỉ nhận khi đúng là bản KENIOS (cùng bundle id) và số build cao hơn.
-                if let ota = try? await store.api.appOTAUpdate(), ota.available,
-                   let otaLink = ota.installUrl, !otaLink.isEmpty,
-                   (ota.bundleId ?? "") == (Bundle.main.bundleIdentifier ?? "com.kenios.codebox"),
-                   (ota.build ?? 0) > Self.appBuild {
-                    updateLink = otaLink
-                    updateVersion = ota.version ?? Self.versionFromBuild(ota.build ?? 0)
-                    updateMsg = store.t("Đã có bản cập nhật mới — bấm để cài trực tiếp (không cần ESign).",
-                                        "A new update is available — tap to install directly (no ESign).")
-                    showUpdate = true
-                }
+                // §1.2 — Kiểm tra & hiện popup CẬP NHẬT (OTA → phiên bản admin đặt → GitHub Release)
+                await checkAppUpdate()
+                // §1.3 — Lời chào toàn cục + GIỌNG chào cho MỌI người
                 if let cfg = try? await store.api.storeConfig() {
-                    // §1.2 — Admin đặt phiên bản thủ công (nếu OTA chưa kích hoạt)
-                    let latest = (cfg.latestVersion ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    let link = (cfg.updateUrl ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !showUpdate, !latest.isEmpty, !link.isEmpty, Self.isNewer(latest, than: Self.appVersion) {
-                        updateLink = link
-                        updateMsg = (cfg.updateMessage ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                        updateVersion = latest
-                        showUpdate = true
-                    }
-                    // §1.3 — Lời chào toàn cục cho MỌI người
                     if cfg.welcomePopupEnabled == true {
                         let t = (cfg.welcomePopupText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                         if !t.isEmpty {
@@ -268,14 +289,6 @@ struct MainTabView: View {
                             rate: cfg.welcomeVoiceRate ?? store.welcomeRate)
                     }
                 }
-                // TỰ ĐỘNG dò bản mới trên GitHub Release — CHẠY ĐỘC LẬP (không phụ thuộc
-                // storeConfig thành công) để không bao giờ bị "im" khi máy chủ chậm 1 nhịp.
-                if !showUpdate, let up = await Self.checkGitHubUpdate(), up.build > Self.appBuild {
-                    updateLink = up.ipaURL
-                    updateVersion = Self.versionFromBuild(up.build)
-                    updateMsg = ""
-                    showUpdate = true
-                }
             }
             // §1.1 — Kiểm tra thông báo phát (sản phẩm mới…) ngay khi mở app
             await checkNotifications()
@@ -291,8 +304,13 @@ struct MainTabView: View {
             }
         }
         .onChange(of: scenePhase) { phase in
-            // Mở lại app từ nền → kiểm tra bảo trì ngay
-            if phase == .active { Task { await store.refreshMe() } }
+            // Mở lại app từ nền → kiểm tra bảo trì + THỬ LẠI dò bản mới (lỡ lần mở đầu bị lỗi mạng).
+            if phase == .active {
+                Task {
+                    await store.refreshMe()
+                    await checkAppUpdate()
+                }
+            }
         }
         // Thông báo khi gói PRO vừa hết hạn (tự chuyển về Free)
         .alert(store.t("Gói PRO đã hết hạn", "PRO plan expired"),
