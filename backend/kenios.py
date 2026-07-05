@@ -6491,7 +6491,7 @@ def _ai_cfg():
                 else "https://api.groq.com/openai/v1")
     if not model:
         model = ("claude-3-5-sonnet-latest" if prov == "anthropic"
-                 else "gemini-2.5-flash" if prov == "gemini"
+                 else "gemini-3.5-flash" if prov == "gemini"
                  else "llama-3.3-70b-versatile")
     return prov, base, model, key
 
@@ -6502,7 +6502,7 @@ def _ai_err(status: int, text: str) -> str:
         return ("⚠️ AI đang bị GIỚI HẠN LƯỢT (quota – lỗi 429).\n"
                 "Cách xử lý:\n"
                 "• Chờ ~1 phút rồi hỏi lại (giới hạn theo phút), hoặc\n"
-                "• Hết hạn mức MIỄN PHÍ trong ngày → đổi model khác: /aimodel gemini-2.5-flash (hoặc gemini-flash-lite-latest)\n"
+                "• Hết hạn mức MIỄN PHÍ trong ngày → đổi model khác: /aimodel gemini-3.5-flash (hoặc gemini-flash-lite-latest)\n"
                 "• Hoặc đổi sang GROQ (miễn phí, hạn mức rộng):\n"
                 "  /aiurl https://api.groq.com/openai/v1 · /aimodel llama-3.3-70b-versatile · /aikey <khoá groq>")
     if status in (401, 403) or "unauthor" in t or "permission" in t or ("api key" in t) or ("invalid" in t and "key" in t):
@@ -6510,7 +6510,7 @@ def _ai_err(status: int, text: str) -> str:
     if status == 404 or "not found" in t or "does not exist" in t:
         _, _, model, _ = _ai_cfg()
         return (f"⚠️ Không tìm thấy model '{model}' (lỗi 404). Đổi tên model bằng /aimodel — "
-                "vd /aimodel gemini-2.5-flash (Gemini) hoặc /aimodel llama-3.3-70b-versatile (Groq).")
+                "vd /aimodel gemini-3.5-flash (Gemini) hoặc /aimodel llama-3.3-70b-versatile (Groq).")
     return f"⚠️ AI báo lỗi {status}. Thử lại sau ít phút, hoặc gõ /aiset để kiểm tra cấu hình."
 
 def _ai_answer(question: str) -> str:
@@ -6557,14 +6557,13 @@ def _ai_answer(question: str) -> str:
             }
             r = _hx.post(url, timeout=90,
                          headers={"x-goog-api-key": key, "content-type": "application/json"}, json=body)
+            if r.status_code == 400 and body.get("tools"):
+                # Model không nhận google_search → thử lại KHÔNG grounding (vẫn trả lời được).
+                body.pop("tools", None)
+                r = _hx.post(url, timeout=90,
+                             headers={"x-goog-api-key": key, "content-type": "application/json"}, json=body)
             if r.status_code >= 400:
-                # Model cũ không hỗ trợ google_search → thử lại KHÔNG grounding cho chắc.
-                if r.status_code == 400 and "google_search" in (r.text or ""):
-                    body.pop("tools", None)
-                    r = _hx.post(url, timeout=90,
-                                 headers={"x-goog-api-key": key, "content-type": "application/json"}, json=body)
-                if r.status_code >= 400:
-                    return _ai_err(r.status_code, r.text)
+                return _ai_err(r.status_code, r.text)
             d = r.json()
             cands = d.get("candidates") or []
             parts = ((cands[0].get("content") or {}).get("parts") or []) if cands else []
