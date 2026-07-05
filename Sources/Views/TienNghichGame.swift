@@ -351,6 +351,113 @@ let TN_ACHIEVEMENTS: [TNAchievement] = [
                   rewardLT: 1000, titleId: "haophu") { $0.vip >= 3 },
 ]
 
+// MARK: - Trang bị (túi đồ) — vật phẩm sinh ngẫu nhiên có độ hiếm
+struct TNGearData: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var slot: String     // "weapon","armor","accessory"
+    var rarity: Int      // 0 Phàm · 1 Linh · 2 Bảo · 3 Tiên · 4 Thần
+    var atk: Int; var def: Int; var hp: Int
+    var nameIdx: Int
+}
+func tnRarityName(_ r: Int) -> String { ["Phàm Phẩm","Linh Phẩm","Bảo Phẩm","Tiên Phẩm","Thần Phẩm"][min(max(r,0),4)] }
+func tnRarityColor(_ r: Int) -> Color { [.gray, .green, .blue, .purple, .orange][min(max(r,0),4)] }
+func tnSlotName(_ s: String) -> String { s == "weapon" ? "Vũ Khí" : (s == "armor" ? "Giáp" : "Phụ Kiện") }
+func tnSlotIcon(_ s: String) -> String { s == "weapon" ? "🗡️" : (s == "armor" ? "🛡️" : "💍") }
+private let TN_GEAR_NAMES: [String: [String]] = [
+    "weapon": ["Phi Kiếm", "Huyết Đao", "Lôi Thương", "Cổ Kiếm", "Sát Thần Kích", "Đồ Long Đao"],
+    "armor": ["Linh Giáp", "Kim Cang Giáp", "Băng Tơ Bào", "Long Lân Giáp", "Thánh Quang Khải", "Bất Diệt Thần Giáp"],
+    "accessory": ["Trữ Vật Nhẫn", "Hộ Tâm Kính", "Tụ Linh Bội", "Cửu Chuyển Châu", "Thiên Đạo Ngọc", "Hỗn Độn Linh Bài"],
+]
+func tnGearName(_ g: TNGearData) -> String {
+    let arr = TN_GEAR_NAMES[g.slot] ?? ["Vật Phẩm"]
+    return arr[g.nameIdx % arr.count]
+}
+// Sinh trang bị theo lực (power = realm*9+stage + level/4), độ hiếm thiên về power
+func tnRollGear(power: Int, minRarity: Int = 0) -> TNGearData {
+    let slots = ["weapon", "armor", "accessory"]
+    let slot = slots.randomElement()!
+    let roll = Int.random(in: 0..<100)
+    var rarity: Int
+    switch roll {
+    case ..<45: rarity = 0
+    case ..<73: rarity = 1
+    case ..<90: rarity = 2
+    case ..<98: rarity = 3
+    default:    rarity = 4
+    }
+    rarity = max(rarity, minRarity)
+    let mul = Double(rarity + 1)
+    let base = Double(power + 4)
+    let a = slot == "weapon" ? Int(base * mul * Double.random(in: 1.4...2.0)) : Int(base * mul * Double.random(in: 0.2...0.5))
+    let d = slot == "armor" ? Int(base * mul * Double.random(in: 0.8...1.2)) : Int(base * mul * Double.random(in: 0.1...0.4))
+    let h = slot == "accessory" ? Int(base * mul * Double.random(in: 4...7)) : Int(base * mul * Double.random(in: 1.5...3.5))
+    return TNGearData(slot: slot, rarity: rarity, atk: a, def: d, hp: h, nameIdx: Int.random(in: 0...5))
+}
+func tnGearValue(_ g: TNGearData) -> Int { (g.atk + g.def + g.hp / 4) * (g.rarity + 1) + 30 }
+
+// MARK: - Tâm pháp (nâng cấp bằng linh thạch → buff vĩnh viễn)
+struct TNTechnique: Identifiable {
+    let id: String; let name: String; let emoji: String; let maxLv: Int
+    let perLv: String; let color: Color; let baseCost: Int
+}
+let TN_TECHNIQUES: [TNTechnique] = [
+    TNTechnique(id: "satpha", name: "Sát Phạt Quyết", emoji: "⚔️", maxLv: 10, perLv: "+3% công/cấp", color: .red, baseCost: 300),
+    TNTechnique(id: "luyenthe", name: "Luyện Thể Quyết", emoji: "❤️", maxLv: 10, perLv: "+2.5% máu/cấp", color: .green, baseCost: 300),
+    TNTechnique(id: "kimcang", name: "Kim Cang Quyết", emoji: "🛡️", maxLv: 10, perLv: "+7 thủ/cấp", color: .cyan, baseCost: 250),
+]
+func tnTech(_ id: String) -> TNTechnique? { TN_TECHNIQUES.first { $0.id == id } }
+
+// MARK: - Boss thế giới & Phụ bản (bí cảnh)
+struct TNBoss: Identifiable {
+    let id: String; let name: String; let emoji: String; let minRealm: Int
+    let hpMul: Double; let atkMul: Double; let reward: Int; let dropRarity: Int; let desc: String
+}
+let TN_BOSSES: [TNBoss] = [
+    TNBoss(id: "b1", name: "Hắc Giao Vương", emoji: "🐊", minRealm: 0, hpMul: 3.0, atkMul: 0.9, reward: 300, dropRarity: 1, desc: "Yêu giao ngàn năm ở Hắc Phong Đầm."),
+    TNBoss(id: "b2", name: "Huyết Nguyệt Lang Vương", emoji: "🐺", minRealm: 1, hpMul: 4.0, atkMul: 1.0, reward: 600, dropRarity: 1, desc: "Sói vương khát máu dưới trăng đỏ."),
+    TNBoss(id: "b3", name: "Cửu U Ma Tôn", emoji: "👹", minRealm: 3, hpMul: 5.5, atkMul: 1.15, reward: 1200, dropRarity: 2, desc: "Ma tôn cổ xưa phong ấn nơi Cửu U."),
+    TNBoss(id: "b4", name: "Thượng Cổ Hỏa Long", emoji: "🐉", minRealm: 5, hpMul: 7.0, atkMul: 1.25, reward: 2400, dropRarity: 3, desc: "Chân long thượng cổ, thân phủ lửa thiêng."),
+    TNBoss(id: "b5", name: "Hỗn Độn Cổ Thần", emoji: "🌌", minRealm: 8, hpMul: 10.0, atkMul: 1.4, reward: 5000, dropRarity: 4, desc: "Cổ thần hỗn độn — thử thách tối thượng."),
+]
+struct TNDungeon: Identifiable {
+    let id: String; let name: String; let emoji: String; let minRealm: Int
+    let waves: Int; let reward: Int; let desc: String; let color: Color
+}
+let TN_DUNGEONS: [TNDungeon] = [
+    TNDungeon(id: "d1", name: "Tàng Kiếm Động", emoji: "🗿", minRealm: 0, waves: 3, reward: 400, desc: "Bí cảnh sơ cấp, 3 ải liên hoàn.", color: .green),
+    TNDungeon(id: "d2", name: "Vạn Yêu Quật", emoji: "🕸️", minRealm: 2, waves: 4, reward: 900, desc: "Hang ổ vạn yêu, 4 ải khó nhằn.", color: .purple),
+    TNDungeon(id: "d3", name: "Cửu Trùng Tiên Điện", emoji: "🏛️", minRealm: 5, waves: 5, reward: 2200, desc: "Tiên điện chín tầng, 5 ải hiểm ác.", color: .orange),
+]
+
+// MARK: - Điểm danh tích luỹ (thưởng theo chu kỳ 7 ngày)
+struct TNCheckinReward: Identifiable {
+    let id: Int; let linhThach: Int; let bonus: String
+}
+let TN_CHECKIN: [TNCheckinReward] = [
+    TNCheckinReward(id: 0, linhThach: 80, bonus: ""),
+    TNCheckinReward(id: 1, linhThach: 120, bonus: "🌿 x3"),
+    TNCheckinReward(id: 2, linhThach: 160, bonus: "⛏️ x3"),
+    TNCheckinReward(id: 3, linhThach: 220, bonus: ""),
+    TNCheckinReward(id: 4, linhThach: 300, bonus: "🎁 Trang bị"),
+    TNCheckinReward(id: 5, linhThach: 400, bonus: ""),
+    TNCheckinReward(id: 6, linhThach: 700, bonus: "🎁 Trang bị hiếm"),
+]
+
+// MARK: - Vòng quay may mắn (giải thưởng ngẫu nhiên)
+struct TNWheelPrize: Identifiable {
+    let id = UUID(); let label: String; let emoji: String; let kind: String; let amount: Int; let color: Color
+}
+let TN_WHEEL: [TNWheelPrize] = [
+    TNWheelPrize(label: "50 Linh Thạch", emoji: "💎", kind: "lt", amount: 50, color: .cyan),
+    TNWheelPrize(label: "150 Linh Thạch", emoji: "💎", kind: "lt", amount: 150, color: .blue),
+    TNWheelPrize(label: "5 Linh Thảo", emoji: "🌿", kind: "thao", amount: 5, color: .green),
+    TNWheelPrize(label: "5 Khoáng Thạch", emoji: "⛏️", kind: "thach", amount: 5, color: .brown),
+    TNWheelPrize(label: "300 Linh Thạch", emoji: "💰", kind: "lt", amount: 300, color: .yellow),
+    TNWheelPrize(label: "Trang Bị Ngẫu Nhiên", emoji: "🎁", kind: "gear", amount: 0, color: .purple),
+    TNWheelPrize(label: "20 Linh Thạch", emoji: "🪙", kind: "lt", amount: 20, color: .gray),
+    TNWheelPrize(label: "ĐẠI THƯỞNG 888", emoji: "🏆", kind: "lt", amount: 888, color: .orange),
+]
+
 // MARK: - Bậc danh vọng PvP (theo điểm)
 struct TNRank { let name: String; let emoji: String; let color: Color }
 func tnPvpRank(_ pts: Int) -> TNRank {
@@ -470,6 +577,18 @@ struct TNSave: Codable {
     var unlockedTitles: [String] = []  // danh hiệu đã mở khoá
     var activeTitle = ""     // danh hiệu đang dùng
     var totalWins = 0        // tổng số trận thắng (thống kê thành tựu)
+    // Túi đồ & trang bị
+    var inventory: [TNGearData] = []
+    var equipWeapon: TNGearData? = nil
+    var equipArmor: TNGearData? = nil
+    var equipAccessory: TNGearData? = nil
+    // Tâm pháp (id → cấp)
+    var techniques: [String: Int] = [:]
+    // Điểm danh tích luỹ
+    var checkinCount = 0
+    var lastCheckin = ""
+    // Phụ bản đã vượt (id)
+    var clearedDungeons: [String] = []
     var skin = "default"
     var ownedSkins = ["default"]
     var skills = ["kiem"]
@@ -508,10 +627,18 @@ struct TNSave: Codable {
     // Danh hiệu: đang dùng cộng chỉ số uy danh
     private var titleAtkB: Int { tnTitle(activeTitle)?.atk ?? 0 }
     private var titleHpB: Int { tnTitle(activeTitle)?.hp ?? 0 }
-    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB + vipHpB + wingHpB + titleHpB)) * guildHpMul) }
+    // Trang bị (túi đồ): tổng chỉ số 3 ô đang mặc
+    private var gearAtkB: Int { (equipWeapon?.atk ?? 0) + (equipArmor?.atk ?? 0) + (equipAccessory?.atk ?? 0) }
+    private var gearDefB: Int { (equipWeapon?.def ?? 0) + (equipArmor?.def ?? 0) + (equipAccessory?.def ?? 0) }
+    private var gearHpB: Int { (equipWeapon?.hp ?? 0) + (equipArmor?.hp ?? 0) + (equipAccessory?.hp ?? 0) }
+    // Tâm pháp: cộng % và chỉ số phẳng theo cấp
+    var techAtkPct: Double { Double(techniques["satpha"] ?? 0) * 0.03 }
+    var techHpPct: Double { Double(techniques["luyenthe"] ?? 0) * 0.025 }
+    var techDefB: Int { (techniques["kimcang"] ?? 0) * 7 }
+    var hpMax: Int { Int((Double(120 + tier * 70 + level * 22) * sectHp + Double(danHp + petHpB + mountHpB + spouseHpB + vipHpB + wingHpB + titleHpB + gearHpB)) * guildHpMul * (1 + techHpPct)) }
     var mpMax: Int { 60 + tier * 40 + level * 6 }
-    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB + vipAtkB + wingAtkB + haloAtkB + titleAtkB)) * guildAtkMul) }
-    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB + mountDefB + haloDefB }
+    var atk: Int { Int((Double(18 + tier * 12 + level * 4) * sectAtk + Double(weaponLv * 15 + danAtk + petAtkB + mountAtkB + spouseAtkB + vipAtkB + wingAtkB + haloAtkB + titleAtkB + gearAtkB)) * guildAtkMul * (1 + techAtkPct)) }
+    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) + armorLv * 8 + petDefB + mountDefB + haloDefB + gearDefB + techDefB }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
     var powerScore: Int { atk * 3 + def * 5 + hpMax }
@@ -754,6 +881,96 @@ final class TNGame: ObservableObject {
         s.linhThach -= l.price
         save()
         return "✅ Mua \(l.name) từ \(l.seller) — giá \(l.price) linh thạch!"
+    }
+
+    // ===== Túi đồ & trang bị =====
+    var powerLevel: Int { s.realm * 9 + s.stage + s.level / 4 }
+    func dropGear(minRarity: Int = 0) -> TNGearData {
+        let g = tnRollGear(power: powerLevel, minRarity: minRarity)
+        s.inventory.append(g)
+        save()
+        return g
+    }
+    func equipGear(_ g: TNGearData) {
+        switch g.slot {
+        case "weapon":    if let cur = s.equipWeapon { s.inventory.append(cur) }; s.equipWeapon = g
+        case "armor":     if let cur = s.equipArmor { s.inventory.append(cur) }; s.equipArmor = g
+        default:          if let cur = s.equipAccessory { s.inventory.append(cur) }; s.equipAccessory = g
+        }
+        s.inventory.removeAll { $0.id == g.id }
+        s.hp = min(s.hp, s.hpMax)
+        save()
+    }
+    func unequip(_ slot: String) {
+        switch slot {
+        case "weapon":    if let cur = s.equipWeapon { s.inventory.append(cur) }; s.equipWeapon = nil
+        case "armor":     if let cur = s.equipArmor { s.inventory.append(cur) }; s.equipArmor = nil
+        default:          if let cur = s.equipAccessory { s.inventory.append(cur) }; s.equipAccessory = nil
+        }
+        s.hp = min(s.hp, s.hpMax); save()
+    }
+    func sellGear(_ g: TNGearData) -> String {
+        let v = tnGearValue(g)
+        s.inventory.removeAll { $0.id == g.id }
+        s.linhThach += v
+        save()
+        return "💰 Bán \(tnGearName(g)) → +\(v) linh thạch."
+    }
+
+    // ===== Tâm pháp =====
+    func techLevel(_ id: String) -> Int { s.techniques[id] ?? 0 }
+    func techCost(_ t: TNTechnique) -> Int { t.baseCost * (techLevel(t.id) + 1) }
+    @discardableResult
+    func upgradeTech(_ t: TNTechnique) -> String {
+        let lv = techLevel(t.id)
+        guard lv < t.maxLv else { return "Đã đạt cấp tối đa." }
+        let cost = techCost(t)
+        guard s.linhThach >= cost else { return "❌ Thiếu linh thạch (cần \(cost))." }
+        s.linhThach -= cost
+        s.techniques[t.id] = lv + 1
+        s.hp = min(s.hp, s.hpMax)
+        save()
+        return "📖 \(t.name) → cấp \(lv + 1)!"
+    }
+
+    // ===== Điểm danh tích luỹ =====
+    var checkinReady: Bool { s.lastCheckin != todayStr() }
+    var checkinToday: Int { s.checkinCount % 7 }
+    @discardableResult
+    func doCheckin() -> String {
+        guard checkinReady else { return "Hôm nay đã điểm danh rồi." }
+        let idx = s.checkinCount % 7
+        let r = TN_CHECKIN[idx]
+        s.lastCheckin = todayStr()
+        s.checkinCount += 1
+        s.linhThach += r.linhThach
+        var extra = ""
+        if r.bonus.contains("🌿") { s.linhThao += 3; extra = " · 🌿 x3" }
+        if r.bonus.contains("⛏️") { s.khoangThach += 3; extra = " · ⛏️ x3" }
+        if r.bonus.contains("Trang bị") {
+            let g = dropGear(minRarity: r.bonus.contains("hiếm") ? 2 : 1)
+            extra = " · 🎁 \(tnRarityName(g.rarity)) \(tnGearName(g))"
+        }
+        save()
+        return "📅 Điểm danh ngày \(idx + 1)/7: +\(r.linhThach) linh thạch\(extra)"
+    }
+
+    // ===== Vòng quay may mắn =====
+    func spinWheel() -> (prize: TNWheelPrize, msg: String)? {
+        let cost = 100
+        guard s.linhThach >= cost else { return nil }
+        s.linhThach -= cost
+        let p = TN_WHEEL.randomElement()!
+        var got = p.label
+        switch p.kind {
+        case "lt":    s.linhThach += p.amount
+        case "thao":  s.linhThao += p.amount
+        case "thach": s.khoangThach += p.amount
+        case "gear":  let g = dropGear(minRarity: 1); got = "\(tnRarityName(g.rarity)) \(tnGearName(g))"
+        default: break
+        }
+        save()
+        return (p, "🎉 Trúng: \(got)!")
     }
     // Luyện khí: nâng cấp vũ khí/giáp
     func forge(weapon: Bool) -> String {
@@ -1188,6 +1405,10 @@ struct TNHomeView: View {
     @State private var showAchieve = false
     @State private var showChat = false
     @State private var showMarket = false
+    @State private var showBoss = false
+    @State private var showBag = false
+    @State private var showCheckin = false
+    @State private var showTech = false
 
     var body: some View {
         ScrollView {
@@ -1288,6 +1509,10 @@ struct TNHomeView: View {
                     }
 
                     Button { showBattle = true } label: { bigBtn("⚔️ Phiêu Lưu — Luyện Yêu Thú", [.purple, .indigo]) }.buttonStyle(TNPress(glow: .purple))
+                    Button { showBoss = true } label: { bigBtn("👹 Boss Thế Giới & Phụ Bản", [.red, .purple]) }.buttonStyle(TNPress(glow: .red))
+                    Button { showBag = true } label: { bigBtn("🎒 Túi Đồ & Trang Bị", [.brown, .yellow]) }.buttonStyle(TNPress(glow: .yellow))
+                    Button { showTech = true } label: { bigBtn("📖 Tâm Pháp — Cây Kỹ Năng", [.indigo, .blue]) }.buttonStyle(TNPress(glow: .blue))
+                    Button { showCheckin = true } label: { bigBtn("📅 Điểm Danh & Vòng Quay", [.pink, .orange]) }.buttonStyle(TNPress(glow: .pink))
                     Button { showMap = true } label: { bigBtn("🗺️ Bản Đồ — Khám Phá Vùng Đất", [.green, .teal]) }.buttonStyle(TNPress(glow: .green))
                     Button { showPets = true } label: { bigBtn("🐾 Thú Cưng Đồng Hành", [.orange, .pink]) }.buttonStyle(TNPress(glow: .orange))
                     Button { showFashion = true } label: { bigBtn("👗 Thời Trang — Cánh & Hào Quang", [.purple, .pink]) }.buttonStyle(TNPress(glow: .purple))
@@ -1341,6 +1566,10 @@ struct TNHomeView: View {
         .sheet(isPresented: $showAchieve) { TNAchieveView(game: game) }
         .sheet(isPresented: $showChat) { TNChatView(game: game) }
         .sheet(isPresented: $showMarket) { TNMarketView(game: game) }
+        .fullScreenCover(isPresented: $showBoss) { TNBossView(game: game) }
+        .sheet(isPresented: $showBag) { TNBagView(game: game) }
+        .sheet(isPresented: $showCheckin) { TNCheckinView(game: game) }
+        .sheet(isPresented: $showTech) { TNTechView(game: game) }
     }
 
     private func toastMsg(_ m: String) {
@@ -3030,6 +3259,359 @@ struct TNMarketView: View {
     private func flash(_ m: String) {
         withAnimation { msg = m }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Boss Thế Giới & Phụ Bản
+struct TNBossView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab = 0
+    @State private var fightBoss: TNBoss?
+    @State private var fightDungeon: TNDungeon?
+    @State private var showFight = false
+    @State private var toast: String?
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red:0.1,green:0.03,blue:0.12), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            TNCloudsBG()
+            VStack(spacing: 0) {
+                HStack {
+                    Text("👹 BOSS & PHỤ BẢN").font(.title3.bold()).foregroundStyle(.red)
+                    Spacer(); Button("Đóng") { dismiss() }.foregroundStyle(.white)
+                }.padding()
+                Picker("", selection: $tab) {
+                    Text("Boss Thế Giới").tag(0); Text("Phụ Bản").tag(1)
+                }.pickerStyle(.segmented).padding(.horizontal)
+                ScrollView {
+                    VStack(spacing: 10) {
+                        if tab == 0 {
+                            ForEach(TN_BOSSES) { b in bossRow(b) }
+                        } else {
+                            ForEach(TN_DUNGEONS) { d in dungeonRow(d) }
+                        }
+                        Color.clear.frame(height: 20)
+                    }.padding(.top, 10)
+                }
+                if let toast {
+                    Text(toast).font(.footnote.bold()).foregroundStyle(.yellow)
+                        .padding(10).background(.black.opacity(0.6), in: Capsule()).padding(.bottom, 10)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .fullScreenCover(isPresented: $showFight) {
+            TNBattleView(game: game, enemy: currentEnemy(), storyMode: true) { won in
+                if won {
+                    if let b = fightBoss {
+                        let g = game.dropGear(minRarity: b.dropRarity)
+                        flash("🎉 Hạ gục \(b.name)! Rơi \(tnRarityName(g.rarity)) \(tnGearName(g)) 🎁")
+                    } else if let d = fightDungeon {
+                        if !game.s.clearedDungeons.contains(d.id) { game.s.clearedDungeons.append(d.id); game.save() }
+                        let g = game.dropGear(minRarity: 2)
+                        flash("🏆 Vượt \(d.name)! Rơi \(tnRarityName(g.rarity)) \(tnGearName(g)) 🎁")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func bossRow(_ b: TNBoss) -> some View {
+        let locked = game.s.realm < b.minRealm
+        HStack(spacing: 12) {
+            Text(b.emoji).font(.system(size: 34)).frame(width: 56, height: 56)
+                .background(.red.opacity(0.18), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(locked ? Image(systemName: "lock.fill").foregroundStyle(.white.opacity(0.8)) : nil)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(b.name).font(.subheadline.bold()).foregroundStyle(.white)
+                Text(b.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                Text("💎 \(b.reward) · 🎁 rơi \(tnRarityName(b.dropRarity))+").font(.system(size: 10, weight: .bold)).foregroundStyle(.orange)
+            }
+            Spacer()
+            if locked {
+                Text("Cần \(TNRealm(rawValue: b.minRealm)?.name ?? "")").font(.caption2).foregroundStyle(.white.opacity(0.5)).frame(width: 70)
+            } else {
+                Button("Khiêu chiến") { fightBoss = b; fightDungeon = nil; showFight = true }
+                    .font(.caption.bold()).foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 8).background(.red, in: Capsule())
+                    .buttonStyle(TNPress(glow: .red))
+            }
+        }
+        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).opacity(locked ? 0.55 : 1).padding(.horizontal)
+    }
+
+    @ViewBuilder private func dungeonRow(_ d: TNDungeon) -> some View {
+        let locked = game.s.realm < d.minRealm
+        let cleared = game.s.clearedDungeons.contains(d.id)
+        HStack(spacing: 12) {
+            Text(d.emoji).font(.system(size: 34)).frame(width: 56, height: 56)
+                .background(d.color.opacity(0.2), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(locked ? Image(systemName: "lock.fill").foregroundStyle(.white.opacity(0.8)) : nil)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(d.name).font(.subheadline.bold()).foregroundStyle(.white)
+                Text(d.desc).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                Text("⚔️ \(d.waves) ải · 💎 \(d.reward)\(cleared ? " · ✅ đã vượt" : "")").font(.system(size: 10, weight: .bold)).foregroundStyle(d.color)
+            }
+            Spacer()
+            if locked {
+                Text("Cần \(TNRealm(rawValue: d.minRealm)?.name ?? "")").font(.caption2).foregroundStyle(.white.opacity(0.5)).frame(width: 70)
+            } else {
+                Button("Vào phụ bản") { fightDungeon = d; fightBoss = nil; showFight = true }
+                    .font(.caption.bold()).foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 8).background(d.color, in: Capsule())
+                    .buttonStyle(TNPress(glow: d.color))
+            }
+        }
+        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).opacity(locked ? 0.55 : 1).padding(.horizontal)
+    }
+
+    private func currentEnemy() -> TNEnemy {
+        if let b = fightBoss {
+            let hp = Int(Double(game.s.hpMax) * b.hpMul)
+            return TNEnemy(name: b.name, emoji: b.emoji, hp: hp, hpMax: hp,
+                           atk: Int(Double(game.s.atk) * 0.8 * b.atkMul), def: Int(Double(game.s.def) * 0.9),
+                           reward: b.reward, exp: b.reward, isBoss: true)
+        } else if let d = fightDungeon {
+            let hp = Int(Double(game.s.hpMax) * Double(d.waves) * 1.2)
+            return TNEnemy(name: "\(d.name) · Thủ Lĩnh", emoji: d.emoji, hp: hp, hpMax: hp,
+                           atk: Int(Double(game.s.atk) * 0.72), def: Int(Double(game.s.def) * 0.85),
+                           reward: d.reward, exp: d.reward, isBoss: true)
+        }
+        let hp = game.s.hpMax * 2
+        return TNEnemy(name: "Yêu Thú", emoji: "🐺", hp: hp, hpMax: hp, atk: game.s.atk / 2, def: game.s.def / 2, reward: 100, exp: 100, isBoss: true)
+    }
+    private func flash(_ m: String) {
+        withAnimation { toast = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { withAnimation { if toast == m { toast = nil } } }
+    }
+}
+
+// MARK: - Túi Đồ & Trang Bị
+struct TNBagView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("🎒 TÚI ĐỒ").font(.title3.bold()).foregroundStyle(.yellow)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal).padding(.top, 8)
+
+                    // Đang mặc
+                    VStack(spacing: 8) {
+                        Text("Đang trang bị").font(.caption.bold()).foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, alignment: .leading)
+                        equippedRow("weapon", game.s.equipWeapon)
+                        equippedRow("armor", game.s.equipArmor)
+                        equippedRow("accessory", game.s.equipAccessory)
+                        Text("Tổng lực chiến: ⚔️\(game.s.atk) · 🛡️\(game.s.def) · ❤️\(game.s.hpMax)")
+                            .font(.caption2.bold()).foregroundStyle(.orange).padding(.top, 2)
+                    }
+                    .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+
+                    Text("Kho đồ (\(game.s.inventory.count))").font(.caption.bold()).foregroundStyle(.white.opacity(0.7))
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
+                    if game.s.inventory.isEmpty {
+                        Text("Túi trống — đánh Boss / phụ bản / điểm danh để nhặt trang bị.")
+                            .font(.caption).foregroundStyle(.white.opacity(0.5)).padding()
+                    }
+                    ForEach(game.s.inventory) { g in gearRow(g) }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.09,green:0.07,blue:0.03), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Túi Đồ").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+        }
+    }
+    @ViewBuilder private func equippedRow(_ slot: String, _ g: TNGearData?) -> some View {
+        HStack(spacing: 10) {
+            Text(tnSlotIcon(slot)).font(.system(size: 24)).frame(width: 40)
+            if let g {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(tnGearName(g))").font(.subheadline.bold()).foregroundStyle(tnRarityColor(g.rarity))
+                    Text("⚔️+\(g.atk) 🛡️+\(g.def) ❤️+\(g.hp)").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.7))
+                }
+                Spacer()
+                Button("Tháo") { game.unequip(slot) }.font(.caption2.bold()).foregroundStyle(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 5).background(.gray.opacity(0.7), in: Capsule())
+            } else {
+                Text("[\(tnSlotName(slot))] — trống").font(.caption).foregroundStyle(.white.opacity(0.4))
+                Spacer()
+            }
+        }
+    }
+    @ViewBuilder private func gearRow(_ g: TNGearData) -> some View {
+        HStack(spacing: 12) {
+            Text(tnSlotIcon(g.slot)).font(.system(size: 28)).frame(width: 48, height: 48)
+                .background(tnRarityColor(g.rarity).opacity(0.2), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(tnGearName(g))").font(.subheadline.bold()).foregroundStyle(tnRarityColor(g.rarity))
+                Text("\(tnRarityName(g.rarity)) · \(tnSlotName(g.slot))").font(.caption2).foregroundStyle(.white.opacity(0.55))
+                Text("⚔️+\(g.atk) 🛡️+\(g.def) ❤️+\(g.hp)").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.75))
+            }
+            Spacer()
+            VStack(spacing: 5) {
+                Button("Mặc") { game.equipGear(g); flash("✅ Đã trang bị \(tnGearName(g))") }
+                    .font(.caption2.bold()).foregroundStyle(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 5).background(.blue, in: Capsule())
+                Button("Bán 💎\(tnGearValue(g))") { flash(game.sellGear(g)) }
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 4).background(.green.opacity(0.7), in: Capsule())
+            }
+        }
+        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+    }
+    private func flash(_ m: String) {
+        withAnimation { msg = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Tâm Pháp (cây kỹ năng nâng cấp)
+struct TNTechView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack {
+                        Text("📖 TÂM PHÁP").font(.title3.bold()).foregroundStyle(.indigo)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal).padding(.top, 8)
+                    Text("Tu luyện tâm pháp để tăng chỉ số vĩnh viễn.")
+                        .font(.caption).foregroundStyle(.white.opacity(0.6))
+                    ForEach(TN_TECHNIQUES) { t in
+                        let lv = game.techLevel(t.id)
+                        let maxed = lv >= t.maxLv
+                        let cost = game.techCost(t)
+                        VStack(spacing: 8) {
+                            HStack(spacing: 12) {
+                                Text(t.emoji).font(.system(size: 32)).frame(width: 54, height: 54)
+                                    .background(t.color.opacity(0.2), in: RoundedRectangle(cornerRadius: 14))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t.name).font(.headline).foregroundStyle(.white)
+                                    Text(t.perLv).font(.caption2).foregroundStyle(t.color)
+                                    Text("Cấp \(lv)/\(t.maxLv)").font(.caption2.bold()).foregroundStyle(.white.opacity(0.7))
+                                }
+                                Spacer()
+                                Button(maxed ? "TỐI ĐA" : "💎\(cost)") { msg = game.upgradeTech(t); TNHaptic.success() }
+                                    .font(.caption.bold()).foregroundStyle(.white)
+                                    .padding(.horizontal, 12).padding(.vertical, 8)
+                                    .background(maxed ? Color.gray : (game.s.linhThach >= cost ? t.color : Color.gray), in: Capsule())
+                                    .disabled(maxed)
+                            }
+                            // Thanh cấp
+                            GeometryReader { geo in
+                                HStack(spacing: 3) {
+                                    ForEach(0..<t.maxLv, id: \.self) { i in
+                                        RoundedRectangle(cornerRadius: 2)
+                                            .fill(i < lv ? t.color : Color.white.opacity(0.12))
+                                            .frame(height: 6)
+                                    }
+                                }.frame(width: geo.size.width)
+                            }.frame(height: 6)
+                        }
+                        .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+                    }
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.05,green:0.05,blue:0.13), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Tâm Pháp").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+        }
+    }
+}
+
+// MARK: - Điểm Danh & Vòng Quay May Mắn
+struct TNCheckinView: View {
+    @ObservedObject var game: TNGame
+    @Environment(\.dismiss) private var dismiss
+    @State private var msg: String?
+    @State private var spinning = false
+    @State private var spinPrize: TNWheelPrize?
+    @State private var wheelIdx = 0
+    private let spinTimer = Timer.publish(every: 0.09, on: .main, in: .common).autoconnect()
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("📅 ĐIỂM DANH").font(.title3.bold()).foregroundStyle(.pink)
+                        Spacer(); Text("💎 \(game.s.linhThach)").foregroundStyle(.cyan).bold()
+                    }.padding(.horizontal).padding(.top, 8)
+
+                    // Lịch điểm danh 7 ngày
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                        ForEach(TN_CHECKIN) { r in
+                            let done = game.s.checkinCount > 0 && r.id < game.checkinToday
+                            let isToday = r.id == game.checkinToday && game.checkinReady
+                            VStack(spacing: 3) {
+                                Text("Ngày \(r.id + 1)").font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.7))
+                                Text(r.bonus.isEmpty ? "💎" : "🎁").font(.system(size: 22))
+                                Text("\(r.linhThach)").font(.system(size: 9, weight: .bold)).foregroundStyle(.cyan)
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 8)
+                            .background((isToday ? Color.pink.opacity(0.3) : Color.white.opacity(0.05)), in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(isToday ? .pink : .clear, lineWidth: 1.5))
+                            .overlay(alignment: .topTrailing) { if done { Text("✓").font(.system(size: 10, weight: .heavy)).foregroundStyle(.green).padding(3) } }
+                        }
+                    }.padding(.horizontal)
+
+                    Button { msg = game.doCheckin(); TNHaptic.success() } label: {
+                        Text(game.checkinReady ? "📅 ĐIỂM DANH HÔM NAY" : "✓ Đã điểm danh hôm nay")
+                            .font(.headline).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 14)
+                            .background(game.checkinReady ? LinearGradient(colors: [.pink, .orange], startPoint: .leading, endPoint: .trailing) : LinearGradient(colors: [.gray, .gray], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
+                    }.disabled(!game.checkinReady).buttonStyle(TNPress(glow: .pink)).padding(.horizontal)
+                    Text("Đã điểm danh tích luỹ \(game.s.checkinCount) ngày").font(.caption2).foregroundStyle(.white.opacity(0.6))
+
+                    Divider().background(.white.opacity(0.2)).padding(.horizontal)
+
+                    // Vòng quay may mắn
+                    Text("🎡 VÒNG QUAY MAY MẮN").font(.subheadline.bold()).foregroundStyle(.orange)
+                    Text(TN_WHEEL[wheelIdx].emoji).font(.system(size: 60))
+                        .scaleEffect(spinning ? 1.15 : 1.0)
+                    Text(TN_WHEEL[wheelIdx].label).font(.caption.bold()).foregroundStyle(TN_WHEEL[wheelIdx].color)
+                    Button { spin() } label: {
+                        Text(spinning ? "Đang quay…" : "🎡 QUAY (100 💎)")
+                            .font(.headline).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 14)
+                            .background(LinearGradient(colors: [.orange, .yellow], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 14))
+                    }.disabled(spinning || game.s.linhThach < 100).buttonStyle(TNPress(glow: .orange)).padding(.horizontal)
+
+                    if let msg { Text(msg).font(.footnote.bold()).foregroundStyle(.yellow).multilineTextAlignment(.center).padding(.horizontal) }
+                    Color.clear.frame(height: 20)
+                }
+            }
+            .background(LinearGradient(colors: [Color(red:0.12,green:0.05,blue:0.08), .black], startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+            .navigationTitle("Điểm Danh & Vòng Quay").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .preferredColorScheme(.dark)
+            .onReceive(spinTimer) { _ in if spinning { wheelIdx = (wheelIdx + 1) % TN_WHEEL.count } }
+        }
+    }
+    private func spin() {
+        guard let result = game.spinWheel() else { msg = "❌ Thiếu linh thạch (cần 100)."; return }
+        spinning = true; msg = nil
+        // Dừng ở ô trúng sau ~1.6s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            spinning = false
+            if let idx = TN_WHEEL.firstIndex(where: { $0.id == result.prize.id }) { wheelIdx = idx }
+            msg = result.msg
+            TNHaptic.success()
+        }
     }
 }
 
