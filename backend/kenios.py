@@ -6493,7 +6493,7 @@ def _ai_err(status: int, text: str) -> str:
         return ("⚠️ AI đang bị GIỚI HẠN LƯỢT (quota – lỗi 429).\n"
                 "Cách xử lý:\n"
                 "• Chờ ~1 phút rồi hỏi lại (giới hạn theo phút), hoặc\n"
-                "• Hết hạn mức MIỄN PHÍ trong ngày → đổi model nhẹ hơn: /aimodel gemini-2.0-flash-lite\n"
+                "• Hết hạn mức MIỄN PHÍ trong ngày → đổi model khác: /aimodel gemini-2.5-flash (hoặc gemini-flash-lite-latest)\n"
                 "• Hoặc đổi sang GROQ (miễn phí, hạn mức rộng):\n"
                 "  /aiurl https://api.groq.com/openai/v1 · /aimodel llama-3.3-70b-versatile · /aikey <khoá groq>")
     if status in (401, 403) or "unauthor" in t or "permission" in t or ("api key" in t) or ("invalid" in t and "key" in t):
@@ -6501,7 +6501,7 @@ def _ai_err(status: int, text: str) -> str:
     if status == 404 or "not found" in t or "does not exist" in t:
         _, _, model, _ = _ai_cfg()
         return (f"⚠️ Không tìm thấy model '{model}' (lỗi 404). Đổi tên model bằng /aimodel — "
-                "vd /aimodel gemini-2.0-flash (Gemini) hoặc /aimodel llama-3.3-70b-versatile (Groq).")
+                "vd /aimodel gemini-2.5-flash (Gemini) hoặc /aimodel llama-3.3-70b-versatile (Groq).")
     return f"⚠️ AI báo lỗi {status}. Thử lại sau ít phút, hoặc gõ /aiset để kiểm tra cấu hình."
 
 def _ai_answer(question: str) -> str:
