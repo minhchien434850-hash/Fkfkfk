@@ -1,6 +1,18 @@
 import SwiftUI
 import UIKit
 
+// Hiệu ứng NHẤN nút: thu nhỏ + phát sáng khi bấm (áp cho nút skill, điều hướng…)
+struct TNPress: ButtonStyle {
+    var glow: Color = .white
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.9 : 1.0)
+            .brightness(configuration.isPressed ? 0.15 : 0)
+            .shadow(color: glow.opacity(configuration.isPressed ? 0.9 : 0.0), radius: configuration.isPressed ? 12 : 0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.5), value: configuration.isPressed)
+    }
+}
+
 // ============================================================================
 //  🐉 TIÊN NGHỊCH — game nhập vai tu tiên (single-player) trong app KENIOS.
 //  Cảnh giới tu luyện · chiến đấu theo lượt · hiệu ứng tung chiêu/skill/skin ·
@@ -100,8 +112,46 @@ let TN_SKINS: [TNSkin] = [
 ]
 func tnSkin(_ id: String) -> TNSkin { TN_SKINS.first { $0.id == id } ?? TN_SKINS[0] }
 
+// MARK: - Môn phái
+struct TNSect: Identifiable {
+    let id: String
+    let name: String
+    let emoji: String
+    let desc: String
+    let colors: [Color]
+    let atkMul: Double
+    let defMul: Double
+    let hpMul: Double
+    let startSkill: String
+    let skin: String
+}
+let TN_SECTS: [TNSect] = [
+    TNSect(id: "hamtien", name: "Hàm Tiên Cổ Tông", emoji: "⚔️",
+           desc: "Kiếm tu chính đạo · công kích cao, ngự kiếm sát địch từ xa.",
+           colors: [.cyan, .blue], atkMul: 1.18, defMul: 1.0, hpMul: 1.0, startSkill: "kiem", skin: "thanhvan"),
+    TNSect(id: "thiendao", name: "Thiên Đạo Các", emoji: "⚡",
+           desc: "Pháp tu lôi hệ · điều khiển sấm sét, cân bằng công thủ.",
+           colors: [.yellow, .orange], atkMul: 1.08, defMul: 1.05, hpMul: 1.05, startSkill: "loi", skin: "tim"),
+    TNSect(id: "matoc", name: "Ma Tộc", emoji: "🩸",
+           desc: "Ma tu huyết đạo · hút sinh lực đối thủ, càng đánh càng khỏe.",
+           colors: [.red, Color(red:0.5,green:0,blue:0)], atkMul: 1.12, defMul: 0.92, hpMul: 1.08, startSkill: "huyet", skin: "huyet"),
+    TNSect(id: "yeutoc", name: "Yêu Tộc", emoji: "❄️",
+           desc: "Yêu tu luyện thể · phòng thủ cực cao, băng hàn khống chế.",
+           colors: [Color(red:0.5,green:0.8,blue:1.0), .teal], atkMul: 0.96, defMul: 1.22, hpMul: 1.18, startSkill: "bang", skin: "thanhvan"),
+    TNSect(id: "thanhdia", name: "Thánh Địa", emoji: "🌿",
+           desc: "Đan/Y tu · máu trâu, hồi phục mạnh, bền bỉ trường kỳ.",
+           colors: [.green, .mint], atkMul: 0.92, defMul: 1.12, hpMul: 1.28, startSkill: "kiem", skin: "default"),
+]
+func tnSect(_ id: String) -> TNSect { TN_SECTS.first { $0.id == id } ?? TN_SECTS[0] }
+
 // MARK: - Dữ liệu lưu
 struct TNSave: Codable {
+    var created = false
+    var name = "Vương Lâm"
+    var server = "Thiên Nam"
+    var sect = "hamtien"
+    var level = 1            // Cấp độ 1–100 (làm nhiệm vụ để lên)
+    var levelExp = 0
     var realm = 0
     var stage = 1            // tầng trong cảnh giới (1–9)
     var exp = 0
@@ -112,11 +162,18 @@ struct TNSave: Codable {
     var ownedSkins = ["default"]
     var skills = ["kiem"]
 
-    var expMax: Int { 80 + (realm * 9 + stage) * 45 }
-    var hpMax: Int { 120 + (realm * 9 + stage) * 70 }
-    var mpMax: Int { 60 + (realm * 9 + stage) * 40 }
-    var atk: Int { 18 + (realm * 9 + stage) * 12 }
-    var def: Int { 4 + (realm * 9 + stage) * 4 }
+    private var tier: Int { realm * 9 + stage }
+    private var sectAtk: Double { tnSect(sect).atkMul }
+    private var sectDef: Double { tnSect(sect).defMul }
+    private var sectHp: Double { tnSect(sect).hpMul }
+
+    var levelExpMax: Int { level * 120 }
+    var isMaxLevel: Bool { level >= 100 }
+    var expMax: Int { 80 + tier * 45 }
+    var hpMax: Int { Int(Double(120 + tier * 70 + level * 22) * sectHp) }
+    var mpMax: Int { 60 + tier * 40 + level * 6 }
+    var atk: Int { Int(Double(18 + tier * 12 + level * 4) * sectAtk) }
+    var def: Int { Int(Double(4 + tier * 4 + level) * sectDef) }
     var realmEnum: TNRealm { TNRealm(rawValue: min(realm, TNRealm.allCases.count - 1)) ?? .luyenKhi }
     var canBreakthrough: Bool { exp >= expMax }
     var powerScore: Int { atk * 3 + def * 5 + hpMax }
@@ -272,9 +329,26 @@ final class TNGame: ObservableObject {
             s.skills.append(sk.id)
         }
     }
+    // Nhận exp CẤP ĐỘ (1–100). Trả về số cấp vừa lên.
+    @discardableResult
+    func gainLevelExp(_ amount: Int) -> Int {
+        guard !s.isMaxLevel else { s.levelExp = 0; save(); return 0 }
+        var up = 0
+        s.levelExp += max(0, amount)
+        while !s.isMaxLevel && s.levelExp >= s.levelExpMax {
+            s.levelExp -= s.levelExpMax
+            s.level += 1
+            up += 1
+            s.hp = s.hpMax           // lên cấp hồi đầy máu
+        }
+        if s.isMaxLevel { s.levelExp = 0 }
+        save()
+        return up
+    }
     func reward(linhThach: Int, exp: Int) {
         s.linhThach += linhThach
         s.exp = min(s.exp + exp, s.expMax)
+        gainLevelExp(exp)            // đánh quái cũng lên CẤP
         save()
     }
     func buySkin(_ skin: TNSkin) -> Bool {
@@ -286,6 +360,25 @@ final class TNGame: ObservableObject {
     }
     func equipSkin(_ id: String) { if s.ownedSkins.contains(id) { s.skin = id; save() } }
     func heal() { s.hp = s.hpMax; save() }
+
+    // Tạo nhân vật mới (server + tên + môn phái)
+    func createCharacter(name: String, server: String, sect: TNSect) {
+        var v = TNSave()
+        v.created = true
+        v.name = name.trimmingCharacters(in: .whitespaces).isEmpty ? "Vương Lâm" : String(name.prefix(16))
+        v.server = server
+        v.sect = sect.id
+        var sk = [sect.startSkill]
+        if !sk.contains("kiem") { sk.insert("kiem", at: 0) }   // ai cũng có kiếm cơ bản
+        v.skills = sk
+        v.skin = sect.skin
+        v.ownedSkins = ["default"]
+        if sect.skin != "default" { v.ownedSkins.append(sect.skin) }
+        v.hp = v.hpMax
+        s = v
+        save()
+    }
+    func resetGame() { s = TNSave(); save() }
 }
 
 // MARK: - Root
@@ -300,17 +393,22 @@ struct TienNghichGameView: View {
                                     Color(red: 0.02, green: 0.03, blue: 0.08)],
                            startPoint: .top, endPoint: .bottom).ignoresSafeArea()
             TNCloudsBG()
-            VStack(spacing: 0) {
-                Group {
-                    switch tab {
-                    case 0: TNHomeView(game: game, tab: $tab)
-                    case 1: TNStoryView(game: game)
-                    case 2: TNSkillsView(game: game)
-                    default: TNShopView(game: game)
+            if !game.s.created {
+                TNCreateView(game: game)
+            } else {
+                VStack(spacing: 0) {
+                    Group {
+                        switch tab {
+                        case 0: TNHomeView(game: game, tab: $tab)
+                        case 1: TNQuestView(game: game)
+                        case 2: TNStoryView(game: game)
+                        case 3: TNSkillsView(game: game)
+                        default: TNShopView(game: game)
+                        }
                     }
+                    .frame(maxHeight: .infinity)
+                    TNTabBar(tab: $tab)
                 }
-                .frame(maxHeight: .infinity)
-                TNTabBar(tab: $tab)
             }
         }
         .preferredColorScheme(.dark)
@@ -322,8 +420,8 @@ struct TienNghichGameView: View {
 // MARK: - Thanh tab dưới
 struct TNTabBar: View {
     @Binding var tab: Int
-    private let items = [("Tu Luyện", "figure.mind.and.body"), ("Cốt Truyện", "book.fill"),
-                         ("Kỹ Năng", "flame.fill"), ("Cửa Hàng", "bag.fill")]
+    private let items = [("Tu Luyện", "figure.mind.and.body"), ("Nhiệm Vụ", "list.bullet.clipboard.fill"),
+                         ("Cốt Truyện", "book.fill"), ("Kỹ Năng", "flame.fill"), ("Cửa Hàng", "bag.fill")]
     var body: some View {
         HStack {
             ForEach(items.indices, id: \.self) { i in
@@ -334,7 +432,9 @@ struct TNTabBar: View {
                     }
                     .foregroundStyle(tab == i ? Color.yellow : .white.opacity(0.5))
                     .frame(maxWidth: .infinity)
+                    .scaleEffect(tab == i ? 1.12 : 1.0)
                 }
+                .buttonStyle(TNPress(glow: .yellow))
             }
         }
         .padding(.vertical, 10)
@@ -454,13 +554,17 @@ struct TNHomeView: View {
                 TNHeroAvatar(skin: tnSkin(game.s.skin), realm: game.s.realmEnum)
                     .scaleEffect(meditating ? 1.06 : 1.0)
 
-                Text("Vương Lâm").font(.title2.bold()).foregroundStyle(.white)
+                Text(game.s.name).font(.title2.bold()).foregroundStyle(.white)
                 HStack(spacing: 8) {
                     Text(game.s.realmEnum.name).bold()
                         .padding(.horizontal, 12).padding(.vertical, 5)
                         .background(game.s.realmEnum.color.opacity(0.35), in: Capsule())
                         .overlay(Capsule().strokeBorder(game.s.realmEnum.color, lineWidth: 1))
                     Text("Tầng \(game.s.stage)").font(.subheadline).foregroundStyle(.white.opacity(0.8))
+                    Text("⭐ Cấp \(game.s.level)").font(.caption.bold())
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.yellow.opacity(0.25), in: Capsule())
+                        .overlay(Capsule().strokeBorder(.yellow, lineWidth: 1))
                 }
                 .foregroundStyle(.white)
 
@@ -485,18 +589,18 @@ struct TNHomeView: View {
                         withAnimation(.spring()) {}
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { meditating = false }
                         toastMsg("🧘 Thiền định — tu vi +\(max(6, game.s.expMax/12))")
-                    } label: { bigBtn("🧘 Tu Luyện (thiền lấy tu vi)", [.teal, .blue]) }
+                    } label: { bigBtn("🧘 Tu Luyện (thiền lấy tu vi)", [.teal, .blue]) }.buttonStyle(TNPress(glow: .teal))
 
                     if game.s.canBreakthrough {
                         Button {
                             toastMsg(game.breakthrough())
-                        } label: { bigBtn("⚡ ĐỘT PHÁ CẢNH GIỚI!", [.orange, .red]) }
+                        } label: { bigBtn("⚡ ĐỘT PHÁ CẢNH GIỚI!", [.orange, .red]) }.buttonStyle(TNPress(glow: .orange))
                             .shadow(color: .orange, radius: 10)
                     }
 
-                    Button { showBattle = true } label: { bigBtn("⚔️ Phiêu Lưu — Luyện Yêu Thú", [.purple, .indigo]) }
-                    Button { tab = 1 } label: { bigBtn("📖 Đi Theo Cốt Truyện", [.brown, .orange]) }
-                    Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }
+                    Button { showBattle = true } label: { bigBtn("⚔️ Phiêu Lưu — Luyện Yêu Thú", [.purple, .indigo]) }.buttonStyle(TNPress(glow: .purple))
+                    Button { tab = 1 } label: { bigBtn("📖 Đi Theo Cốt Truyện", [.brown, .orange]) }.buttonStyle(TNPress(glow: .orange))
+                    Button { showChars = true } label: { bigBtn("🖼️ Thư Viện Nhân Vật", [.pink, .purple]) }.buttonStyle(TNPress(glow: .pink))
                 }
                 .padding(.horizontal)
 
@@ -619,7 +723,7 @@ struct TNBattleView: View {
                 VStack(spacing: 6) {
                     if let dmg { TNDamageText(text: dmg.0, color: dmg.1).id(dmg.0 + UUID().uuidString) }
                     TNHeroAvatar(skin: tnSkin(game.s.skin), realm: game.s.realmEnum, size: 84)
-                    Text("Vương Lâm — \(game.s.realmEnum.name)").font(.subheadline).foregroundStyle(.white)
+                    Text("\(game.s.name) — \(game.s.realmEnum.name)").font(.subheadline).foregroundStyle(.white)
                     TNBar(value: game.s.hp, maxValue: game.s.hpMax, colors: [.green, .mint], label: "❤️").frame(width: 240)
                     TNBar(value: mp, maxValue: game.s.mpMax, colors: [.blue, .cyan], label: "🔷").frame(width: 240)
                 }
@@ -667,6 +771,7 @@ struct TNBattleView: View {
             .background((sk?.color ?? .gray).opacity(usable ? 0.35 : 0.12), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder((sk?.color ?? .gray).opacity(usable ? 0.9 : 0.3), lineWidth: 1))
         }
+        .buttonStyle(TNPress(glow: sk?.color ?? .white))
         .disabled(busy || ended || !usable)
     }
     private func meditateBtn() -> some View {
@@ -677,13 +782,13 @@ struct TNBattleView: View {
                 Text("+MP").font(.system(size: 8))
             }.foregroundStyle(.white).frame(width: 82, height: 74)
             .background(Color.teal.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
-        }.disabled(busy || ended)
+        }.buttonStyle(TNPress(glow: .teal)).disabled(busy || ended)
     }
 
     private func basicAttack() {
         let d = max(3, Int(Double(game.s.atk) * Double.random(in: 0.7...0.95)) - enemy.def)
         fx = (.gray, "👊")
-        hitEnemy(d, "Vương Lâm vung quyền!", .white)
+        hitEnemy(d, "\(game.s.name) vung quyền!", .white)
     }
     private func useSkill(_ sk: TNSkill) {
         guard mp >= sk.mp else { return }
@@ -943,6 +1048,231 @@ struct TNShopView: View {
     private func flash(_ m: String) {
         withAnimation { msg = m }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if msg == m { msg = nil } } }
+    }
+}
+
+// MARK: - Tạo nhân vật (chọn server · nhập tên · chọn môn phái)
+struct TNCreateView: View {
+    @ObservedObject var game: TNGame
+    @State private var step = 0
+    @State private var name = ""
+    @State private var server = "Thiên Nam"
+    @State private var sect = "hamtien"
+
+    private let servers: [(String, String, Int)] = [
+        ("Thiên Nam", "🟢 Mượt", 1287), ("Bắc Cương", "🟢 Mượt", 964),
+        ("Nam Cương", "🟡 Đông", 2510), ("Tây Vực", "🟢 Mượt", 733),
+        ("Đông Hải", "🔴 Full", 3902), ("Tu Chân Giới", "🆕 Mới mở", 158),
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Tiêu đề
+            VStack(spacing: 4) {
+                Text("TIÊN NGHỊCH").font(.system(size: 30, weight: .black, design: .serif))
+                    .foregroundStyle(LinearGradient(colors: [.yellow, .orange, .white], startPoint: .leading, endPoint: .trailing))
+                    .shadow(color: .orange.opacity(0.6), radius: 8)
+                Text(["① Chọn Máy Chủ", "② Đặt Đạo Hiệu", "③ Chọn Môn Phái"][step])
+                    .font(.subheadline).foregroundStyle(.white.opacity(0.8))
+            }.padding(.top, 24).padding(.bottom, 12)
+
+            ScrollView {
+                switch step {
+                case 0: serverStep
+                case 1: nameStep
+                default: sectStep
+                }
+            }
+
+            // Nút điều hướng
+            HStack(spacing: 12) {
+                if step > 0 {
+                    Button { withAnimation { step -= 1 } } label: {
+                        Text("◀ Quay lại").font(.headline).foregroundStyle(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 14)
+                            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+                Button {
+                    if step < 2 { withAnimation { step += 1 } }
+                    else { game.createCharacter(name: name, server: server, sect: tnSect(sect)) }
+                } label: {
+                    Text(step < 2 ? "Tiếp ▶" : "⚔️ VÀO GAME").font(.headline).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .background(LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing),
+                                    in: RoundedRectangle(cornerRadius: 14))
+                }
+            }
+            .padding()
+        }
+        .foregroundStyle(.white)
+    }
+
+    private var serverStep: some View {
+        VStack(spacing: 10) {
+            ForEach(servers, id: \.0) { sv in
+                Button { server = sv.0 } label: {
+                    HStack {
+                        Image(systemName: "server.rack").foregroundStyle(.cyan)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(sv.0).font(.headline)
+                            Text("\(sv.1) · \(sv.2) đạo hữu online").font(.caption2).foregroundStyle(.white.opacity(0.6))
+                        }
+                        Spacer()
+                        if server == sv.0 { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                    }
+                    .padding(14)
+                    .background((server == sv.0 ? Color.orange.opacity(0.25) : Color.white.opacity(0.06)),
+                               in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(server == sv.0 ? Color.orange : .clear, lineWidth: 1.5))
+                }
+                .foregroundStyle(.white)
+            }
+        }.padding(.horizontal)
+    }
+
+    private var nameStep: some View {
+        VStack(spacing: 16) {
+            TNHeroAvatar(skin: tnSkin(tnSect(sect).skin), realm: .luyenKhi, size: 110).padding(.top, 20)
+            Text("Nhập đạo hiệu của ngươi:").font(.subheadline).foregroundStyle(.white.opacity(0.8))
+            TextField("Vương Lâm", text: $name)
+                .multilineTextAlignment(.center).font(.title3.bold())
+                .padding().background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 40)
+            Text("Tối đa 16 ký tự. Để trống sẽ dùng \"Vương Lâm\".")
+                .font(.caption2).foregroundStyle(.white.opacity(0.5))
+        }
+    }
+
+    private var sectStep: some View {
+        VStack(spacing: 10) {
+            ForEach(TN_SECTS) { sc in
+                Button { sect = sc.id } label: {
+                    HStack(spacing: 12) {
+                        Text(sc.emoji).font(.system(size: 34))
+                            .frame(width: 56, height: 56)
+                            .background(LinearGradient(colors: sc.colors, startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 14))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(sc.name).font(.headline)
+                            Text(sc.desc).font(.caption2).foregroundStyle(.white.opacity(0.65)).fixedSize(horizontal: false, vertical: true)
+                            Text("⚔️x\(String(format:"%.2f",sc.atkMul)) · 🛡️x\(String(format:"%.2f",sc.defMul)) · ❤️x\(String(format:"%.2f",sc.hpMul))")
+                                .font(.system(size: 9, weight: .bold)).foregroundStyle(sc.colors.first!)
+                        }
+                        Spacer()
+                        if sect == sc.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.green) }
+                    }
+                    .padding(12)
+                    .background((sect == sc.id ? sc.colors.first!.opacity(0.22) : Color.white.opacity(0.06)),
+                               in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(sect == sc.id ? sc.colors.first! : .clear, lineWidth: 1.5))
+                }
+                .foregroundStyle(.white)
+            }
+        }.padding(.horizontal)
+    }
+}
+
+// MARK: - Nhiệm vụ (làm nhiệm vụ tăng EXP cấp độ)
+struct TNQuestView: View {
+    @ObservedObject var game: TNGame
+    @State private var toast: String?
+    @State private var cooldowns: [String: Date] = [:]
+    @State private var showBattle = false
+
+    // (id, tên, mô tả, exp, linh thạch, loại) — loại: "instant" hoặc "battle"
+    private var quests: [(String, String, String, Int, Int, String)] {
+        let L = game.s.level
+        return [
+            ("thien", "🧘 Bế Quan Tu Luyện", "Ngồi thiền hấp thu linh khí.", 30 + L*8, 10 + L*2, "instant"),
+            ("thao", "🌿 Hái Linh Thảo", "Vào Dược Viên hái thảo dược.", 22 + L*6, 18 + L*3, "instant"),
+            ("dan", "🔥 Luyện Đan Dược", "Giúp Liễu Như Yên luyện đan.", 40 + L*10, 25 + L*4, "instant"),
+            ("tuan", "🗺️ Tuần Tra Sơn Môn", "Bảo vệ tông môn khỏi tà tu.", 35 + L*9, 20 + L*3, "instant"),
+            ("san", "⚔️ Săn Yêu Thú (thực chiến)", "Diệt yêu thú — thắng nhận nhiều EXP!", 90 + L*20, 60 + L*8, "battle"),
+        ]
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                Text("📜 NHIỆM VỤ").font(.title2.bold()).foregroundStyle(.white).padding(.top, 10)
+
+                // Cấp độ
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("⭐ Cấp \(game.s.level)").font(.title3.bold()).foregroundStyle(.yellow)
+                        Spacer()
+                        Text(game.s.isMaxLevel ? "TỐI ĐA" : "EXP \(game.s.levelExp)/\(game.s.levelExpMax)")
+                            .font(.caption).foregroundStyle(.white.opacity(0.7))
+                    }
+                    TNBar(value: game.s.isMaxLevel ? 1 : game.s.levelExp,
+                          maxValue: game.s.isMaxLevel ? 1 : game.s.levelExpMax,
+                          colors: [.yellow, .orange], label: "")
+                }
+                .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
+
+                Text("Làm nhiệm vụ để tăng EXP lên cấp (tối đa cấp 100).")
+                    .font(.caption).foregroundStyle(.white.opacity(0.6))
+
+                ForEach(quests, id: \.0) { q in
+                    let cd = cooldownLeft(q.0)
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(q.1).font(.subheadline.bold()).foregroundStyle(.white)
+                            Text(q.2).font(.caption2).foregroundStyle(.white.opacity(0.6))
+                            Text("✨ EXP +\(q.3)  ·  💎 +\(q.4)").font(.system(size: 10, weight: .bold)).foregroundStyle(.orange)
+                        }
+                        Spacer()
+                        Button {
+                            if q.5 == "battle" { showBattle = true }
+                            else { doQuest(q) }
+                        } label: {
+                            Text(cd > 0 ? "\(cd)s" : "Làm")
+                                .font(.caption.bold()).foregroundStyle(.white)
+                                .frame(width: 60).padding(.vertical, 9)
+                                .background(cd > 0 ? Color.gray : Color.green, in: Capsule())
+                        }
+                        .disabled(cd > 0)
+                    }
+                    .padding(12).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14)).padding(.horizontal)
+                }
+
+                if let toast {
+                    Text(toast).font(.footnote.bold()).foregroundStyle(.yellow)
+                        .padding(10).background(.black.opacity(0.5), in: Capsule())
+                }
+                Color.clear.frame(height: 20)
+            }
+        }
+        .fullScreenCover(isPresented: $showBattle) {
+            TNBattleView(game: game, enemy: questEnemy(), storyMode: false) { won in
+                if won { flash("🎉 Hoàn thành! Nhận EXP + linh thạch.") }
+            }
+        }
+    }
+
+    private func cooldownLeft(_ id: String) -> Int {
+        guard let t = cooldowns[id] else { return 0 }
+        return max(0, 15 - Int(Date().timeIntervalSince(t)))
+    }
+    private func doQuest(_ q: (String, String, String, Int, Int, String)) {
+        let up = game.gainLevelExp(q.3)
+        game.s.linhThach += q.4
+        game.save()
+        cooldowns[q.0] = Date()
+        flash(up > 0 ? "🎉 LÊN CẤP \(game.s.level)! " : "✨ +\(q.3) EXP · 💎 +\(q.4)")
+    }
+    private func questEnemy() -> TNEnemy {
+        let names = [("Băng Hổ", "🐯"), ("Lôi Ưng", "🦅"), ("Hắc Điệp", "🦋"), ("Kim Ô", "🐦‍🔥")]
+        let n = names.randomElement()!
+        let lvl = Double(game.s.realm * 9 + game.s.stage + game.s.level / 5)
+        let hp = Int(90 + lvl * 85)
+        return TNEnemy(name: n.0, emoji: n.1, hp: hp, hpMax: hp,
+                       atk: Int(Double(game.s.atk) * 0.6), def: Int(Double(game.s.def) * 0.6),
+                       reward: 60 + Int(lvl*8), exp: 90 + Int(lvl*20))
+    }
+    private func flash(_ m: String) {
+        withAnimation { toast = m }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { if toast == m { toast = nil } } }
     }
 }
 
