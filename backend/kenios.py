@@ -8265,22 +8265,70 @@ def _tg_goodbye_member(token: str, chat: dict, m: dict) -> None:
             return
     _tg_send(token, chat_id, txt)
 
+# Chống chào 2 lần cùng 1 người: khi được thành viên khác THÊM vào, Telegram gửi CẢ
+# "new_chat_members" LẪN "chat_member" → nếu không lọc sẽ chào 2 lần.
+_tg_greet_seen: dict = {}   # (chat_id, uid) -> thời điểm đã chào
+
+def _tg_greet_once(chat_id, uid) -> bool:
+    """True nếu chưa chào người này trong ~20 giây gần đây (cho phép chào)."""
+    now = time.time()
+    for k, ts in list(_tg_greet_seen.items()):
+        if now - ts > 120:
+            _tg_greet_seen.pop(k, None)
+    key = (str(chat_id), str(uid))
+    if now - _tg_greet_seen.get(key, 0) < 20:
+        return False
+    _tg_greet_seen[key] = now
+    return True
+
+def _tg_greet_or_captcha(token: str, chat: dict, m: dict) -> None:
+    """Chào (hoặc bắt captcha) MỘT thành viên mới — dùng chung cho cả 2 kiểu vào nhóm:
+    được thêm vào (new_chat_members) và tự vào qua link/nhóm công khai (chat_member)."""
+    if not m or m.get("is_bot"):
+        return
+    chat_id = str(chat.get("id"))
+    if not _tg_greet_once(chat_id, m.get("id")):
+        return
+    if get_setting("tg_captcha_on", "0") == "1":
+        # Captcha: hạn chế thành viên mới, yêu cầu bấm nút xác minh (chống bot vào spam).
+        uid = m.get("id")
+        _tg_call(token, "restrictChatMember", chat_id=chat_id, user_id=uid,
+                 permissions={"can_send_messages": False})
+        _tg_send(token, chat_id,
+                 f"🛡️ {_tg_mention(m)} hãy bấm nút bên dưới trong 60 giây để xác minh (chống bot).",
+                 buttons=[[{"text": "✅ Tôi không phải bot", "callback_data": f"verify:{uid}"}]])
+    else:
+        _tg_welcome_members(token, chat, [m])
+
 def _tg_on_join(token: str, chat: dict, msg: dict) -> None:
     chat_id = str(chat.get("id"))
     members = [m for m in msg.get("new_chat_members", []) if not m.get("is_bot")]
-    if get_setting("tg_captcha_on", "0") == "1" and members:
-        # Captcha: hạn chế thành viên mới, yêu cầu bấm nút xác minh (chống bot vào spam).
-        for m in members:
-            uid = m.get("id")
-            _tg_call(token, "restrictChatMember", chat_id=chat_id, user_id=uid,
-                     permissions={"can_send_messages": False})
-            _tg_send(token, chat_id,
-                     f"🛡️ {_tg_mention(m)} hãy bấm nút bên dưới trong 60 giây để xác minh (chống bot).",
-                     buttons=[[{"text": "✅ Tôi không phải bot", "callback_data": f"verify:{uid}"}]])
-    else:
-        _tg_welcome_members(token, chat, members)
+    for m in members:
+        _tg_greet_or_captcha(token, chat, m)
     if get_setting("tg_clean_service", "0") == "1":
         _tg_call(token, "deleteMessage", chat_id=chat_id, message_id=msg.get("message_id"))
+
+def _tg_on_chat_member(token: str, cm: dict) -> None:
+    """Sự kiện chat_member: bắt người VỪA VÀO nhóm qua LINK MỜI / tự vào nhóm công khai
+    (những kiểu này KHÔNG có new_chat_members). Chỉ chào khi chuyển từ 'ngoài nhóm'
+    sang 'thành viên'."""
+    chat = cm.get("chat", {})
+    if chat.get("type") not in ("group", "supergroup"):
+        return
+    old = cm.get("old_chat_member", {}) or {}
+    new = cm.get("new_chat_member", {}) or {}
+    user = new.get("user", {}) or {}
+    if user.get("is_bot"):
+        return
+    def _inside(st: dict) -> bool:
+        s = st.get("status")
+        if s in ("member", "administrator", "creator"):
+            return True
+        if s == "restricted":
+            return bool(st.get("is_member"))
+        return False   # left | kicked | none
+    if _inside(new) and not _inside(old):
+        _tg_greet_or_captcha(token, chat, user)
 
 # ---------- Kho dữ liệu module (notes/filters/afk/flood/khoá/từ cấm) ----------
 _tg_flood: dict = {}
@@ -8930,6 +8978,9 @@ def _tg_dispatch_command(token: str, chat_id: str, msg: dict, text: str, uid, fr
     _tg_admin_command(token, chat_id, msg, cmd, args)
 
 def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
+    # Thành viên vào nhóm qua LINK MỜI / nhóm công khai → chào (không có new_chat_members).
+    if u.get("chat_member"):
+        _tg_on_chat_member(token, u["chat_member"]); return
     # Nút bấm (callback)
     cq = u.get("callback_query")
     if cq:
@@ -9211,7 +9262,7 @@ _tg_cmds_done = ""
 
 def _tg_loop() -> None:
     global _tg_offset, _tg_cmds_done
-    import httpx
+    import httpx, json as _json
     while True:
         try:
             token = (get_setting("tg_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
@@ -9221,8 +9272,17 @@ def _tg_loop() -> None:
             admin_chat = (get_setting("tg_admin_chat", "") or os.getenv("TELEGRAM_ADMIN_CHAT", "")).strip()
             if _tg_cmds_done != token + "|" + admin_chat:   # đăng ký menu lệnh khi đổi token/admin
                 _tg_register_commands(token); _tg_cmds_done = token + "|" + admin_chat
+            # allowed_updates PHẢI có "chat_member" thì bot mới nhận được sự kiện
+            # thành viên VÀO NHÓM QUA LINK MỜI / tự tìm vào nhóm công khai (Telegram
+            # KHÔNG gửi "new_chat_members" cho các kiểu vào này — chỉ gửi chat_member,
+            # và bot phải là QUẢN TRỊ VIÊN mới nhận được). Liệt kê đủ để không mất
+            # message/callback (allowed_updates ghi đè cấu hình cũ mỗi lần gọi).
             r = httpx.get(f"https://api.telegram.org/bot{token}/getUpdates",
-                          params={"offset": _tg_offset + 1, "timeout": 25}, timeout=35)
+                          params={"offset": _tg_offset + 1, "timeout": 25,
+                                  "allowed_updates": _json.dumps(
+                                      ["message", "edited_message", "callback_query",
+                                       "my_chat_member", "chat_member", "chat_join_request"])},
+                          timeout=35)
             for upd in r.json().get("result", []):
                 _tg_offset = max(_tg_offset, upd.get("update_id", 0))
                 try:
