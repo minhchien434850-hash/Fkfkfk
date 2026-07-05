@@ -4,7 +4,7 @@ import AVFoundation
 // ======================== Nén video trước khi tải lên ========================
 // Vì sao cần: video quay từ máy thường là 4K/HEVC nặng vài trăm MB. Tải nguyên
 // bản lên rất lâu ("xử lý lâu") và khi phát lại giật vì máy phải giải mã HEVC +
-// tải cả file. Nén về H.264 720p (moov atom đưa lên đầu) giúp:
+// tải cả file. Nén về H.264 1080p (moov atom đưa lên đầu) giúp:
 //   • Tải lên NHANH  — dung lượng giảm 5–10 lần.
 //   • Phát MƯỢT     — H.264 mọi máy giải mã tốt, phát ngay khi vừa tải (stream),
 //                      tua nhanh không cần tải hết.
@@ -22,13 +22,15 @@ enum VideoUploadHelper {
             return src
         }
 
-        // Ưu tiên 720p; nếu máy/định dạng không hỗ trợ thì hạ xuống chất lượng trung bình.
+        // Ưu tiên 1080p (nét đẹp); không hỗ trợ thì hạ 720p → chất lượng trung bình.
         let compatible = AVAssetExportSession.exportPresets(compatibleWith: asset)
-        let preset: String = compatible.contains(AVAssetExportPreset1280x720)
-            ? AVAssetExportPreset1280x720
-            : (compatible.contains(AVAssetExportPresetMediumQuality)
-               ? AVAssetExportPresetMediumQuality
-               : AVAssetExportPresetPassthrough)
+        let preset: String = compatible.contains(AVAssetExportPreset1920x1080)
+            ? AVAssetExportPreset1920x1080
+            : (compatible.contains(AVAssetExportPreset1280x720)
+               ? AVAssetExportPreset1280x720
+               : (compatible.contains(AVAssetExportPresetMediumQuality)
+                  ? AVAssetExportPresetMediumQuality
+                  : AVAssetExportPresetPassthrough))
 
         guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
             return src
