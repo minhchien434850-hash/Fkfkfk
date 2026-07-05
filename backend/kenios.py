@@ -6515,16 +6515,27 @@ def _ai_answer(question: str) -> str:
     q = (question or "").strip()[:4000]
     if not q:
         return "✍️ Bạn hãy nhập câu hỏi."
-    system = ("Bạn là trợ lý AI thông minh tên 'TRẦN MINH CHIẾN' trong nhóm Telegram. "
-              "Trả lời bằng TIẾNG VIỆT, chính xác, gọn gàng, dễ hiểu. Giải được toán khó, lập trình, "
-              "khoa học và kiến thức nâng cao. Với bài toán: trình bày ngắn gọn các bước rồi nêu ĐÁP SỐ rõ ràng. "
-              "Không bịa đặt. Trả lời trong khoảng 3000 ký tự.")
+    # Nạp NGÀY–GIỜ THỰC (giờ Việt Nam UTC+7) vào não AI để hỏi ngày/giờ nó trả lời đúng.
+    import datetime as _dt
+    _vn = _dt.datetime.utcnow() + _dt.timedelta(hours=7)
+    _wd = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"][_vn.weekday()]
+    _nowstr = (f"{_wd}, ngày {_vn.day:02d}/{_vn.month:02d}/{_vn.year}, lúc "
+               f"{_vn.hour:02d}:{_vn.minute:02d} (giờ Việt Nam, UTC+7)")
+    system = (
+        "Bạn là 'TRẦN MINH CHIẾN' — trợ lý AI siêu thông minh, uyên bác và giàu logic của KENIOS trên Telegram. "
+        "Bạn TRẢ LỜI MỌI tin nhắn và mọi câu hỏi của người dùng: giải đáp thắc mắc, toán khó, lập trình, khoa học, "
+        "đời sống, tư vấn… Suy luận từng bước khi cần và đưa ra đáp án CHÍNH XÁC, đầy đủ. Trả lời bằng TIẾNG VIỆT "
+        "tự nhiên, rõ ràng, thân thiện. Không bịa đặt; nếu không chắc thì nói thẳng. Với bài toán: trình bày ngắn gọn "
+        "các bước rồi nêu ĐÁP SỐ rõ ràng.\n"
+        f"THỜI GIAN THỰC HIỆN TẠI: {_nowstr}.\n"
+        "Khi người dùng hỏi 'hôm nay ngày mấy', 'thứ mấy', 'bây giờ mấy giờ', 'năm nay năm bao nhiêu'… BẮT BUỘC dùng "
+        "đúng mốc thời gian thực ở trên để trả lời, tuyệt đối không đoán sai. Độ dài trả lời trong khoảng 3500 ký tự.")
     try:
         import httpx as _hx
         if prov == "anthropic":
             r = _hx.post(base + "/messages", timeout=90,
                          headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                         json={"model": model, "max_tokens": 1600, "system": system,
+                         json={"model": model, "max_tokens": 2000, "system": system,
                                "messages": [{"role": "user", "content": q}]})
             if r.status_code >= 400:
                 return _ai_err(r.status_code, r.text)
@@ -6532,7 +6543,7 @@ def _ai_answer(question: str) -> str:
             return "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip() or "(AI không trả lời)"
         r = _hx.post(base + "/chat/completions", timeout=90,
                      headers={"Authorization": "Bearer " + key, "content-type": "application/json"},
-                     json={"model": model, "temperature": 0.4, "max_tokens": 1600,
+                     json={"model": model, "temperature": 0.4, "max_tokens": 2000,
                            "messages": [{"role": "system", "content": system}, {"role": "user", "content": q}]})
         if r.status_code >= 400:
             return _ai_err(r.status_code, r.text)
@@ -6592,11 +6603,12 @@ def _tg_ai_reply(token, chat_id, msg, question) -> None:
                  reply_to_message_id=(mid if i == 0 else None), disable_web_page_preview=True)
 
 def _tg_ai_all_on(chat_id) -> bool:
-    """Nhóm này có bật chế độ 'trả lời TẤT CẢ tin' (chat thẳng khỏi cần reply/tag) không."""
+    """Nhóm này có bật chế độ 'trả lời TẤT CẢ tin' (chat thẳng khỏi cần reply/tag) không.
+    MẶC ĐỊNH BẬT: hễ /ai on là cứ nhắn thẳng AI trả lời — trừ khi admin /aiall off."""
     v = get_setting("tg_ai_all_" + str(chat_id), "")
     if v in ("0", "1"):
         return v == "1"
-    return get_setting("tg_ai_all", "0") == "1"
+    return get_setting("tg_ai_all", "1") == "1"
 
 def _tg_ai_wants(chat_id, msg, text, low) -> int:
     """Trả về mức độ AI muốn trả lời trong NHÓM:
@@ -6742,11 +6754,11 @@ def _tg_ai_command(token, chat_id, msg, cmd, args, is_admin: bool, ctype: str) -
                  "Lấy khoá miễn phí: https://console.groq.com · xem <code>/aiset</code>.")
     else:
         _tg_send(token, chat_id,
-                 "🤖 <b>Đã BẬT trợ lý AI!</b> Giờ tôi trả lời mọi câu hỏi khó, bài toán, lập trình, kiến thức nâng cao…\n\n"
-                 "💬 Cách hỏi trong nhóm: <b>reply</b> vào tin của tôi · tag <b>@bot</b> · mở đầu \"<b>ai …</b>\" · "
-                 "câu kết thúc bằng \"<b>?</b>\". Hoặc gõ thẳng <code>/hoiai câu hỏi</code>.\n"
-                 "🔥 Muốn tôi <b>trả lời MỌI tin</b> trong nhóm khỏi cần reply/tag: gõ <code>/aiall on</code>.\n"
-                 "Tắt: <code>/ai off</code>.")
+                 "🤖 <b>Đã BẬT trợ lý AI!</b> Giờ <b>cứ nhắn thẳng trong nhóm là tôi trả lời</b> — khỏi cần reply, "
+                 "khỏi cần tag, khỏi mở đầu bằng \"ai\". Tôi giải đáp mọi thắc mắc: toán khó, lập trình, khoa học, "
+                 "đời sống, hỏi ngày/giờ… đều trả lời chính xác.\n"
+                 "🛡️ Tự bỏ qua tin quá ngắn (ok/haha) &amp; giới hạn nhịp để không spam.\n"
+                 "Nếu muốn tôi CHỈ trả lời khi được gọi (reply/tag/\"?\"): <code>/aiall off</code> · Tắt hẳn: <code>/ai off</code>.")
 
 def _tg_broadcast_task(token: str, admin_chat, text: str) -> None:
     """Gửi 1 thông báo tới TẤT CẢ người đã từng nhắn bot (loa phường)."""
@@ -7633,9 +7645,9 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
     # 🤖 AI: BẬT ở nhóm → trả lời khi được gọi (reply/tag/"ai"/"?"), hoặc TRẢ LỜI TẤT CẢ nếu /aiall on.
     _aiw = _tg_ai_wants(chat_id, msg, text, low)
     if _aiw:
-        if _aiw == 2:   # chế độ trả lời tất cả → giới hạn ~1 trả lời/8s mỗi nhóm, tránh spam & tốn quota
+        if _aiw == 2:   # chế độ trả lời tất cả → giới hạn ~1 trả lời/5s mỗi nhóm, tránh spam & tốn quota
             _now = time.time()
-            if _now - _TG_AI_LAST.get(chat_id, 0) < 8:
+            if _now - _TG_AI_LAST.get(chat_id, 0) < 5:
                 return
             _TG_AI_LAST[chat_id] = _now
         _thr.Thread(target=_tg_ai_reply, args=(token, chat_id, msg, _tg_ai_clean_q(text)), daemon=True).start()
