@@ -6660,7 +6660,7 @@ _TG_RESERVED = {
     "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
     "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
     "modon", "modoff", "autodel", "modadmin", "scanlink", "setvt",
-    "video", "taivideo", "quetlink", "checklink", "scan",
+    "video", "taivideo", "quetlink", "checklink", "scan", "chaosang", "chaotoi",
     # 🎮 lệnh giải trí & tiện ích (không cho lệnh riêng ghi đè)
     "xucxac", "slot", "phitieu", "bongda", "bongro", "bowling", "tungxu", "oantuti", "keobuabao",
     "doanso", "doan", "random", "chon", "xoso", "cuoi", "joke", "cakhia", "khen", "triethly",
@@ -8536,6 +8536,40 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
                  ("🛡️ Tự quét link admin gửi: <b>BẬT</b> — admin dán link, bot tự kiểm tra virus/lừa đảo + báo thông tin đầy đủ."
                   if new else "🛡️ Tự quét link admin gửi: <b>TẮT</b>.") +
                  ("\n💡 Quét virus SÂU: đặt VirusTotal key bằng /setvt <key>." if new and not (get_setting("tg_vt_key","") or "").strip() else ""))
+    elif cmd in ("chaosang", "chaotoi"):
+        import re as _re
+        slot = "morning" if cmd == "chaosang" else "evening"
+        on_key, time_key, text_key = f"tg_greet_{slot}_on", f"tg_greet_{slot}_time", f"tg_greet_{slot}_text"
+        deftime = "07:00" if slot == "morning" else "20:00"
+        deftext = _TG_MORNING_DEFAULT if slot == "morning" else _TG_EVENING_DEFAULT
+        label = "☀️ Chào buổi sáng" if slot == "morning" else "🌙 Chào buổi tối"
+        a = args.strip()
+        _tg_greet_register(chat_id)   # đảm bảo nhóm này nhận lời chào
+        if not a:
+            import html as _h
+            _tg_send(token, chat_id,
+                     f"{label}: <b>{'BẬT' if get_setting(on_key,'1')=='1' else 'TẮT'}</b> lúc "
+                     f"<b>{get_setting(time_key, deftime)}</b> mỗi ngày (giờ VN)\n"
+                     f"Nội dung: {_h.escape(get_setting(text_key, deftext))}\n\n"
+                     f"• <code>/{cmd} on</code> · <code>/{cmd} off</code> — bật/tắt\n"
+                     f"• <code>/{cmd} 6:30</code> — đổi giờ\n"
+                     f"• <code>/{cmd} &lt;nội dung&gt;</code> — đổi lời chào")
+        elif a.lower() in ("on", "bat", "bật", "1"):
+            set_setting(on_key, "1")
+            _tg_send(token, chat_id, f"{label}: BẬT lúc <b>{get_setting(time_key, deftime)}</b> (giờ VN) — nhóm này sẽ nhận mỗi ngày.")
+        elif a.lower() in ("off", "tat", "tắt", "0"):
+            set_setting(on_key, "0")
+            _tg_send(token, chat_id, f"{label}: TẮT.")
+        elif _re.match(r"^\d{1,2}:\d{2}$", a):
+            hh, mm = int(a.split(":")[0]), int(a.split(":")[1])
+            if 0 <= hh <= 23 and 0 <= mm <= 59:
+                set_setting(time_key, f"{hh:02d}:{mm:02d}"); set_setting(on_key, "1")
+                _tg_send(token, chat_id, f"⏰ {label} sẽ gửi lúc <b>{hh:02d}:{mm:02d}</b> mỗi ngày (giờ VN). ✅")
+            else:
+                _tg_send(token, chat_id, f"Giờ không hợp lệ. VD: <code>/{cmd} 6:30</code>")
+        else:
+            set_setting(text_key, a[:1000]); set_setting(on_key, "1")
+            _tg_send(token, chat_id, f"✅ Đã đặt nội dung {label}. Gõ <code>/{cmd}</code> để xem lại.")
     elif cmd == "autodel":
         a = args.strip().lower()
         if a in ("off", "tat", "tắt", "0"):
@@ -8585,6 +8619,7 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
     mid = msg.get("message_id")
     low = text.lower()
     _tg_groups.add(chat_id)
+    _tg_greet_register(chat_id)   # nhớ nhóm để gửi chào sáng/tối đúng giờ
 
     # ============ 1) KIỂM DUYỆT TRƯỚC TIÊN — xoá NGAY, không chờ gì khác ============
     # (Trước đây bot thả cảm xúc/đếm tin TRƯỚC rồi mới kiểm duyệt → mỗi tin tốn thêm
@@ -8985,7 +9020,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                    "/captcha", "/autoreact", "/slowmode", "/log", "/diemdanh", "/top", "/report", "/save",
                    "/clear", "/notes", "/id", "/setwelcome", "/welcome", "/setwelcomebtn", "/setwelcomephoto",
                    "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats", "/autodel", "/modadmin",
-                   "/scanlink"}
+                   "/scanlink", "/chaosang", "/chaotoi"}
     if text.startswith("/") and text.split("@")[0].split()[0].lower() in _GROUP_CMDS:
         _tg_send(token, chat_id,
                  "🔧 Lệnh này dùng trong <b>NHÓM</b>, không chạy khi nhắn riêng bot.\n\n"
@@ -9116,6 +9151,7 @@ def _tg_register_commands(token: str) -> None:
         ("setwelcome", "Sửa lời chào TV mới"), ("welcome", "Bật/tắt chào mừng"),
         ("setwelcomebtn", "Nút link lời chào"), ("setwelcomephoto", "Ảnh lời chào"),
         ("setgoodbye", "Lời tạm biệt"), ("testwelcome", "Xem thử lời chào"),
+        ("chaosang", "☀️ Chào buổi sáng đúng giờ"), ("chaotoi", "🌙 Chào buổi tối đúng giờ"),
         ("modon", "BẬT kiểm duyệt nhóm"), ("modoff", "TẮT kiểm duyệt nhóm"),
         ("modadmin", "Kiểm duyệt cả admin on|off"),
         ("stats", "Thống kê nhóm"),
@@ -9156,19 +9192,78 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
             "<b>Khoá:</b> /lock link|photo|video|sticker|gif|forward|mention|all · /unlock · /locks\n"
             "<b>Lọc & ghi chú:</b> /addbl /rmbl /blacklist · /filter /stop /filters · /save #tên /clear /notes · /setrules /rules\n"
             "<b>Chào mừng:</b> /setwelcome · /setwelcomebtn · /setwelcomephoto · /setgoodbye · /welcome on|off · /testwelcome\n"
+            "⏰ <b>Chào theo giờ:</b> /chaosang [giờ|on|off|nội dung] · /chaotoi [giờ|on|off|nội dung] — tự gửi ĐÚNG GIỜ mỗi ngày (giờ VN)\n"
             "🤖 <b>Trợ lý AI:</b> /ai on|off · /aiall on|off (nhóm trả lời mọi tin) · /aidm on|off (chat riêng tự trả lời) · /aikey &lt;khoá&gt; · /aiprovider · /aiurl · /aimodel · /aiset\n"
             "🛡️ <b>Quét link:</b> /scanlink on|off (tự quét link admin gửi) · /setvt &lt;key&gt; (VirusTotal — quét virus sâu)\n"
             "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /modadmin · /config\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
+# ---------- ⏰ CHÀO BUỔI SÁNG / BUỔI TỐI tự động ĐÚNG GIỜ (giờ VN) ----------
+_TG_MORNING_DEFAULT = "☀️ Chào buổi sáng cả nhà! Chúc mọi người một ngày mới tràn đầy năng lượng, may mắn và thật nhiều niềm vui nhé! 🌸"
+_TG_EVENING_DEFAULT = "🌙 Chào buổi tối cả nhà! Chúc mọi người buổi tối vui vẻ, ấm áp bên gia đình và nghỉ ngơi thật tốt nhé! ✨"
+_tg_sched_thread = None
+
+def _tg_greet_register(chat_id) -> None:
+    """Ghi nhớ nhóm để gửi lời chào sáng/tối (lưu bền, sống qua restart)."""
+    try:
+        cur = [x for x in (get_setting("tg_greet_chats", "") or "").split(",") if x]
+        s = str(chat_id)
+        if s not in cur:
+            cur.append(s); cur = cur[-200:]
+            set_setting("tg_greet_chats", ",".join(cur))
+    except Exception:
+        pass
+
+def _tg_greet_chats() -> list:
+    return [x for x in (get_setting("tg_greet_chats", "") or "").split(",") if x]
+
+def _tg_scheduler_loop() -> None:
+    """Mỗi ~25s kiểm tra giờ VN; đúng giờ đặt thì gửi lời chào sáng/tối 1 lần/ngày."""
+    import datetime as _dt
+    slots = [("tg_greet_morning_on", "tg_greet_morning_time", "tg_greet_morning_text",
+              "tg_greet_morning_last", "07:00", _TG_MORNING_DEFAULT),
+             ("tg_greet_evening_on", "tg_greet_evening_time", "tg_greet_evening_text",
+              "tg_greet_evening_last", "20:00", _TG_EVENING_DEFAULT)]
+    while True:
+        try:
+            token = (get_setting("tg_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+            if not token or get_setting("tg_bot_enabled", "0") != "1":
+                time.sleep(20); continue
+            now = _dt.datetime.utcnow() + _dt.timedelta(hours=7)   # giờ Việt Nam (UTC+7)
+            today = now.strftime("%Y-%m-%d")
+            for on_key, time_key, text_key, last_key, deftime, deftext in slots:
+                if get_setting(on_key, "1") != "1":
+                    continue
+                t = (get_setting(time_key, deftime) or deftime).strip()
+                try:
+                    th, tm = int(t.split(":")[0]), int(t.split(":")[1])
+                except Exception:
+                    continue
+                if now.hour != th or now.minute != tm:
+                    continue
+                if get_setting(last_key, "") == today:      # đã gửi hôm nay rồi
+                    continue
+                set_setting(last_key, today)                # chốt trước khi gửi (chống gửi trùng)
+                txt = get_setting(text_key, "") or deftext
+                for cid in _tg_greet_chats():
+                    try: _tg_send(token, cid, txt)
+                    except Exception: pass
+                    time.sleep(0.1)
+        except Exception:
+            pass
+        time.sleep(25)
+
 def start_telegram_bot() -> None:
     """Khởi động bot Telegram hỗ trợ (long-polling) trong 1 thread nền."""
-    global _tg_thread
+    global _tg_thread, _tg_sched_thread
     if _tg_thread and _tg_thread.is_alive():
         return
     import threading
     _tg_thread = threading.Thread(target=_tg_loop, daemon=True, name="telegram-bot")
     _tg_thread.start()
+    if not (_tg_sched_thread and _tg_sched_thread.is_alive()):
+        _tg_sched_thread = threading.Thread(target=_tg_scheduler_loop, daemon=True, name="telegram-scheduler")
+        _tg_sched_thread.start()
     logging.info("Telegram support bot: thread khởi động (bật khi admin cấu hình token & enable).")
 
 
