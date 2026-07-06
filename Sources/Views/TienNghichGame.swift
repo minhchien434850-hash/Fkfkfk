@@ -49,6 +49,7 @@ struct TNPress: ButtonStyle {
 
 // MARK: - Root
 struct TienNghichGameView: View {
+    @EnvironmentObject private var store: AppStore
     @StateObject private var game = TNGame()
     @State private var tab = 0
 
@@ -73,8 +74,14 @@ struct TienNghichGameView: View {
             }
         }
         // Game chơi MÀN HÌNH NGANG — khoá landscape khi vào, trả về khi thoát
-        .onAppear { OrientationLock.landscape() }
-        .onDisappear { OrientationLock.restore() }
+        .onAppear {
+            OrientationLock.landscape()
+            game.configureOnline(base: store.baseURL, token: store.token)   // đồng bộ ONLINE
+        }
+        .onDisappear {
+            OrientationLock.restore()
+            game.pushOnline(force: true)   // lưu ngay khi thoát game
+        }
     }
 }
 

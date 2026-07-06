@@ -184,6 +184,21 @@ struct TNRechargeView: View {
                     }
                     .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal).padding(.top, 8)
 
+                    // Ví TIỀN THẬT (đồng bộ máy chủ) — nạp tiền vào ví qua VietQR ở mục Ví của app
+                    HStack {
+                        Image(systemName: "wallet.pass.fill").foregroundStyle(.green)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Ví tiền: \(game.walletVND.formatted())đ").font(.subheadline.bold()).foregroundStyle(.green)
+                            Text(game.online ? "Đã kết nối máy chủ — nạp gói dưới sẽ trừ ví tiền thật."
+                                              : "Chưa đăng nhập — đăng nhập KENIOS để nạp tiền thật.")
+                                .font(.caption2).foregroundStyle(.white.opacity(0.6))
+                        }
+                        Spacer()
+                    }
+                    .padding(12).background(.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.green.opacity(0.3), lineWidth: 1))
+                    .padding(.horizontal)
+
                     // Quà miễn phí mỗi ngày
                     Button {
                         msg = game.claimFreeGift(); TNHaptic.success()
@@ -240,7 +255,7 @@ struct TNRechargeView: View {
                         .buttonStyle(TNPress(glow: pkg.color)).padding(.horizontal)
                     }
 
-                    Text("Cửa hàng nạp trong game — linh thạch dùng để mua skin, thú cưng, thú cưỡi, đạo lữ, rèn trang bị…")
+                    Text("Nạp bằng TIỀN THẬT: trừ số dư Ví (nạp Ví qua VietQR ở mục Ví của app). Linh thạch dùng mua skin, thú cưng, thú cưỡi, đạo lữ, rèn trang bị…")
                         .font(.caption2).foregroundStyle(.white.opacity(0.5))
                         .multilineTextAlignment(.center).padding(.horizontal)
 
@@ -254,12 +269,19 @@ struct TNRechargeView: View {
             .preferredColorScheme(.dark)
             .alert("Xác nhận nạp", isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
                 Button("Nạp \(pending?.price ?? "")") {
-                    if let p = pending { msg = game.recharge(p); TNHaptic.success() }
+                    if let p = pending {
+                        if game.online {
+                            msg = "⏳ Đang xử lý…"
+                            game.buyReal(p.id) { ok, m in msg = m; if ok { TNHaptic.success() } }
+                        } else {
+                            msg = game.recharge(p); TNHaptic.success()   // ngoại tuyến: nạp tạm khi chưa đăng nhập
+                        }
+                    }
                     pending = nil
                 }
                 Button("Huỷ", role: .cancel) { pending = nil }
             } message: {
-                Text("Nạp gói \(pending?.name ?? "") — nhận \(( (pending?.linhThach ?? 0) + (pending?.bonus ?? 0) )) linh thạch.")
+                Text("Nạp gói \(pending?.name ?? "") — nhận \(( (pending?.linhThach ?? 0) + (pending?.bonus ?? 0) )) linh thạch.\(game.online ? " Sẽ trừ ví tiền thật." : "")")
             }
         }
     }

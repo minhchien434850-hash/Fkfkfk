@@ -16,6 +16,84 @@ final class TNGame: ObservableObject {
     }
     func save() {
         if let d = try? JSONEncoder().encode(s) { UserDefaults.standard.set(d, forKey: key) }
+        pushOnline()   // đồng bộ máy chủ (có tiết lưu)
+    }
+
+    // ===== ONLINE — đồng bộ tiến trình lên máy chủ + nạp tiền thật =====
+    @Published var online = false
+    @Published var walletVND = 0
+    private var baseURL = ""
+    private var authToken: String?
+    private var lastPush = Date.distantPast
+
+    func configureOnline(base: String, token: String?) {
+        var b = base.trimmingCharacters(in: .whitespaces)
+        if b.hasSuffix("/") { b.removeLast() }
+        baseURL = b
+        authToken = (token?.isEmpty == false) ? token : nil
+        if !baseURL.isEmpty, authToken != nil { loadOnline() }
+    }
+    private func gameReq(_ path: String, _ method: String) -> URLRequest? {
+        guard !baseURL.isEmpty, let url = URL(string: baseURL + path) else { return nil }
+        var r = URLRequest(url: url); r.httpMethod = method; r.timeoutInterval = 30
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let authToken { r.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization") }
+        return r
+    }
+    func loadOnline() {
+        guard let req = gameReq("/game/tn/state", "GET") else { return }
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            guard let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            let wallet = obj["wallet"] as? Int
+            let saveStr = obj["data"] as? String
+            Task { @MainActor in
+                self.online = true
+                if let wallet { self.walletVND = wallet }
+                if let saveStr, let dd = saveStr.data(using: .utf8),
+                   let v = try? JSONDecoder().decode(TNSave.self, from: dd), v.created, self.serverPreferred(v) {
+                    self.s = v
+                    if self.s.hp <= 0 || self.s.hp > self.s.hpMax { self.s.hp = self.s.hpMax }
+                    if let d = try? JSONEncoder().encode(self.s) { UserDefaults.standard.set(d, forKey: self.key) }
+                }
+            }
+        }.resume()
+    }
+    // Ưu tiên bản máy chủ nếu tiến trình xa hơn (tránh mất tiến trình khi đổi máy)
+    private func serverPreferred(_ v: TNSave) -> Bool {
+        if !s.created { return true }
+        return (v.realm * 100 + v.level) > (s.realm * 100 + s.level)
+    }
+    func pushOnline(force: Bool = false) {
+        guard authToken != nil, s.created else { return }
+        if !force && Date().timeIntervalSince(lastPush) < 4 { return }
+        lastPush = Date()
+        guard var req = gameReq("/game/tn/state", "POST"),
+              let d = try? JSONEncoder().encode(s), let str = String(data: d, encoding: .utf8) else { return }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["data": str])
+        URLSession.shared.dataTask(with: req).resume()
+    }
+    // Nạp linh thạch bằng TIỀN THẬT (trừ số dư ví trên máy chủ)
+    func buyReal(_ package: String, _ done: @escaping (Bool, String) -> Void) {
+        guard var req = gameReq("/game/tn/buy", "POST") else { done(false, "Cần đăng nhập tài khoản KENIOS."); return }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["package": package])
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            let obj = (data != nil) ? ((try? JSONSerialization.jsonObject(with: data!)) as? [String: Any]) : nil
+            let http = resp as? HTTPURLResponse
+            let bad = (http != nil) && !(200..<300).contains(http!.statusCode)
+            let detail = obj?["detail"] as? String
+            let lt = obj?["linhThach"] as? Int
+            let w = obj?["wallet"] as? Int
+            let added = obj?["linhthach_added"] as? Int
+            let hasData = data != nil
+            Task { @MainActor in
+                if !hasData { done(false, "Lỗi mạng, thử lại."); return }
+                if bad { done(false, detail ?? "Nạp thất bại."); return }
+                if let lt { self.s.linhThach = lt }
+                if let w { self.walletVND = w }
+                if let d = try? JSONEncoder().encode(self.s) { UserDefaults.standard.set(d, forKey: self.key) }
+                done(true, "✅ Nạp thành công +\(added ?? 0) linh thạch!")
+            }
+        }.resume()
     }
 
     // Thiền/tu luyện → nhận EXP
