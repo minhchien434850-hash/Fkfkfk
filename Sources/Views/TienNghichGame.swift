@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import AudioToolbox
 
 // Rung phản hồi khi tung chiêu (cho game "đã tay")
 enum TNHaptic {
@@ -9,15 +10,31 @@ enum TNHaptic {
     static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
 }
 
-// Hiệu ứng NHẤN nút: thu nhỏ + phát sáng khi bấm (áp cho nút skill, điều hướng…)
+// Âm thanh game (dùng System Sound của iOS — không cần đóng gói file, chạy offline)
+enum TNSound {
+    static func play(_ id: SystemSoundID) { AudioServicesPlaySystemSound(id) }
+    static func tap()   { play(1104) }   // chạm nút
+    static func cast()  { play(1123) }   // tung chiêu
+    static func hit()   { play(1520) }   // trúng đòn
+    static func win()   { play(1025) }   // thắng trận
+    static func level() { play(1027) }   // lên cấp / đột phá
+    static func talk()  { play(1103) }   // NPC nói (từng chữ)
+    static func coin()  { play(1057) }   // nhận thưởng
+}
+
+// Hiệu ứng NHẤN nút: thu nhỏ + phát sáng + PHÁT ÂM THANH khi bấm
 struct TNPress: ButtonStyle {
     var glow: Color = .white
+    var silent = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.9 : 1.0)
             .brightness(configuration.isPressed ? 0.15 : 0)
             .shadow(color: glow.opacity(configuration.isPressed ? 0.9 : 0.0), radius: configuration.isPressed ? 12 : 0)
             .animation(.spring(response: 0.25, dampingFraction: 0.5), value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { pressed in
+                if pressed && !silent { TNSound.tap() }
+            }
     }
 }
 
@@ -1227,33 +1244,25 @@ struct TienNghichGameView: View {
     @State private var tab = 0
 
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(red: 0.05, green: 0.06, blue: 0.13),
-                                    game.s.realmEnum.color.opacity(0.28),
-                                    Color(red: 0.02, green: 0.03, blue: 0.08)],
-                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
-            TNCloudsBG()
+        Group {
             if !game.s.created {
-                TNCreateView(game: game)
-            } else {
-                VStack(spacing: 0) {
-                    Group {
-                        switch tab {
-                        case 0: TNHomeView(game: game, tab: $tab)
-                        case 1: TNQuestView(game: game)
-                        case 2: TNStoryView(game: game)
-                        case 3: TNSkillsView(game: game)
-                        default: TNShopView(game: game)
-                        }
-                    }
-                    .frame(maxHeight: .infinity)
-                    TNTabBar(tab: $tab)
+                ZStack {
+                    LinearGradient(colors: [Color(red: 0.05, green: 0.06, blue: 0.13),
+                                            game.s.realmEnum.color.opacity(0.28),
+                                            Color(red: 0.02, green: 0.03, blue: 0.08)],
+                                   startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+                    TNCloudsBG()
+                    TNCreateView(game: game)
                 }
+                .preferredColorScheme(.dark)
+                .navigationTitle("Tiên Nghịch")
+                .navigationBarTitleDisplayMode(.inline)
+            } else {
+                // VÀO THẲNG MÀN GAME: thế giới di chuyển tự do (không còn menu nút)
+                TNWorldView(game: game)
+                    .navigationBarHidden(true)
             }
         }
-        .preferredColorScheme(.dark)
-        .navigationTitle("Tiên Nghịch")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1761,7 +1770,7 @@ struct TNBattleView: View {
     private func basicAttack() {
         let d = max(3, Int(Double(game.s.atk) * Double.random(in: 0.7...0.95)) - enemy.def)
         fx = (.gray, "👊")
-        TNHaptic.hit(.light)
+        TNHaptic.hit(.light); TNSound.hit()
         hitEnemy(d, "\(game.s.name) vung quyền!", .white)
     }
     private func useSkill(_ sk: TNSkill) {
@@ -1769,7 +1778,7 @@ struct TNBattleView: View {
         mp -= sk.mp
         var d = max(5, Int(Double(game.s.atk) * sk.power * Double.random(in: 0.9...1.15)) - enemy.def)
         fx = (sk.color, sk.icon)
-        TNHaptic.hit(sk.element == "than" ? .heavy : .medium)
+        TNHaptic.hit(sk.element == "than" ? .heavy : .medium); TNSound.cast()
         var extra = ""
         switch sk.element {
         case "loi":   if Bool.random() { enemy.stunned = true; extra = " ⚡Địch bị choáng!" }
@@ -1802,7 +1811,7 @@ struct TNBattleView: View {
         if enemy.hp <= 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 game.reward(linhThach: enemy.reward, exp: enemy.exp)
-                TNHaptic.success()
+                TNHaptic.success(); TNSound.win()
                 win = true; ended = true
             }
             return
@@ -3721,6 +3730,46 @@ struct TNJoystick: View {
     }
 }
 
+// Điểm đến các tính năng (mở dạng bảng trong game, không còn menu nút cũ)
+enum TNRoute: String, Identifiable {
+    case quest, story, skills, shop, map, pets, fashion, guild, pvp, spouse, mount
+    case recharge, vip, achieve, boss, tech, checkin, chat, market, forge, arena, codex, bag
+    var id: String { rawValue }
+}
+// Một mục trong bảng chức năng (icon)
+struct TNMenuItem: Identifiable {
+    let id = UUID(); let emoji: String; let label: String; let route: TNRoute?; let action: String?
+    init(_ emoji: String, _ label: String, route: TNRoute? = nil, action: String? = nil) {
+        self.emoji = emoji; self.label = label; self.route = route; self.action = action
+    }
+}
+let TN_MENU: [TNMenuItem] = [
+    TNMenuItem("🧘", "Tu Luyện", action: "meditate"),
+    TNMenuItem("⚡", "Đột Phá", action: "breakthrough"),
+    TNMenuItem("👹", "Boss/Phụ Bản", route: .boss),
+    TNMenuItem("🏆", "Đấu Đài", route: .arena),
+    TNMenuItem("⚔️", "PvP Xếp Hạng", route: .pvp),
+    TNMenuItem("📜", "Nhiệm Vụ", route: .quest),
+    TNMenuItem("📖", "Cốt Truyện", route: .story),
+    TNMenuItem("🔥", "Kỹ Năng", route: .skills),
+    TNMenuItem("🎒", "Túi Đồ", route: .bag),
+    TNMenuItem("📗", "Tâm Pháp", route: .tech),
+    TNMenuItem("⚒️", "Chế Tạo", route: .forge),
+    TNMenuItem("🛒", "Cửa Hàng", route: .shop),
+    TNMenuItem("🏪", "Chợ", route: .market),
+    TNMenuItem("🐾", "Thú Cưng", route: .pets),
+    TNMenuItem("🐲", "Thú Cưỡi", route: .mount),
+    TNMenuItem("👗", "Thời Trang", route: .fashion),
+    TNMenuItem("💞", "Đạo Lữ", route: .spouse),
+    TNMenuItem("🏯", "Bang Hội", route: .guild),
+    TNMenuItem("📅", "Điểm Danh", route: .checkin),
+    TNMenuItem("🏅", "Thành Tựu", route: .achieve),
+    TNMenuItem("👑", "VIP", route: .vip),
+    TNMenuItem("💰", "Nạp", route: .recharge),
+    TNMenuItem("💬", "Thế Giới Chat", route: .chat),
+    TNMenuItem("🖼️", "Nhân Vật", route: .codex),
+]
+
 struct TNWorldView: View {
     @ObservedObject var game: TNGame
     @Environment(\.dismiss) private var dismiss
@@ -3732,16 +3781,17 @@ struct TNWorldView: View {
     @State private var showBattle = false
     @State private var targetIdx: Int? = nil
     @State private var toast: String?
-    @State private var showQuest = false
-    @State private var showMarket = false
-    @State private var showForge = false
+    @State private var route: TNRoute?
+    @State private var showMenu = false
+    @State private var dlgNPC: TNWorldNPC?
+    @State private var dlgText = ""
+    @State private var castFX: String?
     @State private var bob = false
     private let tick = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geo in
             let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
-            // Camera bám nhân vật, kẹp trong biên thế giới
             let camX = min(max(hero.x, center.x), TN_WORLD_SIZE - center.x)
             let camY = min(max(hero.y, center.y), TN_WORLD_SIZE - center.y)
             ZStack(alignment: .topLeading) {
@@ -3749,30 +3799,47 @@ struct TNWorldView: View {
                     .frame(width: TN_WORLD_SIZE, height: TN_WORLD_SIZE)
                     .offset(x: center.x - camX, y: center.y - camY)
 
-                // HUD trên
-                VStack {
+                // Hiệu ứng tung chiêu giữa màn khi đánh
+                if let castFX {
+                    Text(castFX).font(.system(size: 130))
+                        .position(x: center.x, y: center.y - 30)
+                        .transition(.scale.combined(with: .opacity)).allowsHitTesting(false)
+                        .shadow(color: .orange, radius: 20)
+                }
+
+                // ===== HUD game =====
+                VStack(spacing: 0) {
                     hudBar
                     Spacer()
-                    // Điều khiển dưới
                     HStack(alignment: .bottom) {
                         TNJoystick(vec: $joy)
                         Spacer()
                         actionButtons
                     }
-                    .padding(.horizontal, 24).padding(.bottom, 30)
+                    .padding(.horizontal, 22).padding(.bottom, dlgNPC == nil ? 30 : 150)
                 }
+                // Cột icon chức năng bên phải
+                sideIcons.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+
+                // Toast thông báo
                 if let toast {
                     Text(toast).font(.footnote.bold()).foregroundStyle(.white)
-                        .padding(10).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
-                        .frame(maxWidth: geo.size.width - 60)
-                        .position(x: center.x, y: geo.size.height * 0.7)
+                        .padding(10).background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
+                        .frame(maxWidth: geo.size.width - 80)
+                        .position(x: center.x, y: geo.size.height * 0.28)
                         .transition(.opacity)
                 }
+                // Hộp thoại NPC (gõ chữ + âm thanh)
+                if let npc = dlgNPC {
+                    dialogBox(npc).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                }
+                // Bảng chức năng (thay cho menu nút cũ)
+                if showMenu { menuPanel(geo) }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
         }
-        .ignoresSafeArea(edges: .bottom)
+        .ignoresSafeArea()
         .background(Color(red: 0.13, green: 0.2, blue: 0.13))
         .preferredColorScheme(.dark)
         .onReceive(tick) { _ in step() }
@@ -3782,17 +3849,16 @@ struct TNWorldView: View {
                 if won, let i = targetIdx, mobs.indices.contains(i) {
                     mobs[i].alive = false
                     mobs[i].respawnAt = Date().addingTimeInterval(12)
+                    TNSound.win()
                     flash("🎉 Hạ gục \(mobs[i].name)! Nhận linh thạch & EXP.")
                 }
                 targetIdx = nil
             }
         }
-        .sheet(isPresented: $showQuest) { NavigationStack { TNQuestView(game: game).navigationTitle("Nhiệm Vụ").navigationBarTitleDisplayMode(.inline) } }
-        .sheet(isPresented: $showMarket) { TNMarketView(game: game) }
-        .sheet(isPresented: $showForge) { TNForgeView(game: game) }
+        .sheet(item: $route) { r in routeView(r) }
     }
 
-    // Lớp thế giới: nền + trang trí + NPC + quái + nhân vật
+    // ===== Lớp thế giới =====
     private var worldLayer: some View {
         ZStack(alignment: .topLeading) {
             LinearGradient(colors: [Color(red:0.16,green:0.28,blue:0.16), Color(red:0.10,green:0.18,blue:0.12)],
@@ -3801,13 +3867,12 @@ struct TNWorldView: View {
                 .frame(width: 520, height: 220).position(x: 500, y: 1600)
             Ellipse().fill(Color(red:0.3,green:0.28,blue:0.18).opacity(0.5))
                 .frame(width: 900, height: 120).position(x: 1200, y: 1200)
-
             ForEach(TN_DECOR) { d in
                 Text(d.emoji).font(.system(size: d.size)).position(d.pos).allowsHitTesting(false)
             }
             ForEach(TN_WORLD_NPCS) { npc in
                 VStack(spacing: 1) {
-                    Text("❗").font(.system(size: 14)).opacity(nearNPC(npc) ? 1 : 0.4)
+                    Text("💬").font(.system(size: 14)).opacity(nearNPC(npc) ? 1 : 0.35)
                     Text(npc.emoji).font(.system(size: 40))
                     Text(npc.name).font(.system(size: 10, weight: .bold)).foregroundStyle(.yellow)
                         .padding(.horizontal, 5).padding(.vertical, 1).background(.black.opacity(0.5), in: Capsule())
@@ -3858,8 +3923,8 @@ struct TNWorldView: View {
         HStack(spacing: 10) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left").font(.headline).foregroundStyle(.white)
-                    .padding(9).background(.black.opacity(0.4), in: Circle())
-            }
+                    .padding(9).background(.black.opacity(0.45), in: Circle())
+            }.buttonStyle(TNPress(glow: .white))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(game.s.name).font(.caption.bold()).foregroundStyle(.white)
@@ -3874,34 +3939,180 @@ struct TNWorldView: View {
             }
             Spacer()
             Text("💎 \(game.s.linhThach)").font(.caption.bold()).foregroundStyle(.cyan)
-                .padding(.horizontal, 10).padding(.vertical, 5).background(.black.opacity(0.4), in: Capsule())
+                .padding(.horizontal, 10).padding(.vertical, 5).background(.black.opacity(0.45), in: Capsule())
         }
-        .padding(.horizontal, 16).padding(.top, 8)
+        .padding(.horizontal, 14).padding(.top, 52)
+    }
+
+    // Cột icon chức năng nhanh bên phải + nút Menu
+    private var sideIcons: some View {
+        VStack(spacing: 12) {
+            iconBtn("☰", "Menu", .orange) { TNSound.tap(); withAnimation(.spring(response: 0.3)) { showMenu = true } }
+            iconBtn("📜", "N.Vụ", .green) { route = .quest }
+            iconBtn("🎒", "Túi", .yellow) { route = .bag }
+            iconBtn("🔥", "Skill", .red) { route = .skills }
+            iconBtn("👹", "Boss", .purple) { route = .boss }
+        }
+        .padding(.trailing, 12).padding(.top, 150)
+    }
+    private func iconBtn(_ emoji: String, _ label: String, _ color: Color, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            VStack(spacing: 1) {
+                Text(emoji).font(.system(size: 22))
+                Text(label).font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
+            }
+            .frame(width: 50, height: 50)
+            .background(color.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(color.opacity(0.7), lineWidth: 1))
+        }.buttonStyle(TNPress(glow: color))
     }
 
     @ViewBuilder private var actionButtons: some View {
         VStack(spacing: 12) {
-            if let npc = nearestNPC() {
-                Button { interact(npc) } label: {
+            if let npc = nearestNPC(), dlgNPC == nil {
+                Button { talk(npc) } label: {
                     VStack(spacing: 2) { Text("💬").font(.system(size: 24)); Text("Nói").font(.system(size: 9, weight: .bold)) }
-                        .foregroundStyle(.white).frame(width: 66, height: 66)
+                        .foregroundStyle(.white).frame(width: 64, height: 64)
                         .background(.blue, in: Circle()).shadow(color: .blue, radius: 8)
                 }.buttonStyle(TNPress(glow: .blue))
             }
             if nearestMob() != nil {
                 Button { attack() } label: {
                     VStack(spacing: 2) { Text("⚔️").font(.system(size: 28)); Text("Đánh").font(.system(size: 10, weight: .bold)) }
-                        .foregroundStyle(.white).frame(width: 82, height: 82)
+                        .foregroundStyle(.white).frame(width: 84, height: 84)
                         .background(LinearGradient(colors: [.red, .orange], startPoint: .top, endPoint: .bottom), in: Circle())
                         .shadow(color: .red, radius: 10)
-                }.buttonStyle(TNPress(glow: .red))
+                }.buttonStyle(TNPress(glow: .red, silent: true))
             }
         }
     }
 
+    // Hộp thoại NPC kiểu RPG (chữ gõ dần + âm thanh)
+    private func dialogBox(_ npc: TNWorldNPC) -> some View {
+        VStack {
+            Spacer()
+            HStack(alignment: .top, spacing: 12) {
+                Text(npc.emoji).font(.system(size: 46))
+                    .frame(width: 64, height: 64).background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(npc.name).font(.subheadline.bold()).foregroundStyle(.yellow)
+                    Text(dlgText).font(.callout).foregroundStyle(.white)
+                    HStack {
+                        Spacer()
+                        if let r = npcRoute(npc) {
+                            Button("Vào ▶") { TNSound.tap(); dlgNPC = nil; route = r }
+                                .font(.caption.bold()).foregroundStyle(.white)
+                                .padding(.horizontal, 14).padding(.vertical, 6).background(.blue, in: Capsule())
+                        }
+                        Button("Đóng") { dlgNPC = nil }
+                            .font(.caption.bold()).foregroundStyle(.white.opacity(0.8))
+                            .padding(.horizontal, 12).padding(.vertical, 6).background(.white.opacity(0.15), in: Capsule())
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.yellow.opacity(0.4), lineWidth: 1))
+            .padding(.horizontal, 14).padding(.bottom, 26)
+        }
+    }
+
+    // Bảng chức năng game (icon grid) — thay cho danh sách nút cũ
+    private func menuPanel(_ geo: GeometryProxy) -> some View {
+        ZStack {
+            Color.black.opacity(0.6).ignoresSafeArea().onTapGesture { withAnimation { showMenu = false } }
+            VStack(spacing: 12) {
+                HStack {
+                    Text("☰ CHỨC NĂNG").font(.headline.bold()).foregroundStyle(.yellow)
+                    Spacer()
+                    Button { withAnimation { showMenu = false } } label: {
+                        Image(systemName: "xmark").foregroundStyle(.white).padding(8).background(.white.opacity(0.15), in: Circle())
+                    }
+                }.padding(.horizontal, 4)
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 14) {
+                        ForEach(TN_MENU) { it in
+                            if !(it.action == "breakthrough" && !game.s.canBreakthrough) {
+                                Button { tapMenu(it) } label: {
+                                    VStack(spacing: 4) {
+                                        Text(it.emoji).font(.system(size: 30))
+                                        Text(it.label).font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                                            .multilineTextAlignment(.center).lineLimit(2)
+                                    }
+                                    .frame(maxWidth: .infinity).frame(height: 74)
+                                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                                    .overlay(alignment: .topTrailing) {
+                                        if it.route == .achieve && game.pendingAchievements > 0 {
+                                            Text("\(game.pendingAchievements)").font(.system(size: 9, weight: .heavy)).foregroundStyle(.white)
+                                                .padding(4).background(.red, in: Circle()).offset(x: -4, y: 4)
+                                        }
+                                    }
+                                }.buttonStyle(TNPress(glow: .yellow))
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: 460, maxHeight: geo.size.height * 0.7)
+            .background(Color(red: 0.08, green: 0.09, blue: 0.15), in: RoundedRectangle(cornerRadius: 22))
+            .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(.yellow.opacity(0.3), lineWidth: 1))
+            .padding(24)
+        }
+        .transition(.opacity)
+    }
+    private func tapMenu(_ it: TNMenuItem) {
+        TNSound.tap()
+        withAnimation { showMenu = false }
+        if let r = it.route { route = r; return }
+        switch it.action {
+        case "meditate": game.meditate(); TNSound.coin(); flash("🧘 Thiền định — tu vi +\(max(6, game.s.expMax/12))")
+        case "breakthrough": TNSound.level(); flash(game.breakthrough())
+        default: break
+        }
+    }
+
+    // Điểm đến từng chức năng
+    @ViewBuilder private func routeView(_ r: TNRoute) -> some View {
+        switch r {
+        case .quest:  wrap("Nhiệm Vụ") { TNQuestView(game: game) }
+        case .story:  wrap("Cốt Truyện") { TNStoryView(game: game) }
+        case .skills: wrap("Kỹ Năng") { TNSkillsView(game: game) }
+        case .shop:   wrap("Cửa Hàng") { TNShopView(game: game) }
+        case .map:    TNMapView(game: game)
+        case .pets:   TNPetView(game: game)
+        case .fashion: TNFashionView(game: game)
+        case .guild:  TNGuildView(game: game)
+        case .pvp:    TNPvPView(game: game)
+        case .spouse: TNSpouseView(game: game)
+        case .mount:  TNMountView(game: game)
+        case .recharge: TNRechargeView(game: game)
+        case .vip:    TNVipView(game: game)
+        case .achieve: TNAchieveView(game: game)
+        case .boss:   TNBossView(game: game)
+        case .tech:   TNTechView(game: game)
+        case .checkin: TNCheckinView(game: game)
+        case .chat:   TNChatView(game: game)
+        case .market: TNMarketView(game: game)
+        case .forge:  TNForgeView(game: game)
+        case .arena:  TNArenaView(game: game)
+        case .codex:  TNCharactersView()
+        case .bag:    TNBagView(game: game)
+        }
+    }
+    @ViewBuilder private func wrap<V: View>(_ title: String, @ViewBuilder _ content: () -> V) -> some View {
+        NavigationStack {
+            content()
+                .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { route = nil } } }
+        }
+        .preferredColorScheme(.dark)
+    }
+
     // ===== Logic =====
     private func step() {
-        guard !showBattle else { return }
+        guard !showBattle, dlgNPC == nil, !showMenu else { walking = false; return }
         let speed: CGFloat = 5.0
         if abs(joy.dx) > 0.05 || abs(joy.dy) > 0.05 {
             walking = true
@@ -3932,17 +4143,33 @@ struct TNWorldView: View {
     private func nearestNPC() -> TNWorldNPC? {
         TN_WORLD_NPCS.filter { dist($0.pos, hero) < 95 }.min { dist($0.pos, hero) < dist($1.pos, hero) }
     }
+    private func npcRoute(_ npc: TNWorldNPC) -> TNRoute? {
+        switch npc.action { case "quest": return .quest; case "market": return .market; case "forge": return .forge; default: return nil }
+    }
     private func attack() {
         guard let i = nearestMob() else { return }
-        targetIdx = i; TNHaptic.hit(.medium); showBattle = true
+        targetIdx = i
+        TNHaptic.hit(.heavy); TNSound.cast()
+        // Hiệu ứng tung chiêu chớp giữa màn rồi vào trận
+        withAnimation(.easeOut(duration: 0.2)) { castFX = "⚔️" }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation { castFX = nil }
+            showBattle = true
+        }
     }
-    private func interact(_ npc: TNWorldNPC) {
-        flash("\(npc.emoji) \(npc.name): \(npc.line)")
-        switch npc.action {
-        case "quest": DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { showQuest = true }
-        case "market": DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { showMarket = true }
-        case "forge": DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { showForge = true }
-        default: break
+    // NPC nói: gõ chữ dần + âm thanh nói
+    private func talk(_ npc: TNWorldNPC) {
+        TNHaptic.hit(.light); TNSound.talk()
+        dlgNPC = npc; dlgText = ""
+        typeNext(1, npc)
+    }
+    private func typeNext(_ i: Int, _ npc: TNWorldNPC) {
+        guard dlgNPC?.id == npc.id else { return }
+        let chars = Array(npc.line)
+        if i <= chars.count {
+            dlgText = String(chars.prefix(i))
+            if i % 2 == 0 { TNSound.talk() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { typeNext(i + 1, npc) }
         }
     }
     private func mobEnemy() -> TNEnemy {
