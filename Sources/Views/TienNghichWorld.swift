@@ -64,6 +64,169 @@ let TN_WORLD_NPCS: [TNWorldNPC] = [
     TNWorldNPC(pos: CGPoint(x: 1500, y: 800), name: "Thiết Tượng", emoji: "🧔", line: "Trang bị tốt cần rèn giũa. Vào lò chứ?", action: "forge"),
 ]
 
+// ============================ BẢN ĐỒ ĐỊA HÌNH (vẽ vector — nét ở mọi độ phân giải) ============================
+// Vẽ 1 lần ra ảnh đệm để không phải vẽ lại mỗi khung khi di chuyển (mượt + nhẹ RAM).
+struct TNTerrain: View {
+    var quality: Int = 2
+    @State private var img: Image?
+    var body: some View {
+        Group {
+            if let img { img.resizable().interpolation(.medium) }
+            else { Color(red: 0.16, green: 0.30, blue: 0.18) }
+        }
+        .onAppear { renderOnce() }
+        .onChange(of: quality) { _ in renderOnce() }
+    }
+    private func renderOnce() {
+        let px: CGFloat = 1100
+        let renderer = ImageRenderer(content: TNTerrainCanvas(quality: quality).frame(width: px, height: px))
+        renderer.scale = 1
+        if let ui = renderer.uiImage { img = Image(uiImage: ui) }
+    }
+}
+struct TNTerrainCanvas: View {
+    var quality: Int = 2
+    var body: some View {
+        Canvas { ctx, size in
+            let W = size.width
+            // Nền cỏ
+            ctx.fill(Path(CGRect(origin: .zero, size: size)),
+                     with: .linearGradient(Gradient(colors: [Color(red:0.20,green:0.42,blue:0.22),
+                                                             Color(red:0.11,green:0.27,blue:0.15)]),
+                                           startPoint: .zero, endPoint: CGPoint(x: W, y: W)))
+            var seed: UInt64 = 12345
+            func rnd() -> CGFloat { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return CGFloat((seed >> 33) % 100000) / 100000 }
+            // Mảng cỏ đậm tạo chiều sâu
+            for _ in 0..<70 {
+                let cx = rnd()*W, cy = rnd()*W, r = 30 + rnd()*80
+                ctx.fill(Path(ellipseIn: CGRect(x: cx-r, y: cy-r*0.5, width: r*2, height: r)),
+                         with: .color(Color(red:0.09,green:0.22,blue:0.12).opacity(0.35)))
+            }
+            // Lưới ô mờ
+            var grid = Path(); let step: CGFloat = 130
+            var gx: CGFloat = 0; while gx <= W { grid.move(to: CGPoint(x: gx, y: 0)); grid.addLine(to: CGPoint(x: gx, y: W)); gx += step }
+            var gy: CGFloat = 0; while gy <= W { grid.move(to: CGPoint(x: 0, y: gy)); grid.addLine(to: CGPoint(x: W, y: gy)); gy += step }
+            ctx.stroke(grid, with: .color(.white.opacity(0.035)), lineWidth: 1)
+            // Sông uốn lượn
+            var river = Path()
+            river.move(to: CGPoint(x: 180, y: 0))
+            river.addCurve(to: CGPoint(x: 760, y: W), control1: CGPoint(x: 560, y: W*0.32), control2: CGPoint(x: 60, y: W*0.7))
+            ctx.stroke(river, with: .linearGradient(Gradient(colors: [Color(red:0.25,green:0.52,blue:0.72), Color(red:0.14,green:0.34,blue:0.6)]),
+                                                    startPoint: .zero, endPoint: CGPoint(x: W, y: W)),
+                       style: StrokeStyle(lineWidth: 95, lineCap: .round))
+            ctx.stroke(river, with: .color(.white.opacity(0.12)), style: StrokeStyle(lineWidth: 30, lineCap: .round))
+            // Đường mòn đất chữ thập
+            var road = Path()
+            road.move(to: CGPoint(x: 0, y: W*0.5)); road.addLine(to: CGPoint(x: W, y: W*0.5))
+            road.move(to: CGPoint(x: W*0.52, y: 0)); road.addLine(to: CGPoint(x: W*0.52, y: W))
+            ctx.stroke(road, with: .color(Color(red:0.44,green:0.35,blue:0.22).opacity(0.55)), style: StrokeStyle(lineWidth: 72, lineCap: .round))
+            ctx.stroke(road, with: .color(Color(red:0.52,green:0.42,blue:0.28).opacity(0.4)), style: StrokeStyle(lineWidth: 20, lineCap: .round))
+            // Dãy núi viền trên
+            for i in 0..<9 {
+                let mx = CGFloat(i)*W/9 + 20
+                var m = Path()
+                m.move(to: CGPoint(x: mx, y: 300)); m.addLine(to: CGPoint(x: mx+150, y: 300)); m.addLine(to: CGPoint(x: mx+75, y: 70)); m.closeSubpath()
+                ctx.fill(m, with: .color(Color(red:0.28,green:0.3,blue:0.33).opacity(0.65)))
+                var cap = Path(); cap.move(to: CGPoint(x: mx+52, y: 140)); cap.addLine(to: CGPoint(x: mx+98, y: 140)); cap.addLine(to: CGPoint(x: mx+75, y: 70)); cap.closeSubpath()
+                ctx.fill(cap, with: .color(.white.opacity(0.55)))
+            }
+            // Cây cối (vector) — mật độ theo độ hoạ
+            let q = max(0, min(2, quality))
+            let treeCount = [45, 85, 140][q]
+            seed = 24680
+            for _ in 0..<treeCount {
+                let tx = rnd()*W, ty = 340 + rnd()*(W-360), s = 15 + rnd()*16
+                ctx.fill(Path(ellipseIn: CGRect(x: tx-s*0.75, y: ty+s*0.85, width: s*1.5, height: s*0.5)), with: .color(.black.opacity(0.18)))
+                ctx.fill(Path(CGRect(x: tx-s*0.12, y: ty, width: s*0.24, height: s*0.95)), with: .color(Color(red:0.34,green:0.22,blue:0.12)))
+                for c in [CGPoint(x: 0, y: -1), CGPoint(x: -0.62, y: -0.42), CGPoint(x: 0.62, y: -0.42)] {
+                    let rr: CGFloat = (c.x == 0 ? 1.0 : 0.72) * s
+                    ctx.fill(Path(ellipseIn: CGRect(x: tx + c.x*s - rr, y: ty + c.y*s - rr, width: rr*2, height: rr*2)),
+                             with: .color(Color(red:0.15,green:0.4,blue:0.2)))
+                }
+                ctx.fill(Path(ellipseIn: CGRect(x: tx - s*0.4, y: ty - s*1.3, width: s*0.7, height: s*0.7)), with: .color(Color(red:0.22,green:0.5,blue:0.27).opacity(0.7)))
+            }
+            // Đá
+            for _ in 0..<[14, 26, 40][q] {
+                let rx = rnd()*W, ry = 340 + rnd()*(W-360), s = 12 + rnd()*18
+                ctx.fill(Path(ellipseIn: CGRect(x: rx-s, y: ry-s*0.7, width: s*2, height: s*1.3)), with: .color(Color(red:0.4,green:0.4,blue:0.42)))
+                ctx.fill(Path(ellipseIn: CGRect(x: rx-s*0.5, y: ry-s*0.7, width: s*1.2, height: s*0.7)), with: .color(.white.opacity(0.12)))
+            }
+            // Hoa
+            for _ in 0..<[30, 70, 120][q] {
+                let fx = rnd()*W, fy = 340 + rnd()*(W-360)
+                let cols = [Color.pink, .yellow, .white, .purple, .orange]
+                ctx.fill(Path(ellipseIn: CGRect(x: fx-3.5, y: fy-3.5, width: 7, height: 7)), with: .color(cols[Int(rnd()*5) % 5].opacity(0.85)))
+            }
+        }
+    }
+}
+
+// Nhân vật vẽ vector (không dùng emoji hệ thống) — tiên nhân áo bào
+struct TNHeroVector: View {
+    var colors: [Color]
+    var size: CGFloat = 46
+    var body: some View {
+        Canvas { ctx, sz in
+            let w = sz.width, h = sz.height
+            // áo bào (thân)
+            var robe = Path()
+            robe.move(to: CGPoint(x: w*0.5, y: h*0.28))
+            robe.addLine(to: CGPoint(x: w*0.82, y: h*0.95))
+            robe.addLine(to: CGPoint(x: w*0.18, y: h*0.95))
+            robe.closeSubpath()
+            ctx.fill(robe, with: .linearGradient(Gradient(colors: colors), startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: w, y: h)))
+            // đai lưng
+            ctx.fill(Path(CGRect(x: w*0.3, y: h*0.6, width: w*0.4, height: h*0.08)), with: .color(.yellow.opacity(0.8)))
+            // đầu
+            ctx.fill(Path(ellipseIn: CGRect(x: w*0.36, y: h*0.08, width: w*0.28, height: w*0.28)), with: .color(Color(red:0.98,green:0.85,blue:0.72)))
+            // tóc
+            var hair = Path(); hair.addArc(center: CGPoint(x: w*0.5, y: h*0.2), radius: w*0.16, startAngle: .degrees(180), endAngle: .degrees(360), clockwise: false)
+            ctx.fill(hair, with: .color(Color(red:0.15,green:0.12,blue:0.1)))
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+// Icon UI vẽ vector (không dùng emoji/hệ thống)
+struct TNVIcon: View {
+    let kind: String
+    var color: Color = .white
+    var size: CGFloat = 24
+    var body: some View {
+        Canvas { ctx, sz in
+            let w = sz.width, h = sz.height
+            let col = GraphicsContext.Shading.color(color)
+            switch kind {
+            case "menu":
+                for i in 0..<3 {
+                    let y = h*0.28 + CGFloat(i)*h*0.22
+                    ctx.fill(Path(roundedRect: CGRect(x: w*0.18, y: y, width: w*0.64, height: h*0.1), cornerRadius: 2), with: col)
+                }
+            case "quest": // cuộn giấy
+                ctx.stroke(Path(roundedRect: CGRect(x: w*0.22, y: h*0.15, width: w*0.56, height: h*0.7), cornerRadius: 4), with: col, lineWidth: 2)
+                for i in 0..<3 { let y = h*0.32 + CGFloat(i)*h*0.16; ctx.stroke(Path { $0.move(to: CGPoint(x: w*0.32, y: y)); $0.addLine(to: CGPoint(x: w*0.68, y: y)) }, with: col, lineWidth: 1.5) }
+            case "bag": // túi
+                var p = Path(); p.move(to: CGPoint(x: w*0.25, y: h*0.4)); p.addLine(to: CGPoint(x: w*0.75, y: h*0.4)); p.addLine(to: CGPoint(x: w*0.82, y: h*0.85)); p.addLine(to: CGPoint(x: w*0.18, y: h*0.85)); p.closeSubpath()
+                ctx.fill(p, with: col)
+                ctx.stroke(Path { $0.addArc(center: CGPoint(x: w*0.5, y: h*0.4), radius: w*0.15, startAngle: .degrees(180), endAngle: .degrees(360), clockwise: true) }, with: col, lineWidth: 2)
+            case "skill": // ngọn lửa
+                var f = Path(); f.move(to: CGPoint(x: w*0.5, y: h*0.12)); f.addQuadCurve(to: CGPoint(x: w*0.8, y: h*0.6), control: CGPoint(x: w*0.85, y: h*0.3)); f.addQuadCurve(to: CGPoint(x: w*0.5, y: h*0.9), control: CGPoint(x: w*0.75, y: h*0.9)); f.addQuadCurve(to: CGPoint(x: w*0.2, y: h*0.6), control: CGPoint(x: w*0.25, y: h*0.9)); f.addQuadCurve(to: CGPoint(x: w*0.5, y: h*0.12), control: CGPoint(x: w*0.15, y: h*0.3)); f.closeSubpath()
+                ctx.fill(f, with: col)
+            case "boss": // đầu lâu
+                ctx.fill(Path(ellipseIn: CGRect(x: w*0.22, y: h*0.15, width: w*0.56, height: h*0.55)), with: col)
+                ctx.fill(Path(CGRect(x: w*0.4, y: h*0.6, width: w*0.2, height: h*0.22)), with: col)
+                ctx.fill(Path(ellipseIn: CGRect(x: w*0.32, y: h*0.32, width: w*0.12, height: h*0.14)), with: .color(.black))
+                ctx.fill(Path(ellipseIn: CGRect(x: w*0.56, y: h*0.32, width: w*0.12, height: h*0.14)), with: .color(.black))
+            case "back":
+                ctx.stroke(Path { $0.move(to: CGPoint(x: w*0.62, y: h*0.2)); $0.addLine(to: CGPoint(x: w*0.32, y: h*0.5)); $0.addLine(to: CGPoint(x: w*0.62, y: h*0.8)) }, with: col, style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+            default:
+                ctx.fill(Path(ellipseIn: CGRect(x: w*0.3, y: h*0.3, width: w*0.4, height: h*0.4)), with: col)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 // Cần joystick điều khiển
 struct TNJoystick: View {
     @Binding var vec: CGVector
@@ -135,6 +298,7 @@ let TN_MENU: [TNMenuItem] = [
     TNMenuItem("💰", "Nạp", route: .recharge),
     TNMenuItem("💬", "Thế Giới Chat", route: .chat),
     TNMenuItem("🖼️", "Nhân Vật", route: .codex),
+    TNMenuItem("⚙️", "Đồ Hoạ", action: "gfx"),
 ]
 
 struct TNWorldView: View {
@@ -165,9 +329,12 @@ struct TNWorldView: View {
             let camX = min(max(hero.x, center.x), TN_WORLD_SIZE - center.x)
             let camY = min(max(hero.y, center.y), TN_WORLD_SIZE - center.y)
             ZStack(alignment: .topLeading) {
+                // Bản đồ + thực thể — KẸP trong màn hình (không để khung 2200px làm tràn HUD)
                 worldLayer
                     .frame(width: TN_WORLD_SIZE, height: TN_WORLD_SIZE)
                     .offset(x: center.x - camX, y: center.y - camY)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                    .clipped()
 
                 // Hiệu ứng tung chiêu giữa màn khi đánh
                 if let castFX {
@@ -177,7 +344,7 @@ struct TNWorldView: View {
                         .shadow(color: .orange, radius: 20)
                 }
 
-                // ===== HUD game =====
+                // ===== HUD game (neo theo MÀN HÌNH) =====
                 VStack(spacing: 0) {
                     hudBar
                     Spacer()
@@ -188,8 +355,10 @@ struct TNWorldView: View {
                     }
                     .padding(.horizontal, 22).padding(.bottom, dlgNPC == nil ? 30 : 150)
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
+
                 // Cột icon chức năng bên phải
-                sideIcons.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                sideIcons.frame(width: geo.size.width, height: geo.size.height, alignment: .trailing)
 
                 // Toast thông báo
                 if let toast {
@@ -264,15 +433,9 @@ struct TNWorldView: View {
     // ===== Lớp thế giới =====
     private var worldLayer: some View {
         ZStack(alignment: .topLeading) {
-            LinearGradient(colors: [Color(red:0.16,green:0.28,blue:0.16), Color(red:0.10,green:0.18,blue:0.12)],
-                           startPoint: .top, endPoint: .bottom)
-            Ellipse().fill(Color(red:0.2,green:0.35,blue:0.5).opacity(0.5))
-                .frame(width: 520, height: 220).position(x: 500, y: 1600)
-            Ellipse().fill(Color(red:0.3,green:0.28,blue:0.18).opacity(0.5))
-                .frame(width: 900, height: 120).position(x: 1200, y: 1200)
-            ForEach(TN_DECOR) { d in
-                Text(d.emoji).font(.system(size: d.size)).position(d.pos).allowsHitTesting(false)
-            }
+            // Bản đồ địa hình vector (cỏ, sông, đường, núi, cây, đá, hoa)
+            TNTerrain(quality: game.s.gfx)
+                .frame(width: TN_WORLD_SIZE, height: TN_WORLD_SIZE)
             ForEach(TN_WORLD_NPCS) { npc in
                 VStack(spacing: 1) {
                     Text("💬").font(.system(size: 14)).opacity(nearNPC(npc) ? 1 : 0.35)
@@ -314,9 +477,8 @@ struct TNWorldView: View {
                     Image(uiImage: ui).resizable().scaledToFill().frame(width: 46, height: 46).clipShape(Circle())
                         .overlay(Circle().strokeBorder(.white.opacity(0.7), lineWidth: 2))
                 } else {
-                    Circle().fill(LinearGradient(colors: tnSkin(game.s.skin).colors, startPoint: .top, endPoint: .bottom))
-                        .frame(width: 46, height: 46).overlay(Text("🥋").font(.system(size: 24)))
-                        .overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 2))
+                    // Nhân vật vẽ vector (không dùng emoji hệ thống)
+                    TNHeroVector(colors: tnSkin(game.s.skin).colors, size: 50)
                 }
             }
             .scaleEffect(x: faceLeft ? -1 : 1, y: 1)
@@ -328,7 +490,7 @@ struct TNWorldView: View {
     private var hudBar: some View {
         HStack(spacing: 10) {
             Button { dismiss() } label: {
-                Image(systemName: "chevron.left").font(.headline).foregroundStyle(.white)
+                TNVIcon(kind: "back", color: .white, size: 20)
                     .padding(9).background(.black.opacity(0.45), in: Circle())
             }.buttonStyle(TNPress(glow: .white))
             VStack(alignment: .leading, spacing: 3) {
@@ -352,21 +514,21 @@ struct TNWorldView: View {
         .padding(.horizontal, 14).padding(.top, 52)
     }
 
-    // Cột icon chức năng nhanh bên phải + nút Menu
+    // Cột icon chức năng nhanh bên phải + nút Menu (icon VẼ VECTOR, không dùng emoji hệ thống)
     private var sideIcons: some View {
         VStack(spacing: 12) {
-            iconBtn("☰", "Menu", .orange) { TNSound.tap(); withAnimation(.spring(response: 0.3)) { showMenu = true } }
-            iconBtn("📜", "N.Vụ", .green) { route = .quest }
-            iconBtn("🎒", "Túi", .yellow) { route = .bag }
-            iconBtn("🔥", "Skill", .red) { route = .skills }
-            iconBtn("👹", "Boss", .purple) { route = .boss }
+            iconBtn("menu", "Menu", .orange) { TNSound.tap(); withAnimation(.spring(response: 0.3)) { showMenu = true } }
+            iconBtn("quest", "N.Vụ", .green) { route = .quest }
+            iconBtn("bag", "Túi", .yellow) { route = .bag }
+            iconBtn("skill", "Skill", .red) { route = .skills }
+            iconBtn("boss", "Boss", .purple) { route = .boss }
         }
         .padding(.trailing, 12).padding(.top, 150)
     }
-    private func iconBtn(_ emoji: String, _ label: String, _ color: Color, _ act: @escaping () -> Void) -> some View {
+    private func iconBtn(_ kind: String, _ label: String, _ color: Color, _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
-            VStack(spacing: 1) {
-                Text(emoji).font(.system(size: 22))
+            VStack(spacing: 2) {
+                TNVIcon(kind: kind, color: .white, size: 24)
                 Text(label).font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
             }
             .frame(width: 50, height: 50)
@@ -488,6 +650,9 @@ struct TNWorldView: View {
         switch it.action {
         case "meditate": game.meditate(); TNSound.coin(); flash("🧘 Thiền định — tu vi +\(max(6, game.s.expMax/12))")
         case "breakthrough": TNSound.level(); flash(game.breakthrough())
+        case "gfx":
+            game.s.gfx = (game.s.gfx + 1) % 3; game.save()
+            flash("⚙️ Độ hoạ: \(["Thấp","Vừa","Cao"][game.s.gfx])")
         default: break
         }
     }

@@ -16,6 +16,7 @@ struct TNSave: Codable {
     var hp = 120
     var linhThach = 0
     var tienNgoc = 0         // 🔮 Tiên Ngọc — nguyên liệu quý để đột phá cảnh giới cao
+    var gfx = 2              // Độ hoạ: 0 Thấp · 1 Vừa · 2 Cao (mật độ cảnh vật + hiệu ứng)
     var chapter = 0          // cốt truyện đã qua
     var arenaRank = 0        // số cao thủ đã hạ ở Đấu Đài
     var weaponLv = 0         // Luyện Khí — cấp vũ khí (+công)
