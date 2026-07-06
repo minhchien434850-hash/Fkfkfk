@@ -10,6 +10,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     weak var appStore: AppStore?
 
+    // Khoá xoay màn hình: mặc định như cũ (theo Info.plist); game Tiên Nghịch khoá NGANG khi vào chơi.
+    static var orientationLock: UIInterfaceOrientationMask = .all
+    func application(_ application: UIApplication,
+                     supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        AppDelegate.orientationLock
+    }
+
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Gắn nút "ẩn bàn phím" lên mọi ô nhập trong toàn app
@@ -214,6 +221,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 withCompletionHandler handler: @escaping () -> Void) {
         handler()
     }
+}
+
+// ============================ Khoá hướng màn hình (cho game chơi ngang) ============================
+enum OrientationLock {
+    /// Khoá app vào một hướng và xoay tới hướng đó ngay.
+    static func lock(_ mask: UIInterfaceOrientationMask, rotateTo: UIInterfaceOrientation) {
+        AppDelegate.orientationLock = mask
+        DispatchQueue.main.async {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            if #available(iOS 16.0, *) {
+                for scene in scenes {
+                    scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+                }
+                scenes.first?.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            } else {
+                UIDevice.current.setValue(rotateTo.rawValue, forKey: "orientation")
+                UIViewController.attemptRotationToDeviceOrientation()
+            }
+        }
+    }
+    static func landscape() { lock(.landscape, rotateTo: .landscapeRight) }
+    static func restore()   { lock(.all, rotateTo: .portrait) }
 }
 
 // ============================ App Entry Point ============================

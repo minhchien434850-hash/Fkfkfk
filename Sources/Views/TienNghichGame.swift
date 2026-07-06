@@ -72,6 +72,9 @@ struct TienNghichGameView: View {
                     .navigationBarHidden(true)
             }
         }
+        // Game chơi MÀN HÌNH NGANG — khoá landscape khi vào, trả về khi thoát
+        .onAppear { OrientationLock.landscape() }
+        .onDisappear { OrientationLock.restore() }
     }
 }
 
