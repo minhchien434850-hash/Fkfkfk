@@ -398,9 +398,16 @@ struct TNCharactersView: View {
                         let st = tnAffStyle(c.affinity)
                         Button { selected = c } label: {
                             HStack(spacing: 12) {
-                                Text(st.emoji).font(.system(size: 28)).frame(width: 52, height: 52)
-                                    .background(st.color.opacity(0.2), in: RoundedRectangle(cornerRadius: 13))
-                                    .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(st.color.opacity(0.5), lineWidth: 1))
+                                Group {
+                                    if let ui = UIImage(named: "tnc_\(c.id)") {
+                                        Image(uiImage: ui).resizable().scaledToFill()
+                                    } else {
+                                        Text(st.emoji).font(.system(size: 28))
+                                    }
+                                }
+                                .frame(width: 52, height: 52).clipShape(RoundedRectangle(cornerRadius: 13))
+                                .background(st.color.opacity(0.2), in: RoundedRectangle(cornerRadius: 13))
+                                .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(st.color.opacity(0.5), lineWidth: 1))
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
                                         Text(c.name).font(.subheadline.bold()).foregroundStyle(.white)
@@ -441,11 +448,19 @@ struct TNCodexDetail: View {
             ScrollView {
                 VStack(spacing: 16) {
                     ZStack {
-                        Circle().fill(RadialGradient(colors: [st.color.opacity(0.6), .clear], center: .center, startRadius: 0, endRadius: 90))
-                            .frame(width: 180, height: 180)
-                        Circle().strokeBorder(AngularGradient(colors: [st.color, .white, st.color], center: .center), lineWidth: 3)
-                            .frame(width: 130, height: 130)
-                        Text(st.emoji).font(.system(size: 70))
+                        // Hào quang vẽ Canvas (aura) KẸP với ảnh chân dung thật
+                        Circle().fill(RadialGradient(colors: [st.color.opacity(0.6), .clear], center: .center, startRadius: 0, endRadius: 110))
+                            .frame(width: 220, height: 220)
+                        if let ui = UIImage(named: "tnc_\(c.id)") {
+                            Image(uiImage: ui).resizable().scaledToFill()
+                                .frame(width: 150, height: 190).clipShape(RoundedRectangle(cornerRadius: 18))
+                                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(AngularGradient(colors: [st.color, .white, st.color], center: .center), lineWidth: 3))
+                                .shadow(color: st.color.opacity(0.7), radius: 16)
+                        } else {
+                            Circle().strokeBorder(AngularGradient(colors: [st.color, .white, st.color], center: .center), lineWidth: 3)
+                                .frame(width: 130, height: 130)
+                            Text(st.emoji).font(.system(size: 70))
+                        }
                     }.padding(.top, 10)
                     Text(c.name).font(.title.bold()).foregroundStyle(.white)
                     Text(c.catName).font(.caption.bold()).foregroundStyle(st.color)

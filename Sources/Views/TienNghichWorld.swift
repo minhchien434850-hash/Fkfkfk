@@ -57,11 +57,12 @@ func tnMakeMobs() -> [TNWorldMob] {
 // NPC thân thiện trong thế giới
 struct TNWorldNPC: Identifiable {
     let id = UUID(); let pos: CGPoint; let name: String; let emoji: String; let line: String; let action: String
+    var img: String? = nil    // ảnh chân dung thật (nếu có)
 }
 let TN_WORLD_NPCS: [TNWorldNPC] = [
-    TNWorldNPC(pos: CGPoint(x: 1100, y: 1100), name: "Trưởng Lão", emoji: "🧙", line: "Hậu bối, chăm chỉ tu luyện sẽ có ngày phi thăng!", action: "quest"),
-    TNWorldNPC(pos: CGPoint(x: 700, y: 900), name: "Thương Nhân", emoji: "🧕", line: "Ghé xem hàng hoá của lão phu chứ?", action: "market"),
-    TNWorldNPC(pos: CGPoint(x: 1500, y: 800), name: "Thiết Tượng", emoji: "🧔", line: "Trang bị tốt cần rèn giũa. Vào lò chứ?", action: "forge"),
+    TNWorldNPC(pos: CGPoint(x: 1100, y: 1100), name: "Đại Trưởng Lão", emoji: "🧙", line: "Hậu bối, chăm chỉ tu luyện sẽ có ngày phi thăng!", action: "quest", img: "tnc_dai-truong-lao"),
+    TNWorldNPC(pos: CGPoint(x: 700, y: 900), name: "Liễu Như Yến", emoji: "🧕", line: "Ghé xem hàng hoá & đan dược của ta chứ?", action: "market", img: "tnc_lieu-nhu-yen"),
+    TNWorldNPC(pos: CGPoint(x: 1500, y: 800), name: "Thái Sơ", emoji: "🧔", line: "Trang bị tốt cần rèn giũa. Vào lò chứ?", action: "forge", img: "tnc_thai-so"),
 ]
 
 // ============================ BẢN ĐỒ ĐỊA HÌNH (vẽ vector — nét ở mọi độ phân giải) ============================
@@ -439,7 +440,13 @@ struct TNWorldView: View {
             ForEach(TN_WORLD_NPCS) { npc in
                 VStack(spacing: 1) {
                     Text("💬").font(.system(size: 14)).opacity(nearNPC(npc) ? 1 : 0.35)
-                    Text(npc.emoji).font(.system(size: 40))
+                    if let img = npc.img, let ui = UIImage(named: img) {
+                        Image(uiImage: ui).resizable().scaledToFill().frame(width: 52, height: 52).clipShape(Circle())
+                            .overlay(Circle().strokeBorder(.yellow.opacity(0.8), lineWidth: 2))
+                            .shadow(color: .yellow.opacity(nearNPC(npc) ? 0.7 : 0), radius: 8)
+                    } else {
+                        Text(npc.emoji).font(.system(size: 40))
+                    }
                     Text(npc.name).font(.system(size: 10, weight: .bold)).foregroundStyle(.yellow)
                         .padding(.horizontal, 5).padding(.vertical, 1).background(.black.opacity(0.5), in: Capsule())
                 }.position(npc.pos).allowsHitTesting(false)
@@ -473,11 +480,11 @@ struct TNWorldView: View {
             ZStack {
                 Circle().fill(RadialGradient(colors: [tnSkin(game.s.skin).colors.first!.opacity(0.7), .clear], center: .center, startRadius: 0, endRadius: 34))
                     .frame(width: 64, height: 64)
-                if let ui = UIImage(named: "tn_vuonglam") {
-                    Image(uiImage: ui).resizable().scaledToFill().frame(width: 46, height: 46).clipShape(Circle())
-                        .overlay(Circle().strokeBorder(.white.opacity(0.7), lineWidth: 2))
+                if let ui = UIImage(named: "tnc_vuong-lam") ?? UIImage(named: "tn_vuonglam") {
+                    // Ảnh chân dung thật KẸP với hào quang Canvas phía sau
+                    Image(uiImage: ui).resizable().scaledToFill().frame(width: 48, height: 48).clipShape(Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.8), lineWidth: 2))
                 } else {
-                    // Nhân vật vẽ vector (không dùng emoji hệ thống)
                     TNHeroVector(colors: tnSkin(game.s.skin).colors, size: 50)
                 }
             }
@@ -562,8 +569,14 @@ struct TNWorldView: View {
         VStack {
             Spacer()
             HStack(alignment: .top, spacing: 12) {
-                Text(npc.emoji).font(.system(size: 46))
-                    .frame(width: 64, height: 64).background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
+                Group {
+                    if let img = npc.img, let ui = UIImage(named: img) {
+                        Image(uiImage: ui).resizable().scaledToFill()
+                    } else { Text(npc.emoji).font(.system(size: 46)) }
+                }
+                .frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 14))
+                .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.yellow.opacity(0.5), lineWidth: 1))
                 VStack(alignment: .leading, spacing: 6) {
                     Text(npc.name).font(.subheadline.bold()).foregroundStyle(.yellow)
                     Text(dlgText).font(.callout).foregroundStyle(.white)
