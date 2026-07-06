@@ -103,24 +103,39 @@ final class TNGame: ObservableObject {
         logDaily("medi")
         save()
     }
+    // Chi phí 🔮 Tiên Ngọc để ĐỘT PHÁ LÊN CẢNH GIỚI mới (càng cao càng tốn; cảnh giới thấp miễn phí)
+    var breakthroughTienNgocCost: Int {
+        guard s.stage >= 9, s.realm < TNRealm.allCases.count - 1 else { return 0 }
+        return max(0, (s.realm + 1 - 2)) * 3   // Nguyên Anh (realm 3)=3 · … · Cổ Thần (realm 14)=36
+    }
     // Đột phá cảnh giới
     @discardableResult
     func breakthrough() -> String {
         guard s.canBreakthrough else { return "Chưa đủ tu vi để đột phá." }
-        s.exp = 0
         if s.stage >= 9 {
             if s.realm < TNRealm.allCases.count - 1 {
+                // Lên cảnh giới mới — cảnh giới cao cần Tiên Ngọc
+                let cost = breakthroughTienNgocCost
+                if s.tienNgoc < cost {
+                    let nextName = TNRealm(rawValue: s.realm + 1)?.name ?? ""
+                    return "❌ Cần \(cost) 🔮 Tiên Ngọc để đột phá lên \(nextName)! Săn quái / làm nhiệm vụ để nhặt (rơi 30%). Hiện có \(s.tienNgoc) 🔮."
+                }
+                s.tienNgoc -= cost
+                s.exp = 0
                 s.realm += 1; s.stage = 1
                 s.hp = s.hpMax
                 unlockSkillsForRealm()
                 save()
-                return "🎉 ĐỘT PHÁ THÀNH CÔNG! Bước vào cảnh giới \(s.realmEnum.name) tầng 1!"
+                let costMsg = cost > 0 ? " (tốn \(cost) 🔮)" : ""
+                return "🎉 ĐỘT PHÁ THÀNH CÔNG! Bước vào cảnh giới \(s.realmEnum.name) tầng 1!\(costMsg)"
             } else {
+                s.exp = 0
                 s.stage = 9
                 save()
                 return "Ngươi đã đạt đỉnh cao Cổ Thần — vô địch thiên hạ!"
             }
         } else {
+            s.exp = 0
             s.stage += 1
             s.hp = s.hpMax
             unlockSkillsForRealm()
@@ -158,9 +173,16 @@ final class TNGame: ObservableObject {
         gainLevelExp(xp)             // đánh quái cũng lên CẤP
         s.linhThao += Int.random(in: 1...3)      // rơi nguyên liệu luyện đan
         s.khoangThach += Int.random(in: 1...3)   // rơi nguyên liệu luyện khí
+        if Int.random(in: 0..<100) < 30 { s.tienNgoc += Int.random(in: 1...2) }  // 🔮 rơi 30%
         s.totalWins += 1             // thống kê thành tựu
         logDaily("hunt")             // thắng trận → tiến độ nhiệm vụ ngày
         save()
+    }
+    // Nhặt Tiên Ngọc từ nhiệm vụ (rơi 30%). Trả về số nhặt được (0 nếu trượt).
+    @discardableResult
+    func rollTienNgoc(_ chance: Int = 30, _ amount: Int = 1) -> Int {
+        if Int.random(in: 0..<100) < chance { s.tienNgoc += amount; save(); return amount }
+        return 0
     }
     // ===== Thành tựu & Danh hiệu =====
     func achievementDone(_ a: TNAchievement) -> Bool { a.check(s) }

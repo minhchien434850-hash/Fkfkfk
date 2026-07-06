@@ -297,6 +297,8 @@ struct TNWorldView: View {
                 }
             }
             Spacer()
+            Text("🔮 \(game.s.tienNgoc)").font(.caption.bold()).foregroundStyle(Color(red:0.5,green:1,blue:0.7))
+                .padding(.horizontal, 10).padding(.vertical, 5).background(.black.opacity(0.45), in: Capsule())
             Text("💎 \(game.s.linhThach)").font(.caption.bold()).foregroundStyle(.cyan)
                 .padding(.horizontal, 10).padding(.vertical, 5).background(.black.opacity(0.45), in: Capsule())
         }
@@ -389,6 +391,17 @@ struct TNWorldView: View {
                         Image(systemName: "xmark").foregroundStyle(.white).padding(8).background(.white.opacity(0.15), in: Circle())
                     }
                 }.padding(.horizontal, 4)
+                // Tài nguyên + gợi ý chi phí đột phá
+                HStack(spacing: 10) {
+                    Text("💎 \(game.s.linhThach)").font(.caption.bold()).foregroundStyle(.cyan)
+                    Text("🔮 \(game.s.tienNgoc) Tiên Ngọc").font(.caption.bold()).foregroundStyle(Color(red:0.5,green:1,blue:0.7))
+                    Spacer()
+                    if game.breakthroughTienNgocCost > 0 {
+                        Text("Đột phá kế: \(game.breakthroughTienNgocCost) 🔮").font(.caption2.bold()).foregroundStyle(.orange)
+                    }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 8)
+                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
                 ScrollView {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 14) {
                         ForEach(TN_MENU) { it in

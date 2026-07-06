@@ -266,9 +266,11 @@ struct TNQuestView: View {
         let up = game.gainLevelExp(q.3)
         game.s.linhThach += q.4
         game.logDaily("quest")       // làm nhiệm vụ thường → tiến độ nhiệm vụ ngày
+        let ngoc = game.rollTienNgoc()   // 🔮 rơi Tiên Ngọc 30%
         game.save()
         cooldowns[q.0] = Date()
-        flash(up > 0 ? "🎉 LÊN CẤP \(game.s.level)! " : "✨ +\(q.3) EXP · 💎 +\(q.4)")
+        let ngocMsg = ngoc > 0 ? " · 🔮 +\(ngoc) Tiên Ngọc!" : ""
+        flash((up > 0 ? "🎉 LÊN CẤP \(game.s.level)! " : "✨ +\(q.3) EXP · 💎 +\(q.4)") + ngocMsg)
     }
     private func questEnemy() -> TNEnemy {
         let names = [("Băng Hổ", "🐯"), ("Lôi Ưng", "🦅"), ("Hắc Điệp", "🦋"), ("Kim Ô", "🐦‍🔥")]
