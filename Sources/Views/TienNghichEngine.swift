@@ -164,17 +164,23 @@ final class TNGame: ObservableObject {
         save()
         return up
     }
+    // Chiến lợi phẩm trận gần nhất (để bảng kết quả hiển thị "rơi ra gì")
+    @Published var lastLoot = TNLoot()
     func reward(linhThach: Int, exp: Int) {
         // Đặc quyền VIP: cộng thêm % linh thạch & EXP
         let lt = Int(Double(linhThach) * vipRewardMul)
         let xp = Int(Double(exp) * vipRewardMul)
+        let thao = Int.random(in: 1...3)
+        let thach = Int.random(in: 1...3)
+        let ngoc = Int.random(in: 0..<100) < 30 ? Int.random(in: 1...2) : 0   // 🔮 rơi 30%
         s.linhThach += lt
         s.exp = min(s.exp + xp, s.expMax)
         gainLevelExp(xp)             // đánh quái cũng lên CẤP
-        s.linhThao += Int.random(in: 1...3)      // rơi nguyên liệu luyện đan
-        s.khoangThach += Int.random(in: 1...3)   // rơi nguyên liệu luyện khí
-        if Int.random(in: 0..<100) < 30 { s.tienNgoc += Int.random(in: 1...2) }  // 🔮 rơi 30%
+        s.linhThao += thao           // rơi nguyên liệu luyện đan
+        s.khoangThach += thach       // rơi nguyên liệu luyện khí
+        s.tienNgoc += ngoc
         s.totalWins += 1             // thống kê thành tựu
+        lastLoot = TNLoot(linhThach: lt, exp: xp, tienNgoc: ngoc, linhThao: thao, khoangThach: thach)
         logDaily("hunt")             // thắng trận → tiến độ nhiệm vụ ngày
         save()
     }

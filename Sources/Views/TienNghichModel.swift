@@ -118,6 +118,15 @@ struct TNSave: Codable {
     var powerScore: Int { atk * 3 + def * 5 + hpMax }
 }
 
+// MARK: - Chiến lợi phẩm (hiển thị ở bảng kết quả trận)
+struct TNLoot {
+    var linhThach = 0
+    var exp = 0
+    var tienNgoc = 0
+    var linhThao = 0
+    var khoangThach = 0
+}
+
 // MARK: - Kẻ địch
 struct TNEnemy {
     var name: String

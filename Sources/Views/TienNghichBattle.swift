@@ -104,7 +104,7 @@ struct TNBattleView: View {
             if let fx { TNSkillFX(color: fx.0, icon: fx.1).id(UUID()) }
 
             if ended {
-                TNResultView(win: win, reward: win ? enemy.reward : 0, exp: win ? enemy.exp : 0) {
+                TNResultView(win: win, loot: game.lastLoot) {
                     onDone(win); dismiss()
                 }
             }
@@ -208,29 +208,50 @@ struct TNBattleView: View {
 
 struct TNResultView: View {
     let win: Bool
-    let reward: Int
-    let exp: Int
+    var loot = TNLoot()
     let onClose: () -> Void
+    @State private var pop = false
     var body: some View {
         ZStack {
-            Color.black.opacity(0.75).ignoresSafeArea()
-            VStack(spacing: 16) {
+            Color.black.opacity(0.78).ignoresSafeArea()
+            VStack(spacing: 14) {
                 Text(win ? "🎉 CHIẾN THẮNG!" : "💀 THẤT BẠI").font(.largeTitle.bold())
                     .foregroundStyle(win ? .yellow : .red)
+                    .scaleEffect(pop ? 1.0 : 0.6)
                 if win {
-                    Text("💎 Linh thạch +\(reward)").foregroundStyle(.cyan)
-                    Text("✨ Tu vi +\(exp)").foregroundStyle(.orange)
+                    Text("— CHIẾN LỢI PHẨM —").font(.caption.bold()).foregroundStyle(.white.opacity(0.6))
+                    VStack(spacing: 8) {
+                        lootRow("💎", "Linh thạch", loot.linhThach, .cyan)
+                        lootRow("✨", "Tu vi", loot.exp, .orange)
+                        if loot.tienNgoc > 0 {
+                            lootRow("🔮", "Tiên Ngọc", loot.tienNgoc, Color(red:0.5,green:1,blue:0.7))
+                                .shadow(color: Color(red:0.4,green:1,blue:0.6), radius: 8)
+                        }
+                        if loot.linhThao > 0 { lootRow("🌿", "Linh thảo", loot.linhThao, .green) }
+                        if loot.khoangThach > 0 { lootRow("⛏️", "Khoáng thạch", loot.khoangThach, .brown) }
+                    }
+                    .padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
                 } else {
                     Text("Đạo hữu bại trận nhưng được cứu chữa,\nmáu đã hồi đầy. Luyện thêm rồi quay lại!")
                         .multilineTextAlignment(.center).foregroundStyle(.white.opacity(0.8)).font(.footnote)
                 }
                 Button(action: onClose) {
                     Text("Trở về").font(.headline).foregroundStyle(.white)
-                        .frame(width: 160).padding(.vertical, 12)
+                        .frame(width: 180).padding(.vertical, 12)
                         .background(LinearGradient(colors: [.purple, .indigo], startPoint: .leading, endPoint: .trailing), in: Capsule())
-                }
+                }.buttonStyle(TNPress(glow: .purple))
             }
-            .padding(30).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .padding(28).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+            .padding(.horizontal, 30)
         }
+        .onAppear { withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) { pop = true } }
+    }
+    private func lootRow(_ emoji: String, _ name: String, _ amount: Int, _ color: Color) -> some View {
+        HStack {
+            Text(emoji).font(.title3)
+            Text(name).foregroundStyle(.white.opacity(0.85)).font(.subheadline)
+            Spacer()
+            Text("+\(amount)").font(.subheadline.bold()).foregroundStyle(color)
+        }.frame(width: 210)
     }
 }

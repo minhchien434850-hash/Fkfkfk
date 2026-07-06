@@ -28,12 +28,14 @@ struct TNWorldMob: Identifiable {
     var pos: CGPoint
     let name: String
     let emoji: String
+    var elite = false        // quái Tinh Anh (mini-boss) — mạnh hơn, thưởng hậu, chắc rơi Tiên Ngọc
     var alive = true
     var respawnAt: Date? = nil
 }
 func tnMakeMobs() -> [TNWorldMob] {
     let kinds = [("Yêu Lang","🐺"),("Sơn Trư","🐗"),("Độc Xà","🐍"),("Hắc Hùng","🐻"),
                  ("Yêu Hồ","🦊"),("Độc Chu","🕷️"),("Huyết Bức","🦇"),("Thạch Quái","🗿")]
+    let elites = [("Hắc Phong Yêu Vương","👹"),("Huyết Nhãn Ma Lang","🐺"),("Thượng Cổ Hung Thú","🦁")]
     var out: [TNWorldMob] = []
     var seed: UInt64 = 77777
     func rnd() -> CGFloat { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return CGFloat((seed >> 33) % 100000) / 100000 }
@@ -42,6 +44,12 @@ func tnMakeMobs() -> [TNWorldMob] {
         let y = 150 + rnd() * (TN_WORLD_SIZE - 300)
         let k = kinds[i % kinds.count]
         out.append(TNWorldMob(pos: CGPoint(x: x, y: y), name: k.0, emoji: k.1))
+    }
+    // 3 quái Tinh Anh (mini-boss) rải rác
+    for j in 0..<elites.count {
+        let x = 250 + rnd() * (TN_WORLD_SIZE - 500)
+        let y = 250 + rnd() * (TN_WORLD_SIZE - 500)
+        out.append(TNWorldMob(pos: CGPoint(x: x, y: y), name: elites[j].0, emoji: elites[j].1, elite: true))
     }
     return out
 }
@@ -146,6 +154,9 @@ struct TNWorldView: View {
     @State private var dlgText = ""
     @State private var castFX: String?
     @State private var bob = false
+    @State private var celebrate: String?
+    @State private var shownLevel = -1
+    @State private var shownRealm = -1
     private let tick = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -194,6 +205,20 @@ struct TNWorldView: View {
                 }
                 // Bảng chức năng (thay cho menu nút cũ)
                 if showMenu { menuPanel(geo) }
+                // Hiệu ứng LÊN CẤP / ĐỘT PHÁ toàn màn
+                if let celebrate {
+                    VStack {
+                        Text(celebrate)
+                            .font(.system(size: 36, weight: .black, design: .serif))
+                            .foregroundStyle(LinearGradient(colors: [.yellow, .orange, .white], startPoint: .leading, endPoint: .trailing))
+                            .multilineTextAlignment(.center)
+                            .shadow(color: .orange, radius: 20)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.35).ignoresSafeArea())
+                    .allowsHitTesting(false)
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
@@ -202,14 +227,33 @@ struct TNWorldView: View {
         .background(Color(red: 0.13, green: 0.2, blue: 0.13))
         .preferredColorScheme(.dark)
         .onReceive(tick) { _ in step() }
-        .onAppear { withAnimation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true)) { bob = true } }
+        .onChange(of: game.s.level) { v in
+            if v > shownLevel { shownLevel = v; showCelebrate("⭐ LÊN CẤP \(v)!") } else { shownLevel = v }
+        }
+        .onChange(of: game.s.realm) { v in
+            if v > shownRealm { shownRealm = v; showCelebrate("⚡ ĐỘT PHÁ\n\(game.s.realmEnum.name)!") } else { shownRealm = v }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true)) { bob = true }
+            shownLevel = game.s.level; shownRealm = game.s.realm
+        }
         .fullScreenCover(isPresented: $showBattle) {
             TNBattleView(game: game, enemy: mobEnemy(), storyMode: false) { won in
                 if won, let i = targetIdx, mobs.indices.contains(i) {
+                    let m = mobs[i]
                     mobs[i].alive = false
-                    mobs[i].respawnAt = Date().addingTimeInterval(12)
+                    mobs[i].respawnAt = Date().addingTimeInterval(m.elite ? 45 : 12)
                     TNSound.win()
-                    flash("🎉 Hạ gục \(mobs[i].name)! Nhận linh thạch & EXP.")
+                    if m.elite {
+                        // Tinh Anh: thưởng hậu — chắc chắn Tiên Ngọc + rơi trang bị
+                        let bonus = Int.random(in: 3...6)
+                        game.s.tienNgoc += bonus
+                        let g = game.dropGear(minRarity: 2)
+                        game.save()
+                        flash("👑 Hạ Tinh Anh \(m.name)! 🔮 +\(bonus) Tiên Ngọc · 🎁 \(tnRarityName(g.rarity)) \(tnGearName(g))")
+                    } else {
+                        flash("🎉 Hạ gục \(m.name)! Nhận chiến lợi phẩm.")
+                    }
                 }
                 targetIdx = nil
             }
@@ -240,11 +284,14 @@ struct TNWorldView: View {
             ForEach(mobs) { m in
                 if m.alive {
                     VStack(spacing: 1) {
-                        Text(m.emoji).font(.system(size: 38))
+                        if m.elite { Text("👑").font(.system(size: 16)) }
+                        Text(m.emoji).font(.system(size: m.elite ? 54 : 38))
                             .scaleEffect(nearMob(m) ? 1.15 : 1.0)
-                            .shadow(color: nearMob(m) ? .red : .clear, radius: 8)
-                        Text(m.name).font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.85))
-                            .padding(.horizontal, 4).background(.red.opacity(0.5), in: Capsule())
+                            .shadow(color: m.elite ? .orange : (nearMob(m) ? .red : .clear), radius: m.elite ? 14 : 8)
+                        Text(m.name).font(.system(size: m.elite ? 10 : 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .background((m.elite ? Color.orange : Color.red).opacity(0.6), in: Capsule())
                     }.position(m.pos).allowsHitTesting(false)
                 }
             }
@@ -546,14 +593,23 @@ struct TNWorldView: View {
     }
     private func mobEnemy() -> TNEnemy {
         let m = targetIdx.flatMap { mobs.indices.contains($0) ? mobs[$0] : nil }
+        let elite = m?.elite ?? false
         let lvl = Double(game.s.realm * 9 + game.s.stage + game.s.level / 5)
-        let hp = Int((80 + lvl * 85) * Double.random(in: 0.9...1.2))
+        let base = Int((80 + lvl * 85) * Double.random(in: 0.9...1.2))
+        let hp = elite ? base * 4 : base
         return TNEnemy(name: m?.name ?? "Yêu Thú", emoji: m?.emoji ?? "🐺", hp: hp, hpMax: hp,
-                       atk: Int(Double(game.s.atk) * 0.55), def: Int(Double(game.s.def) * 0.55),
-                       reward: Int(30 + lvl * 12), exp: Int(25 + lvl * 15))
+                       atk: Int(Double(game.s.atk) * (elite ? 0.85 : 0.55)),
+                       def: Int(Double(game.s.def) * (elite ? 0.8 : 0.55)),
+                       reward: Int((30 + lvl * 12) * (elite ? 4 : 1)),
+                       exp: Int((25 + lvl * 15) * (elite ? 4 : 1)), isBoss: elite)
     }
     private func flash(_ m: String) {
         withAnimation { toast = m }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { withAnimation { if toast == m { toast = nil } } }
+    }
+    private func showCelebrate(_ t: String) {
+        TNSound.level(); TNHaptic.success()
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) { celebrate = t }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { withAnimation { celebrate = nil } }
     }
 }
