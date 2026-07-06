@@ -307,6 +307,25 @@ func tnAffStyle(_ a: String) -> (emoji: String, color: Color) {
     default:           return ("⚡", Color(red: 1, green: 0.85, blue: 0.2))  // lightning
     }
 }
+// Màu áo bào (gradient) theo hệ — để vẽ nhân vật toàn thân hợp chủ đề
+func tnAffColors(_ a: String) -> [Color] {
+    switch a {
+    case "fire":   return [.orange, .red]
+    case "ice":    return [.cyan, .blue]
+    case "nature": return [.green, Color(red:0.1,green:0.4,blue:0.2)]
+    case "cosmos": return [.indigo, .purple]
+    case "dark":   return [.purple, Color(red:0.2,green:0.05,blue:0.25)]
+    case "gold":   return [Color(red:1,green:0.85,blue:0.3), .orange]
+    case "light":  return [.yellow, .white]
+    case "wind":   return [.teal, .mint]
+    case "lotus":  return [.pink, .white]
+    default:        return [Color(red:1,green:0.9,blue:0.4), .yellow]  // lightning
+    }
+}
+// Màu áo bào theo id nhân vật (tra trong Codex)
+func tnColorsForCodexId(_ id: String) -> [Color] {
+    tnAffColors(TN_CODEX.first { $0.id == id }?.affinity ?? "lightning")
+}
 let TN_CODEX_CATS: [(String, String)] = [
     ("ALL", "Tất cả"), ("MAIN", "Nhân Vật Chính"), ("ELITE", "Thiên Kiêu"),
     ("TOP", "Cường Giả Hàng Đầu"), ("MAIDEN", "Thánh Nữ"), ("BEAST", "Linh Thú & Yêu Thú"),
@@ -447,20 +466,23 @@ struct TNCodexDetail: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    ZStack {
-                        // Hào quang vẽ Canvas (aura) KẸP với ảnh chân dung thật
-                        Circle().fill(RadialGradient(colors: [st.color.opacity(0.6), .clear], center: .center, startRadius: 0, endRadius: 110))
-                            .frame(width: 220, height: 220)
-                        if let ui = UIImage(named: "tnc_\(c.id)") {
-                            Image(uiImage: ui).resizable().scaledToFill()
-                                .frame(width: 150, height: 190).clipShape(RoundedRectangle(cornerRadius: 18))
-                                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(AngularGradient(colors: [st.color, .white, st.color], center: .center), lineWidth: 3))
-                                .shadow(color: st.color.opacity(0.7), radius: 16)
-                        } else {
-                            Circle().strokeBorder(AngularGradient(colors: [st.color, .white, st.color], center: .center), lineWidth: 3)
-                                .frame(width: 130, height: 130)
-                            Text(st.emoji).font(.system(size: 70))
+                    HStack(spacing: 8) {
+                        // Ảnh chân dung thật
+                        ZStack {
+                            Circle().fill(RadialGradient(colors: [st.color.opacity(0.55), .clear], center: .center, startRadius: 0, endRadius: 95))
+                                .frame(width: 190, height: 190)
+                            if let ui = UIImage(named: "tnc_\(c.id)") {
+                                Image(uiImage: ui).resizable().scaledToFill()
+                                    .frame(width: 130, height: 165).clipShape(RoundedRectangle(cornerRadius: 16))
+                                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(AngularGradient(colors: [st.color, .white, st.color], center: .center), lineWidth: 3))
+                                    .shadow(color: st.color.opacity(0.7), radius: 14)
+                            } else {
+                                Text(st.emoji).font(.system(size: 70))
+                            }
                         }
+                        // Nhân vật TOÀN THÂN vẽ bằng code (thân Canvas theo hệ + mặt ảnh thật)
+                        TNCultivator(colors: tnAffColors(c.affinity),
+                                     walking: false, face: UIImage(named: "tnc_\(c.id)"), size: 120)
                     }.padding(.top, 10)
                     Text(c.name).font(.title.bold()).foregroundStyle(.white)
                     Text(c.catName).font(.caption.bold()).foregroundStyle(st.color)

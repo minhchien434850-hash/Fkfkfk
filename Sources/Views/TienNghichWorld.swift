@@ -508,9 +508,10 @@ struct TNWorldView: View {
                 VStack(spacing: 1) {
                     Text("💬").font(.system(size: 14)).opacity(nearNPC(npc) ? 1 : 0.35)
                     if let img = npc.img, let ui = UIImage(named: img) {
-                        Image(uiImage: ui).resizable().scaledToFill().frame(width: 52, height: 52).clipShape(Circle())
-                            .overlay(Circle().strokeBorder(.yellow.opacity(0.8), lineWidth: 2))
-                            .shadow(color: .yellow.opacity(nearNPC(npc) ? 0.7 : 0), radius: 8)
+                        // NPC vẽ toàn thân (thân Canvas theo hệ + mặt ảnh thật)
+                        TNCultivator(colors: tnColorsForCodexId(String(img.dropFirst(4))),
+                                     walking: false, face: ui, size: 62)
+                            .shadow(color: .yellow.opacity(nearNPC(npc) ? 0.6 : 0), radius: 8)
                     } else {
                         Text(npc.emoji).font(.system(size: 40))
                     }
