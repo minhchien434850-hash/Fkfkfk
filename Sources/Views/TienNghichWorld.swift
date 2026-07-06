@@ -188,6 +188,73 @@ struct TNHeroVector: View {
     }
 }
 
+// Tiên nhân TOÀN THÂN vẽ bằng code — thân/áo bào vẽ Canvas + KẸP ảnh mặt thật, có cử động
+struct TNCultivator: View {
+    var colors: [Color]
+    var walking: Bool = false
+    var faceLeft: Bool = false
+    var face: UIImage? = nil
+    var size: CGFloat = 62
+    var body: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let step = CGFloat(walking ? sin(t * 9) : 0)
+            let sway = CGFloat(sin(t * 3) * (walking ? 5.0 : 2.0))
+            let breathe = CGFloat(sin(t * 2) * 1.5)
+            ZStack {
+                Canvas { ctx, sz in
+                    let w = sz.width, h = sz.height
+                    // Hào quang
+                    ctx.fill(Path(ellipseIn: CGRect(x: w*0.04, y: h*0.04, width: w*0.92, height: h*0.92)),
+                             with: .radialGradient(Gradient(colors: [colors.first!.opacity(0.4), .clear]),
+                                                   center: CGPoint(x: w*0.5, y: h*0.5), startRadius: 0, endRadius: w*0.55))
+                    // Bóng đổ
+                    ctx.fill(Path(ellipseIn: CGRect(x: w*0.3, y: h*0.93, width: w*0.4, height: h*0.05)), with: .color(.black.opacity(0.3)))
+                    // Chân (bước khi đi)
+                    let lc = Color(red: 0.18, green: 0.17, blue: 0.22)
+                    ctx.fill(Path(roundedRect: CGRect(x: w*0.41 - step*3, y: h*0.72, width: w*0.08, height: h*0.22), cornerRadius: 3), with: .color(lc))
+                    ctx.fill(Path(roundedRect: CGRect(x: w*0.51 + step*3, y: h*0.72, width: w*0.08, height: h*0.22), cornerRadius: 3), with: .color(lc))
+                    // Áo bào (phất theo sway)
+                    var robe = Path()
+                    robe.move(to: CGPoint(x: w*0.5, y: h*0.30))
+                    robe.addLine(to: CGPoint(x: w*0.74, y: h*0.80 + sway))
+                    robe.addQuadCurve(to: CGPoint(x: w*0.26, y: h*0.80 - sway), control: CGPoint(x: w*0.5, y: h*0.88))
+                    robe.closeSubpath()
+                    ctx.fill(robe, with: .linearGradient(Gradient(colors: colors), startPoint: CGPoint(x: 0, y: h*0.3), endPoint: CGPoint(x: w, y: h*0.8)))
+                    // Cổ áo chữ V
+                    var col = Path(); col.move(to: CGPoint(x: w*0.43, y: h*0.34)); col.addLine(to: CGPoint(x: w*0.5, y: h*0.52)); col.addLine(to: CGPoint(x: w*0.57, y: h*0.34))
+                    ctx.stroke(col, with: .color(.white.opacity(0.85)), lineWidth: 2.5)
+                    // Đai lưng
+                    ctx.fill(Path(CGRect(x: w*0.35, y: h*0.56, width: w*0.3, height: h*0.045)), with: .color(.yellow.opacity(0.85)))
+                    // Tay áo
+                    ctx.fill(Path(roundedRect: CGRect(x: w*0.25, y: h*0.35, width: w*0.09, height: h*0.27), cornerRadius: 4), with: .linearGradient(Gradient(colors: colors), startPoint: .zero, endPoint: CGPoint(x: w, y: h)))
+                    ctx.fill(Path(roundedRect: CGRect(x: w*0.66, y: h*0.35, width: w*0.09, height: h*0.27), cornerRadius: 4), with: .linearGradient(Gradient(colors: colors), startPoint: .zero, endPoint: CGPoint(x: w, y: h)))
+                    // Tóc sau đầu
+                    ctx.fill(Path(ellipseIn: CGRect(x: w*0.33, y: h*0.05, width: w*0.34, height: h*0.29)), with: .color(Color(red: 0.11, green: 0.09, blue: 0.12)))
+                }
+                // ĐẦU: ảnh mặt thật (kẹp) hoặc vẽ vector
+                Group {
+                    if let face {
+                        Image(uiImage: face).resizable().scaledToFill()
+                            .frame(width: size*0.42, height: size*0.42).clipShape(Circle())
+                            .overlay(Circle().strokeBorder(.white.opacity(0.75), lineWidth: 1.5))
+                    } else {
+                        Circle().fill(Color(red: 0.98, green: 0.86, blue: 0.74))
+                            .frame(width: size*0.32, height: size*0.32)
+                            .overlay(HStack(spacing: size*0.07) {
+                                Circle().fill(.black).frame(width: size*0.04, height: size*0.05)
+                                Circle().fill(.black).frame(width: size*0.04, height: size*0.05)
+                            })
+                    }
+                }
+                .position(x: size*0.5, y: size*1.25*0.18 + breathe)
+            }
+            .frame(width: size, height: size*1.25)
+            .scaleEffect(x: faceLeft ? -1 : 1, y: 1)
+        }
+    }
+}
+
 // Icon UI vẽ vector (không dùng emoji/hệ thống)
 struct TNVIcon: View {
     let kind: String
@@ -477,20 +544,10 @@ struct TNWorldView: View {
                 Capsule().fill(.black.opacity(0.5)).frame(width: 46, height: 5)
                 Capsule().fill(.green).frame(width: 46 * CGFloat(Double(game.s.hp) / Double(max(1, game.s.hpMax))), height: 5)
             }
-            ZStack {
-                Circle().fill(RadialGradient(colors: [tnSkin(game.s.skin).colors.first!.opacity(0.7), .clear], center: .center, startRadius: 0, endRadius: 34))
-                    .frame(width: 64, height: 64)
-                if let ui = UIImage(named: "tnc_vuong-lam") ?? UIImage(named: "tn_vuonglam") {
-                    // Ảnh chân dung thật KẸP với hào quang Canvas phía sau
-                    Image(uiImage: ui).resizable().scaledToFill().frame(width: 48, height: 48).clipShape(Circle())
-                        .overlay(Circle().strokeBorder(.white.opacity(0.8), lineWidth: 2))
-                } else {
-                    TNHeroVector(colors: tnSkin(game.s.skin).colors, size: 50)
-                }
-            }
-            .scaleEffect(x: faceLeft ? -1 : 1, y: 1)
-            .offset(y: walking && bob ? -3 : 0)
-            Ellipse().fill(.black.opacity(0.3)).frame(width: 34, height: 9)
+            // Tiên nhân toàn thân vẽ bằng code (thân Canvas + mặt ảnh thật), tự cử động
+            TNCultivator(colors: tnSkin(game.s.skin).colors,
+                         walking: walking, faceLeft: faceLeft,
+                         face: UIImage(named: "tnc_vuong-lam"), size: 64)
         }
     }
 
