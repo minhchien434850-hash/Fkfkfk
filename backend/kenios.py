@@ -780,6 +780,14 @@ def init_db() -> None:
                 fp TEXT PRIMARY KEY,
                 created_at INTEGER
             );
+            -- Lưu tiến trình game (ONLINE) — mỗi user 1 bản save theo từng game
+            CREATE TABLE IF NOT EXISTS game_saves(
+                user_id INTEGER NOT NULL,
+                game TEXT NOT NULL DEFAULT 'tiennghich',
+                data TEXT NOT NULL DEFAULT '{}',
+                updated_at INTEGER,
+                PRIMARY KEY(user_id, game)
+            );
             -- Mã khuyến mãi / giảm giá
             CREATE TABLE IF NOT EXISTS store_promo_codes(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -12801,6 +12809,82 @@ def store_wallet(user=Depends(get_user)) -> dict[str, Any]:
         "tx": [{"kind": r["kind"], "amount": r["amount"], "note": r["note"] or "",
                 "created_at": r["created_at"]} for r in tx],
     }
+
+
+# ============================ GAME TIÊN NGHỊCH — Online save + nạp tiền thật ============================
+# Gói nạp linh thạch (VND thật → linh thạch). Trừ ví tiền thật (nạp qua /store/wallet/topup).
+TN_LT_PACKAGES: dict[str, tuple[int, int]] = {
+    "p1": (20000, 500),
+    "p2": (50000, 1430),
+    "p3": (100000, 3360),
+    "p4": (200000, 7800),
+    "p5": (500000, 22400),
+}
+
+class TNSaveIn(BaseModel):
+    data: str = "{}"
+
+class TNBuyIn(BaseModel):
+    package: str
+
+@app.get("/game/tn/state")
+def tn_state(user=Depends(get_user)) -> dict[str, Any]:
+    """Tải tiến trình game online của người chơi + số dư ví."""
+    with db() as c:
+        r = c.execute("SELECT data FROM game_saves WHERE user_id=? AND game='tiennghich'",
+                      (user["id"],)).fetchone()
+        bal = _wallet_balance(c, user["id"])
+    return {"data": (r["data"] if r else ""), "wallet": bal}
+
+@app.post("/game/tn/state")
+def tn_state_save(b: TNSaveIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Lưu tiến trình game lên máy chủ (online)."""
+    data = b.data or "{}"
+    if len(data) > 300000:
+        raise HTTPException(status_code=400, detail="Dữ liệu lưu quá lớn.")
+    with db() as c:
+        c.execute(
+            "INSERT INTO game_saves(user_id,game,data,updated_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(user_id,game) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
+            (user["id"], "tiennghich", data, int(time.time())))
+    return {"ok": True}
+
+@app.get("/game/tn/packages")
+def tn_packages() -> list[dict[str, Any]]:
+    return [{"id": k, "vnd": v[0], "linhthach": v[1]} for k, v in TN_LT_PACKAGES.items()]
+
+@app.post("/game/tn/buy")
+def tn_buy(b: TNBuyIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Nạp linh thạch bằng TIỀN THẬT: trừ số dư ví (đã nạp qua VietQR) rồi cộng linh thạch vào save."""
+    pkg = TN_LT_PACKAGES.get(b.package)
+    if not pkg:
+        raise HTTPException(status_code=400, detail="Gói nạp không hợp lệ.")
+    price, credits = pkg
+    with db() as c:
+        bal = _wallet_balance(c, user["id"])
+        if bal < price:
+            raise HTTPException(status_code=400,
+                detail=(f"Số dư ví không đủ (cần {price:,}đ, còn {bal:,}đ). Vào Ví nạp thêm tiền."
+                        .replace(",", ".")))
+        _wallet_add(c, user["id"], -price, "purchase", f"Nạp {credits} linh thạch Tiên Nghịch")
+        r = c.execute("SELECT data FROM game_saves WHERE user_id=? AND game='tiennghich'",
+                      (user["id"],)).fetchone()
+        try:
+            data = json.loads(r["data"]) if r and r["data"] else {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        data["linhThach"] = int(data.get("linhThach", 0)) + credits
+        data["totalRecharged"] = int(data.get("totalRecharged", 0)) + credits
+        txt = json.dumps(data, ensure_ascii=False)
+        c.execute(
+            "INSERT INTO game_saves(user_id,game,data,updated_at) VALUES(?,?,?,?) "
+            "ON CONFLICT(user_id,game) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
+            (user["id"], "tiennghich", txt, int(time.time())))
+        newbal = _wallet_balance(c, user["id"])
+    return {"ok": True, "linhthach_added": credits,
+            "linhThach": data["linhThach"], "wallet": newbal}
 
 
 class TopupIn(BaseModel):
