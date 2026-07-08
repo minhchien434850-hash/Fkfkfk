@@ -10853,6 +10853,28 @@ def _fake_showcase(n_orders: int, n_topups: int, now: int):
     return orders, topups
 
 
+def _fake_leaders(now: int):
+    """Danh sách 'đại gia' ẢO cho bảng xếp hạng nạp tích luỹ — ổn định theo NGÀY
+    (không nhảy loạn mỗi lần tải), có xê dịch nhẹ để trông sống động. Người nạp
+    THẬT sẽ được TRỘN chung và xếp theo tổng nạp, KHÔNG làm mất người ảo."""
+    import random
+    rnd = random.Random(now // 86400)   # cùng 1 ngày → cùng danh sách
+    seen: set = set()
+
+    def _name() -> str:
+        for _ in range(10):
+            ho, dem, ten = rnd.choice(_VN_HO), rnd.choice(_VN_DEM), rnd.choice(_VN_TEN)
+            if (ho, dem, ten) not in seen:
+                seen.add((ho, dem, ten))
+                return f"{ho} {dem} {ten}"
+        return f"{rnd.choice(_VN_HO)} {rnd.choice(_VN_DEM)} {rnd.choice(_VN_TEN)}"
+
+    bases = [9200000, 6100000, 4300000, 3100000, 2200000,
+             1500000, 1050000, 760000, 520000, 360000, 240000, 150000]
+    return [{"user": _mask_name(_name()), "total": b + rnd.randint(0, 40) * 1000}
+            for b in bases]
+
+
 @app.get("/store/showcase")
 def store_showcase() -> dict[str, Any]:
     """Dữ liệu trang chủ cửa hàng: giao dịch gần đây, nạp gần đây, bảng xếp hạng nạp."""
@@ -10875,7 +10897,7 @@ def store_showcase() -> dict[str, Any]:
             "SELECT u.username AS uname, SUM(t.credited) AS total "
             "FROM store_topups t JOIN users u ON u.id=t.user_id "
             "WHERE t.status='completed' "
-            "GROUP BY t.user_id ORDER BY total DESC LIMIT 5").fetchall()
+            "GROUP BY t.user_id ORDER BY total DESC LIMIT 30").fetchall()
     now = int(time.time())
     real_orders = [
         {"user": _mask_name(r["uname"]), "product": r["pname"],
@@ -10891,12 +10913,20 @@ def store_showcase() -> dict[str, Any]:
     TARGET = 15
     fake_orders, fake_topups = _fake_showcase(
         max(0, TARGET - len(real_orders)), max(0, TARGET - len(real_topups)), now)
+    # Bảng xếp hạng nạp tích luỹ: TRỘN người nạp THẬT + đại gia ẢO, xếp theo tổng nạp.
+    # Người thật nạp càng nhiều càng leo cao; người ảo luôn còn đó (không bị mất).
+    real_leaders = [
+        {"user": _mask_name(r["uname"]), "total": int(r["total"] or 0)}
+        for r in leaders
+    ]
+    merged_leaders = sorted(real_leaders + _fake_leaders(now),
+                            key=lambda x: x["total"], reverse=True)[:10]
     return {
         "recent_orders": (real_orders + fake_orders)[:TARGET],
         "recent_topups": (real_topups + fake_topups)[:TARGET],
         "leaderboard": [
-            {"rank": i + 1, "user": _mask_name(r["uname"]), "total": r["total"] or 0}
-            for i, r in enumerate(leaders)
+            {"rank": i + 1, "user": m["user"], "total": m["total"]}
+            for i, m in enumerate(merged_leaders)
         ],
     }
 
