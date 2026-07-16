@@ -1852,6 +1852,7 @@ _acb_task = None   # giữ tham chiếu tránh bị thu gom (GC)
 @app.on_event("startup")
 def _startup() -> None:
     global _acb_task
+    import threading
     init_db()
     start_mail_smtp()
     start_telegram_bot()
