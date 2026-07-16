@@ -142,7 +142,7 @@ struct ElevenLabsKeyView: View {
                         UserDefaults.standard.set(v, forKey: "eleven_auto_emotion")
                     }
                 } header: { Text("Cảm xúc tự động (v3)") } footer: {
-                    Text("Khi BẬT: app tự nhận diện nội dung bình luận và chèn thẻ hợp cảnh cho giọng sinh động hơn — bình luận cười 😂 → [laughs], hype 🔥 → [excited], hỏi ? → [curious], chào/cảm ơn ❤️ → [happy], buồn 😢 → [sad]. Nếu bạn TỰ gõ thẻ trong câu thì app không chèn thêm.")
+                    Text("Khi BẬT: app đọc nội dung bình luận và chèn 1–3 thẻ cảm xúc hợp ngữ cảnh — càng nhiều dấu !, chữ HOA, emoji, chữ kéo dàiii thì càng nhiều cảm xúc. Cười 😂 → [laughs], hype 🔥 → [excited], dễ thương 🥰 → [warmly], bất ngờ 😱 → [gasps], buồn 😢 → [sad]/[crying], hỏi ? → [curious]… Bình luận TOXIC/khịa sẽ được đọc kiểu cà khịa – coi thường ([sarcastic]/[sighs]) chứ không gắt lại. Nếu bạn TỰ gõ thẻ thì app không chèn thêm.")
                 }
             }
 
