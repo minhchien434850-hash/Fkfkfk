@@ -122,7 +122,11 @@ struct ElevenLabsKeyView: View {
                     .buttonStyle(.plain)
                 }
             } header: { Text("Model") } footer: {
-                Text("Multilingual v2 cho tiếng Việt tốt nhất. Flash v2.5 nhanh hơn và tốn ít credit hơn.")
+                if selectedModel == "eleven_v3" {
+                    Text("Eleven v3: biểu cảm nhất, tự nhận diện ngôn ngữ (tiếng Việt tốt). Chèn THẺ CẢM XÚC ngay trong câu — vd [excited], [whispers], [laughs], [sighs], [sarcastic] — để giọng diễn cảm GIỐNG HỆT bản web. Độ ổn định tự khớp đúng 3 mức Creative/Natural/Robust như web. Cần key có quyền v3.")
+                } else {
+                    Text("Multilingual v2 cho tiếng Việt tốt nhất. Flash v2.5 nhanh hơn và tốn ít credit hơn.")
+                }
             }
 
             // ----- Phát thử -----
@@ -257,12 +261,10 @@ struct ElevenLabsKeyView: View {
         req.setValue(key, forHTTPHeaderField: "xi-api-key")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
-        let body: [String: Any] = [
-            "text": testSentence,
-            "model_id": selectedModel,
-            "language_code": "vi",
-            "voice_settings": ["stability": 0.5, "similarity_boost": 0.75]
-        ]
+        // Dùng chung bộ dựng body chuẩn theo model (v3 snap stability 0/0.5/1, bỏ language_code cho v2).
+        let body = elevenLabsRequestBody(text: testSentence, model: selectedModel,
+                                         stability: 0.5, similarityBoost: 0.75,
+                                         style: 0.0, speakerBoost: true)
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         URLSession.shared.dataTask(with: req) { data, response, error in
