@@ -78,6 +78,7 @@ EnvironmentFile=$WORK/.env
 ExecStart=$WORK/venv/bin/uvicorn kenios:app --host 0.0.0.0 --port $PORT --workers 1
 Restart=always
 RestartSec=5
+LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 EOF

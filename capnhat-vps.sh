@@ -133,6 +133,18 @@ else
   echo "    (Không thấy nginx — bỏ qua.)"
 fi
 
+# Nâng giới hạn file-descriptor cho dịch vụ (chống 'unable to open database file' khi chạy lâu)
+echo "==> Nâng giới hạn file mở (LimitNOFILE) cho dịch vụ kenios..."
+SVC="/etc/systemd/system/kenios.service"
+if [ -f "$SVC" ] && ! grep -q "LimitNOFILE" "$SVC"; then
+  sed -i '/^Restart=always/a LimitNOFILE=65536' "$SVC" 2>/dev/null \
+    || sed -i '/^\[Service\]/a LimitNOFILE=65536' "$SVC" 2>/dev/null || true
+  systemctl daemon-reload
+  echo "    ✓ Đã đặt LimitNOFILE=65536."
+else
+  echo "    ✓ Giới hạn file đã ổn (hoặc không thấy service)."
+fi
+
 # Xoá cache bytecode cũ (lý do hay gặp: restart nhưng vẫn chạy code cũ)
 echo "==> Xoá cache Python cũ..."
 rm -rf "$WORK/__pycache__" 2>/dev/null || true

@@ -353,11 +353,27 @@ DEFAULT_SYSTEM = os.getenv(
 )
 
 # ========================== Cơ sở dữ liệu ==========================
-def db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+import contextlib as _contextlib
+
+@_contextlib.contextmanager
+def db():
+    """Mở kết nối SQLite cho 1 khối `with db() as c`. Tự COMMIT khi xong, ROLLBACK khi
+    lỗi, và LUÔN ĐÓNG kết nối (giải phóng file-descriptor). Trước đây dùng `with` trên
+    Connection chỉ commit chứ KHÔNG đóng → rò rỉ fd, chạy lâu sẽ 'unable to open database
+    file' và backend 502. Đóng hẳn ở đây khắc phục triệt để."""
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        yield conn
+        conn.commit()
+    except Exception:
+        try: conn.rollback()
+        except Exception: pass
+        raise
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
@@ -10759,14 +10775,23 @@ async def _acb_fetch_and_confirm() -> int:
 
 
 async def _acb_autopay_loop() -> None:
-    """Vòng lặp nền: cứ ~5 giây kiểm tra giao dịch ACB mới để tự cộng tiền / cấp key."""
+    """Vòng lặp nền tự cộng tiền/cấp key khi có giao dịch ACB mới.
+    KHÔNG dùng auto chuyển khoản (chưa nhập token) → NGHỈ LÂU, ít hỏi DB. Có token mới
+    kiểm tra mỗi 5 giây. Chống spam log (tối đa 1 lần/phút)."""
+    _last_err = 0.0
     while True:
         try:
             if get_setting("acb_api_token", "").strip():
                 await _acb_fetch_and_confirm()
+                await asyncio.sleep(5)
+            else:
+                await asyncio.sleep(60)   # không dùng → nghỉ 60s (gần như không tải DB)
         except Exception as e:
-            log.error("ACB autopay loop lỗi: %s", e)
-        await asyncio.sleep(5)
+            now = time.time()
+            if now - _last_err > 60:
+                log.error("ACB autopay loop lỗi: %s", e)
+                _last_err = now
+            await asyncio.sleep(30)
 
 
 @app.get("/payment/history")
