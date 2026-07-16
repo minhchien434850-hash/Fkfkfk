@@ -10,6 +10,8 @@ struct ElevenLabsKeyView: View {
     @State private var draftKey: String = ""
     @State private var draftVoiceId: String = ""
     @State private var selectedModel: String = UserDefaults.standard.string(forKey: "eleven_model") ?? "eleven_multilingual_v2"
+    // v3: tự thêm thẻ cảm xúc theo nội dung bình luận (mặc định BẬT)
+    @State private var autoEmotion: Bool = (UserDefaults.standard.object(forKey: "eleven_auto_emotion") as? Bool) ?? true
     @State private var testStatus: TestStatus = .idle
     @State private var testPlayer: AVAudioPlayer?
     @State private var showDeleteConfirm = false
@@ -126,6 +128,21 @@ struct ElevenLabsKeyView: View {
                     Text("Eleven v3: biểu cảm nhất, tự nhận diện ngôn ngữ (tiếng Việt tốt). Chèn THẺ CẢM XÚC ngay trong câu — vd [excited], [whispers], [laughs], [sighs], [sarcastic] — để giọng diễn cảm GIỐNG HỆT bản web. Độ ổn định tự khớp đúng 3 mức Creative/Natural/Robust như web. Cần key có quyền v3.")
                 } else {
                     Text("Multilingual v2 cho tiếng Việt tốt nhất. Flash v2.5 nhanh hơn và tốn ít credit hơn.")
+                }
+            }
+
+            // ----- v3: Tự thêm thẻ cảm xúc theo nội dung -----
+            if selectedModel == "eleven_v3" {
+                Section {
+                    Toggle(isOn: $autoEmotion) {
+                        Label("Tự thêm cảm xúc khi đọc", systemImage: "theatermasks.fill")
+                    }
+                    .tint(.pink)
+                    .onChange(of: autoEmotion) { v in
+                        UserDefaults.standard.set(v, forKey: "eleven_auto_emotion")
+                    }
+                } header: { Text("Cảm xúc tự động (v3)") } footer: {
+                    Text("Khi BẬT: app tự nhận diện nội dung bình luận và chèn thẻ hợp cảnh cho giọng sinh động hơn — bình luận cười 😂 → [laughs], hype 🔥 → [excited], hỏi ? → [curious], chào/cảm ơn ❤️ → [happy], buồn 😢 → [sad]. Nếu bạn TỰ gõ thẻ trong câu thì app không chèn thêm.")
                 }
             }
 

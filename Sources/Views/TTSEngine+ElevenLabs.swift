@@ -19,8 +19,18 @@ func elevenLabsRequestBody(text: String, model: String,
         "style": style,
         "use_speaker_boost": speakerBoost
     ]
+    // v3: TỰ THÊM THẺ CẢM XÚC theo nội dung (vd bình luận vui → [laughs], hype → [excited])
+    // cho giọng sinh động hơn. Chỉ v3 hiểu thẻ; v2 sẽ đọc thành chữ nên KHÔNG thêm.
+    // Tôn trọng lựa chọn người dùng (tắt được) và KHÔNG thêm nếu họ đã tự gõ thẻ.
+    var outText = text
+    if isV3 && UserDefaults.standard.object(forKey: "eleven_auto_emotion") as? Bool != false {
+        let tag = elevenLabsAutoEmotionTag(for: text)
+        if !tag.isEmpty && !text.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
+            outText = tag + " " + text
+        }
+    }
     var body: [String: Any] = [
-        "text": text,
+        "text": outText,
         "model_id": model,
         "voice_settings": settings
     ]
@@ -29,6 +39,28 @@ func elevenLabsRequestBody(text: String, model: String,
         body["language_code"] = "vi"
     }
     return body
+}
+
+// Chọn THẺ CẢM XÚC v3 hợp ngữ cảnh cho một câu (tiếng Việt). Trả về "[tag]" hoặc "" nếu không rõ.
+// Dùng các thẻ v3 phổ biến, được hỗ trợ tốt: [laughs] [excited] [happy] [sad] [curious] [whispers] [sighs].
+func elevenLabsAutoEmotionTag(for text: String) -> String {
+    let s = text.lowercased()
+    func has(_ arr: [String]) -> Bool { arr.contains { s.contains($0) } }
+    // Cười / vui nhộn
+    if has(["haha", "hihi", "hehe", "kkk", "kaka", "😂", "🤣", "😆", "buồn cười", "vui quá",
+            "cười", "lol", "=))", ":))"]) { return "[laughs]" }
+    // Buồn / thương cảm
+    if has(["😢", "😭", "buồn", "khóc", "tội nghiệp", "chia buồn", "thất vọng", "huhu", "chán quá"]) { return "[sad]" }
+    // Hype / phấn khích (từ mạnh + dấu chấm than)
+    if has(["🔥", "😍", "🤩", "đỉnh", "tuyệt vời", "quá đỉnh", "vô địch", "khủng", "cực", "vãi",
+            "xuất sắc", "number one", "quá hay", "quá đã", "gớm", "bá cháy"]) { return "[excited]" }
+    if s.contains("!") && has(["quá", "ghê", "hay", "đẹp", "thích", "yêu", "mê"]) { return "[excited]" }
+    // Câu hỏi / tò mò
+    if s.contains("?") || has(["tại sao", "vì sao", "sao vậy", "thế nào", "là gì", "ở đâu", "bao nhiêu"]) { return "[curious]" }
+    // Chào hỏi / ấm áp / cảm ơn (thường gặp khi có người vào phòng, tặng quà, follow)
+    if has(["cảm ơn", "cám ơn", "chào", "xin chào", "welcome", "tặng", "quà", "yêu mọi người",
+            "theo dõi", "follow", "chia sẻ", "❤️", "🥰", "😘"]) { return "[happy]" }
+    return ""
 }
 
 // ======================== Giọng ElevenLabs (AI · đọc tiếng Việt) ========================
