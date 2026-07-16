@@ -12,7 +12,7 @@ struct APIClient {
     var token: String?
 
     // Địa chỉ VPS TRỰC TIẾP (IPv4) — dùng để TỰ ĐỘNG né khi domain/proxy hỏng (502/không kết nối).
-    static let fallbackBase = "http://103.131.56.11"
+    static let fallbackBase = "http://160.25.168.234"
 
     var root: String {
         var s = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
