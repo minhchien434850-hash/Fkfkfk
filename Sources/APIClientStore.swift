@@ -263,6 +263,69 @@ extension APIClient {
     func deleteFile(_ id: Int) async throws -> MessageResponse {
         try decode(try await send("/files/\(id)", method: "DELETE"))
     }
+
+    // ==================== Sao lưu & Khôi phục (admin) ====================
+    func backupConfig() async throws -> BackupConfig {
+        try decode(try await send("/admin/backup-config"))
+    }
+    func setBackupConfig(dailyOn: Bool? = nil, chatId: String? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let dailyOn { body["daily_on"] = dailyOn }
+        if let chatId { body["chat_id"] = chatId }
+        _ = try await send("/admin/backup-config", method: "POST", json: body)
+    }
+    func backupNow() async throws -> MessageResponse {
+        try decode(try await send("/admin/backup-now", method: "POST", json: [:]))
+    }
+    /// Tải file .zip sao lưu về máy — trả (URL file tạm, tên file).
+    func downloadBackup() async throws -> (URL, String) {
+        var req = URLRequest(url: try makeURL("/admin/backup"))
+        req.httpMethod = "GET"
+        req.timeoutInterval = 600
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (tempURL, resp) = try await URLSession.shared.download(for: req)
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.message("Tải bản sao lưu thất bại.")
+        }
+        var filename = "kenios-backup.zip"
+        if let disp = http.value(forHTTPHeaderField: "Content-Disposition"),
+           let range = disp.range(of: "filename=\"") {
+            let start = range.upperBound
+            if let endRange = disp.range(of: "\"", range: start..<disp.endIndex) {
+                filename = String(disp[start..<endRange.lowerBound])
+            }
+        }
+        // Đổi tên file tạm → tên đúng (.zip) để chia sẻ/lưu đẹp
+        let dst = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        try? FileManager.default.removeItem(at: dst)
+        try FileManager.default.moveItem(at: tempURL, to: dst)
+        return (dst, filename)
+    }
+    /// Khôi phục từ file .zip (multipart) → máy chủ nhận rồi tự khởi động lại.
+    func restoreBackup(fileURL: URL) async throws -> MessageResponse {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var req = URLRequest(url: try makeURL("/admin/restore"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 600
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let fileData = try Data(contentsOf: fileURL)
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/zip\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        let (data, resp) = try await URLSession.shared.upload(for: req, from: body)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.message("Phản hồi không hợp lệ.") }
+        if !(200..<300).contains(http.statusCode) {
+            var detail = "Khôi phục thất bại (\(http.statusCode))."
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let d = obj["detail"] as? String { detail = d }
+            throw APIError.message(detail)
+        }
+        return try decode(data)
+    }
     func mimeType(for ext: String) -> String {
         switch ext {
         case "png": return "image/png"

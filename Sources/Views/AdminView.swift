@@ -87,6 +87,10 @@ struct AdminView: View {
                     Button { showErrors = true } label: {
                         Label(store.t("Log lỗi hệ thống", "System error log"), systemImage: "exclamationmark.triangle")
                     }
+                    NavigationLink { BackupRestoreView() } label: {
+                        Label(store.t("Sao lưu & Khôi phục", "Backup & Restore"),
+                              systemImage: "externaldrive.fill.badge.timemachine")
+                    }
                 }
 
                 // ==================== Thanh toán chờ duyệt ====================

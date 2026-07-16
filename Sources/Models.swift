@@ -76,6 +76,15 @@ struct ConversationDetail: Decodable {
 }
 
 struct MessageResponse: Decodable { let message: String }
+
+// Cấu hình sao lưu (admin) — khớp /admin/backup-config (convertFromSnakeCase)
+struct BackupConfig: Decodable {
+    var dailyOn: Bool = true
+    var chatId: String = ""
+    var lastDate: String = ""
+    var lastOk: String = ""
+    var hasBot: Bool = false
+}
 struct ForgotResponse: Decodable { let message: String; let resetToken: String? }
 struct KeyInfo: Decodable { let provider: String; let configured: Bool }
 struct ServerConfig: Decodable { let name: String; let providers: [Provider] }

@@ -114,6 +114,35 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("kenios")
 
+# ----- ÁP BẢN KHÔI PHỤC ĐANG CHỜ (nếu có) — chạy TRƯỚC khi mở DB / nạp khóa -----
+# Khi admin bấm "Khôi phục", file mới được lưu tạm dạng *.restore rồi dịch vụ khởi động
+# lại. Ở lần khởi động này, ta thay file thật BẰNG bản khôi phục TRƯỚC khi có bất kỳ kết
+# nối DB nào → không bao giờ hỏng file khi đang chạy.
+def _apply_pending_restore() -> None:
+    import shutil as _sh
+    _kf = os.getenv("CODEBOX_ENC_KEYFILE", "kenios_enc.key")
+    db_restore = DB_PATH + ".restore"
+    if os.path.exists(db_restore):
+        try:
+            if os.path.exists(DB_PATH):
+                _sh.copy2(DB_PATH, DB_PATH + ".bak")   # giữ bản cũ để lỡ cần
+            os.replace(db_restore, DB_PATH)
+            for ext in ("-wal", "-shm"):               # bỏ WAL/SHM cũ để không lẫn dữ liệu
+                try: os.remove(DB_PATH + ext)
+                except OSError: pass
+            logging.info("KENIOS: đã áp bản khôi phục database.")
+        except Exception as e:
+            logging.warning("Áp khôi phục DB lỗi: %s", e)
+    key_restore = _kf + ".restore"
+    if os.path.exists(key_restore):
+        try:
+            os.replace(key_restore, _kf)
+            logging.info("KENIOS: đã áp bản khôi phục khóa mã hóa.")
+        except Exception as e:
+            logging.warning("Áp khôi phục khóa lỗi: %s", e)
+
+_apply_pending_restore()
+
 # ----- Fernet (mã hóa API key) -----
 from cryptography.fernet import Fernet
 _key_file = os.getenv("CODEBOX_ENC_KEYFILE", "kenios_enc.key")
@@ -1826,6 +1855,8 @@ def _startup() -> None:
     init_db()
     start_mail_smtp()
     start_telegram_bot()
+    # Sao lưu tự động 1 lần/ngày về Telegram của admin
+    threading.Thread(target=_backup_daily_loop, daemon=True, name="backup-daily").start()
     try:
         _acb_task = asyncio.create_task(_acb_autopay_loop())
     except RuntimeError:
@@ -2347,6 +2378,181 @@ def save_notif_sounds(b: NotifSoundsIn, user=Depends(get_user)) -> dict[str, Any
 def get_notif_sounds(user=Depends(get_user)) -> dict[str, Any]:
     """Đọc âm thanh thông báo dùng chung (toàn cục)."""
     return {"json": get_setting("notif_sounds_global", "")}
+
+
+# ========================= SAO LƯU & KHÔI PHỤC (BACKUP) =========================
+# Gói toàn bộ trạng thái phục hồi được: database (kenios.db) + khóa mã hóa
+# (kenios_enc.key, để giải mã API key đã lưu) → 1 file .zip nhỏ gọn.
+#  • Tải bản sao lưu về máy: GET /admin/backup
+#  • Khôi phục từ file:       POST /admin/restore  (dịch vụ tự khởi động lại)
+#  • Tự gửi 1 lần/ngày về Telegram của admin (bật/tắt trong cấu hình).
+def _backup_make_zip() -> str:
+    """Tạo file .zip sao lưu (DB đồng nhất qua SQLite backup API + khóa). Trả về đường dẫn."""
+    import zipfile, tempfile
+    ts = time.strftime("%Y%m%d-%H%M")
+    out = os.path.join(tempfile.gettempdir(), f"kenios-backup-{ts}.zip")
+    # Sao chép DB AN TOÀN kể cả khi đang ghi (SQLite Online Backup API)
+    db_snapshot = os.path.join(tempfile.gettempdir(), f"kenios-db-{ts}.sqlite")
+    try:
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(db_snapshot)
+        with dst:
+            src.backup(dst)
+        dst.close(); src.close()
+    except Exception:
+        # Dự phòng: copy thẳng file (vẫn tốt trong đa số trường hợp)
+        import shutil as _sh
+        _sh.copy2(DB_PATH, db_snapshot)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(db_snapshot, "kenios.db")
+        if os.path.exists(_key_file):
+            z.write(_key_file, "kenios_enc.key")
+        # Ghi kèm mốc thời gian để biết bản này của lúc nào
+        z.writestr("backup_info.txt",
+                   f"KENIOS backup\ncreated_utc={time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())}\n")
+    try: os.remove(db_snapshot)
+    except OSError: pass
+    return out
+
+
+@app.get("/admin/backup")
+def admin_backup(admin=Depends(get_admin)):
+    """Tải file .zip sao lưu toàn bộ (DB + khóa) về máy."""
+    path = _backup_make_zip()
+    fname = os.path.basename(path)
+    return FileResponse(path, filename=fname, media_type="application/zip",
+                        content_disposition_type="attachment")
+
+
+@app.post("/admin/restore")
+async def admin_restore(file: UploadFile = FastAPIFile(...), admin=Depends(get_admin)) -> dict[str, Any]:
+    """Khôi phục từ file .zip sao lưu. Lưu tạm dạng *.restore rồi KHỞI ĐỘNG LẠI dịch vụ —
+    lúc khởi động sẽ thay DB/khóa an toàn (xem _apply_pending_restore)."""
+    import zipfile, tempfile
+    raw = await file.read()
+    tmp_zip = os.path.join(tempfile.gettempdir(), f"restore-{secrets.token_hex(6)}.zip")
+    with open(tmp_zip, "wb") as f:
+        f.write(raw)
+    try:
+        if not zipfile.is_zipfile(tmp_zip):
+            raise HTTPException(status_code=400, detail="File không phải bản sao lưu (.zip) hợp lệ.")
+        with zipfile.ZipFile(tmp_zip) as z:
+            names = z.namelist()
+            if "kenios.db" not in names:
+                raise HTTPException(status_code=400, detail="Thiếu kenios.db trong file sao lưu.")
+            # Giải nén DB ra file tạm rồi KIỂM TRA mở được + có bảng trước khi nhận
+            db_tmp = os.path.join(tempfile.gettempdir(), f"restore-db-{secrets.token_hex(6)}.sqlite")
+            with open(db_tmp, "wb") as f:
+                f.write(z.read("kenios.db"))
+            try:
+                _c = sqlite3.connect(db_tmp)
+                n = _c.execute("SELECT count(*) FROM sqlite_master").fetchone()[0]
+                _c.close()
+            except Exception:
+                raise HTTPException(status_code=400, detail="File DB trong bản sao lưu bị hỏng.")
+            if n < 1:
+                raise HTTPException(status_code=400, detail="File DB trống — không khôi phục.")
+            # Đặt bản khôi phục đang chờ (áp khi khởi động lại)
+            os.replace(db_tmp, DB_PATH + ".restore")
+            if "kenios_enc.key" in names:
+                with open(_key_file + ".restore", "wb") as f:
+                    f.write(z.read("kenios_enc.key"))
+    finally:
+        try: os.remove(tmp_zip)
+        except OSError: pass
+    # Trả lời XONG rồi mới khởi động lại (sau 1.5s) để app nhận được phản hồi.
+    import threading as _thr
+    def _restart_later():
+        time.sleep(1.5)
+        try:
+            subprocess.run(["systemctl", "restart", "kenios"], timeout=20)
+        except Exception:
+            os._exit(0)   # systemd Restart=always sẽ bật lại
+    _thr.Thread(target=_restart_later, daemon=True).start()
+    return {"ok": True, "message": "Đã nhận bản sao lưu. Máy chủ đang khởi động lại để khôi phục (khoảng 10 giây)."}
+
+
+def _tg_send_document(token: str, chat_id, path: str, caption: str = "") -> bool:
+    """Gửi 1 file (tài liệu) vào Telegram."""
+    try:
+        with open(path, "rb") as f:
+            r = httpx.post(f"https://api.telegram.org/bot{token}/sendDocument",
+                           data={"chat_id": str(chat_id), "caption": caption[:1000]},
+                           files={"document": (os.path.basename(path), f, "application/zip")},
+                           timeout=180)
+        return bool(r.json().get("ok"))
+    except Exception as e:
+        log.warning("sendDocument lỗi: %s", e); return False
+
+
+def _backup_daily_loop() -> None:
+    """Mỗi ngày gửi 1 lần file sao lưu về Telegram của admin (nếu đã bật + có token & chat)."""
+    import time as _t
+    while True:
+        try:
+            if get_setting("backup_daily_on", "1") == "1":
+                token = (get_setting("tg_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+                chat = (get_setting("backup_chat", "") or get_setting("tg_admin_chat", "")
+                        or os.getenv("TELEGRAM_ADMIN_CHAT", "")).strip()
+                today = _t.strftime("%Y-%m-%d")
+                if token and chat and get_setting("backup_last_date", "") != today:
+                    try:
+                        path = _backup_make_zip()
+                        cap = f"🗄️ Sao lưu KENIOS tự động — {today}\nGiữ file này để khôi phục khi cần."
+                        if _tg_send_document(token, chat, path, cap):
+                            set_setting("backup_last_date", today)
+                            set_setting("backup_last_ok", str(int(_t.time())))
+                        try: os.remove(path)
+                        except OSError: pass
+                    except Exception as e:
+                        log.warning("Backup ngày lỗi: %s", e)
+        except Exception:
+            pass
+        _t.sleep(1800)   # kiểm tra mỗi 30 phút (gửi tối đa 1 lần/ngày)
+
+
+class BackupCfgIn(BaseModel):
+    daily_on: Optional[bool] = None
+    chat_id: Optional[str] = None
+
+
+@app.get("/admin/backup-config")
+def admin_backup_config(admin=Depends(get_admin)) -> dict[str, Any]:
+    return {
+        "daily_on": get_setting("backup_daily_on", "1") == "1",
+        "chat_id": get_setting("backup_chat", ""),
+        "last_date": get_setting("backup_last_date", ""),
+        "last_ok": get_setting("backup_last_ok", ""),
+        "has_bot": bool((get_setting("tg_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()),
+    }
+
+
+@app.post("/admin/backup-config")
+def admin_set_backup_config(b: BackupCfgIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    if b.daily_on is not None:
+        set_setting("backup_daily_on", "1" if b.daily_on else "0")
+    if b.chat_id is not None:
+        set_setting("backup_chat", b.chat_id.strip()[:64])
+    return {"ok": True}
+
+
+@app.post("/admin/backup-now")
+def admin_backup_now(admin=Depends(get_admin)) -> dict[str, Any]:
+    """Gửi NGAY 1 bản sao lưu về Telegram (không đợi tới lịch ngày)."""
+    token = (get_setting("tg_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+    chat = (get_setting("backup_chat", "") or get_setting("tg_admin_chat", "")
+            or os.getenv("TELEGRAM_ADMIN_CHAT", "")).strip()
+    if not token or not chat:
+        raise HTTPException(status_code=400,
+            detail="Chưa cấu hình bot Telegram hoặc Chat ID nhận sao lưu.")
+    path = _backup_make_zip()
+    ok = _tg_send_document(token, chat, path,
+                           f"🗄️ Sao lưu KENIOS (gửi thủ công) — {time.strftime('%Y-%m-%d %H:%M')}")
+    try: os.remove(path)
+    except OSError: pass
+    if not ok:
+        raise HTTPException(status_code=502, detail="Gửi Telegram thất bại. Kiểm tra token/Chat ID.")
+    return {"ok": True, "message": "Đã gửi bản sao lưu về Telegram."}
 
 
 # ===================== SSH / SFTP proxy (Remote Server Tool) =====================
