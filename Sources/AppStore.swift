@@ -98,16 +98,19 @@ final class AppStore: ObservableObject {
 
     init() {
         var savedURL = d.string(forKey: "baseURL") ?? ""
-        // Nâng cấp máy chủ cũ (IP HTTP) → domain HTTPS mới — CHỈ CHẠY 1 LẦN. Sau đó tôn trọng
-        // lựa chọn của người dùng (không tự đổi lại nữa), để "đường lui" dùng IP không bị revert.
-        let legacyHosts = ["http://103.131.56.11", "https://103.131.56.11",
-                           "http://103.131.56.11/", "https://103.131.56.11/"]
-        if !d.bool(forKey: "didMigrateServerURL") {
-            if legacyHosts.contains(savedURL) {
+        // Chuyển MỌI máy chủ cũ đã chết (IP cũ 103.131.56.11 + tên miền app.kenios.store)
+        // → VPS MỚI (Config.defaultServerURL). CHỈ CHẠY 1 LẦN (cờ v2). Sau đó tôn trọng lựa
+        // chọn của người dùng, không tự đổi lại nữa.
+        let deadHosts = ["http://103.131.56.11", "https://103.131.56.11",
+                         "http://103.131.56.11/", "https://103.131.56.11/",
+                         "https://app.kenios.store", "http://app.kenios.store",
+                         "https://app.kenios.store/", "http://app.kenios.store/"]
+        if !d.bool(forKey: "didMigrateServer_v2_newIP") {
+            if savedURL.isEmpty || deadHosts.contains(savedURL) {
                 savedURL = Config.defaultServerURL
                 d.set(savedURL, forKey: "baseURL")
             }
-            d.set(true, forKey: "didMigrateServerURL")
+            d.set(true, forKey: "didMigrateServer_v2_newIP")
         }
         baseURL = savedURL.isEmpty ? Config.defaultServerURL : savedURL
         serverType = d.string(forKey: "serverType") ?? Config.defaultServerType

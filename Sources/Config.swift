@@ -9,7 +9,8 @@ enum Config {
     //    nội bộ, thường không mở ra ngoài nên app sẽ không kết nối được.
     //    Dùng domain HTTPS (app.kenios.store) → khách hàng mở app là chạy ngay,
     //    KHÔNG cần đăng nhập/nhập máy chủ, lại bảo mật (khỏi vướng ATS của iOS).
-    static let defaultServerURL = "https://app.kenios.store"
+    //    👉 KHÔNG dùng tên miền nữa — trỏ thẳng vào IP VPS mới (qua nginx cổng 80).
+    static let defaultServerURL = "http://160.25.168.234"
 
     static let defaultServerType = "VPS"
 }

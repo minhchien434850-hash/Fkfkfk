@@ -7807,11 +7807,8 @@ import re as _kenios_re
 _KENIOS_BAN_WORD = _kenios_re.compile(r"\b(bản|ban)\b", _kenios_re.UNICODE)
 
 def _kenios_wants_support(low: str) -> bool:
-    if not low:
-        return False
-    if any(k in low for k in _KENIOS_SUP_TRIGGERS):
-        return True
-    return bool(_KENIOS_BAN_WORD.search(low))
+    # ĐÃ TẮT theo yêu cầu: bot KHÔNG tự bung bảng giá/tư vấn nữa (tránh làm phiền khách).
+    return False
 
 def _kenios_support_start(token, chat_id) -> None:
     _tg_send(token, chat_id,
@@ -9098,9 +9095,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
     # 🛒 Tư vấn khách hàng KENIOS: /tuvan /banggia mở luồng · /setpay /setweb (admin) đặt thanh toán.
     if _tgtxt.startswith("/") and _tgtxt.split():
         _kc = _tgtxt.split()[0].lstrip("/").split("@")[0].lower()
-        if _kc in ("tuvan", "banggia", "gia", "muahack", "hotro"):
-            _kenios_support_start(token, chat_id)
-            return
+        # ĐÃ BỎ lệnh tư vấn/bảng giá (/tuvan /banggia /gia /muahack /hotro) theo yêu cầu.
         if _kc in ("setpay", "setweb"):
             _uid3 = (msg.get("from") or {}).get("id")
             _kadm = (bool(admin_chat) and chat_id == str(admin_chat)) or (
@@ -9302,7 +9297,6 @@ def _tg_register_commands(token: str) -> None:
     # Lệnh CÔNG KHAI — mọi người thấy khi bấm "/"
     pub = [
         ("help", "Menu & danh sách lệnh"), ("menu", "Mở menu nút bấm"),
-        ("tuvan", "🛒 Tư vấn chọn bản (bảng giá)"), ("banggia", "💰 Xem bảng giá"),
         ("hoiai", "🤖 Hỏi trợ lý AI"),
         ("nhac", "Lấy nhạc YouTube/TikTok"), ("video", "🎬 Tải video (cắt phần nếu lớn)"),
         ("quetlink", "🛡️ Quét link virus/lừa đảo"),

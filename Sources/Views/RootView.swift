@@ -223,9 +223,6 @@ struct MainTabView: View {
             VideoFeedView() // TikTok của riêng app
                 .tabItem { Label(store.t("Video", "Video"), systemImage: "play.rectangle.on.rectangle.fill") }
                 .tag(14)
-            StoreView() // App bán hàng (sản phẩm · key · tải game)
-                .tabItem { Label(store.t("Cửa hàng", "Store"), systemImage: "bag.fill") }
-                .tag(15)
             FriendsView()
                 .tabItem { Label(store.t("Bạn bè", "Friends"), systemImage: "person.2.fill") }
                 .tag(4)
@@ -237,8 +234,8 @@ struct MainTabView: View {
             // Lần mở app đầu: nhảy tới tab mặc định do người dùng chọn (Cài đặt)
             if !didInitTab {
                 didInitTab = true
-                store.tab = [2, 14, 15, 4, 16].contains(defaultLaunchTab) ? defaultLaunchTab : 2
-            } else if ![2, 14, 15, 4, 16].contains(store.tab) {
+                store.tab = [2, 14, 4, 16].contains(defaultLaunchTab) ? defaultLaunchTab : 2
+            } else if ![2, 14, 4, 16].contains(store.tab) {
                 store.tab = 2
             }
             // Giọng chào: nếu cấu hình TOÀN CỤC (server) đang tải → chờ .task phát cho MỌI người;

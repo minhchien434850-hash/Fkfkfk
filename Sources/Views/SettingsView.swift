@@ -98,7 +98,6 @@ struct SettingsView: View {
                     Picker(store.t("Mở app vào tab", "Open app on tab"), selection: $defaultLaunchTab) {
                         Text(store.t("Mạng xã hội", "Social")).tag(2)
                         Text(store.t("Video", "Video")).tag(14)
-                        Text(store.t("Cửa hàng", "Store")).tag(15)
                         Text(store.t("Bạn bè", "Friends")).tag(4)
                         Text(store.t("Khám phá", "Explore")).tag(16)
                     }
