@@ -12024,6 +12024,39 @@ def media_upload(b: MediaUploadIn, user=Depends(get_user)) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Lỗi lưu ảnh: {e}")
     return {"id": fid, "path": f"/media/{fid}"}
 
+
+@app.post("/media/upload-raw")
+async def media_upload_raw(request: Request, name: str, mime: Optional[str] = None,
+                           user=Depends(get_user)) -> dict[str, Any]:
+    """Tải media (ảnh/âm thanh/video) dạng STREAM thẳng từ máy → công khai /media/{id}.
+    Nhanh hơn base64 (không phình 33%, không nạp cả file vào RAM) → tải NHIỀU file song
+    song không lỗi. Body = nội dung file thô; ?name= & ?mime= trên query."""
+    import tempfile as _tf
+    tmp = os.path.join(UPLOAD_DIR, f"tmpm_{secrets.token_hex(8)}")
+    total = 0
+    try:
+        with open(tmp, "wb") as f:
+            async for chunk in request.stream():
+                total += len(chunk); f.write(chunk)
+    except Exception as e:
+        try: os.remove(tmp)
+        except OSError: pass
+        raise HTTPException(status_code=500, detail=f"Lỗi tải lên: {e}")
+    if total < 1:
+        try: os.remove(tmp)
+        except OSError: pass
+        raise HTTPException(status_code=400, detail="File rỗng.")
+    m = (mime or request.headers.get("content-type") or "audio/mpeg")
+    nm = (name or f"media_{int(time.time())}")[:80]
+    with db() as c:
+        cur = c.execute("INSERT INTO files(user_id,name,category,mime,size,data,created_at) "
+                        "VALUES(?,?,?,?,?,'',?)",
+                        (user["id"], nm, "media", m, total, int(time.time())))
+        fid = cur.lastrowid
+    os.replace(tmp, os.path.join(UPLOAD_DIR, str(fid)))
+    return {"id": fid, "path": f"/media/{fid}"}
+
+
 @app.get("/media/{fid}")
 def media_serve(fid: int, background_tasks: BackgroundTasks):
     """Phục vụ ảnh đã upload — công khai (để dùng làm link logo/banner/media)."""

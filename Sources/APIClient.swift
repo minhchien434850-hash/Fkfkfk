@@ -840,6 +840,27 @@ struct APIClient {
             json: ["data_base64": dataBase64, "mime": mime, "name": name]))
         return root + r.path
     }
+    // Tải media (âm thanh/ảnh/video) STREAM thẳng từ file trên máy → nhanh, ít RAM,
+    // hợp để tải NHIỀU file song song. Trả về URL công khai tuyệt đối (/media/{id}).
+    func mediaUploadRaw(name: String, mime: String, fileURL: URL) async throws -> String {
+        let nm = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let mm = mime.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? mime
+        var req = URLRequest(url: try makeURL("/media/upload-raw?name=\(nm)&mime=\(mm)"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 300
+        req.setValue(mime, forHTTPHeaderField: "Content-Type")
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data, resp) = try await URLSession.shared.upload(for: req, fromFile: fileURL)
+        guard let http = resp as? HTTPURLResponse else { throw APIError.message("Phản hồi không hợp lệ.") }
+        if !(200..<300).contains(http.statusCode) {
+            var detail = "Tải lên lỗi (\(http.statusCode))."
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let d = obj["detail"] as? String { detail = d }
+            throw APIError.message(detail)
+        }
+        let r: MediaUploadResponse = try decode(data)
+        return root + r.path
+    }
     // Tải ảnh/video lên (công khai /media/{id}) → trả về FILE ID để đăng bài
     func mediaUploadId(dataBase64: String, mime: String, name: String) async throws -> Int {
         let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",

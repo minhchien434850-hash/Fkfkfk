@@ -23,6 +23,8 @@ struct TTSView: View {
     @State private var audioUploading = false
     @State private var audioError: String?        // báo lỗi tải file âm thanh (thay vì im lặng)
     @State private var newCustomLink = ""         // ô dán link liên tiếp để thêm vào kho
+    @State private var audioDone = 0              // số file đã tải xong (tải nhiều file cùng lúc)
+    @State private var audioTotal = 0             // tổng số file đang tải
 
     // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
     @State private var translateToVi = true
@@ -456,10 +458,8 @@ struct TTSView: View {
         .sheet(isPresented: $showAudioImporter) {
             // Bộ chọn file có ô TÍCH (✓) + nút "Mở"; nhận mọi file âm thanh.
             DocumentPicker(contentTypes: [.audio, .mpeg4Audio, .mp3, .wav], allowsMultipleSelection: true, asCopy: true) { urls in
-                if let fileURL = urls.first {
-                    let t = audioImportType
-                    Task { await uploadAudio(fileURL, for: t) }
-                }
+                let t = audioImportType
+                Task { await uploadAudioBatch(urls, for: t) }
             }.ignoresSafeArea()
         }
     }
@@ -488,7 +488,11 @@ struct TTSView: View {
                 } label: {
                     Label("Tải file âm thanh", systemImage: "square.and.arrow.up").font(.caption)
                 }.buttonStyle(.bordered).disabled(audioUploading)
-                if audioUploading { ProgressView().scaleEffect(0.7); Text("Đang tải…").font(.caption2).foregroundStyle(.secondary) }
+                if audioUploading {
+                    ProgressView().scaleEffect(0.7)
+                    Text(audioTotal > 1 ? "Đang tải \(audioDone)/\(audioTotal)…" : "Đang tải…")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
             if let audioError {
                 Text("⚠️ " + audioError).font(.caption2).foregroundStyle(.red)
@@ -520,56 +524,71 @@ struct TTSView: View {
         }
     }
 
-    /// Đọc file âm thanh → tải lên máy chủ → lấy link. type=="__lib" thêm vào kho; còn lại gán cho sự kiện.
-    private func uploadAudio(_ fileURL: URL, for type: String) async {
-        audioUploading = true
-        audioError = nil
-        // Với asCopy:true, URL là bản tạm app sở hữu — đọc thẳng. Vẫn xin quyền cho chắc.
-        let access = fileURL.startAccessingSecurityScopedResource()
-        defer { if access { fileURL.stopAccessingSecurityScopedResource() } }
-        let data: Data
-        do {
-            data = try Data(contentsOf: fileURL)
-        } catch {
-            audioUploading = false
-            audioError = "Không đọc được file: \(error.localizedDescription)"
-            return
+    /// Tải NHIỀU file âm thanh cùng lúc — SONG SONG (5 file/lượt), stream thẳng (nhanh, ít RAM),
+    /// có đếm tiến độ. type=="__lib" thêm vào kho; còn lại gán cho sự kiện.
+    private func uploadAudioBatch(_ urls: [URL], for type: String) async {
+        let items = urls
+        guard !items.isEmpty else { return }
+        audioUploading = true; audioError = nil
+        audioTotal = items.count; audioDone = 0
+
+        struct Uploaded { let name: String; let url: String?; let server: Bool }
+        let api = store.api
+
+        // Mỗi file: thử stream lên server; lỗi thì lưu tạm trên máy (vẫn dùng được ngay).
+        func upload(_ url: URL) async -> Uploaded {
+            let name = url.lastPathComponent
+            let mime = name.lowercased().hasSuffix(".wav") ? "audio/wav"
+                     : name.lowercased().hasSuffix(".m4a") ? "audio/mp4" : "audio/mpeg"
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let link = try await api.mediaUploadRaw(name: name, mime: mime, fileURL: url)
+                return Uploaded(name: name, url: link, server: true)
+            } catch {
+                if let data = try? Data(contentsOf: url), !data.isEmpty,
+                   let localURL = saveAudioLocally(data, name: name) {
+                    return Uploaded(name: name, url: localURL, server: false)
+                }
+                return Uploaded(name: name, url: nil, server: false)
+            }
         }
-        if data.isEmpty {
-            audioUploading = false
-            audioError = "File rỗng (0 byte)."
-            return
+
+        var results: [Uploaded] = []
+        await withTaskGroup(of: Uploaded.self) { group in
+            let maxConc = 5
+            var idx = 0
+            while idx < items.count && idx < maxConc { let u = items[idx]; group.addTask { await upload(u) }; idx += 1 }
+            while let r = await group.next() {
+                results.append(r)
+                audioDone += 1
+                if idx < items.count { let u = items[idx]; group.addTask { await upload(u) }; idx += 1 }
+            }
         }
-        let name = fileURL.lastPathComponent
-        let mime = name.lowercased().hasSuffix(".wav") ? "audio/wav"
-                 : name.lowercased().hasSuffix(".m4a") ? "audio/mp4" : "audio/mpeg"
-        do {
-            let url = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(), mime: mime, name: name)
+
+        // Áp kết quả vào kho / sự kiện (trên main — đang ở MainActor).
+        for r in results where r.url != nil {
             if type == "__lib" {
-                tts.addCustomSound(url: url, name: name)
+                tts.addCustomSound(url: r.url!, name: r.name)
             } else {
                 tts.setNotifSound("custom", for: type)
-                tts.setNotifSoundUrl(url, for: type)
-            }
-            await store.saveNotifSounds()
-            audioError = nil
-        } catch {
-            // DỰ PHÒNG: server lỗi/chưa kết nối → lưu file NGAY TRÊN MÁY để dùng được liền.
-            if let localURL = saveAudioLocally(data, name: name) {
-                if type == "__lib" {
-                    tts.addCustomSound(url: localURL, name: name)
-                } else {
-                    tts.setNotifSound("custom", for: type)
-                    tts.setNotifSoundUrl(localURL, for: type)
-                }
-                // Vẫn thử đồng bộ kho lên server (nếu được) để máy khác cũng thấy.
-                await store.saveNotifSounds()
-                audioError = "Đã lưu âm trên máy & dùng được ngay ✅ (chưa đồng bộ lên máy chủ nên máy khác chưa thấy). Lý do: \(error.localizedDescription)"
-            } else {
-                audioError = "Không lưu được file: \(error.localizedDescription)"
+                tts.setNotifSoundUrl(r.url!, for: type)
             }
         }
-        audioUploading = false
+        await store.saveNotifSounds()
+
+        let okServer = results.filter { $0.server }.count
+        let localOnly = results.filter { $0.url != nil && !$0.server }.count
+        let failed = results.filter { $0.url == nil }.count
+        if failed == 0 && localOnly == 0 {
+            audioError = nil
+        } else {
+            var parts: [String] = ["Đã tải \(okServer)/\(items.count) file lên máy chủ"]
+            if localOnly > 0 { parts.append("\(localOnly) lưu tạm trên máy (máy chủ bận)") }
+            if failed > 0 { parts.append("\(failed) file lỗi") }
+            audioError = parts.joined(separator: " · ") + "."
+        }
+        audioUploading = false; audioTotal = 0; audioDone = 0
     }
 
     /// Lưu dữ liệu âm thanh vào thư mục app (dùng được offline, còn sau khi tắt app).
@@ -674,7 +693,9 @@ struct TTSView: View {
                     Button {
                         audioImportType = type; showAudioImporter = true
                     } label: {
-                        Label(audioUploading ? "Đang tải lên…" : "Tải file âm thanh từ máy",
+                        Label(audioUploading
+                                ? (audioTotal > 1 ? "Đang tải \(audioDone)/\(audioTotal)…" : "Đang tải lên…")
+                                : "Tải file âm thanh từ máy",
                               systemImage: "square.and.arrow.up").font(.caption)
                     }.buttonStyle(.bordered).disabled(audioUploading)
                     Spacer()
