@@ -160,11 +160,12 @@ extension TTSEngine {
     }
 
     /// Thông báo 1 sự kiện: phát âm thanh (nếu là gift/follow/share) TRƯỚC rồi mới đọc.
+    /// gift/follow/share = ƯU TIÊN → chèn lên đầu hàng đợi, đọc TRƯỚC các bình luận đang chờ.
     func announce(_ text: String, eventType: String) {
         activateSession()
         if silentPlayer == nil { startBackgroundMode() }
         if Self.notifEventTypes.contains(eventType) {
-            playNotif(for: eventType) { [weak self] in self?.speak(text) }
+            playNotif(for: eventType) { [weak self] in self?.speak(text, priority: true) }
         } else {
             speak(text)
         }

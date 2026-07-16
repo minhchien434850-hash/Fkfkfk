@@ -3,17 +3,13 @@ import AVFoundation
 // ======================== Chị Google (online, prefetch để hết khoảng lặng) ========================
 extension TTSEngine {
 
-    func playGoogleTTS(_ text: String) {
+    func playGoogleTTS(_ text: String, priority: Bool = false) {
         // Google TTS giới hạn ~200 ký tự/yêu cầu → chia 180 và đọc lần lượt TOÀN BỘ.
         let chunks = splitTextIntoChunks(text, maxLen: 180)
-        for chunk in chunks {
-            googleQueue.append(chunk)
-        }
-        // Khi live quá đông bình luận, hàng đợi có thể phình to khiến TTS đọc trễ rất lâu so với thực tế.
-        // Giữ lại các đoạn MỚI NHẤT, bỏ bớt đoạn cũ để app luôn "đuổi kịp" livestream.
-        if googleQueue.count > maxQueueSize {
-            googleQueue.removeFirst(googleQueue.count - maxQueueSize)
-        }
+        // Ưu tiên (follow/tặng quà/chia sẻ) → chèn LÊN ĐẦU (giữ đúng thứ tự các đoạn) để đọc trước.
+        // KHÔNG cắt bỏ hàng đợi: đọc ĐẦY ĐỦ từng bình luận, xong mới sang cái kế tiếp.
+        if priority { googleQueue.insert(contentsOf: chunks, at: 0) }
+        else { googleQueue.append(contentsOf: chunks) }
         pendingCount = googleQueue.count + elevenQueue.count
         if !isPlayingGoogle {
             playNextGoogleItem()

@@ -159,16 +159,16 @@ private func hasAllCapsWord(_ text: String) -> Bool {
 // ======================== Giọng ElevenLabs (AI · đọc tiếng Việt) ========================
 extension TTSEngine {
 
-    func playElevenLabsTTS(_ text: String) {
+    func playElevenLabsTTS(_ text: String, priority: Bool = false) {
         // Dùng ElevenLabs chỉ khi có cả API key VÀ Voice ID
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
         let vid = elevenVoiceId.trimmingCharacters(in: .whitespaces)
         if !key.isEmpty && !vid.isEmpty {
-            playElevenLabs(text)
+            playElevenLabs(text, priority: priority)
             return
         }
         // Chưa nhập Voice ID → fallback Google TTS
-        playGoogleTTS(text)
+        playGoogleTTS(text, priority: priority)
     }
 
     // Hàm dự phòng: đọc bằng giọng Việt trên thiết bị khi Google TTS không khả dụng
@@ -189,11 +189,11 @@ extension TTSEngine {
         synth.speak(u)
     }
 
-    func playElevenLabs(_ text: String) {
-        elevenQueue.append(text)
-        if elevenQueue.count > maxQueueSize {
-            elevenQueue.removeFirst(elevenQueue.count - maxQueueSize)
-        }
+    func playElevenLabs(_ text: String, priority: Bool = false) {
+        // Ưu tiên (follow/tặng quà/chia sẻ) → chèn LÊN ĐẦU để đọc trước bình luận thường.
+        // KHÔNG cắt bỏ hàng đợi nữa: đọc ĐẦY ĐỦ từng bình luận, xong mới sang cái kế tiếp.
+        if priority { elevenQueue.insert(text, at: 0) }
+        else { elevenQueue.append(text) }
         pendingCount = googleQueue.count + elevenQueue.count
         if !isPlayingEleven { playNextEleven() }
     }

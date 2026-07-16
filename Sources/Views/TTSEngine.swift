@@ -176,7 +176,8 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         try? s.setActive(true, options: [])
     }
 
-    func speak(_ text: String) {
+    /// priority=true (follow/tặng quà/chia sẻ) → CHÈN LÊN ĐẦU hàng đợi để đọc TRƯỚC bình luận.
+    func speak(_ text: String, priority: Bool = false) {
         // Chuẩn hóa văn bản:
         // · ElevenLabs: GIỮ NGUYÊN văn bản gốc (model tự xử lý ngữ điệu/cảm xúc).
         // · Chị Google: chuẩn hóa đầy đủ (kèm mở rộng tiếng lóng).
@@ -197,11 +198,11 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
 
         switch engineType {
         case .google:
-            playGoogleTTS(t)
+            playGoogleTTS(t, priority: priority)
         case .siri:
             playSiriTTS(t)
         case .elevenlabs:
-            playElevenLabsTTS(t)
+            playElevenLabsTTS(t, priority: priority)
         case .system:
             playSystemTTS(t)
         }
