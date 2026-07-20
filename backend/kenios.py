@@ -2539,8 +2539,10 @@ async def admin_restore(file: UploadFile = FastAPIFile(...), admin=Depends(get_a
             names = z.namelist()
             if "kenios.db" not in names:
                 raise HTTPException(status_code=400, detail="Thiếu kenios.db trong file sao lưu.")
-            # Giải nén DB ra file tạm rồi KIỂM TRA mở được + có bảng trước khi nhận
-            db_tmp = os.path.join(tempfile.gettempdir(), f"restore-db-{secrets.token_hex(6)}.sqlite")
+            # Giải nén DB ra file tạm CÙNG THƯ MỤC với DB (KHÔNG dùng /tmp — tránh lỗi
+            # Errno 18 'cross-device link' khi /tmp và /root/kenios khác phân vùng ổ đĩa).
+            _db_dir = os.path.dirname(os.path.abspath(DB_PATH)) or "."
+            db_tmp = os.path.join(_db_dir, f"restore-db-{secrets.token_hex(6)}.sqlite.tmp")
             with open(db_tmp, "wb") as f:
                 f.write(z.read("kenios.db"))
             try:
@@ -2548,10 +2550,14 @@ async def admin_restore(file: UploadFile = FastAPIFile(...), admin=Depends(get_a
                 n = _c.execute("SELECT count(*) FROM sqlite_master").fetchone()[0]
                 _c.close()
             except Exception:
+                try: os.remove(db_tmp)
+                except OSError: pass
                 raise HTTPException(status_code=400, detail="File DB trong bản sao lưu bị hỏng.")
             if n < 1:
+                try: os.remove(db_tmp)
+                except OSError: pass
                 raise HTTPException(status_code=400, detail="File DB trống — không khôi phục.")
-            # Đặt bản khôi phục đang chờ (áp khi khởi động lại)
+            # Đặt bản khôi phục đang chờ (áp khi khởi động lại) — cùng thư mục nên os.replace OK.
             os.replace(db_tmp, DB_PATH + ".restore")
             if "kenios_enc.key" in names:
                 with open(_key_file + ".restore", "wb") as f:
