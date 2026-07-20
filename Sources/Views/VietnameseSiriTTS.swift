@@ -79,7 +79,7 @@ struct VietnameseTextNormalizer {
         "plz": "làm ơn", "pls": "làm ơn",
         // --- Tài khoản / ngân hàng / công việc ---
         "acc": "ạc", "pass": "mật khẩu", "tk": "tài khoản", "qr": "quy rờ",
-        "hack": "hake", "app": "áp", "dchi": "địa chỉ", "ngh": "ngân hàng",
+        "hack": "hake", "dchi": "địa chỉ", "ngh": "ngân hàng",
         "bks": "biển kiểm soát", "hđ": "hoạt động", "qd": "quyết định", "vb": "văn bản",
         "cq": "cơ quan", "cty": "công ty", "gd": "giám đốc", "pgd": "phó giám đốc",
         "pp": "phó phòng", "lh": "liên hệ", "nv": "nhân viên", "nn": "nhà nghỉ",
@@ -95,6 +95,8 @@ struct VietnameseTextNormalizer {
         "dinhchop": "đỉnh chóp", "xitkeo": "xịt keo", "phongbat": "phông bạt",
         "cmn": "chuẩn mẹ nó", "cmnr": "chuẩn mẹ nó rồi", "cmnl": "chuẩn mẹ nó luôn",
         "ccmnr": "chuẩn con mẹ nó rồi", "ccmnl": "chuẩn con mẹ nó luôn", "ncl": "nói chung là",
+        // --- Meme / lóng đọc theo nghĩa vui (theo yêu cầu) ---
+        "cc": "cục cưng", "dm": "định mệnh", "dcm": "định con mệnh", "tuất": "chó",
         // --- Từ tục có nguyên âm → đọc nhẹ / đánh vần (giữ live an toàn) ---
         "vloi": "vờ lờ", "vnoi": "vờ nờ", "vloz": "vờ lờ", "loz": "lờ", "eos": "không",
         "vaiz": "vãi", "vliz": "vãi", "vcliz": "vãi cả", "smliz": "sờ mờ lờ",
@@ -118,6 +120,17 @@ struct VietnameseTextNormalizer {
         // 0) Vài cụm có ký hiệu "/" (tokenizer sẽ tách) — xử lý trước.
         s = s.replacingOccurrences(of: "p/s", with: " tái bút ", options: .caseInsensitive)
         s = s.replacingOccurrences(of: "p.s", with: " tái bút ", options: .caseInsensitive)
+
+        // 0b) Cụm nhiều từ (phải thay TRƯỚC khi tách từ). "hack mà gà" trước "hack ngu".
+        if slang {
+            let phrases: [(String, String)] = [
+                ("hack mà gà", " không sao làm lại "),
+                ("hack ngu", " anh chơi hay thế em hâm mộ anh ")
+            ]
+            for (k, v) in phrases {
+                s = s.replacingOccurrences(of: k, with: v, options: .caseInsensitive)
+            }
+        }
 
         // 1) Đổi ký hiệu thành chữ.
         for (k, v) in symbolMap { s = s.replacingOccurrences(of: k, with: v) }
