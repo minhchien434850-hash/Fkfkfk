@@ -4672,8 +4672,9 @@ def _reader_token(uid: int) -> str:
     return hmac.new(SECRET.encode(), f"reader:{uid}".encode(), hashlib.sha256).hexdigest()[:24]
 
 def _reader_base_url() -> str:
-    return (get_setting("ipa_sign_base", "") or os.getenv("IPA_SIGN_BASE", "")
-            or "https://app.kenios.store").rstrip("/")
+    # Ưu tiên setting riêng cho link trình đọc → biến môi trường → IP VPS mới (chạy HTTP).
+    return (get_setting("reader_base", "") or os.getenv("READER_BASE", "")
+            or "http://160.25.168.234").rstrip("/")
 
 def _reader_cfg(tok: str) -> dict:
     raw = get_setting(f"reader_cfg_{tok}", "")
