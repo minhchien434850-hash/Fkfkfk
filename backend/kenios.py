@@ -4664,6 +4664,151 @@ async def tiktok_live_disconnect(b: TikTokLiveIn) -> dict[str, Any]:
     return {"ok": True}
 
 
+# ============ TRÌNH ĐỌC TRÊN TRÌNH DUYỆT (TikTok Studio / OBS – Browser Source) ============
+# Máy chủ tạo 1 ĐƯỜNG DẪN riêng cho từng người. Mở link trên PC phát live (hoặc thêm làm
+# Browser Source trong OBS / TikTok LIVE Studio) → trang tự kết nối phòng LIVE, đọc bình
+# luận THẲNG trên luồng (âm phát ở PC, KHÔNG đọc trên điện thoại). Giọng ĐỒNG BỘ với app.
+def _reader_token(uid: int) -> str:
+    return hmac.new(SECRET.encode(), f"reader:{uid}".encode(), hashlib.sha256).hexdigest()[:24]
+
+def _reader_base_url() -> str:
+    return (get_setting("ipa_sign_base", "") or os.getenv("IPA_SIGN_BASE", "")
+            or "https://app.kenios.store").rstrip("/")
+
+def _reader_cfg(tok: str) -> dict:
+    raw = get_setting(f"reader_cfg_{tok}", "")
+    try:
+        return json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+
+class ReaderCfgIn(BaseModel):
+    username: str = ""
+    engine: str = "eleven"            # eleven = giọng ElevenLabs máy chủ · browser = giọng trình duyệt
+    voice_id: str = ""
+    model: str = "eleven_multilingual_v2"
+    speed: float = 1.0
+    read_types: list[str] = ["comment", "gift", "follow", "share"]
+    translate: bool = False
+    tpl: dict[str, str] = {}
+
+@app.post("/live-reader/save")
+def reader_save(b: ReaderCfgIn, user=Depends(get_user)) -> dict[str, Any]:
+    tok = _reader_token(user["id"])
+    cfg = b.dict()
+    cfg["username"] = _tt_norm_user(cfg.get("username", "")) or ""
+    set_setting(f"reader_cfg_{tok}", json.dumps(cfg))
+    return {"ok": True, "token": tok, "url": f"{_reader_base_url()}/r/{tok}"}
+
+@app.get("/live-reader/config")
+def reader_get(user=Depends(get_user)) -> dict[str, Any]:
+    tok = _reader_token(user["id"])
+    return {"token": tok, "url": f"{_reader_base_url()}/r/{tok}", "config": _reader_cfg(tok)}
+
+@app.get("/live-reader/data")
+def reader_data(k: str) -> dict[str, Any]:
+    cfg = _reader_cfg(k)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Link không hợp lệ.")
+    return {"config": cfg, "eleven": bool(_eleven_server_key())}   # KHÔNG trả API key
+
+class ReaderTTSIn(BaseModel):
+    text: str
+
+@app.post("/live-reader/tts")
+def reader_tts(b: ReaderTTSIn, k: str):
+    cfg = _reader_cfg(k)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Link không hợp lệ.")
+    key = _eleven_server_key()
+    vid = (cfg.get("voice_id") or "").strip()
+    text = (b.text or "").strip()
+    if not key or not vid or not text:
+        raise HTTPException(status_code=400, detail="Chưa đủ điều kiện đọc ElevenLabs.")
+    model = cfg.get("model") or "eleven_multilingual_v2"
+    try:
+        speed = float(cfg.get("speed") or 1.0)
+    except Exception:
+        speed = 1.0
+    is_v3 = (model == "eleven_v3")
+    vs = {"stability": (0.5 if is_v3 else 0.5), "similarity_boost": 0.75,
+          "style": 0.0, "use_speaker_boost": True}
+    if abs(speed - 1.0) > 0.001:
+        vs["speed"] = max(0.7, min(speed, 1.2))
+    payload = {"text": text, "model_id": model, "voice_settings": vs}
+    if model != "eleven_multilingual_v2":
+        payload["language_code"] = "vi"
+    try:
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
+                       headers={"xi-api-key": key, "Content-Type": "application/json",
+                                "Accept": "audio/mpeg"},
+                       json=payload, timeout=60)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"ElevenLabs {r.status_code}")
+    return Response(content=r.content, media_type="audio/mpeg")
+
+_READER_HTML = r"""<!doctype html><html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KENIOS — Đọc bình luận Live</title>
+<style>body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0b0f1a;color:#e8eefc}
+.wrap{padding:18px;max-width:720px;margin:0 auto;width:100%;box-sizing:border-box}
+h1{font-size:18px;margin:6px 0}
+.btn{background:#2b7fff;color:#fff;border:0;border-radius:12px;padding:14px 22px;font-size:16px;font-weight:700;cursor:pointer}
+.btn.stop{background:#e0453f}
+.st{font-size:13px;opacity:.85;margin:10px 0}
+#feed{margin-top:12px;font-size:13px;line-height:1.55}
+.row{padding:6px 0;border-bottom:1px solid #1b2436}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:8px;background:#1b2740;margin-right:6px}</style>
+</head><body><div class="wrap">
+<h1>🎙️ KENIOS — Đọc bình luận Live</h1>
+<div class="st" id="who"></div>
+<button class="btn" id="go">▶️ Bắt đầu đọc</button>
+<div class="st" id="status">Bấm "Bắt đầu đọc" để kết nối phòng LIVE.</div>
+<div id="feed"></div></div>
+<audio id="au"></audio>
+<script>
+const TOKEN="__TOKEN__", API=location.origin;
+let cfg=null,user="",after=0,poll=null,running=false,q=[],playing=false;
+const DEF={comment:"{name} bình luận: {content}",gift:"Cảm ơn {name} đã tặng {content}",follow:"Cảm ơn {name} đã theo dõi",share:"Cảm ơn {name} đã chia sẻ live",join:"Chào mừng {name} đã vào phòng"};
+const $=id=>document.getElementById(id);
+function cleanName(s){s=(s||"").replace(/[_\-.]/g," ").replace(/[^\p{L}\p{N} ]/gu,"").replace(/\s+/g," ").trim();return s||"bạn";}
+function tpl(ev){var t=(cfg.tpl&&cfg.tpl[ev.type])||DEF[ev.type]||DEF.comment;return t.replace("{name}",cleanName(ev.name)).replace("{content}",ev.content||"").trim();}
+async function speakEleven(text){var r=await fetch(API+"/live-reader/tts?k="+TOKEN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:text})});if(!r.ok)throw new Error("tts "+r.status);return URL.createObjectURL(await r.blob());}
+function speakBrowser(text){return new Promise(function(res){var u=new SpeechSynthesisUtterance(text);u.lang="vi-VN";u.rate=Math.max(.6,Math.min(cfg.speed||1,1.4));u.onend=res;u.onerror=res;speechSynthesis.speak(u);});}
+async function playNext(){if(playing)return;var item=q.shift();if(!item){playing=false;return;}playing=true;
+ try{if(cfg.engine==="eleven"&&cfg._eleven&&cfg.voice_id){var url=await speakEleven(item);var au=$("au");au.src=url;au.onended=function(){URL.revokeObjectURL(url);playing=false;playNext();};au.onerror=function(){playing=false;playNext();};await au.play();}
+ else{await speakBrowser(item);playing=false;playNext();}}catch(e){playing=false;setTimeout(playNext,300);}}
+function enqueue(text,prio){if(!text)return;if(prio)q.unshift(text);else q.push(text);if(!playing)playNext();}
+function setStatus(s){$("status").textContent="Trạng thái: "+(s||"...")+(playing?" · đang đọc":"");}
+async function connect(){await fetch(API+"/social/tiktok/live/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:user})});}
+async function drainOld(){await new Promise(function(r){setTimeout(r,2500);});var r=await fetch(API+"/social/tiktok/live/events?username="+encodeURIComponent(user)+"&after="+after);var d=await r.json();after=d.last||after;setStatus(d.status);}
+function addFeed(ev,text){var f=$("feed"),div=document.createElement("div");div.className="row";div.innerHTML='<span class="tag">'+ev.type+'</span>'+text.replace(/</g,"&lt;");f.prepend(div);while(f.children.length>60)f.removeChild(f.lastChild);}
+async function loop(){if(!running)return;
+ try{var r=await fetch(API+"/social/tiktok/live/events?username="+encodeURIComponent(user)+"&after="+after);var d=await r.json();setStatus(d.status);
+ (d.events||[]).forEach(function(ev){if((cfg.read_types||[]).indexOf(ev.type)>=0){var text=tpl(ev);var prio=["gift","follow","share"].indexOf(ev.type)>=0;enqueue(text,prio);addFeed(ev,text);}});
+ after=d.last||after;if(d.status==="ended"||d.status==="error"){stop();return;}}catch(e){}
+ poll=setTimeout(loop,1500);}
+async function start(){var r=await fetch(API+"/live-reader/data?k="+TOKEN);if(!r.ok){$("status").textContent="Link lỗi — tạo lại trong app.";return;}
+ var d=await r.json();cfg=d.config;cfg._eleven=d.eleven;user=cfg.username||"";
+ if(!user){$("status").textContent="Chưa có @username — vào app đặt lại.";return;}
+ $("who").textContent="Phòng LIVE: @"+user+" · Giọng: "+(cfg.engine==="eleven"&&cfg._eleven?"ElevenLabs (đồng bộ app)":"Trình duyệt");
+ running=true;$("go").textContent="⏹ Dừng";$("go").classList.add("stop");
+ await connect();await drainOld();loop();}
+function stop(){running=false;if(poll)clearTimeout(poll);q=[];playing=false;try{speechSynthesis.cancel();$("au").pause();}catch(e){}
+ $("go").textContent="▶️ Bắt đầu đọc";$("go").classList.remove("stop");setStatus("đã dừng");}
+$("go").onclick=function(){running?stop():start();};
+</script></body></html>"""
+
+@app.get("/r/{tok}", response_class=HTMLResponse)
+def reader_page(tok: str):
+    if not _reader_cfg(tok):
+        return HTMLResponse("<h3 style='font-family:sans-serif;padding:24px'>Link chưa tạo hoặc không hợp lệ. Vào app KENIOS → Đọc (TTS) → tạo lại đường dẫn.</h3>",
+                            status_code=404)
+    return HTMLResponse(_READER_HTML.replace("__TOKEN__", tok))
+
+
 # ======================== KenMail — Email tích hợp (tài khoản + mật khẩu) ========================
 import re as _re_mail
 import smtplib as _smtplib

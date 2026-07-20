@@ -870,6 +870,19 @@ struct APIClient {
     /// URL công khai của 1 file media theo id (ảnh/video bài đăng) — tải bằng AsyncImage được.
     func mediaURL(fileId: Int) -> URL? { URL(string: "\(root)/media/\(fileId)") }
 
+    // ============ Trình đọc trên trình duyệt (TikTok Studio / OBS) ============
+    struct ReaderSaveResp: Decodable { let url: String; let token: String }
+    /// Lưu & ĐỒNG BỘ thiết lập giọng lên máy chủ, trả về ĐƯỜNG DẪN trang đọc.
+    func saveReaderConfig(username: String, engine: String, voiceId: String, model: String,
+                          speed: Double, readTypes: [String], translate: Bool,
+                          tpl: [String: String]) async throws -> String {
+        let r: ReaderSaveResp = try decode(try await send("/live-reader/save", method: "POST", json: [
+            "username": username, "engine": engine, "voice_id": voiceId, "model": model,
+            "speed": speed, "read_types": readTypes, "translate": translate, "tpl": tpl,
+        ]))
+        return r.url
+    }
+
     // ==================== ElevenLabs dùng chung (admin đặt key · khách dùng) ====================
     struct ElevenKeyStatus: Decodable { let set: Bool; let masked: String }
     /// ADMIN: xem trạng thái key máy chủ (đã đặt chưa · che bớt).

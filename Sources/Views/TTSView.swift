@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import AVFoundation
 import MediaPlayer
 import UniformTypeIdentifiers
@@ -39,6 +40,10 @@ struct TTSView: View {
     @State private var pollTask: Task<Void, Never>?
     @State private var readTypes: Set<String> = ["comment", "gift", "follow", "share", "join"]
     @State private var liveFeed: [TikTokLiveEvent] = []
+    // ----- Trình đọc trên trình duyệt (TikTok Studio / OBS) -----
+    @State private var readerURL = ""
+    @State private var readerBusy = false
+    @State private var readerMsg: String?
 
     // ----- Cấu hình câu phát (greetings) -----
     @State private var templateJoin = UserDefaults.standard.string(forKey: "tts_event_template_join") ?? "Chào mừng {name} đã vào phòng"
@@ -175,6 +180,61 @@ struct TTSView: View {
 
                         Text("Nhập ID người đang LIVE → app tự đọc bình luận/quà bằng giọng đã chọn. Tiếp tục đọc khi khoá màn hình.")
                             .font(.caption2).foregroundStyle(.secondary)
+                    }
+
+                    // ===== Đọc trên TikTok Studio / OBS (qua trình duyệt · TÁCH RIÊNG) =====
+                    section("Đọc trên TikTok Studio / OBS (trình duyệt)") {
+                        Text("Khác với phần trên: tạo 1 ĐƯỜNG DẪN của máy chủ, mở trên MÁY TÍNH phát live (hoặc thêm làm Browser Source trong OBS / TikTok LIVE Studio). Trang tự đọc bình luận THẲNG trên luồng — không cần mở app. Giọng ĐỒNG BỘ với thiết lập ở đây.")
+                            .font(.caption2).foregroundStyle(.secondary)
+
+                        Button { Task { await makeReaderLink() } } label: {
+                            HStack {
+                                if readerBusy { ProgressView().padding(.trailing, 4) }
+                                Label(readerURL.isEmpty ? "Tạo & đồng bộ đường dẫn" : "Cập nhật đồng bộ lại",
+                                      systemImage: "link.badge.plus").frame(maxWidth: .infinity)
+                            }
+                        }.buttonStyle(.borderedProminent)
+                            .disabled(readerBusy || tiktokId.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                        if tiktokId.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Text("Nhập @username TikTok ở ô phía trên trước khi tạo đường dẫn.")
+                                .font(.caption2).foregroundStyle(.orange)
+                        }
+
+                        if !readerURL.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(readerURL).font(.caption.monospaced())
+                                    .textSelection(.enabled).lineLimit(2)
+                                    .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color(.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                HStack {
+                                    Button { UIPasteboard.general.string = readerURL; readerMsg = "Đã sao chép đường dẫn." } label: {
+                                        Label("Sao chép", systemImage: "doc.on.doc.fill").font(.caption)
+                                    }.buttonStyle(.bordered)
+                                    Button { if let u = URL(string: readerURL) { UIApplication.shared.open(u) } } label: {
+                                        Label("Mở thử", systemImage: "safari.fill").font(.caption)
+                                    }.buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                        if let readerMsg {
+                            Text(readerMsg).font(.caption2).foregroundStyle(.green)
+                        }
+
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 8) {
+                                guideRow("1", "Đặt giọng ở app", "Chọn giọng (ElevenLabs/Google), Voice ID, tốc độ, loại sự kiện muốn đọc — rồi bấm “Tạo & đồng bộ đường dẫn”.")
+                                guideRow("2", "Sao chép đường dẫn", "Bấm “Sao chép”. Gửi/mở đường dẫn này trên MÁY TÍNH đang phát live.")
+                                guideRow("3", "Thêm vào OBS / TikTok Studio", "OBS: + → Browser → dán đường dẫn (bật “Control audio via OBS”). Hoặc chỉ cần mở đường dẫn bằng Chrome trên máy phát live.")
+                                guideRow("4", "Bấm “Bắt đầu đọc”", "Trên trang vừa mở, bấm “Bắt đầu đọc”. Nó tự kết nối phòng LIVE của bạn và đọc bình luận bằng đúng giọng đã đồng bộ.")
+                                Text("Lưu ý: đổi giọng/tốc độ trong app thì bấm “Cập nhật đồng bộ lại” rồi tải lại trang. Giọng ElevenLabs dùng key admin trên máy chủ (khách không cần key).")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }.padding(.top, 4)
+                        } label: {
+                            Label("Hướng dẫn thêm vào OBS / TikTok Studio", systemImage: "questionmark.circle.fill")
+                                .font(.caption.bold()).foregroundStyle(Theme.accent)
+                        }
                     }
 
                     // ----- Cấu hình câu phát (greetings) -----
@@ -865,6 +925,32 @@ struct TTSView: View {
         .background(selected ? Color.green.opacity(0.10) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         Divider()
+    }
+
+    // Tạo & đồng bộ đường dẫn trình đọc trên trình duyệt (TikTok Studio / OBS).
+    private func makeReaderLink() async {
+        let id = tiktokId.trimmingCharacters(in: .whitespaces)
+        guard !id.isEmpty else { return }
+        readerBusy = true; readerMsg = nil
+        let hasEleven = !tts.elevenVoiceId.trimmingCharacters(in: .whitespaces).isEmpty
+        let engine = (tts.engineType == .elevenlabs && hasEleven) ? "eleven" : "browser"
+        let model = UserDefaults.standard.string(forKey: "eleven_model") ?? "eleven_multilingual_v2"
+        let tpl: [String: String] = [
+            "comment": templateComment, "gift": templateGift, "follow": templateFollow,
+            "share": templateShare, "join": templateJoin,
+        ]
+        do {
+            let url = try await store.api.saveReaderConfig(
+                username: id, engine: engine,
+                voiceId: tts.elevenVoiceId.trimmingCharacters(in: .whitespaces),
+                model: model, speed: tts.elevenSpeed, readTypes: Array(readTypes),
+                translate: translateToVi, tpl: tpl)
+            readerURL = url
+            readerMsg = "Đã đồng bộ giọng. Mở đường dẫn trên máy phát live."
+        } catch {
+            readerMsg = "Lỗi tạo đường dẫn: \(error.localizedDescription)"
+        }
+        readerBusy = false
     }
 
     // Một dòng hướng dẫn: số thứ tự tròn + tiêu đề + mô tả.
