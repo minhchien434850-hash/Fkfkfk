@@ -2417,6 +2417,7 @@ def admin_set_eleven_key(b: ElevenKeyIn, admin=Depends(get_admin)) -> dict[str, 
     """ADMIN lưu/xoá API key ElevenLabs dùng chung (key rỗng = xoá)."""
     k = (b.key or "").strip()
     set_setting("eleven_api_key_enc", enc(k) if k else "")
+    _store_config_cache["data"] = None   # đổi key → cập nhật cờ eleven_server_key ngay
     return {"ok": True, "set": bool(k)}
 
 @app.get("/admin/eleven-key")
@@ -11149,8 +11150,21 @@ def store_all_products() -> dict[str, Any]:
     return {"by_category": grouped}
 
 
+# Cache /store/config ~20s: app gọi rất nhiều (mỗi lần mở + nhiều màn) mà mỗi lần chạy
+# ~40 câu get_setting + 3 câu COUNT → nặng DB. Cache giảm tải, app mở nhanh hơn.
+_store_config_cache: dict[str, Any] = {"ts": 0.0, "data": None}
+
 @app.get("/store/config")
 def store_config() -> dict[str, Any]:
+    now = time.time()
+    if _store_config_cache["data"] is not None and now - _store_config_cache["ts"] < 20:
+        return _store_config_cache["data"]
+    data = _store_config_build()
+    _store_config_cache["data"] = data
+    _store_config_cache["ts"] = now
+    return data
+
+def _store_config_build() -> dict[str, Any]:
     # Đếm số THẬT cho 3 ô thống kê (người dùng / sản phẩm đã bán / lượt đánh giá)
     with db() as c:
         real_users = c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
@@ -13818,6 +13832,7 @@ def admin_store_config(b: StoreConfigIn, admin=Depends(get_admin)) -> dict[str, 
     if b.welcome_voice_id is not None: set_setting("store_welcome_voice_id", b.welcome_voice_id.strip()[:200])
     if b.notif_voice_enabled is not None: set_setting("store_notif_voice_enabled", "1" if b.notif_voice_enabled else "0")
     if b.gamecat_limit is not None: set_setting("store_gamecat_limit", str(max(1, min(int(b.gamecat_limit), 30))))
+    _store_config_cache["data"] = None   # cập nhật cấu hình → app thấy ngay (không đợi cache)
     return {"message": "Đã cập nhật giao diện app bán hàng."}
 
 
