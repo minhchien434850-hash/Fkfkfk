@@ -318,6 +318,9 @@ struct TTSView: View {
                     // ----- Tự động đọc thông báo định kỳ (quảng cáo / nhắc inbox) -----
                     autoAnnounceSection
 
+                    // ----- Tự động cà khịa lại bình luận khiêu khích -----
+                    autoRoastSection
+
                     // ----- Thông báo livestream -----
                     section("Thông báo livestream") {
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -607,6 +610,22 @@ struct TTSView: View {
                       systemImage: "checkmark.circle.fill")
                     .font(.caption2).foregroundStyle(.green)
             }
+        }
+    }
+
+    // ----- Tự động cà khịa lại bình luận khiêu khích (clap-back) -----
+    @ViewBuilder private var autoRoastSection: some View {
+        section("Tự động cà khịa lại (clap-back)") {
+            Text("Khi có bình luận khiêu khích / anti (chứa từ như ngu, gà, kém, chửi thề…), bot tự đọc lại 1 câu cà khịa vui NGAY SAU bình luận đó — bằng giọng đang chọn.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Toggle(isOn: $tts.autoRoastOn) {
+                Label("Bật tự động cà khịa lại", systemImage: "flame.fill").font(.subheadline)
+            }.tint(Theme.accent)
+            Button { tts.speak(tts.randomRoast()) } label: {
+                Label("Nghe thử 1 câu cà khịa", systemImage: "play.circle.fill").frame(maxWidth: .infinity)
+            }.buttonStyle(.bordered)
+            Text("Câu cà khịa vui, không chửi tục. Chỉ kích hoạt với bình luận có ý khiêu khích.")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -1204,6 +1223,10 @@ struct TTSView: View {
                         let text = await liveSpeechText(ev)
                         // Phát âm thanh thông báo (quà/follow/share) TRƯỚC rồi mới đọc.
                         tts.announce(text, eventType: ev.type)
+                        // Tự động CÀ KHỊA lại bình luận khiêu khích (đọc NGAY SAU bình luận đó).
+                        if ev.type == "comment", tts.autoRoastOn, tts.shouldRoast(ev.content) {
+                            tts.announce(tts.randomRoast(), eventType: "comment")
+                        }
                     }
                     if liveFeed.count > 120 { liveFeed.removeFirst(liveFeed.count - 120) }
                     lastEventId = r.last

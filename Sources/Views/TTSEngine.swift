@@ -133,6 +133,48 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         speak(msg)
     }
 
+    // ===== Tự động CÀ KHỊA lại bình luận khiêu khích (clap-back) =====
+    @Published var autoRoastOn: Bool = UserDefaults.standard.bool(forKey: "tts_auto_roast_on") {
+        didSet { UserDefaults.standard.set(autoRoastOn, forKey: "tts_auto_roast_on") }
+    }
+
+    /// Kho câu cà khịa (vui, không tục) — đọc lại khi gặp bình luận khiêu khích.
+    static let roastComebacks: [String] = [
+        "Ơ kìa, nói người thì phải ngẫm đến ta nha bạn ơi.",
+        "Bạn rảnh dữ ha, vô đây chỉ để bình luận nhiêu đó thôi à?",
+        "Cảm ơn bạn đã đóng góp tương tác, chúc bạn mau khôn nha.",
+        "Anti là fan giấu mặt đó, cảm ơn bạn đã theo dõi mình sát sao.",
+        "Bạn gõ phím nhanh vậy mà sao suy nghĩ hơi chậm nhỉ?",
+        "Khịa mình chi cho mệt, để sức đó lo cho bản thân bạn đi.",
+        "Bạn đúng là nhân tài, tiếc là chưa ai phát hiện ra thôi.",
+        "Nghe bạn nói xong mình càng tự tin hơn, cảm ơn nha.",
+        "Bạn lo được cho mình chưa mà đã lo cho người ta rồi?",
+        "Trình của bạn tới đây thôi à? Mình tưởng còn hơn chứ.",
+        "Gõ phím thì mạnh, ngoài đời chắc hiền như cục đất nhỉ.",
+        "Bạn vô đây khịa mà mình vẫn vui, vậy là bạn thua rồi đó.",
+        "Câu này hay đó, tiếc là bạn nói sai người rồi.",
+        "Thôi bạn ra ngoài hít tí khí trời cho tỉnh táo lại nha.",
+        "Bình luận của bạn mình nghe rồi, nhẹ như gió thoảng à."
+    ]
+
+    /// Từ khoá khiêu khích/anti để KÍCH HOẠT cà khịa (kèm dạng không dấu thường gặp).
+    private static let provokeWords: [String] = [
+        "ngu", "gà", "ga ", "dốt", "dot", "đần", "kém", "kem", "dở", "do te", "tệ",
+        "óc", "xấu", "xau", "rác", "rac", "vô dụng", "vo dung", "lừa", "lua dao",
+        "scam", "fake", "giả", "gia tao", "bịp", "bip", "lùa gà", "lua ga", "phèn",
+        "phen", "nổ", "chém gió", "chem gio", "ảo", "vl", "vcl", "clm", "đm", "dm",
+        "cc", "đmm", "vkl", "súc", "suc vat", "chửi", "chui", "đồ", "khịa", "khia"
+    ]
+
+    /// Có nên cà khịa lại bình luận này không (chứa từ khiêu khích)?
+    func shouldRoast(_ comment: String) -> Bool {
+        let low = " " + comment.lowercased() + " "
+        return Self.provokeWords.contains { low.contains($0) }
+    }
+
+    /// 1 câu cà khịa ngẫu nhiên.
+    func randomRoast() -> String { Self.roastComebacks.randomElement() ?? "" }
+
     func fetchElevenVoiceName(_ vid: String) {
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
         guard !key.isEmpty, let url = URL(string: "https://api.elevenlabs.io/v1/voices/\(vid)") else { return }
