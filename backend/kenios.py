@@ -2384,16 +2384,16 @@ class NotifSoundsIn(BaseModel):
 
 
 @app.post("/notif-sounds")
-def save_notif_sounds(b: NotifSoundsIn, user=Depends(get_user)) -> dict[str, Any]:
-    """Lưu âm thanh thông báo DÙNG CHUNG (toàn cục): bất kỳ ai cũng thêm/đổi được,
-    mọi người (khách + admin) đều thấy giống nhau. Cài lại app / build lại vẫn còn."""
+def save_notif_sounds(b: NotifSoundsIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    """CHỈ ADMIN đồng bộ bộ âm thanh thông báo DÙNG CHUNG (toàn cục). Sau khi đồng bộ,
+    MỌI khách tải về dùng được (khách tự thêm âm riêng thì lưu cục bộ trên máy họ)."""
     set_setting("notif_sounds_global", json.dumps(b.sounds))
     return {"ok": True}
 
 
 @app.get("/notif-sounds")
 def get_notif_sounds(user=Depends(get_user)) -> dict[str, Any]:
-    """Đọc âm thanh thông báo dùng chung (toàn cục)."""
+    """Đọc bộ âm thanh thông báo dùng chung (admin đã đồng bộ) — khách nào cũng tải được."""
     return {"json": get_setting("notif_sounds_global", "")}
 
 
@@ -2486,8 +2486,13 @@ def tts_eleven(b: ElevenTTSIn, user=Depends(get_user)):
 #  • Tải bản sao lưu về máy: GET /admin/backup
 #  • Khôi phục từ file:       POST /admin/restore  (dịch vụ tự khởi động lại)
 #  • Tự gửi 1 lần/ngày về Telegram của admin (bật/tắt trong cấu hình).
-def _backup_make_zip() -> str:
-    """Tạo file .zip sao lưu (DB đồng nhất qua SQLite backup API + khóa). Trả về đường dẫn."""
+def _backup_make_zip(include_uploads: bool = True) -> str:
+    """Tạo file .zip sao lưu ĐẦY ĐỦ, KHÔI PHỤC LÀ DÙNG ĐƯỢC NGAY:
+      • kenios.db  — toàn bộ dữ liệu (đồng nhất qua SQLite Online Backup API).
+      • kenios_enc.key — khóa giải mã (để đọc lại API key đã lưu).
+      • uploads/…  — TẤT CẢ file đã tải lên (âm thanh TTS, ảnh logo/banner,
+        file sản phẩm…) → khôi phục xong ÂM THANH THÔNG BÁO vẫn phát được.
+    include_uploads=False → chỉ DB + khóa (bản gọn, để gửi Telegram khi file lớn)."""
     import zipfile, tempfile
     ts = time.strftime("%Y%m%d-%H%M")
     out = os.path.join(tempfile.gettempdir(), f"kenios-backup-{ts}.zip")
@@ -2503,23 +2508,42 @@ def _backup_make_zip() -> str:
         # Dự phòng: copy thẳng file (vẫn tốt trong đa số trường hợp)
         import shutil as _sh
         _sh.copy2(DB_PATH, db_snapshot)
+    n_files = 0; total_bytes = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(db_snapshot, "kenios.db")
         if os.path.exists(_key_file):
             z.write(_key_file, "kenios_enc.key")
-        # Ghi kèm mốc thời gian để biết bản này của lúc nào
+        # ĐÓNG GÓI TOÀN BỘ file đã tải lên (âm thanh/ảnh/media/file sản phẩm).
+        if include_uploads and os.path.isdir(UPLOAD_DIR):
+            for root, _dirs, files in os.walk(UPLOAD_DIR):
+                for fn in files:
+                    # Bỏ file tạm đang tải dở (tmp_/tmpm_/restore-…) — không cần sao lưu.
+                    if fn.startswith(("tmp_", "tmpm_", "temp_", "m_", "restore-")):
+                        continue
+                    fp = os.path.join(root, fn)
+                    try:
+                        rel = os.path.relpath(fp, UPLOAD_DIR)
+                        z.write(fp, os.path.join("uploads", rel))
+                        n_files += 1; total_bytes += os.path.getsize(fp)
+                    except OSError:
+                        pass
+        # Ghi kèm mốc thời gian + thống kê để biết bản này của lúc nào
         z.writestr("backup_info.txt",
-                   f"KENIOS backup\ncreated_utc={time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())}\n")
+                   f"KENIOS backup\ncreated_utc={time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())}\n"
+                   f"uploads_included={'1' if include_uploads else '0'}\n"
+                   f"uploads_files={n_files}\nuploads_bytes={total_bytes}\n")
     try: os.remove(db_snapshot)
     except OSError: pass
     return out
 
 
 @app.get("/admin/backup")
-def admin_backup(admin=Depends(get_admin)):
-    """Tải file .zip sao lưu toàn bộ (DB + khóa) về máy."""
-    path = _backup_make_zip()
+def admin_backup(background_tasks: BackgroundTasks, admin=Depends(get_admin)):
+    """Tải file .zip sao lưu ĐẦY ĐỦ (DB + khóa + toàn bộ file đã tải lên) về máy."""
+    path = _backup_make_zip(include_uploads=True)
     fname = os.path.basename(path)
+    # Xoá file zip tạm sau khi đã gửi xong (bản đầy đủ có thể lớn → tránh đầy ổ đĩa).
+    background_tasks.add_task(lambda p=path: os.remove(p) if os.path.exists(p) else None)
     return FileResponse(path, filename=fname, media_type="application/zip",
                         content_disposition_type="attachment")
 
@@ -2563,6 +2587,24 @@ async def admin_restore(file: UploadFile = FastAPIFile(...), admin=Depends(get_a
             if "kenios_enc.key" in names:
                 with open(_key_file + ".restore", "wb") as f:
                     f.write(z.read("kenios_enc.key"))
+            # KHÔI PHỤC NGAY các file đã tải lên (âm thanh/ảnh/media/file sản phẩm) →
+            # sau khi khởi động lại là dùng được luôn (âm thanh thông báo phát được).
+            os.makedirs(UPLOAD_DIR, exist_ok=True)
+            for nm in names:
+                if not nm.startswith("uploads/") or nm.endswith("/"):
+                    continue
+                rel = nm[len("uploads/"):]
+                # Chặn path traversal (../) — chỉ ghi trong UPLOAD_DIR.
+                dest = os.path.normpath(os.path.join(UPLOAD_DIR, rel))
+                if not dest.startswith(os.path.abspath(UPLOAD_DIR) + os.sep) \
+                   and dest != os.path.abspath(UPLOAD_DIR):
+                    continue
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "wb") as f:
+                        f.write(z.read(nm))
+                except Exception:
+                    pass
     finally:
         try: os.remove(tmp_zip)
         except OSError: pass
@@ -2576,6 +2618,28 @@ async def admin_restore(file: UploadFile = FastAPIFile(...), admin=Depends(get_a
             os._exit(0)   # systemd Restart=always sẽ bật lại
     _thr.Thread(target=_restart_later, daemon=True).start()
     return {"ok": True, "message": "Đã nhận bản sao lưu. Máy chủ đang khởi động lại để khôi phục (khoảng 10 giây)."}
+
+
+# Telegram sendDocument giới hạn ~50MB. Bản đầy đủ (kèm uploads) có thể vượt →
+# khi đó gửi bản GỌN (chỉ DB + khóa) để sao lưu tự động KHÔNG bao giờ im lặng thất bại.
+# Bản đầy đủ vẫn tải tay được qua nút "Tải bản sao lưu" (GET /admin/backup).
+_TG_DOC_LIMIT = 48 * 1024 * 1024
+
+def _backup_zip_for_telegram() -> tuple[str, str]:
+    """Trả về (đường_dẫn_zip, ghi_chú). Ưu tiên bản đầy đủ; quá lớn thì hạ về bản gọn."""
+    full = _backup_make_zip(include_uploads=True)
+    try:
+        if os.path.getsize(full) <= _TG_DOC_LIMIT:
+            return full, ""
+    except OSError:
+        return full, ""
+    # Quá lớn cho Telegram → tạo bản gọn (DB + khóa) thay thế.
+    try: os.remove(full)
+    except OSError: pass
+    small = _backup_make_zip(include_uploads=False)
+    note = ("\n⚠️ File tải lên (âm thanh/ảnh) quá lớn để gửi Telegram — "
+            "bản này CHỈ có dữ liệu. Tải bản ĐẦY ĐỦ trong app: Cấu hình › Sao lưu › Tải bản sao lưu.")
+    return small, note
 
 
 def _tg_send_document(token: str, chat_id, path: str, caption: str = "") -> bool:
@@ -2603,8 +2667,8 @@ def _backup_daily_loop() -> None:
                 today = _t.strftime("%Y-%m-%d")
                 if token and chat and get_setting("backup_last_date", "") != today:
                     try:
-                        path = _backup_make_zip()
-                        cap = f"🗄️ Sao lưu KENIOS tự động — {today}\nGiữ file này để khôi phục khi cần."
+                        path, note = _backup_zip_for_telegram()
+                        cap = f"🗄️ Sao lưu KENIOS tự động — {today}\nGiữ file này để khôi phục khi cần.{note}"
                         if _tg_send_document(token, chat, path, cap):
                             set_setting("backup_last_date", today)
                             set_setting("backup_last_ok", str(int(_t.time())))
@@ -2651,14 +2715,17 @@ def admin_backup_now(admin=Depends(get_admin)) -> dict[str, Any]:
     if not token or not chat:
         raise HTTPException(status_code=400,
             detail="Chưa cấu hình bot Telegram hoặc Chat ID nhận sao lưu.")
-    path = _backup_make_zip()
+    path, note = _backup_zip_for_telegram()
     ok = _tg_send_document(token, chat, path,
-                           f"🗄️ Sao lưu KENIOS (gửi thủ công) — {time.strftime('%Y-%m-%d %H:%M')}")
+                           f"🗄️ Sao lưu KENIOS (gửi thủ công) — {time.strftime('%Y-%m-%d %H:%M')}{note}")
     try: os.remove(path)
     except OSError: pass
     if not ok:
         raise HTTPException(status_code=502, detail="Gửi Telegram thất bại. Kiểm tra token/Chat ID.")
-    return {"ok": True, "message": "Đã gửi bản sao lưu về Telegram."}
+    msg = "Đã gửi bản sao lưu về Telegram."
+    if note:
+        msg += " (Bản gửi Telegram là bản gọn vì file tải lên quá lớn — tải bản đầy đủ bằng nút Tải bản sao lưu.)"
+    return {"ok": True, "message": msg}
 
 
 # ===================== SSH / SFTP proxy (Remote Server Tool) =====================

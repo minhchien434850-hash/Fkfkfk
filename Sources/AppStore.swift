@@ -352,16 +352,32 @@ final class AppStore: ObservableObject {
             if let id = s["id"], !id.isEmpty { d.set(id, forKey: "tts_sound_\(ev)") }
             if let url = s["url"] { d.set(url, forKey: "tts_sound_url_\(ev)") }
         }
-        // Khôi phục KHO âm tùy chỉnh (không giới hạn)
-        if let lib = obj["library"] as? [[String: String]],
-           let ld = try? JSONSerialization.data(withJSONObject: lib),
-           let ls = String(data: ld, encoding: .utf8) {
-            d.set(ls, forKey: "tts_custom_sounds")
+        // GỘP kho âm dùng chung (admin đồng bộ) với kho âm KHÁCH tự thêm trên máy →
+        // âm admin luôn có, mà âm riêng của khách KHÔNG bị mất mỗi lần mở app.
+        if let serverLib = obj["library"] as? [[String: String]] {
+            var merged = serverLib
+            var seen = Set(serverLib.compactMap { $0["url"] })
+            if let raw = d.string(forKey: "tts_custom_sounds"),
+               let data = raw.data(using: .utf8),
+               let localLib = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                for item in localLib {
+                    let url = item["url"] ?? ""
+                    if !url.isEmpty, !seen.contains(url) { merged.append(item); seen.insert(url) }
+                }
+            }
+            if let ld = try? JSONSerialization.data(withJSONObject: merged),
+               let ls = String(data: ld, encoding: .utf8) {
+                d.set(ls, forKey: "tts_custom_sounds")
+            }
         }
     }
 
-    /// Đẩy cấu hình âm thanh thông báo (3 sự kiện + kho tùy chỉnh) lên máy chủ để lưu lâu dài.
-    func saveNotifSounds() async {
+    /// CHỈ ADMIN: đồng bộ bộ âm thanh thông báo (3 sự kiện + kho tùy chỉnh) LÊN MÁY CHỦ dùng chung.
+    /// Sau khi đồng bộ, mọi khách tải về dùng được. Khách gọi hàm này sẽ bị bỏ qua (chỉ lưu cục bộ).
+    /// Trả về true nếu đã đồng bộ thành công.
+    @discardableResult
+    func saveNotifSounds() async -> Bool {
+        guard isAdmin else { return false }   // khách không được ghi đè bộ dùng chung
         var dict: [String: Any] = [:]
         for ev in ["gift", "follow", "share"] {
             dict[ev] = ["id": d.string(forKey: "tts_sound_\(ev)") ?? "",
@@ -372,7 +388,8 @@ final class AppStore: ObservableObject {
            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
             dict["library"] = arr
         }
-        try? await api.saveNotifSounds(dict)
+        do { try await api.saveNotifSounds(dict); return true }
+        catch { return false }
     }
 
     /// Tải lại hồ sơ + trạng thái bảo trì.

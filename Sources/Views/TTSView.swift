@@ -26,6 +26,9 @@ struct TTSView: View {
     @State private var newCustomLink = ""         // ô dán link liên tiếp để thêm vào kho
     @State private var audioDone = 0              // số file đã tải xong (tải nhiều file cùng lúc)
     @State private var audioTotal = 0             // tổng số file đang tải
+    // ----- Đồng bộ bộ âm lên server (CHỈ ADMIN) -----
+    @State private var syncing = false
+    @State private var syncMsg: String?
 
     // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
     @State private var translateToVi = true
@@ -539,7 +542,11 @@ struct TTSView: View {
 
     @ViewBuilder private var notifSoundSection: some View {
         section("Âm thanh thông báo (như TikFinity) · phát TRƯỚC khi đọc") {
-            Text("Hơn 50 âm + KHO âm tùy chỉnh KHÔNG GIỚI HẠN: dán link .mp3 liên tiếp, tải file, hoặc trích âm thanh từ video. Mỗi âm dùng được cho cả Tặng quà/Follow/Chia sẻ. Lưu trên máy chủ → cài lại app/build lại VẪN CÒN.")
+            Text("Hơn 50 âm + KHO âm tùy chỉnh KHÔNG GIỚI HẠN: dán link .mp3 liên tiếp, tải nhiều file cùng lúc, hoặc trích âm thanh từ video. Mỗi âm dùng được cho cả Tặng quà/Follow/Chia sẻ.")
+                .font(.caption2).foregroundStyle(.secondary)
+            Text(store.isAdmin
+                 ? "Bạn là ADMIN: chỉnh xong bấm “Đồng bộ lên server” ở cuối mục để MỌI khách dùng được (cài lại app vẫn còn)."
+                 : "Âm bạn tự thêm lưu trên máy này. Bộ âm dùng chung do quản trị đồng bộ sẽ tự tải về khi mở app.")
                 .font(.caption2).foregroundStyle(.secondary)
             Text("Nguồn âm meme miễn phí: myinstants.com · freesound.org · pixabay.com/sound-effects.")
                 .font(.caption2).foregroundStyle(.secondary)
@@ -548,6 +555,7 @@ struct TTSView: View {
             ForEach(notifEventLabels, id: \.id) { ev in
                 soundChipRow(ev.id, label: ev.label, icon: ev.icon)
             }
+            adminSyncControls
         }
         .sheet(isPresented: $showAudioImporter) {
             // Bộ chọn file có ô TÍCH (✓) + nút "Mở"; nhận mọi file âm thanh.
@@ -618,8 +626,43 @@ struct TTSView: View {
         }
     }
 
-    /// Tải NHIỀU file âm thanh cùng lúc — SONG SONG (5 file/lượt), stream thẳng (nhanh, ít RAM),
-    /// có đếm tiến độ. type=="__lib" thêm vào kho; còn lại gán cho sự kiện.
+    /// Nút ĐỒNG BỘ LÊN SERVER — CHỈ ADMIN thấy. Admin bấm → bộ âm (3 sự kiện + kho tùy chỉnh)
+    /// được lưu dùng chung; MỌI khách mở app sẽ tải về và dùng được ngay.
+    @ViewBuilder private var adminSyncControls: some View {
+        if store.isAdmin {
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Quản trị: bộ âm dùng chung cho khách", systemImage: "person.badge.key.fill")
+                    .font(.caption.bold()).foregroundStyle(Theme.accent)
+                Text("Chỉnh xong bộ âm ở trên rồi bấm ĐỒNG BỘ. Khách KHÔNG thấy nút này — họ chỉ nhận & dùng bộ âm bạn đã đồng bộ (khách vẫn tự thêm âm riêng, lưu trên máy họ).")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Button {
+                    Task {
+                        syncing = true; syncMsg = nil
+                        let ok = await store.saveNotifSounds()
+                        syncing = false
+                        syncMsg = ok ? "Đã đồng bộ lên server — khách dùng được ngay."
+                                     : "Đồng bộ thất bại. Kiểm tra mạng rồi thử lại."
+                    }
+                } label: {
+                    HStack {
+                        if syncing { ProgressView().scaleEffect(0.8).padding(.trailing, 2) }
+                        Label(syncing ? "Đang đồng bộ…" : "Đồng bộ lên server (cho khách dùng)",
+                              systemImage: "icloud.and.arrow.up.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                }.buttonStyle(.borderedProminent).tint(Theme.accent).disabled(syncing)
+                if let syncMsg {
+                    Text(syncMsg).font(.caption2)
+                        .foregroundStyle(syncMsg.hasPrefix("Đã đồng bộ") ? .green : .red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// Tải NHIỀU file âm thanh cùng lúc — SONG SONG (3 file/lượt), stream thẳng (nhanh, ít RAM),
+    /// CÓ THỬ LẠI khi lỗi mạng; đếm tiến độ. type=="__lib" thêm vào kho; còn lại gán cho sự kiện.
     private func uploadAudioBatch(_ urls: [URL], for type: String) async {
         let items = urls
         guard !items.isEmpty else { return }
@@ -629,28 +672,39 @@ struct TTSView: View {
         struct Uploaded { let name: String; let url: String?; let server: Bool }
         let api = store.api
 
-        // Mỗi file: thử stream lên server; lỗi thì lưu tạm trên máy (vẫn dùng được ngay).
+        // Mỗi file: thử stream lên server (THỬ LẠI tối đa 3 lần khi lỗi mạng/máy chủ bận);
+        // vẫn lỗi thì lưu vào máy (dùng được ngay, không mất file).
         func upload(_ url: URL) async -> Uploaded {
             let name = url.lastPathComponent
             let mime = name.lowercased().hasSuffix(".wav") ? "audio/wav"
                      : name.lowercased().hasSuffix(".m4a") ? "audio/mp4" : "audio/mpeg"
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
-            do {
-                let link = try await api.mediaUploadRaw(name: name, mime: mime, fileURL: url)
-                return Uploaded(name: name, url: link, server: true)
-            } catch {
-                if let data = try? Data(contentsOf: url), !data.isEmpty,
-                   let localURL = saveAudioLocally(data, name: name) {
-                    return Uploaded(name: name, url: localURL, server: false)
+            let attempts = 3
+            for attempt in 1...attempts {
+                do {
+                    let link = try await api.mediaUploadRaw(name: name, mime: mime, fileURL: url)
+                    return Uploaded(name: name, url: link, server: true)
+                } catch {
+                    // Còn lượt → chờ tăng dần (0.6s, 1.4s) rồi thử lại.
+                    if attempt < attempts {
+                        let ns = UInt64(0.6 * Double(attempt) * 1_000_000_000) + 800_000_000
+                        try? await Task.sleep(nanoseconds: ns)
+                    }
                 }
-                return Uploaded(name: name, url: nil, server: false)
             }
+            // Hết lượt lên server → lưu vào máy để KHÔNG mất file, vẫn phát được.
+            if let data = try? Data(contentsOf: url), !data.isEmpty,
+               let localURL = saveAudioLocally(data, name: name) {
+                return Uploaded(name: name, url: localURL, server: false)
+            }
+            return Uploaded(name: name, url: nil, server: false)
         }
 
         var results: [Uploaded] = []
         await withTaskGroup(of: Uploaded.self) { group in
-            let maxConc = 5
+            // 3 file/lượt: cân bằng nhanh & ổn định (nhiều quá dễ nghẽn mạng/máy chủ → lỗi).
+            let maxConc = 3
             var idx = 0
             while idx < items.count && idx < maxConc { let u = items[idx]; group.addTask { await upload(u) }; idx += 1 }
             while let r = await group.next() {
