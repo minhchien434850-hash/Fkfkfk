@@ -4631,8 +4631,8 @@ async def _tiktok_live_runner(username: str) -> None:
         sess["seq"] += 1
         item = {"id": sess["seq"], "type": etype,
                 "name": name or "", "content": content or ""}
-        # Đếm theo loại để chẩn đoán (xem có bắt được bình luận hay không).
-        sess["counts"][etype] = sess["counts"].get(etype, 0) + 1
+        # Đếm SỐ ĐÃ ĐẨY để đọc (theo loại app dùng).
+        sess["pushed"][etype] = sess["pushed"].get(etype, 0) + 1
         # Người vào (join) RẤT NHIỀU trong live đông → để RIÊNG 1 buffer nhỏ, KHÔNG cho
         # đẩy văng BÌNH LUẬN/quà/follow ra khỏi buffer trước khi app kịp đọc.
         if etype == "join":
@@ -4682,6 +4682,54 @@ async def _tiktok_live_runner(username: str) -> None:
     async def _on_end(_e):
         sess["status"] = "ended"
 
+    # ---- BỘ ĐẾM TỔNG QUÁT: đăng ký lên MỌI lớp *Event của thư viện để biết CHÍNH XÁC
+    # máy chủ NHẬN được loại sự kiện nào (kể cả bình luận nếu tới dưới tên lớp khác).
+    # Đồng thời làm LƯỚI AN TOÀN: bất kỳ sự kiện dạng bình luận/chat nào (dù khác tên
+    # lớp CommentEvent) đều được ĐẨY để đọc → không bỏ sót bình luận.
+    try:
+        import TikTokLive.events as _ttev
+
+        def _mk_catch(cname: str):
+            async def _h(e):
+                try:
+                    sess["counts"][cname] = sess["counts"].get(cname, 0) + 1
+                    low = cname.lower()
+                    if ("comment" in low or "chat" in low) and cname != "CommentEvent":
+                        u = getattr(e, "user", None)
+                        nm = (getattr(u, "nickname", "") or getattr(u, "unique_id", "")
+                              or getattr(u, "display_id", "") or "")
+                        txt = (getattr(e, "comment", None) or getattr(e, "text", None)
+                               or getattr(e, "content", None) or "")
+                        if txt:
+                            push("comment", nm, str(txt))
+                except Exception:
+                    pass
+            return _h
+
+        for _n in dir(_ttev):
+            _obj = getattr(_ttev, _n, None)
+            if isinstance(_obj, type) and _n.endswith("Event"):
+                try:
+                    client.on(_obj)(_mk_catch(_n))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # ---- Khoá ký EulerStream (TÙY CHỌN): giúp nhận ĐỦ sự kiện (nhất là BÌNH LUẬN) ổn định,
+    # tránh bị giới hạn ở pool ký miễn phí dùng chung. Admin đặt qua ENV TIKTOK_SIGN_KEY
+    # hoặc setting 'tiktok_sign_key'. Không có key thì vẫn chạy như cũ.
+    try:
+        _sk = (get_setting("tiktok_sign_key", "") or os.getenv("TIKTOK_SIGN_KEY", "")).strip()
+        if _sk:
+            try:
+                from TikTokLive.client.web.web_settings import WebDefaults
+                WebDefaults.tiktok_sign_api_key = _sk
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     try:
         await client.start()
     except asyncio.CancelledError:
@@ -4714,7 +4762,8 @@ async def tiktok_live_connect(b: TikTokLiveIn) -> dict[str, Any]:
             "events": _collections.deque(maxlen=3000),
             # Người vào (join): buffer RIÊNG, nhỏ (chỉ cần vài chục cái gần nhất).
             "joins": _collections.deque(maxlen=200),
-            "counts": {},   # đếm theo loại để chẩn đoán (comment/join/gift…)
+            "counts": {},   # SỐ NHẬN theo TÊN LỚP sự kiện (CommentEvent/JoinEvent/…) — chẩn đoán
+            "pushed": {},   # SỐ ĐÃ ĐẨY để app đọc (comment/join/gift/…)
             "seq": 0, "status": "connecting", "error": None,
             "client": None, "task": None,
         }
@@ -4735,7 +4784,9 @@ async def tiktok_live_events(username: str, after: int = 0) -> dict[str, Any]:
     evs = sorted((e for e in merged if e["id"] > after), key=lambda x: x["id"])
     last = evs[-1]["id"] if evs else after
     return {"status": sess["status"], "error": sess.get("error"),
-            "events": evs, "last": last, "counts": sess.get("counts", {})}
+            "events": evs, "last": last,
+            "counts": sess.get("counts", {}),     # nhận theo tên lớp (chẩn đoán)
+            "pushed": sess.get("pushed", {})}     # đã đẩy để đọc
 
 
 @app.post("/social/tiktok/live/disconnect")

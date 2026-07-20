@@ -609,6 +609,9 @@ struct TikTokLiveEventsResponse: Decodable {
     let error: String?
     let events: [TikTokLiveEvent]
     let last: Int
+    // Chẩn đoán: SỐ NHẬN theo tên lớp sự kiện (CommentEvent/JoinEvent…) + số ĐÃ đẩy để đọc.
+    let counts: [String: Int]?
+    let pushed: [String: Int]?
 }
 
 struct TranslateResponse: Decodable {

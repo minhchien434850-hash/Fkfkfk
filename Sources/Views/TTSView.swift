@@ -43,6 +43,7 @@ struct TTSView: View {
     @State private var pollTask: Task<Void, Never>?
     @State private var readTypes: Set<String> = ["comment", "gift", "follow", "share", "join"]
     @State private var liveFeed: [TikTokLiveEvent] = []
+    @State private var liveCounts: [String: Int] = [:]   // chẩn đoán: máy chủ NHẬN được loại nào
     // ----- Trình đọc trên trình duyệt (TikTok Studio / OBS) -----
     @State private var readerURL = ""
     @State private var readerBusy = false
@@ -164,11 +165,18 @@ struct TTSView: View {
                             Text(liveError).font(.caption2).foregroundStyle(.red)
                         }
 
-                        if !liveFeed.isEmpty {
+                        liveDiagnosticLine   // Máy chủ NHẬN được: bình luận / vào / quà…
+
+                        // ƯU TIÊN HIỆN BÌNH LUẬN: bảng bình luận RIÊNG, luôn thấy, không bị
+                        // "người vào" lấn át. Giữ tới 40 bình luận gần nhất (mới nhất trên cùng).
+                        let comments = liveFeed.filter { $0.type == "comment" }
+                        if !comments.isEmpty {
                             VStack(alignment: .leading, spacing: 4) {
-                                ForEach(liveFeed.suffix(12).reversed()) { ev in
+                                Label("Bình luận", systemImage: "text.bubble.fill")
+                                    .font(.caption.bold()).foregroundStyle(Theme.accent)
+                                ForEach(comments.suffix(40).reversed()) { ev in
                                     HStack(alignment: .top, spacing: 6) {
-                                        Image(systemName: kLiveEvents.first { $0.id == ev.type }?.icon ?? "text.bubble")
+                                        Image(systemName: "text.bubble")
                                             .font(.caption2).foregroundStyle(Theme.accent)
                                         Text(renderLive(ev)).font(.caption2)
                                         Spacer()
@@ -178,6 +186,25 @@ struct TTSView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
                             .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+
+                        // Các sự kiện khác (vào phòng / quà / follow) — gọn, để RIÊNG bên dưới.
+                        let others = liveFeed.filter { $0.type != "comment" }
+                        if !others.isEmpty {
+                            VStack(alignment: .leading, spacing: 3) {
+                                ForEach(others.suffix(6).reversed()) { ev in
+                                    HStack(alignment: .top, spacing: 6) {
+                                        Image(systemName: kLiveEvents.first { $0.id == ev.type }?.icon ?? "person.fill")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                        Text(renderLive(ev)).font(.caption2).foregroundStyle(.secondary)
+                                        Spacer()
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(Color(.secondarySystemBackground).opacity(0.5))
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
 
@@ -1047,6 +1074,28 @@ struct TTSView: View {
         }
     }
 
+    /// Dòng CHẨN ĐOÁN: máy chủ THỰC SỰ nhận được loại sự kiện nào (theo tên lớp TikTokLive).
+    /// Giúp biết ngay lỗi nằm ở "không bắt được bình luận" hay ở "đọc".
+    @ViewBuilder private var liveDiagnosticLine: some View {
+        if !liveCounts.isEmpty {
+            let cmt = liveCounts["CommentEvent"] ?? 0
+            let join = liveCounts["JoinEvent"] ?? 0
+            let gift = liveCounts["GiftEvent"] ?? 0
+            let follow = liveCounts["FollowEvent"] ?? 0
+            let like = liveCounts["LikeEvent"] ?? 0
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Máy chủ nhận: 💬 \(cmt) · 👤 \(join) · 🎁 \(gift) · ❤️ \(follow)"
+                     + (like > 0 ? " · 👍 \(like)" : ""))
+                    .font(.caption2).foregroundStyle(.secondary)
+                if cmt == 0 && (join + gift + follow + like) > 0 {
+                    Text("⚠️ Kết nối OK nhưng CHƯA nhận được bình luận nào từ TikTok — thường cần khoá ký (sign key). Báo người quản trị đặt TIKTOK_SIGN_KEY.")
+                        .font(.caption2).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
     private func renderLive(_ ev: TikTokLiveEvent) -> String {
         let template: String
         switch ev.type {
@@ -1067,7 +1116,7 @@ struct TTSView: View {
     private func connectLive() {
         let id = tiktokId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !id.isEmpty else { return }
-        liveError = nil; liveFeed = []; lastEventId = 0
+        liveError = nil; liveFeed = []; lastEventId = 0; liveCounts = [:]
         liveStatus = "connecting"; liveConnected = true
         
         tts.startBackgroundMode() // Giữ app chạy ngầm bằng silent audio loop
@@ -1101,6 +1150,7 @@ struct TTSView: View {
                 do {
                     let r = try await store.api.tiktokLiveEvents(username: id, after: lastEventId)
                     liveStatus = r.status
+                    if let c = r.counts { liveCounts = c }
                     if let e = r.error { liveError = e }
                     for ev in r.events {
                         // CHỈ hiện các loại sự kiện ĐANG BẬT lên bảng tin → khi tắt "Người vào",
