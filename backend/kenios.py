@@ -4780,7 +4780,7 @@ const TOKEN="__TOKEN__", API=location.origin;
 let cfg=null,user="",after=0,poll=null,running=false,q=[],playing=false;
 const DEF={comment:"{name} bình luận: {content}",gift:"Cảm ơn {name} đã tặng {content}",follow:"Cảm ơn {name} đã theo dõi",share:"Cảm ơn {name} đã chia sẻ live",join:"Chào mừng {name} đã vào phòng"};
 const $=id=>document.getElementById(id);
-function cleanName(s){s=(s||"").replace(/[_\-.]/g," ").replace(/[^\p{L}\p{N} ]/gu,"").replace(/\s+/g," ").trim();return s||"bạn";}
+function cleanName(s){s=(s||"").normalize("NFKC").replace(/[_\-.]/g," ").replace(/[^\p{L}\p{N} ]/gu,"").replace(/\s+/g," ").trim();return s||"bạn";}
 function tpl(ev){var t=(cfg.tpl&&cfg.tpl[ev.type])||DEF[ev.type]||DEF.comment;return t.replace("{name}",cleanName(ev.name)).replace("{content}",ev.content||"").trim();}
 async function speakEleven(text){var r=await fetch(API+"/live-reader/tts?k="+TOKEN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:text})});if(!r.ok)throw new Error("tts "+r.status);return URL.createObjectURL(await r.blob());}
 function speakBrowser(text){return new Promise(function(res){var u=new SpeechSynthesisUtterance(text);u.lang="vi-VN";u.rate=Math.max(.6,Math.min(cfg.speed||1,1.4));u.onend=res;u.onerror=res;speechSynthesis.speak(u);});}

@@ -1100,11 +1100,14 @@ struct TTSView: View {
             .trimmingCharacters(in: .whitespaces)
     }
 
-    /// Làm SẠCH tên người xem để ĐỌC RÕ: bỏ emoji/ký hiệu lạ, gạch/gạch dưới → khoảng trắng,
-    /// giữ chữ-số (kể cả tiếng Việt có dấu). Tên rỗng/không đọc được → "bạn".
+    /// Làm SẠCH tên người xem để ĐỌC RÕ & ĐÚNG:
+    /// 1) Chuẩn hoá FONT LẠ về chữ thường (NFKC): 𝓜𝓲𝓷𝓱→Minh · Ⓜⓘⓝⓗ→Minh · ｆｕｌｌ→full …
+    /// 2) Bỏ emoji/ký hiệu; đổi _ - . thành khoảng trắng; giữ chữ-số (kể cả tiếng Việt có dấu).
+    /// Tên rỗng/không đọc được → "bạn".
     private func cleanLiveName(_ raw: String) -> String {
+        let normalized = raw.precomposedStringWithCompatibilityMapping   // NFKC — quy font lạ về chữ chuẩn
         var out = ""
-        for ch in raw {
+        for ch in normalized {
             if ch.isLetter || ch.isNumber || ch == " " {
                 out.append(ch)
             } else if ch == "_" || ch == "-" || ch == "." {
