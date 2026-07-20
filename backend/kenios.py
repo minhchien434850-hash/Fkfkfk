@@ -4629,10 +4629,16 @@ async def _tiktok_live_runner(username: str) -> None:
 
     def push(etype: str, name: str, content: str = "") -> None:
         sess["seq"] += 1
-        sess["events"].append({
-            "id": sess["seq"], "type": etype,
-            "name": name or "", "content": content or "",
-        })
+        item = {"id": sess["seq"], "type": etype,
+                "name": name or "", "content": content or ""}
+        # Đếm theo loại để chẩn đoán (xem có bắt được bình luận hay không).
+        sess["counts"][etype] = sess["counts"].get(etype, 0) + 1
+        # Người vào (join) RẤT NHIỀU trong live đông → để RIÊNG 1 buffer nhỏ, KHÔNG cho
+        # đẩy văng BÌNH LUẬN/quà/follow ra khỏi buffer trước khi app kịp đọc.
+        if etype == "join":
+            sess["joins"].append(item)
+        else:
+            sess["events"].append(item)
 
     client = TikTokLiveClient(unique_id=f"@{username}")
     sess["client"] = client
@@ -4643,8 +4649,13 @@ async def _tiktok_live_runner(username: str) -> None:
 
     @client.on(CommentEvent)
     async def _on_comment(e):
-        name = getattr(getattr(e, "user", None), "nickname", "") or getattr(getattr(e, "user", None), "unique_id", "")
-        push("comment", name, getattr(e, "comment", ""))
+        u = getattr(e, "user", None)
+        name = (getattr(u, "nickname", "") or getattr(u, "unique_id", "")
+                or getattr(u, "display_id", "") or "")
+        # Text bình luận: các bản TikTokLive dùng tên field khác nhau → thử lần lượt.
+        text = (getattr(e, "comment", None) or getattr(e, "text", None)
+                or getattr(e, "content", None) or "")
+        push("comment", name, str(text))
 
     @client.on(GiftEvent)
     async def _on_gift(e):
@@ -4699,7 +4710,11 @@ async def tiktok_live_connect(b: TikTokLiveIn) -> dict[str, Any]:
         if sess and sess.get("status") in ("connecting", "connected"):
             return {"ok": True, "status": sess["status"], "username": username}
         sess = {
-            "events": _collections.deque(maxlen=500),
+            # Bình luận/quà/follow/share: giữ NHIỀU & LÂU (không bị người vào đẩy văng).
+            "events": _collections.deque(maxlen=3000),
+            # Người vào (join): buffer RIÊNG, nhỏ (chỉ cần vài chục cái gần nhất).
+            "joins": _collections.deque(maxlen=200),
+            "counts": {},   # đếm theo loại để chẩn đoán (comment/join/gift…)
             "seq": 0, "status": "connecting", "error": None,
             "client": None, "task": None,
         }
@@ -4714,10 +4729,13 @@ async def tiktok_live_events(username: str, after: int = 0) -> dict[str, Any]:
     u = _tt_norm_user(username)
     sess = _tiktok_live_sessions.get(u)
     if not sess:
-        return {"status": "idle", "error": None, "events": [], "last": after}
-    evs = [e for e in list(sess["events"]) if e["id"] > after]
+        return {"status": "idle", "error": None, "events": [], "last": after, "counts": {}}
+    # GỘP 2 buffer (bình luận/quà/follow/share + người vào) rồi sắp theo thứ tự thời gian (id).
+    merged = list(sess["events"]) + list(sess.get("joins", []))
+    evs = sorted((e for e in merged if e["id"] > after), key=lambda x: x["id"])
     last = evs[-1]["id"] if evs else after
-    return {"status": sess["status"], "error": sess.get("error"), "events": evs, "last": last}
+    return {"status": sess["status"], "error": sess.get("error"),
+            "events": evs, "last": last, "counts": sess.get("counts", {})}
 
 
 @app.post("/social/tiktok/live/disconnect")
