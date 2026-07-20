@@ -30,6 +30,9 @@ struct TTSView: View {
     @State private var syncing = false
     @State private var syncMsg: String?
 
+    // ----- Câu cà khịa tự thêm -----
+    @State private var newRoast = ""
+
     // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
     @State private var translateToVi = true
     @State private var onlyVietnameseVoices = false
@@ -626,6 +629,45 @@ struct TTSView: View {
             }.buttonStyle(.bordered)
             Text("Câu cà khịa vui, không chửi tục. Chỉ kích hoạt với bình luận có ý khiêu khích.")
                 .font(.caption2).foregroundStyle(.secondary)
+
+            Divider().padding(.vertical, 2)
+
+            // ---- Tự thêm câu cà khịa (lưu trên máy, không cần build lại) ----
+            Text("Câu cà khịa của bạn — tự thêm ngay trong app:").font(.caption).bold()
+            HStack {
+                TextField("Nhập câu cà khịa rồi bấm +", text: $newRoast)
+                    .autocorrectionDisabled()
+                    .padding(8).background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                Button {
+                    tts.addCustomRoast(newRoast); newRoast = ""
+                } label: { Image(systemName: "plus.circle.fill").font(.title3) }
+                    .disabled(newRoast.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if tts.customRoasts.isEmpty {
+                Text("Chưa có câu nào của bạn. Bot sẽ dùng \(TTSEngine.roastComebacks.count) câu mặc định.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(tts.customRoasts, id: \.self) { line in
+                        HStack(spacing: 8) {
+                            Button { tts.speak(line) } label: {
+                                Image(systemName: "play.circle.fill")
+                            }.buttonStyle(.plain).foregroundStyle(.green)
+                            Text(line).font(.caption2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button { tts.removeCustomRoast(line) } label: {
+                                Image(systemName: "xmark.circle.fill")
+                            }.buttonStyle(.plain).foregroundStyle(.red)
+                        }
+                        .padding(.vertical, 6)
+                        Divider()
+                    }
+                }
+                Text("Bot đọc ngẫu nhiên trong \(TTSEngine.roastComebacks.count + tts.customRoasts.count) câu (mặc định + của bạn).")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 

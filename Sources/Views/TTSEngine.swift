@@ -166,14 +166,33 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         "cc", "đmm", "vkl", "súc", "suc vat", "chửi", "chui", "đồ", "khịa", "khia"
     ]
 
+    /// Câu cà khịa DO NGƯỜI DÙNG tự thêm trong app (lưu trên máy, không cần build lại).
+    @Published var customRoasts: [String] =
+        UserDefaults.standard.stringArray(forKey: "tts_custom_roasts") ?? [] {
+        didSet { UserDefaults.standard.set(customRoasts, forKey: "tts_custom_roasts") }
+    }
+
+    /// Thêm 1 câu cà khịa của người dùng (bỏ trùng & khoảng trắng thừa).
+    func addCustomRoast(_ s: String) {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !customRoasts.contains(t) else { return }
+        customRoasts.append(t)
+    }
+
+    /// Xoá 1 câu cà khịa của người dùng.
+    func removeCustomRoast(_ s: String) { customRoasts.removeAll { $0 == s } }
+
     /// Có nên cà khịa lại bình luận này không (chứa từ khiêu khích)?
     func shouldRoast(_ comment: String) -> Bool {
         let low = " " + comment.lowercased() + " "
         return Self.provokeWords.contains { low.contains($0) }
     }
 
-    /// 1 câu cà khịa ngẫu nhiên.
-    func randomRoast() -> String { Self.roastComebacks.randomElement() ?? "" }
+    /// 1 câu cà khịa ngẫu nhiên (gộp câu mặc định + câu người dùng tự thêm).
+    func randomRoast() -> String {
+        let pool = Self.roastComebacks + customRoasts
+        return pool.randomElement() ?? ""
+    }
 
     func fetchElevenVoiceName(_ vid: String) {
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
