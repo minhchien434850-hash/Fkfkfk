@@ -138,23 +138,24 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         didSet { UserDefaults.standard.set(autoRoastOn, forKey: "tts_auto_roast_on") }
     }
 
-    /// Kho câu cà khịa (vui, không tục) — đọc lại khi gặp bình luận khiêu khích.
+    /// Kho câu cà khịa (vui, không tục). Dùng {name} để GỌI TÊN người bình luận
+    /// → đọc "tên ơi, ..." rồi tới câu khịa.
     static let roastComebacks: [String] = [
-        "Ơ kìa, nói người thì phải ngẫm đến ta nha bạn ơi.",
-        "Bạn rảnh dữ ha, vô đây chỉ để bình luận nhiêu đó thôi à?",
-        "Cảm ơn bạn đã đóng góp tương tác, chúc bạn mau khôn nha.",
-        "Anti là fan giấu mặt đó, cảm ơn bạn đã theo dõi mình sát sao.",
-        "Bạn gõ phím nhanh vậy mà sao suy nghĩ hơi chậm nhỉ?",
-        "Khịa mình chi cho mệt, để sức đó lo cho bản thân bạn đi.",
-        "Bạn đúng là nhân tài, tiếc là chưa ai phát hiện ra thôi.",
-        "Nghe bạn nói xong mình càng tự tin hơn, cảm ơn nha.",
-        "Bạn lo được cho mình chưa mà đã lo cho người ta rồi?",
-        "Trình của bạn tới đây thôi à? Mình tưởng còn hơn chứ.",
-        "Gõ phím thì mạnh, ngoài đời chắc hiền như cục đất nhỉ.",
-        "Bạn vô đây khịa mà mình vẫn vui, vậy là bạn thua rồi đó.",
-        "Câu này hay đó, tiếc là bạn nói sai người rồi.",
-        "Thôi bạn ra ngoài hít tí khí trời cho tỉnh táo lại nha.",
-        "Bình luận của bạn mình nghe rồi, nhẹ như gió thoảng à."
+        "{name} ơi, nói người thì phải ngẫm đến ta nha.",
+        "{name} rảnh dữ ha, vô đây chỉ để bình luận nhiêu đó thôi à?",
+        "Cảm ơn {name} đã đóng góp tương tác, chúc mau khôn nha.",
+        "{name} nè, anti là fan giấu mặt đó, cảm ơn đã theo dõi mình sát sao.",
+        "{name} gõ phím nhanh vậy mà sao suy nghĩ hơi chậm nhỉ?",
+        "Khịa mình chi cho mệt {name} ơi, để sức đó lo cho bản thân đi.",
+        "{name} đúng là nhân tài, tiếc là chưa ai phát hiện ra thôi.",
+        "Nghe {name} nói xong mình càng tự tin hơn, cảm ơn nha.",
+        "{name} lo được cho mình chưa mà đã lo cho người ta rồi?",
+        "Trình của {name} tới đây thôi à? Mình tưởng còn hơn chứ.",
+        "{name} gõ phím thì mạnh, ngoài đời chắc hiền như cục đất nhỉ.",
+        "{name} vô đây khịa mà mình vẫn vui, vậy là {name} thua rồi đó.",
+        "Câu này hay đó {name}, tiếc là nói sai người rồi.",
+        "Thôi {name} ra ngoài hít tí khí trời cho tỉnh táo lại nha.",
+        "Bình luận của {name} mình nghe rồi, nhẹ như gió thoảng à."
     ]
 
     /// Từ khoá khiêu khích/anti để KÍCH HOẠT cà khịa (kèm dạng không dấu thường gặp).
@@ -188,10 +189,22 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         return Self.provokeWords.contains { low.contains($0) }
     }
 
-    /// 1 câu cà khịa ngẫu nhiên (gộp câu mặc định + câu người dùng tự thêm).
-    func randomRoast() -> String {
+    /// Ghép tên vào câu cà khịa: có {name} thì thay bằng tên; không có thì chèn "tên ơi, " phía trước.
+    func renderRoast(_ line: String, name: String) -> String {
+        let nm = name.trimmingCharacters(in: .whitespaces)
+        if line.contains("{name}") {
+            return line.replacingOccurrences(of: "{name}", with: nm.isEmpty ? "bạn" : nm)
+        } else if !nm.isEmpty {
+            return "\(nm) ơi, " + line
+        }
+        return line
+    }
+
+    /// 1 câu cà khịa ngẫu nhiên (gộp câu mặc định + câu người dùng tự thêm), đã GỌI TÊN người.
+    func randomRoast(name: String = "") -> String {
         let pool = Self.roastComebacks + customRoasts
-        return pool.randomElement() ?? ""
+        guard let line = pool.randomElement() else { return "" }
+        return renderRoast(line, name: name)
     }
 
     func fetchElevenVoiceName(_ vid: String) {

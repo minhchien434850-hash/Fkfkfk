@@ -624,16 +624,18 @@ struct TTSView: View {
             Toggle(isOn: $tts.autoRoastOn) {
                 Label("Bật tự động cà khịa lại", systemImage: "flame.fill").font(.subheadline)
             }.tint(Theme.accent)
-            Button { tts.speak(tts.randomRoast()) } label: {
+            Button { tts.speak(tts.randomRoast(name: "Minh")) } label: {
                 Label("Nghe thử 1 câu cà khịa", systemImage: "play.circle.fill").frame(maxWidth: .infinity)
             }.buttonStyle(.bordered)
-            Text("Câu cà khịa vui, không chửi tục. Chỉ kích hoạt với bình luận có ý khiêu khích.")
+            Text("Câu cà khịa vui, không chửi tục. Bot GỌI TÊN người bình luận rồi mới khịa. Chỉ kích hoạt với bình luận có ý khiêu khích.")
                 .font(.caption2).foregroundStyle(.secondary)
 
             Divider().padding(.vertical, 2)
 
             // ---- Tự thêm câu cà khịa (lưu trên máy, không cần build lại) ----
             Text("Câu cà khịa của bạn — tự thêm ngay trong app:").font(.caption).bold()
+            Text("Mẹo: gõ {name} vào chỗ muốn chèn tên người (vd: \"{name} ơi, khịa gì kỳ vậy\"). Không gõ {name} thì bot tự thêm \"tên ơi,\" phía trước.")
+                .font(.caption2).foregroundStyle(.secondary)
             HStack {
                 TextField("Nhập câu cà khịa rồi bấm +", text: $newRoast)
                     .autocorrectionDisabled()
@@ -651,7 +653,7 @@ struct TTSView: View {
                 VStack(spacing: 0) {
                     ForEach(tts.customRoasts, id: \.self) { line in
                         HStack(spacing: 8) {
-                            Button { tts.speak(line) } label: {
+                            Button { tts.speak(tts.renderRoast(line, name: "Minh")) } label: {
                                 Image(systemName: "play.circle.fill")
                             }.buttonStyle(.plain).foregroundStyle(.green)
                             Text(line).font(.caption2)
@@ -1265,9 +1267,10 @@ struct TTSView: View {
                         let text = await liveSpeechText(ev)
                         // Phát âm thanh thông báo (quà/follow/share) TRƯỚC rồi mới đọc.
                         tts.announce(text, eventType: ev.type)
-                        // Tự động CÀ KHỊA lại bình luận khiêu khích (đọc NGAY SAU bình luận đó).
+                        // Tự động CÀ KHỊA lại bình luận khiêu khích: GỌI TÊN người rồi khịa,
+                        // đọc NGAY SAU bình luận đó.
                         if ev.type == "comment", tts.autoRoastOn, tts.shouldRoast(ev.content) {
-                            tts.announce(tts.randomRoast(), eventType: "comment")
+                            tts.announce(tts.randomRoast(name: cleanLiveName(ev.name)), eventType: "comment")
                         }
                     }
                     if liveFeed.count > 120 { liveFeed.removeFirst(liveFeed.count - 120) }
