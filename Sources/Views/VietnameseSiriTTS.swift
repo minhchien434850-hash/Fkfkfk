@@ -183,6 +183,21 @@ struct VietnameseTextNormalizer {
         "tp": "thành phố"
     ]
 
+    /// CHỮ VIẾT KHÔNG DẤU → phục hồi dấu để đọc ĐÚNG CHÍNH TẢ.
+    /// CHỈ chọn từ phổ biến & KHÔNG nhập nhằng (gần như luôn 1 nghĩa) để tránh đoán sai.
+    /// Cố ý BỎ QUA các từ dễ nhầm (ban, toi, lam, cung, qua, moi, gia, do, dung, ngay…).
+    static let noDiacritic: [String: String] = [
+        "khong": "không", "duoc": "được", "nguoi": "người", "yeu": "yêu",
+        "thich": "thích", "rat": "rất", "oi": "ơi", "minh": "mình",
+        "chao": "chào", "dep": "đẹp", "gioi": "giỏi", "tuyet": "tuyệt",
+        "roi": "rồi", "chua": "chưa", "biet": "biết", "hieu": "hiểu",
+        "muon": "muốn", "thuong": "thương", "buon": "buồn", "khoc": "khóc",
+        "cuoi": "cười", "uong": "uống", "com": "cơm", "nuoc": "nước",
+        "tien": "tiền", "tot": "tốt", "xau": "xấu", "som": "sớm",
+        "chieu": "chiều", "that": "thật", "vay": "vậy", "gi": "gì",
+        "cuu": "cứu", "giup": "giúp", "luon": "luôn", "nhe": "nhé"
+    ]
+
     /// Tên chữ cái tiếng Việt để ĐÁNH VẦN rõ ràng (đọc "A" ra "a", "qr" ra "quy rờ")
     /// — KHÔNG đọc theo tiếng Anh. Dùng cho ElevenLabs & Google khi gặp cụm viết tắt.
     static let letterNames: [Character: String] = [
@@ -249,6 +264,8 @@ struct VietnameseTextNormalizer {
             let key = token.lowercased()
             if let rep = dictionary[key] {
                 out += rep
+            } else if let rep = noDiacritic[key] {
+                out += rep                        // phục hồi dấu chính tả (chữ không dấu phổ biến)
             } else if token.count >= 2 && token.count <= 6 && !token.contains(where: { $0.isNumber })
                         && !hasVowel(key) && letterNames.keys.contains(where: { key.contains($0) }) {
                 out += spellLetters(key)          // cụm phụ âm thuần → đánh vần rõ ràng
