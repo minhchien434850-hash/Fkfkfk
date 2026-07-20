@@ -315,6 +315,9 @@ struct TTSView: View {
                         }
                     }
 
+                    // ----- Tự động đọc thông báo định kỳ (quảng cáo / nhắc inbox) -----
+                    autoAnnounceSection
+
                     // ----- Thông báo livestream -----
                     section("Thông báo livestream") {
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -407,20 +410,12 @@ struct TTSView: View {
                                 .font(.subheadline)
                         }.tint(Theme.accent)
 
-                        // Bộ lọc tiếng lóng/viết tắt đã tự áp dụng cho mọi giọng (iOS · Siri · Google).
-                        // Link mở trình đọc tiếng Việt chuẩn riêng (xem trước văn bản sau khi lọc).
-                        NavigationLink {
-                            VietnameseSiriTTSView()
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "wand.and.stars").foregroundStyle(.green).frame(width: 28)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Đọc tiếng Việt chuẩn (lọc tiếng lóng)").font(.subheadline.bold())
-                                    Text("Tự đổi 'ko→không', 'đc→được'… rồi đọc bằng giọng vi-VN").font(.caption2).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
-                            }.padding(.vertical, 4)
+                        // Bộ chuẩn hoá tiếng Việt (mở rộng tiếng lóng/viết tắt + đọc rõ chữ cái)
+                        // ĐÃ TỰ ĐỘNG áp dụng cho ElevenLabs & Chị Google — không cần bật gì thêm.
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                            Text("Đã tự đổi tiếng lóng/viết tắt (ko→không, đc→được, qr→quy rờ…) và đọc rõ chữ cái tiếng Việt cho ElevenLabs & Google.")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
 
                         // TỐC ĐỘ theo GIỌNG ĐANG CHỌN. ElevenLabs → thanh riêng 0.5–2.0 (ngay ở đây,
@@ -566,6 +561,54 @@ struct TTSView: View {
         ("follow", "Follow",   "heart.fill"),
         ("share",  "Chia sẻ",  "square.and.arrow.up.fill")
     ]
+
+    // ----- Tự động đọc thông báo định kỳ: bật/tắt · sửa chữ · sửa phút · nghe thử -----
+    @ViewBuilder private var autoAnnounceSection: some View {
+        section("Tự động đọc thông báo (định kỳ)") {
+            Text("Cứ sau N phút, app tự đọc câu thông báo bên dưới bằng ĐÚNG giọng đang chọn (ElevenLabs · Google · iOS · Siri). Ai cũng dùng được.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            Toggle(isOn: $tts.autoAnnounceOn) {
+                Label("Bật tự động đọc thông báo", systemImage: "megaphone.fill").font(.subheadline)
+            }.tint(Theme.accent)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Nội dung thông báo:").font(.caption).bold()
+                TextEditor(text: $tts.autoAnnounceText)
+                    .font(.body).frame(minHeight: 70)
+                    .padding(6).background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text("Đọc mỗi").font(.caption)
+                    Spacer()
+                    Text(String(format: "%.1f phút", tts.autoAnnounceMinutes))
+                        .font(.caption2.bold()).foregroundStyle(Theme.accent)
+                }
+                Slider(value: $tts.autoAnnounceMinutes, in: 0.5...120, step: 0.5)
+                Text("Từ 0,5 đến 120 phút. (Tối thiểu thực tế 30 giây để đọc kịp.)")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button { tts.previewAutoAnnounce() } label: {
+                    Label("Nghe thử", systemImage: "play.circle.fill").frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent)
+                    .disabled(tts.autoAnnounceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button { tts.stop() } label: {
+                    Label("Dừng", systemImage: "stop.fill").frame(maxWidth: .infinity)
+                }.buttonStyle(.bordered)
+            }
+
+            if tts.autoAnnounceOn {
+                Label("Đang bật · đọc mỗi \(String(format: "%.1f", tts.autoAnnounceMinutes)) phút bằng giọng \(tts.engineType.label).",
+                      systemImage: "checkmark.circle.fill")
+                    .font(.caption2).foregroundStyle(.green)
+            }
+        }
+    }
 
     @ViewBuilder private var notifSoundSection: some View {
         section("Âm thanh thông báo (như TikFinity) · phát TRƯỚC khi đọc") {

@@ -15,58 +15,91 @@ struct VietnameseTextNormalizer {
 
     /// Từ điển phiên âm: viết tắt / tiếng lóng chat -> từ đầy đủ để TTS đọc đúng.
     /// Khóa luôn ở dạng CHỮ THƯỜNG; tra cứu theo từng "từ" nên không phá chữ bên trong từ khác.
+    /// (Từ tục/chửi thề dạng viết tắt KHÔNG có nguyên âm — vd vcl, sml, dm — sẽ tự được
+    ///  ĐÁNH VẦN thành tên chữ cái tiếng Việt "vờ cờ lờ", "sờ mờ lờ"… ở bước dự phòng bên dưới,
+    ///  vừa đọc rõ vừa tránh phát nguyên văn từ tục trên live.)
     static let dictionary: [String: String] = [
         // --- Phủ định / khẳng định ---
-        "ko": "không", "k": "không", "kg": "không", "khg": "không", "hok": "không",
-        "hông": "không", "hong": "không", "kh": "không", "kp": "không phải",
-        "đc": "được", "dc": "được", "đk": "được", "dk": "được",
-        "uh": "ừ", "uk": "ừ", "um": "ừ", "ukm": "ừ", "okê": "ô kê", "oke": "ô kê",
-        "ok": "ô kê", "okm": "ô kê", "okie": "ô kê",
+        "ko": "không", "k": "không", "kk": "không", "kg": "không", "khg": "không",
+        "hok": "không", "hem": "không", "hong": "không", "hông": "không", "kô": "không",
+        "kh": "không", "kbt": "không biết", "ksg": "không sao đâu", "ks": "không sao",
+        "klq": "không liên quan", "knh": "không nha", "kma": "không mà", "kmr": "không mà",
+        "kbh": "không bao giờ", "kdc": "không được", "kđc": "không được", "dko": "được không",
+        "kmb": "không muốn biết", "kns": "không nói sai",
+        "dc": "được", "đc": "được", "dk": "được", "đk": "được", "đx": "được",
+        "đr": "đúng rồi", "chx": "chưa",
+        "uh": "ừ", "uk": "ừ", "um": "ừ", "ukm": "ừ", "ok": "ô kê", "oke": "ô kê",
+        "okê": "ô kê", "okm": "ô kê", "okie": "ô kê",
         // --- Đại từ / xưng hô ---
-        "mk": "mình", "mik": "mình", "mìh": "mình",
-        "t": "tao", "tau": "tao", "tớ": "tớ",
-        "bn": "bạn", "fr": "bạn",
-        "ng": "người", "ngta": "người ta", "ngdung": "người dùng",
-        "ae": "anh em", "ce": "chị em", "bme": "bố mẹ", "ny": "người yêu",
-        // --- Hỏi / từ nối ---
-        "j": "gì", "z": "vậy", "dz": "vậy", "zậy": "vậy", "vại": "vậy",
-        "ntn": "như thế nào", "ny luôn": "luôn",
-        "nhma": "nhưng mà", "nhưg": "nhưng", "vs": "với", "vows": "với",
-        "ms": "mới", "r": "rồi", "rùi": "rồi", "roài": "rồi", "rồii": "rồi",
-        "trc": "trước", "sd": "sử dụng", "sài": "xài",
-        "h": "giờ", "bh": "bao giờ", "bjo": "bao giờ", "bao h": "bao giờ",
-        "ns": "nói", "nc": "nói chuyện", "nt?": "như thế nào",
-        // --- Tính từ / trạng từ ---
-        "wa": "quá", "qá": "quá", "qua": "quá", "nhìu": "nhiều", "nhju": "nhiều",
-        "ít": "ít", "iu": "yêu", "thik": "thích", "thíc": "thích",
-        "bít": "biết", "bik": "biết", "bit": "biết", "bjk": "biết",
-        "cũg": "cũng", "cug": "cũng", "đág": "đáng", "lém": "lắm", "lm": "làm",
-        "zui": "vui", "zẻ": "rẻ", "zề": "về", "zô": "vô",
-        // --- Cảm thán / tiếng lóng (làm sạch, đọc nhẹ) ---
-        "vl": "vãi", "vcl": "vãi", "vkl": "vãi", "vc": "vãi",
-        "clgt": "cái gì thế", "cmnr": "luôn rồi", "vlnr": "vãi luôn rồi",
-        "gato": "ghen tị", "trùm": "trùm", "gg": "Google",
-        "haha": "ha ha", "hihi": "hi hi", "huhu": "hu hu", "kk": "ha ha",
+        "mk": "mật khẩu", "mik": "mình", "mìh": "mình",
+        "t": "tôi", "tau": "tao", "tui": "tui", "tớ": "tớ", "m": "mày",
+        "bn": "bạn", "b": "bạn", "bb": "bạn", "ng": "người", "ngta": "người ta",
+        "mn": "mọi người", "mng": "mọi người", "gđ": "gia đình", "ae": "anh em",
+        "ce": "chị em", "bme": "bố mẹ", "ny": "người yêu", "nyc": "người yêu cũ",
+        "nym": "người yêu mới", "cr": "crush", "fa": "độc thân", "vk": "vợ",
+        "ck": "chồng", "p3": "bạn bè", "e": "em", "a": "anh", "c": "chị",
+        // --- Hỏi / vậy / từ nối ---
+        "j": "gì", "cj": "cái gì", "s": "sao", "sa": "sao",
+        "z": "vậy", "v": "vậy", "zay": "vậy", "zậy": "vậy", "dz": "vậy",
+        "vt": "vậy ta", "vtr": "vậy trời", "ntn": "như thế nào",
+        "nhma": "nhưng mà", "nma": "nhưng mà", "nhưg": "nhưng", "vs": "với",
+        "ms": "mới", "r": "rồi", "rùi": "rồi", "roài": "rồi", "trc": "trước",
+        "sd": "sử dụng", "h": "giờ", "bh": "bây giờ", "bjo": "bao giờ",
+        "tbn": "thế mới nói", "th": "trường hợp", "chg": "chẳng",
+        "qtqd": "quá trời quá đất",
+        // --- Động từ / tính từ / trạng từ ---
+        "ns": "nói", "nc": "nói chuyện", "bl": "bình luận", "cmt": "bình luận",
+        "stt": "trạng thái", "tl": "trả lời", "rep": "trả lời", "nt": "nhắn tin",
+        "ib": "nhắn tin riêng", "pm": "nhắn tin riêng",
+        "wa": "quá", "qá": "quá", "nhìu": "nhiều", "nhiu": "nhiều", "mún": "muốn",
+        "iu": "yêu", "thik": "thích", "thíc": "thích", "bt": "biết", "bth": "bình thường",
+        "bik": "biết", "bit": "biết", "bjt": "biết", "bjk": "biết",
+        "cũg": "cũng", "cg": "cũng", "cx": "cũng", "cug": "cũng", "lm": "làm",
+        "zui": "vui", "zô": "vô", "gnn": "chúc ngủ ngon", "g9": "chúc ngủ ngon",
+        "snvv": "sinh nhật vui vẻ",
+        // --- Cảm thán / cười / thở dài ---
+        "vl": "vờ lờ", "vc": "vãi cả", "vch": "vãi chưởng",
+        "haha": "ha ha", "hihi": "hi hi", "huhu": "hu hu", "hic": "hức",
+        "haizz": "hai za", "kkk": "kha kha kha", "mlem": "thèm quá",
         // --- Địa danh / thương hiệu / thông dụng ---
-        "vn": "Việt Nam", "hcm": "Hồ Chí Minh", "hn": "Hà Nội", "sg": "Sài Gòn",
-        "đn": "Đà Nẵng", "fb": "Facebook", "ig": "Instagram", "insta": "Instagram",
-        "yt": "YouTube", "tt": "TikTok", "tóp tóp": "TikTok", "zalo": "Za lô",
-        "đt": "điện thoại", "mt": "máy tính", "lt": "laptop",
-        "sp": "sản phẩm", " shop": "cửa hàng", "ad": "quản trị viên", "add": "kết bạn",
-        "ship": "giao hàng", "order": "đặt hàng", "sale": "giảm giá",
-        "cmt": "bình luận", "cmt nha": "bình luận nha", "sub": "đăng ký",
-        "like": "thích", "share": "chia sẻ", "live": "phát trực tiếp",
-        // --- Số / thời gian thông dụng ---
-        "ah": "à", "à": "à", "nha": "nha", "nhé": "nhé", "nhaa": "nha",
-        "đ": "đồng", "k đồng": "nghìn đồng", "tr": "triệu", "củ": "triệu",
-        // --- Bổ sung thêm từ lóng / viết tắt thông dụng ---
-        "cx": "cũng", "vậy nhỉ": "vậy nhỉ", "nma": "nhưng mà", "tks": "cảm ơn",
-        "thanks": "cảm ơn", "ty": "cảm ơn", "sr": "xin lỗi", "sorry": "xin lỗi",
-        "plz": "làm ơn", "pls": "làm ơn", "acc": "tài khoản", "pass": "mật khẩu",
-        "user": "tài khoản", "gv": "giáo viên", "hs": "học sinh", "sv": "sinh viên",
-        "ck": "chồng", "vk": "vợ", "e": "em", "a": "anh", "c": "chị", "b": "bạn",
-        "đợi tí": "đợi tí", "nãy": "nãy", "z hả": "vậy hả", "tr?": "thật ạ",
-        "vãi": "vãi", "trời": "trời", "ố dề": "ố dề", "chằm zn": "trầm cảm"
+        "hcm": "Hồ Chí Minh", "hn": "Hà Nội", "sg": "Sài Gòn", "đn": "Đà Nẵng",
+        "fb": "phây búc", "face": "phây búc", "ig": "in sờ ta gram", "insta": "in sờ ta gram",
+        "yt": "diu túp", "tt": "tíc tóc", "zalo": "za lô", "đt": "điện thoại",
+        "mt": "máy tính", "lt": "láp tóp", "sp": "sản phẩm", "shop": "cửa hàng",
+        "sốp": "cửa hàng", "ad": "quản trị viên", "add": "kết bạn", "kb": "kết bạn",
+        "kp": "kết bạn", "ship": "ship", "order": "đặt hàng", "sale": "giảm giá",
+        "sub": "đăng ký", "dky": "đăng ký", "dnh": "đăng nhập", "like": "thích",
+        "share": "chia sẻ", "live": "lai", "mxh": "mạng xã hội", "cđm": "cộng đồng mạng",
+        "nsnd": "nghệ sĩ nhân dân", "drama": "đờ ra ma", "toxic": "tốc xích", "gg": "gu gồ",
+        // --- Tiền / thời gian ---
+        "đ": "đồng", "tr": "triệu", "củ": "triệu",
+        // --- Cảm ơn / xin lỗi ---
+        "tks": "cảm ơn", "thanks": "cảm ơn", "thx": "cảm ơn", "3q": "cảm ơn",
+        "ty": "cảm ơn", "sr": "xin lỗi", "xl": "xin lỗi", "sorry": "xin lỗi",
+        "plz": "làm ơn", "pls": "làm ơn",
+        // --- Tài khoản / ngân hàng / công việc ---
+        "acc": "ạc", "pass": "mật khẩu", "tk": "tài khoản", "qr": "quy rờ",
+        "hack": "hake", "app": "áp", "dchi": "địa chỉ", "ngh": "ngân hàng",
+        "bks": "biển kiểm soát", "hđ": "hoạt động", "qd": "quyết định", "vb": "văn bản",
+        "cq": "cơ quan", "cty": "công ty", "gd": "giám đốc", "pgd": "phó giám đốc",
+        "pp": "phó phòng", "lh": "liên hệ", "nv": "nhân viên", "nn": "nhà nghỉ",
+        "gv": "giáo viên", "hs": "học sinh", "sv": "sinh viên", "nvqs": "nghĩa vụ quân sự",
+        "sll": "số lượng lớn", "fomo": "phô mô", "ot": "tăng ca", "bst": "bộ sưu tập",
+        "sgbb": "sư gơ bây bi", "sgdd": "sư gơ đe đi",
+        // --- Tiếng lóng có nghĩa (đọc rõ nghĩa) ---
+        "gato": "ghen ăn tức ở", "flex": "khoe khoang", "slay": "đỉnh cao",
+        "xu": "xui xẻo", "trapboy": "kẻ lừa tình", "trapgirl": "kẻ lừa tình",
+        "redflag": "cờ đỏ", "greenflag": "cờ xanh", "mukbang": "mấc banh",
+        "vlog": "vê lốc", "ode": "làm quá", "checkvar": "chéc va", "quayxe": "quay xe",
+        "etoet": "cứu với", "xinvia": "xin vía", "travia": "trả vía",
+        "dinhchop": "đỉnh chóp", "xitkeo": "xịt keo", "phongbat": "phông bạt",
+        "cmn": "chuẩn mẹ nó", "cmnr": "chuẩn mẹ nó rồi", "cmnl": "chuẩn mẹ nó luôn",
+        "ccmnr": "chuẩn con mẹ nó rồi", "ccmnl": "chuẩn con mẹ nó luôn", "ncl": "nói chung là",
+        // --- Từ tục có nguyên âm → đọc nhẹ / đánh vần (giữ live an toàn) ---
+        "vloi": "vờ lờ", "vnoi": "vờ nờ", "vloz": "vờ lờ", "loz": "lờ", "eos": "không",
+        "vaiz": "vãi", "vliz": "vãi", "vcliz": "vãi cả", "smliz": "sờ mờ lờ",
+        "atcl": "ảo tưởng", "nguvl": "ngu vãi", "nguvkl": "ngu vãi", "nguvch": "ngu vãi chưởng",
+        "atsm": "ảo tưởng sức mạnh", "atns": "ảo tưởng nhan sắc"
     ]
 
     /// Ký hiệu -> đọc thành chữ (để TTS không đọc máy móc hoặc bỏ qua).
@@ -81,6 +114,10 @@ struct VietnameseTextNormalizer {
     /// emoji/ký hiệu/số tiền. Dùng cho giọng iOS theo yêu cầu.
     static func normalize(_ text: String, slang: Bool = true) -> String {
         var s = text
+
+        // 0) Vài cụm có ký hiệu "/" (tokenizer sẽ tách) — xử lý trước.
+        s = s.replacingOccurrences(of: "p/s", with: " tái bút ", options: .caseInsensitive)
+        s = s.replacingOccurrences(of: "p.s", with: " tái bút ", options: .caseInsensitive)
 
         // 1) Đổi ký hiệu thành chữ.
         for (k, v) in symbolMap { s = s.replacingOccurrences(of: k, with: v) }
@@ -98,8 +135,9 @@ struct VietnameseTextNormalizer {
         //     — LUÔN áp dụng (kể cả giọng iOS) để đọc tự nhiên, chuẩn hơn.
         s = replaceWords(s, using: formalAbbrev)
 
-        // 3) Thay từng "từ" theo từ điển tiếng lóng (chỉ khi bật bộ lọc).
-        if slang { s = replaceWords(s, using: dictionary) }
+        // 3) Thay từng "từ" theo từ điển tiếng lóng + ĐÁNH VẦN cụm viết tắt không đọc được
+        //    (chỉ khi bật bộ lọc — dùng cho ElevenLabs & Chị Google).
+        if slang { s = expandSlangAndSpell(s) }
 
         // 4) Gom khoảng trắng, gọn dấu câu lặp (… , !!! , ??? ).
         s = collapse(s)
@@ -141,9 +179,38 @@ struct VietnameseTextNormalizer {
         "stk": "số tài khoản", "tphcm": "thành phố Hồ Chí Minh",
         "vd": "ví dụ", "vv": "vân vân",
         "vn": "Việt Nam", "sl": "số lượng",
-        "kg": "ki lô", "km": "ki lô mét",
+        "km": "ki lô mét",
         "tp": "thành phố"
     ]
+
+    /// Tên chữ cái tiếng Việt để ĐÁNH VẦN rõ ràng (đọc "A" ra "a", "qr" ra "quy rờ")
+    /// — KHÔNG đọc theo tiếng Anh. Dùng cho ElevenLabs & Google khi gặp cụm viết tắt.
+    static let letterNames: [Character: String] = [
+        "a": "a", "ă": "á", "â": "ớ", "b": "bờ", "c": "cờ", "d": "dờ", "đ": "đờ",
+        "e": "e", "ê": "ê", "f": "phờ", "g": "gờ", "h": "hờ", "i": "i", "j": "gi",
+        "k": "cờ", "l": "lờ", "m": "mờ", "n": "nờ", "o": "o", "ô": "ô", "ơ": "ơ",
+        "p": "pờ", "q": "quy", "r": "rờ", "s": "sờ", "t": "tờ", "u": "u", "ư": "ư",
+        "v": "vờ", "w": "vờ kép", "x": "xờ", "y": "i", "z": "dờ"
+    ]
+
+    // Nguyên âm tiếng Việt (đủ dấu) — để nhận biết cụm KHÔNG có nguyên âm (không đọc thành từ được).
+    private static let vowelChars: Set<Character> =
+        Set("aăâeêioôơuưyàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ")
+
+    private static func hasVowel(_ token: String) -> Bool {
+        for ch in token where vowelChars.contains(ch) { return true }
+        return false
+    }
+
+    /// Đánh vần 1 cụm thành tên chữ cái tiếng Việt: "qr" → "quy rờ", "vcl" → "vờ cờ lờ".
+    private static func spellLetters(_ token: String) -> String {
+        var parts: [String] = []
+        for ch in token {
+            if let n = letterNames[ch] { parts.append(n) }
+            else if ch.isNumber { parts.append(String(ch)) }
+        }
+        return parts.joined(separator: " ")
+    }
 
     // Tách theo "từ" = chuỗi chữ cái/chữ số liền nhau; phần còn lại giữ nguyên.
     private static func replaceWords(_ text: String, using dict: [String: String]) -> String {
@@ -165,6 +232,34 @@ struct VietnameseTextNormalizer {
                 flush()
                 out.append(ch)
             }
+        }
+        flush()
+        return out
+    }
+
+    /// Như replaceWords(dictionary) nhưng có DỰ PHÒNG: cụm không có trong từ điển và
+    /// KHÔNG có nguyên âm (vd "qr", "vcl", "sml", "dm") → đánh vần tên chữ cái tiếng Việt
+    /// ("quy rờ", "vờ cờ lờ", "sờ mờ lờ", "dờ mờ"). Nhờ vậy đọc chữ cái rõ, không đọc tiếng Anh
+    /// và tự làm nhẹ từ tục viết tắt trên live.
+    private static func expandSlangAndSpell(_ text: String) -> String {
+        var out = ""
+        var token = ""
+        func flush() {
+            guard !token.isEmpty else { return }
+            let key = token.lowercased()
+            if let rep = dictionary[key] {
+                out += rep
+            } else if token.count >= 2 && token.count <= 6 && !token.contains(where: { $0.isNumber })
+                        && !hasVowel(key) && letterNames.keys.contains(where: { key.contains($0) }) {
+                out += spellLetters(key)          // cụm phụ âm thuần → đánh vần rõ ràng
+            } else {
+                out += token
+            }
+            token = ""
+        }
+        for ch in text {
+            if ch.isLetter || ch.isNumber { token.append(ch) }
+            else { flush(); out.append(ch) }
         }
         flush()
         return out

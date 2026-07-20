@@ -87,6 +87,52 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         didSet { UserDefaults.standard.set(elevenSpeed, forKey: "eleven_speed") }
     }
 
+    // ===== Tự động đọc thông báo định kỳ (quảng cáo / nhắc inbox…) =====
+    // Bật/tắt · sửa chữ · sửa số phút · nghe thử. Đọc bằng ĐÚNG giọng đang chọn (mọi động cơ).
+    @Published var autoAnnounceOn: Bool = UserDefaults.standard.bool(forKey: "tts_auto_announce_on") {
+        didSet {
+            UserDefaults.standard.set(autoAnnounceOn, forKey: "tts_auto_announce_on")
+            rescheduleAutoAnnounce()
+        }
+    }
+    @Published var autoAnnounceText: String =
+        UserDefaults.standard.string(forKey: "tts_auto_announce_text")
+        ?? "mọi người cần phần mềm này inbox phần tiểu sử cho mình" {
+        didSet { UserDefaults.standard.set(autoAnnounceText, forKey: "tts_auto_announce_text") }
+    }
+    // Số phút giữa 2 lần đọc (0.5–120). Mặc định 1 phút.
+    @Published var autoAnnounceMinutes: Double =
+        (UserDefaults.standard.object(forKey: "tts_auto_announce_minutes") as? Double) ?? 1.0 {
+        didSet {
+            UserDefaults.standard.set(autoAnnounceMinutes, forKey: "tts_auto_announce_minutes")
+            rescheduleAutoAnnounce()
+        }
+    }
+    private var autoAnnounceTimer: Timer?
+
+    /// Đặt lại hẹn giờ đọc thông báo định kỳ theo trạng thái bật/tắt & số phút hiện tại.
+    func rescheduleAutoAnnounce() {
+        autoAnnounceTimer?.invalidate()
+        autoAnnounceTimer = nil
+        guard autoAnnounceOn else { return }
+        let interval = max(30.0, autoAnnounceMinutes * 60.0)   // tối thiểu 30 giây cho an toàn
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let msg = self.autoAnnounceText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !msg.isEmpty else { return }
+            self.speak(msg)   // đọc bằng đúng giọng đang chọn
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        autoAnnounceTimer = timer
+    }
+
+    /// Nghe thử ngay câu thông báo bằng giọng đang chọn.
+    func previewAutoAnnounce() {
+        let msg = autoAnnounceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !msg.isEmpty else { return }
+        speak(msg)
+    }
+
     func fetchElevenVoiceName(_ vid: String) {
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
         guard !key.isEmpty, let url = URL(string: "https://api.elevenlabs.io/v1/voices/\(vid)") else { return }
@@ -170,6 +216,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         setupRemoteCommands()   // điều khiển từ Control Center / màn khoá
         NotificationCenter.default.addObserver(self, selector: #selector(handleAudioInterruption),
                                                 name: AVAudioSession.interruptionNotification, object: nil)
+        rescheduleAutoAnnounce()   // khôi phục hẹn giờ đọc thông báo nếu đã bật
     }
 
     /// Tự khôi phục đọc/phát nền sau khi cuộc gọi đến/đi hoặc Siri… làm gián đoạn audio session.
@@ -211,7 +258,9 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let t: String
         switch engineType {
-        case .elevenlabs: t = raw
+        // ElevenLabs & Chị Google: chuẩn hóa ĐẦY ĐỦ (mở rộng tiếng lóng/viết tắt +
+        // đánh vần chữ cái rõ ràng "qr→quy rờ", đọc tiếng Việt không lẫn tiếng Anh).
+        case .elevenlabs: t = VietnameseTextNormalizer.normalize(raw)
         case .google:     t = VietnameseTextNormalizer.normalize(raw)
         default:          t = VietnameseTextNormalizer.normalize(raw, slang: false)
         }
@@ -293,6 +342,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     }
 
     deinit {
+        autoAnnounceTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
 
