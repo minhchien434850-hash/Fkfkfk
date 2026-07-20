@@ -2433,6 +2433,7 @@ class ElevenTTSIn(BaseModel):
     similarity_boost: float = 0.75
     style: float = 0.0
     use_speaker_boost: bool = True
+    speed: float = 1.0
 
 @app.post("/tts/eleven")
 def tts_eleven(b: ElevenTTSIn, user=Depends(get_user)):
@@ -2450,14 +2451,13 @@ def tts_eleven(b: ElevenTTSIn, user=Depends(get_user)):
         raise HTTPException(status_code=400, detail="Thiếu nội dung cần đọc.")
     is_v3 = (b.model_id == "eleven_v3")
     stab = min([0.0, 0.5, 1.0], key=lambda x: abs(x - b.stability)) if is_v3 else b.stability
-    payload = {
-        "text": text,
-        "model_id": b.model_id,
-        "voice_settings": {
-            "stability": stab, "similarity_boost": b.similarity_boost,
-            "style": b.style, "use_speaker_boost": b.use_speaker_boost,
-        },
+    vs = {
+        "stability": stab, "similarity_boost": b.similarity_boost,
+        "style": b.style, "use_speaker_boost": b.use_speaker_boost,
     }
+    if abs(b.speed - 1.0) > 0.001:
+        vs["speed"] = max(0.7, min(b.speed, 1.2))
+    payload = {"text": text, "model_id": b.model_id, "voice_settings": vs}
     if b.model_id != "eleven_multilingual_v2":
         payload["language_code"] = "vi"
     try:

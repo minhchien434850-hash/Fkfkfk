@@ -76,6 +76,10 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     @Published var elevenServerKey: Bool = false
     var serverBase: String = ""       // URL máy chủ (do AppStore bơm vào)
     var serverToken: String? = nil    // token đăng nhập để gọi /tts/eleven
+    // Tốc độ đọc ElevenLabs (0.7 chậm → 1.2 nhanh; 1.0 = bình thường). Ai cũng chỉnh được (lưu máy).
+    @Published var elevenSpeed: Double = (UserDefaults.standard.object(forKey: "eleven_speed") as? Double) ?? 1.0 {
+        didSet { UserDefaults.standard.set(elevenSpeed, forKey: "eleven_speed") }
+    }
 
     func fetchElevenVoiceName(_ vid: String) {
         let key = elevenKey.trimmingCharacters(in: .whitespaces)

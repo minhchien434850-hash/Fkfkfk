@@ -18,6 +18,8 @@ struct ElevenLabsKeyView: View {
     @State private var selectedModel: String = UserDefaults.standard.string(forKey: "eleven_model") ?? "eleven_multilingual_v2"
     // v3: tự thêm thẻ cảm xúc theo nội dung bình luận (mặc định BẬT)
     @State private var autoEmotion: Bool = (UserDefaults.standard.object(forKey: "eleven_auto_emotion") as? Bool) ?? true
+    // Tốc độ đọc (0.7 chậm → 1.2 nhanh). Ai cũng chỉnh được (lưu trên máy).
+    @State private var speed: Double = (UserDefaults.standard.object(forKey: "eleven_speed") as? Double) ?? 1.0
     @State private var testStatus: TestStatus = .idle
     @State private var testPlayer: AVAudioPlayer?
     @State private var showDeleteConfirm = false
@@ -134,6 +136,24 @@ struct ElevenLabsKeyView: View {
                 }
             } header: { Text("Voice ID") } footer: {
                 Text("Vào elevenlabs.io → Voices → chọn giọng → Copy Voice ID → dán vào đây. Tên giọng sẽ tự hiện.")
+            }
+
+            // ----- Tốc độ đọc (ai cũng chỉnh được) -----
+            Section {
+                HStack {
+                    Image(systemName: "tortoise.fill").foregroundStyle(.secondary)
+                    Slider(value: $speed, in: 0.7...1.2, step: 0.05)
+                        .onChange(of: speed) { v in UserDefaults.standard.set(v, forKey: "eleven_speed") }
+                    Image(systemName: "hare.fill").foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text(String(format: "Tốc độ: %.2f×", speed)).font(.caption.bold())
+                    Spacer()
+                    Button("Đặt lại 1.0×") { speed = 1.0; UserDefaults.standard.set(1.0, forKey: "eleven_speed") }
+                        .font(.caption)
+                }
+            } header: { Text("Tốc độ đọc") } footer: {
+                Text("Kéo sang trái = đọc chậm rõ, sang phải = đọc nhanh. 1.0× là bình thường. Cả admin và khách đều chỉnh được (lưu riêng trên máy).")
             }
 
             // ----- Chọn Model -----
@@ -350,7 +370,7 @@ struct ElevenLabsKeyView: View {
                     req.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
                     let body = elevenLabsRequestBody(text: testSentence, model: selectedModel,
                                                      stability: 0.5, similarityBoost: 0.75,
-                                                     style: 0.0, speakerBoost: true)
+                                                     style: 0.0, speakerBoost: true, speed: speed)
                     req.httpBody = try? JSONSerialization.data(withJSONObject: body)
                     let (d, resp) = try await URLSession.shared.data(for: req)
                     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -366,7 +386,7 @@ struct ElevenLabsKeyView: View {
                     // Không có key riêng → đọc thử qua MÁY CHỦ (key admin).
                     data = try await store.api.elevenTTS(
                         text: testSentence, voiceId: vid, modelId: selectedModel,
-                        stability: 0.5, similarityBoost: 0.75, style: 0.0, speakerBoost: true)
+                        stability: 0.5, similarityBoost: 0.75, style: 0.0, speakerBoost: true, speed: speed)
                 }
                 guard !data.isEmpty else { testStatus = .failure("Không nhận được audio."); return }
                 try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])

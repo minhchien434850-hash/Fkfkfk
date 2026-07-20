@@ -883,11 +883,11 @@ struct APIClient {
     /// Đọc 1 đoạn qua MÁY CHỦ (dùng key admin) → trả về audio mp3. Khách không cần key.
     func elevenTTS(text: String, voiceId: String, modelId: String,
                    stability: Double, similarityBoost: Double,
-                   style: Double, speakerBoost: Bool) async throws -> Data {
+                   style: Double, speakerBoost: Bool, speed: Double = 1.0) async throws -> Data {
         try await send("/tts/eleven", method: "POST", json: [
             "text": text, "voice_id": voiceId, "model_id": modelId,
             "stability": stability, "similarity_boost": similarityBoost,
-            "style": style, "use_speaker_boost": speakerBoost,
+            "style": style, "use_speaker_boost": speakerBoost, "speed": speed,
         ])
     }
 }

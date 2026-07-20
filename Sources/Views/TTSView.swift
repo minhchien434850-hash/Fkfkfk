@@ -928,6 +928,15 @@ struct TTSView: View {
             do {
                 let s = try await store.api.tiktokLiveConnect(username: id)
                 liveStatus = s.status
+                // BỎ QUA bình luận CŨ: lúc vừa kết nối, TikTok dồn về 1 loạt bình luận
+                // trước đó. Chờ ~2.5s cho loạt cũ dồn hết rồi NHẢY QUA toàn bộ (không đọc),
+                // chỉ đọc bình luận MỚI phát sinh SAU khi kết nối → không đọc lại cả live.
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                if !Task.isCancelled,
+                   let drain = try? await store.api.tiktokLiveEvents(username: id, after: lastEventId) {
+                    lastEventId = drain.last
+                    liveStatus = drain.status
+                }
                 startPolling(id)
             } catch {
                 liveError = error.localizedDescription
@@ -990,11 +999,27 @@ struct TTSView: View {
         case "share": template = templateShare
         default: template = "{name} bình luận: {content}"
         }
-        let name = ev.name.isEmpty ? "bạn" : ev.name
+        let name = cleanLiveName(ev.name)
         return template
             .replacingOccurrences(of: "{name}", with: name)
             .replacingOccurrences(of: "{content}", with: content)
             .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Làm SẠCH tên người xem để ĐỌC RÕ: bỏ emoji/ký hiệu lạ, gạch/gạch dưới → khoảng trắng,
+    /// giữ chữ-số (kể cả tiếng Việt có dấu). Tên rỗng/không đọc được → "bạn".
+    private func cleanLiveName(_ raw: String) -> String {
+        var out = ""
+        for ch in raw {
+            if ch.isLetter || ch.isNumber || ch == " " {
+                out.append(ch)
+            } else if ch == "_" || ch == "-" || ch == "." {
+                out.append(" ")            // tách token dính nhau → đọc rõ hơn
+            }
+            // emoji/ký hiệu khác → bỏ
+        }
+        out = out.split(separator: " ").joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        return out.isEmpty ? "bạn" : out
     }
 
     /// Đọc 1 đoạn text: nếu bật dịch thì dịch sang tiếng Việt trước rồi mới đọc.

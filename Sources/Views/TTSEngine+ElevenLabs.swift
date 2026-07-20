@@ -7,18 +7,22 @@ import AVFoundation
 //  • Multilingual v2: KHÔNG gửi language_code (model này không hỗ trợ → tránh lỗi 400) và không snap stability.
 func elevenLabsRequestBody(text: String, model: String,
                            stability: Double, similarityBoost: Double,
-                           style: Double, speakerBoost: Bool) -> [String: Any] {
+                           style: Double, speakerBoost: Bool, speed: Double = 1.0) -> [String: Any] {
     let isV3 = (model == "eleven_v3")
     // v3: làm tròn stability về đúng 1 trong 3 mốc web dùng.
     let stab: Double = isV3
         ? [0.0, 0.5, 1.0].min(by: { abs($0 - stability) < abs($1 - stability) })!
         : stability
-    let settings: [String: Any] = [
+    var settings: [String: Any] = [
         "stability": stab,
         "similarity_boost": similarityBoost,
         "style": style,
         "use_speaker_boost": speakerBoost
     ]
+    // Tốc độ đọc (0.7–1.2). Chỉ gửi khi khác 1.0 để không ảnh hưởng giọng mặc định.
+    if abs(speed - 1.0) > 0.001 {
+        settings["speed"] = max(0.7, min(speed, 1.2))
+    }
     let outText = elevenAugmentedText(text, model: model)
     var body: [String: Any] = [
         "text": outText,
@@ -235,7 +239,8 @@ extension TTSEngine {
             let body = elevenLabsRequestBody(text: text, model: model,
                                              stability: tone.stability,
                                              similarityBoost: tone.similarityBoost,
-                                             style: tone.style, speakerBoost: tone.speakerBoost)
+                                             style: tone.style, speakerBoost: tone.speakerBoost,
+                                             speed: elevenSpeed)
             req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         } else {
             // KHÔNG có key riêng → dùng KEY MÁY CHỦ (admin đặt) qua /tts/eleven. Khách chỉ cần Voice ID.
@@ -253,6 +258,7 @@ extension TTSEngine {
                 "text": elevenAugmentedText(text, model: model), "voice_id": vid, "model_id": model,
                 "stability": tone.stability, "similarity_boost": tone.similarityBoost,
                 "style": tone.style, "use_speaker_boost": tone.speakerBoost,
+                "speed": elevenSpeed,
             ]
             req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         }
