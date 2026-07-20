@@ -15,6 +15,7 @@ struct StoreAppConfig: Codable, Hashable {
     let bannerUrl: String
     let topupBonusPercent: Int?
     var googleClientId: String? = nil   // Client ID iOS để "Đăng nhập bằng Google" (rỗng = ẩn nút)
+    var elevenServerKey: Bool? = nil     // máy chủ đã có khoá ElevenLabs dùng chung → khách chỉ nhập Voice ID
     var logoEffect: String? = nil   // rainbow|none|glow|neon|gold
     var logoFont: String? = nil     // rounded|serif|mono|default
     var logoAnim: String? = nil     // shimmer|wave|pulse|none

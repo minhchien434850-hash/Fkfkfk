@@ -3,10 +3,16 @@ import AVFoundation
 
 // ======================== ElevenLabs API Key — Nhập, kiểm tra, lưu Keychain ========================
 struct ElevenLabsKeyView: View {
+    @EnvironmentObject var store: AppStore
     @Binding var elevenKey: String
     @Binding var elevenVoiceId: String
     @Binding var elevenVoiceName: String
 
+    // Key DÙNG CHUNG trên máy chủ (admin đặt). Khách chỉ nhập Voice ID.
+    @State private var serverKeySet = false
+    @State private var serverKeyMasked = ""
+    @State private var savingServer = false
+    @State private var serverMsg: String?
     @State private var draftKey: String = ""
     @State private var draftVoiceId: String = ""
     @State private var selectedModel: String = UserDefaults.standard.string(forKey: "eleven_model") ?? "eleven_multilingual_v2"
@@ -48,26 +54,55 @@ struct ElevenLabsKeyView: View {
                 .padding(.vertical, 4)
             } header: { Text("Trạng thái") }
 
-            // ----- Nhập API key -----
-            Section {
-                SecureField("Dán ElevenLabs API key (xi-...)", text: $draftKey)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.system(.body, design: .monospaced))
-                if !draftKey.trimmingCharacters(in: .whitespaces).isEmpty {
-                    Button { saveKey() } label: {
-                        Label("Lưu vào Keychain", systemImage: "checkmark.shield.fill")
-                            .frame(maxWidth: .infinity).bold()
+            // ----- API key: CHỈ ADMIN nhập; đặt 1 lần → mọi khách dùng chung -----
+            if store.isAdmin {
+                Section {
+                    if serverKeySet {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                            Text("Máy chủ đã có key: \(serverKeyMasked)").font(.caption)
+                        }
                     }
-                    .buttonStyle(.borderedProminent).tint(.blue)
+                    SecureField("Dán ElevenLabs API key (xi-...)", text: $draftKey)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .font(.system(.body, design: .monospaced))
+                    if !draftKey.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Button { Task { await saveServerKey() } } label: {
+                            HStack {
+                                if savingServer { ProgressView().padding(.trailing, 4) }
+                                Label("Lưu key lên MÁY CHỦ (dùng chung cho mọi khách)", systemImage: "icloud.and.arrow.up.fill")
+                                    .frame(maxWidth: .infinity)
+                            }.bold()
+                        }.buttonStyle(.borderedProminent).tint(.blue).disabled(savingServer)
+                    }
+                    if serverKeySet {
+                        Button(role: .destructive) { Task { await clearServerKey() } } label: {
+                            Label("Xoá key khỏi máy chủ", systemImage: "trash")
+                        }
+                    }
+                    if let serverMsg {
+                        Text(serverMsg).font(.caption).foregroundStyle(.secondary)
+                    }
+                } header: { Text("API Key (chỉ Admin)") } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Key lưu MÃ HOÁ trên máy chủ, KHÔNG hiện cho khách. Admin đặt 1 lần → mọi khách chỉ cần nhập Voice ID là đọc được.")
+                        Link("Lấy API key tại elevenlabs.io →",
+                             destination: URL(string: "https://elevenlabs.io/app/speech-synthesis")!)
+                            .font(.caption)
+                    }
                 }
-            } header: { Text("API Key") } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Key được lưu trong iOS Keychain — mã hoá phần cứng.")
-                    Link("Lấy API key miễn phí tại elevenlabs.io →",
-                         destination: URL(string: "https://elevenlabs.io/app/speech-synthesis")!)
-                        .font(.caption)
-                }
+            } else {
+                // Khách: không thấy ô key. Chỉ báo trạng thái + nhập Voice ID bên dưới.
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: serverKeySet ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(serverKeySet ? .green : .orange)
+                        Text(serverKeySet
+                             ? "Giọng ElevenLabs do admin cung cấp — bạn CHỈ cần nhập Voice ID bên dưới."
+                             : "Chưa có giọng ElevenLabs (admin chưa cấu hình). Tạm dùng giọng khác.")
+                            .font(.caption)
+                    }
+                } header: { Text("Giọng ElevenLabs") }
             }
 
             // ----- Nhập Voice ID -----
@@ -170,7 +205,7 @@ struct ElevenLabsKeyView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(testButtonTint)
-                    .disabled(activeKey.isEmpty || elevenVoiceId.isEmpty || testStatus == .loading || testStatus == .playing)
+                    .disabled(!hasAnyKey || elevenVoiceId.isEmpty || testStatus == .loading || testStatus == .playing)
 
                     if case .failure(let msg) = testStatus {
                         HStack(alignment: .top, spacing: 6) {
@@ -184,20 +219,19 @@ struct ElevenLabsKeyView: View {
                 Text("Yêu cầu đã lưu API key và Voice ID.")
             }
 
-            // ----- Xoá key -----
-            if !activeKey.isEmpty {
+            // ----- Xoá key CỤC BỘ (chỉ khi có key riêng trên máy này) -----
+            if !elevenKey.isEmpty {
                 Section {
                     Button(role: .destructive) { showDeleteConfirm = true } label: {
-                        Label("Xoá API key", systemImage: "trash.fill").frame(maxWidth: .infinity)
+                        Label("Xoá API key trên máy này", systemImage: "trash.fill").frame(maxWidth: .infinity)
                     }
                 }
             }
         }
         .navigationTitle("Cấu hình ElevenLabs")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            draftVoiceId = elevenVoiceId
-        }
+        .onAppear { draftVoiceId = elevenVoiceId }
+        .task { await loadServerKeyStatus() }
         .confirmationDialog("Xoá API key?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
             Button("Xoá key ElevenLabs", role: .destructive) { deleteKey() }
             Button("Huỷ", role: .cancel) { }
@@ -214,12 +248,47 @@ struct ElevenLabsKeyView: View {
     private var selectedModelLabel: String {
         availableModels.first { $0.id == selectedModel }?.label ?? selectedModel
     }
-    private var statusColor: Color { elevenKey.isEmpty ? .orange : .green }
-    private var statusIcon: String { elevenKey.isEmpty ? "key.slash.fill" : "key.fill" }
-    private var statusTitle: String { elevenKey.isEmpty ? "Chưa có API key" : "Đã có API key ✓" }
+    private var hasAnyKey: Bool { !elevenKey.isEmpty || serverKeySet }
+    private var statusColor: Color { hasAnyKey ? .green : .orange }
+    private var statusIcon: String { hasAnyKey ? "key.fill" : "key.slash.fill" }
+    private var statusTitle: String { hasAnyKey ? "Đã sẵn sàng đọc ✓" : "Chưa có API key" }
     private var statusSubtitle: String {
-        guard !elevenKey.isEmpty else { return "Nhập API key bên dưới để dùng ElevenLabs." }
-        return "Key: \(String(elevenKey.prefix(8)))•••••••• · Lưu trong Keychain"
+        if !elevenKey.isEmpty { return "Dùng key riêng trên máy này." }
+        if serverKeySet { return "Dùng key CHUNG của máy chủ (admin đặt) — chỉ cần Voice ID." }
+        return store.isAdmin ? "Admin thêm API key bên dưới để mọi khách dùng chung." : "Admin chưa cấu hình giọng ElevenLabs."
+    }
+
+    // ----- Server key (dùng chung) -----
+    private func loadServerKeyStatus() async {
+        // Trạng thái có key máy chủ (từ store-config, ai cũng đọc được — chỉ true/false).
+        if let cfg = try? await store.api.storeConfig() {
+            serverKeySet = (cfg.elevenServerKey ?? false)
+        }
+        // Admin xem thêm phần "che bớt" của key.
+        if store.isAdmin, let st = try? await store.api.elevenKeyStatus() {
+            serverKeySet = st.set; serverKeyMasked = st.masked
+        }
+    }
+    private func saveServerKey() async {
+        let k = draftKey.trimmingCharacters(in: .whitespaces)
+        guard !k.isEmpty else { return }
+        savingServer = true; serverMsg = nil
+        do {
+            try await store.api.setElevenServerKey(k)
+            draftKey = ""
+            serverMsg = "Đã lưu key lên máy chủ — mọi khách dùng chung được."
+            await loadServerKeyStatus()
+        } catch { serverMsg = "Lưu lỗi: \(error.localizedDescription)" }
+        savingServer = false
+    }
+    private func clearServerKey() async {
+        savingServer = true; serverMsg = nil
+        do {
+            try await store.api.setElevenServerKey("")
+            serverMsg = "Đã xoá key khỏi máy chủ."
+            await loadServerKeyStatus()
+        } catch { serverMsg = "Xoá lỗi: \(error.localizedDescription)" }
+        savingServer = false
     }
     private var testButtonLabel: String {
         switch testStatus {
@@ -264,56 +333,54 @@ struct ElevenLabsKeyView: View {
     private func testVoice() {
         let key = activeKey
         let vid = elevenVoiceId.trimmingCharacters(in: .whitespaces)
-        guard !key.isEmpty, !vid.isEmpty else { return }
+        guard !vid.isEmpty, hasAnyKey else { return }
         testStatus = .loading
-        testPlayer?.stop()
-        testPlayer = nil
-
-        guard let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(vid)") else {
-            testStatus = .failure("Voice ID không hợp lệ"); return
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 30
-        req.setValue(key, forHTTPHeaderField: "xi-api-key")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
-        // Dùng chung bộ dựng body chuẩn theo model (v3 snap stability 0/0.5/1, bỏ language_code cho v2).
-        let body = elevenLabsRequestBody(text: testSentence, model: selectedModel,
-                                         stability: 0.5, similarityBoost: 0.75,
-                                         style: 0.0, speakerBoost: true)
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        URLSession.shared.dataTask(with: req) { data, response, error in
-            DispatchQueue.main.async {
-                if let error { testStatus = .failure("Lỗi mạng: \(error.localizedDescription)"); return }
-                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if code != 200 {
-                    var detail = "HTTP \(code)"
-                    if let data,
-                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let msg = (json["detail"] as? [String: Any])?["message"] as? String
-                               ?? json["detail"] as? String { detail = msg }
-                    testStatus = .failure(detail); return
-                }
-                guard let data, !data.isEmpty else {
-                    testStatus = .failure("Không nhận được audio."); return
-                }
-                do {
-                    // .mixWithOthers → phát cùng nhạc app khác, không cắt/không đè âm lượng.
-                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-                    try AVAudioSession.sharedInstance().setActive(true)
-                    let player = try AVAudioPlayer(data: data)
-                    player.prepareToPlay(); player.play()
-                    testPlayer = player
-                    testStatus = .playing
-                    DispatchQueue.main.asyncAfter(deadline: .now() + player.duration + 0.3) {
-                        if testStatus == .playing { testStatus = .success }
+        testPlayer?.stop(); testPlayer = nil
+        Task {
+            do {
+                let data: Data
+                if !key.isEmpty {
+                    // Key riêng → gọi thẳng ElevenLabs.
+                    guard let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(vid)") else {
+                        testStatus = .failure("Voice ID không hợp lệ"); return
                     }
-                } catch {
-                    testStatus = .failure("Không phát được audio: \(error.localizedDescription)")
+                    var req = URLRequest(url: url); req.httpMethod = "POST"; req.timeoutInterval = 30
+                    req.setValue(key, forHTTPHeaderField: "xi-api-key")
+                    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    req.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+                    let body = elevenLabsRequestBody(text: testSentence, model: selectedModel,
+                                                     stability: 0.5, similarityBoost: 0.75,
+                                                     style: 0.0, speakerBoost: true)
+                    req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+                    let (d, resp) = try await URLSession.shared.data(for: req)
+                    let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                    if code != 200 {
+                        var detail = "HTTP \(code)"
+                        if let json = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                           let msg = (json["detail"] as? [String: Any])?["message"] as? String
+                                   ?? json["detail"] as? String { detail = msg }
+                        testStatus = .failure(detail); return
+                    }
+                    data = d
+                } else {
+                    // Không có key riêng → đọc thử qua MÁY CHỦ (key admin).
+                    data = try await store.api.elevenTTS(
+                        text: testSentence, voiceId: vid, modelId: selectedModel,
+                        stability: 0.5, similarityBoost: 0.75, style: 0.0, speakerBoost: true)
                 }
+                guard !data.isEmpty else { testStatus = .failure("Không nhận được audio."); return }
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+                try AVAudioSession.sharedInstance().setActive(true)
+                let player = try AVAudioPlayer(data: data)
+                player.prepareToPlay(); player.play()
+                testPlayer = player
+                testStatus = .playing
+                DispatchQueue.main.asyncAfter(deadline: .now() + player.duration + 0.3) {
+                    if testStatus == .playing { testStatus = .success }
+                }
+            } catch {
+                testStatus = .failure(error.localizedDescription)
             }
-        }.resume()
+        }
     }
 }

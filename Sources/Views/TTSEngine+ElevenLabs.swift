@@ -19,16 +19,7 @@ func elevenLabsRequestBody(text: String, model: String,
         "style": style,
         "use_speaker_boost": speakerBoost
     ]
-    // v3: TỰ THÊM THẺ CẢM XÚC theo nội dung (vd bình luận vui → [laughs], hype → [excited])
-    // cho giọng sinh động hơn. Chỉ v3 hiểu thẻ; v2 sẽ đọc thành chữ nên KHÔNG thêm.
-    // Tôn trọng lựa chọn người dùng (tắt được) và KHÔNG thêm nếu họ đã tự gõ thẻ.
-    var outText = text
-    if isV3 && UserDefaults.standard.object(forKey: "eleven_auto_emotion") as? Bool != false {
-        let tag = elevenLabsAutoEmotionTag(for: text)
-        if !tag.isEmpty && !text.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
-            outText = tag + " " + text
-        }
-    }
+    let outText = elevenAugmentedText(text, model: model)
     var body: [String: Any] = [
         "text": outText,
         "model_id": model,
@@ -39,6 +30,18 @@ func elevenLabsRequestBody(text: String, model: String,
         body["language_code"] = "vi"
     }
     return body
+}
+
+// v3: tự thêm thẻ cảm xúc theo nội dung (chỉ v3; tôn trọng công tắc; không thêm nếu đã có thẻ).
+// Dùng chung cho cả đường GỌI TRỰC TIẾP lẫn GỌI QUA MÁY CHỦ (dùng chung 1 cách xử lý text).
+func elevenAugmentedText(_ text: String, model: String) -> String {
+    guard model == "eleven_v3",
+          UserDefaults.standard.object(forKey: "eleven_auto_emotion") as? Bool != false else { return text }
+    let tag = elevenLabsAutoEmotionTag(for: text)
+    if !tag.isEmpty && !text.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
+        return tag + " " + text
+    }
+    return text
 }
 
 // ======================== Bộ PHÂN TÍCH CẢM XÚC v3 (đa dạng · đa tầng · hợp ngữ cảnh) ========================
@@ -160,14 +163,15 @@ private func hasAllCapsWord(_ text: String) -> Bool {
 extension TTSEngine {
 
     func playElevenLabsTTS(_ text: String, priority: Bool = false) {
-        // Dùng ElevenLabs chỉ khi có cả API key VÀ Voice ID
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
         let vid = elevenVoiceId.trimmingCharacters(in: .whitespaces)
-        if !key.isEmpty && !vid.isEmpty {
+        // Dùng ElevenLabs khi có Voice ID VÀ (key riêng của mình HOẶC key dùng chung của máy chủ).
+        let canUse = !vid.isEmpty && (!key.isEmpty || (elevenServerKey && !serverBase.isEmpty))
+        if canUse {
             playElevenLabs(text, priority: priority)
             return
         }
-        // Chưa nhập Voice ID → fallback Google TTS
+        // Chưa có Voice ID (hoặc chưa có key nào) → fallback Google TTS
         playGoogleTTS(text, priority: priority)
     }
 
@@ -213,23 +217,45 @@ extension TTSEngine {
         pendingCount = googleQueue.count + elevenQueue.count
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
         let vid = elevenVoiceId.trimmingCharacters(in: .whitespaces)
-        guard !vid.isEmpty, let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(vid)") else {
-            playNextEleven(); return
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 60
-        req.setValue(key, forHTTPHeaderField: "xi-api-key")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+        guard !vid.isEmpty else { playNextEleven(); return }
         // Dùng model do người dùng chọn trong ElevenLabsKeyView (lưu UserDefaults)
         let model = UserDefaults.standard.string(forKey: "eleven_model") ?? "eleven_multilingual_v2"
         let tone = currentTone
-        let body = elevenLabsRequestBody(text: text, model: model,
-                                         stability: tone.stability,
-                                         similarityBoost: tone.similarityBoost,
-                                         style: tone.style, speakerBoost: tone.speakerBoost)
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        var req: URLRequest
+        if !key.isEmpty {
+            // CÓ KEY RIÊNG → gọi thẳng ElevenLabs.
+            guard let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(vid)") else {
+                playNextEleven(); return
+            }
+            req = URLRequest(url: url)
+            req.httpMethod = "POST"; req.timeoutInterval = 60
+            req.setValue(key, forHTTPHeaderField: "xi-api-key")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+            let body = elevenLabsRequestBody(text: text, model: model,
+                                             stability: tone.stability,
+                                             similarityBoost: tone.similarityBoost,
+                                             style: tone.style, speakerBoost: tone.speakerBoost)
+            req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        } else {
+            // KHÔNG có key riêng → dùng KEY MÁY CHỦ (admin đặt) qua /tts/eleven. Khách chỉ cần Voice ID.
+            var base = serverBase.trimmingCharacters(in: .whitespaces)
+            if !base.lowercased().hasPrefix("http") { base = "http://" + base }
+            while base.hasSuffix("/") { base.removeLast() }
+            guard let url = URL(string: base + "/tts/eleven") else { playNextEleven(); return }
+            req = URLRequest(url: url)
+            req.httpMethod = "POST"; req.timeoutInterval = 60
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+            if let t = serverToken { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+            // Thêm thẻ cảm xúc ở APP (backend không xử lý) rồi gửi text đã kèm thẻ.
+            let payload: [String: Any] = [
+                "text": elevenAugmentedText(text, model: model), "voice_id": vid, "model_id": model,
+                "stability": tone.stability, "similarity_boost": tone.similarityBoost,
+                "style": tone.style, "use_speaker_boost": tone.speakerBoost,
+            ]
+            req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        }
         URLSession.shared.dataTask(with: req) { [weak self] data, resp, _ in
             guard let self else { return }
             DispatchQueue.main.async {

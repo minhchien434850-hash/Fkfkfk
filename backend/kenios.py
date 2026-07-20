@@ -2397,6 +2397,88 @@ def get_notif_sounds(user=Depends(get_user)) -> dict[str, Any]:
     return {"json": get_setting("notif_sounds_global", "")}
 
 
+# ============ ElevenLabs DÙNG CHUNG: ADMIN đặt API key 1 lần → MỌI khách dùng ============
+# Key LƯU MÃ HOÁ trên máy chủ, KHÔNG bao giờ trả về cho app (khách không thấy được key).
+# App gọi /tts/eleven (kèm Voice ID của khách) → máy chủ đọc bằng key admin → trả audio.
+def _eleven_server_key() -> str:
+    raw = get_setting("eleven_api_key_enc", "")
+    if not raw:
+        return ""
+    try:
+        return dec(raw)
+    except Exception:
+        return ""
+
+class ElevenKeyIn(BaseModel):
+    key: str = ""
+
+@app.post("/admin/eleven-key")
+def admin_set_eleven_key(b: ElevenKeyIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    """ADMIN lưu/xoá API key ElevenLabs dùng chung (key rỗng = xoá)."""
+    k = (b.key or "").strip()
+    set_setting("eleven_api_key_enc", enc(k) if k else "")
+    return {"ok": True, "set": bool(k)}
+
+@app.get("/admin/eleven-key")
+def admin_get_eleven_key(admin=Depends(get_admin)) -> dict[str, Any]:
+    k = _eleven_server_key()
+    masked = (k[:5] + "•••••" + k[-4:]) if len(k) > 12 else ("•••••" if k else "")
+    return {"set": bool(k), "masked": masked}
+
+class ElevenTTSIn(BaseModel):
+    text: str
+    voice_id: str
+    model_id: str = "eleven_multilingual_v2"
+    stability: float = 0.5
+    similarity_boost: float = 0.75
+    style: float = 0.0
+    use_speaker_boost: bool = True
+
+@app.post("/tts/eleven")
+def tts_eleven(b: ElevenTTSIn, user=Depends(get_user)):
+    """Đọc 1 đoạn bằng ElevenLabs dùng KEY MÁY CHỦ (admin đặt) + Voice ID của khách.
+    Trả về audio/mpeg. Khách KHÔNG cần và KHÔNG thấy API key."""
+    key = _eleven_server_key()
+    if not key:
+        raise HTTPException(status_code=400,
+            detail="Máy chủ chưa có khoá ElevenLabs. Nhờ admin thêm trong Cấu hình ElevenLabs.")
+    vid = (b.voice_id or "").strip()
+    text = (b.text or "").strip()
+    if not vid:
+        raise HTTPException(status_code=400, detail="Thiếu Voice ID.")
+    if not text:
+        raise HTTPException(status_code=400, detail="Thiếu nội dung cần đọc.")
+    is_v3 = (b.model_id == "eleven_v3")
+    stab = min([0.0, 0.5, 1.0], key=lambda x: abs(x - b.stability)) if is_v3 else b.stability
+    payload = {
+        "text": text,
+        "model_id": b.model_id,
+        "voice_settings": {
+            "stability": stab, "similarity_boost": b.similarity_boost,
+            "style": b.style, "use_speaker_boost": b.use_speaker_boost,
+        },
+    }
+    if b.model_id != "eleven_multilingual_v2":
+        payload["language_code"] = "vi"
+    try:
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
+                       headers={"xi-api-key": key, "Content-Type": "application/json",
+                                "Accept": "audio/mpeg"},
+                       json=payload, timeout=60)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Lỗi gọi ElevenLabs: {e}")
+    if r.status_code != 200:
+        detail = f"ElevenLabs lỗi {r.status_code}"
+        try:
+            j = r.json()
+            detail = (j.get("detail", {}) or {}).get("message") or j.get("detail") or detail
+        except Exception:
+            pass
+        code = r.status_code if r.status_code in (401, 404, 429) else 502
+        raise HTTPException(status_code=code, detail=str(detail))
+    return Response(content=r.content, media_type="audio/mpeg")
+
+
 # ========================= SAO LƯU & KHÔI PHỤC (BACKUP) =========================
 # Gói toàn bộ trạng thái phục hồi được: database (kenios.db) + khóa mã hóa
 # (kenios_enc.key, để giải mã API key đã lưu) → 1 file .zip nhỏ gọn.
@@ -10931,6 +11013,8 @@ def store_config() -> dict[str, Any]:
         "logo_type": get_setting("store_logo_type", "image"),
         # Client ID iOS để app hiện nút "Đăng nhập bằng Google"
         "google_client_id": _google_login_client_id(),
+        # Máy chủ đã có khoá ElevenLabs dùng chung? (khách chỉ cần nhập Voice ID)
+        "eleven_server_key": bool(_eleven_server_key()),
         "banner_type": get_setting("store_banner_type", "image"),
         "banner_url": get_setting("store_banner_url", ""),
         "topup_bonus_percent": _topup_bonus_percent(),

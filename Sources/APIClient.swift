@@ -869,4 +869,25 @@ struct APIClient {
     }
     /// URL công khai của 1 file media theo id (ảnh/video bài đăng) — tải bằng AsyncImage được.
     func mediaURL(fileId: Int) -> URL? { URL(string: "\(root)/media/\(fileId)") }
+
+    // ==================== ElevenLabs dùng chung (admin đặt key · khách dùng) ====================
+    struct ElevenKeyStatus: Decodable { let set: Bool; let masked: String }
+    /// ADMIN: xem trạng thái key máy chủ (đã đặt chưa · che bớt).
+    func elevenKeyStatus() async throws -> ElevenKeyStatus {
+        try decode(try await send("/admin/eleven-key"))
+    }
+    /// ADMIN: lưu (hoặc xoá nếu rỗng) API key ElevenLabs dùng chung.
+    func setElevenServerKey(_ key: String) async throws {
+        _ = try await send("/admin/eleven-key", method: "POST", json: ["key": key])
+    }
+    /// Đọc 1 đoạn qua MÁY CHỦ (dùng key admin) → trả về audio mp3. Khách không cần key.
+    func elevenTTS(text: String, voiceId: String, modelId: String,
+                   stability: Double, similarityBoost: Double,
+                   style: Double, speakerBoost: Bool) async throws -> Data {
+        try await send("/tts/eleven", method: "POST", json: [
+            "text": text, "voice_id": voiceId, "model_id": modelId,
+            "stability": stability, "similarity_boost": similarityBoost,
+            "style": style, "use_speaker_boost": speakerBoost,
+        ])
+    }
 }

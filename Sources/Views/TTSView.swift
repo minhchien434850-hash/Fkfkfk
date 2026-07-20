@@ -134,6 +134,24 @@ struct TTSView: View {
                             Circle().fill(liveStatusColor).frame(width: 8, height: 8)
                             Text(liveStatusText).font(.caption).foregroundStyle(.secondary)
                         }
+
+                        // ----- HƯỚNG DẪN kết nối với TikTok Studio / phòng LIVE -----
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 8) {
+                                guideRow("1", "Bật LIVE trên TikTok", "Mở TikTok Studio (hoặc app TikTok) → bấm “Đi LIVE / Go LIVE” để bắt đầu buổi phát trực tiếp.")
+                                guideRow("2", "Lấy @username của bạn", "Vào trang hồ sơ TikTok, tên có dạng “@tencuaban”. Chép đúng phần “@tencuaban”.")
+                                guideRow("3", "Dán vào ô trên & Kết nối", "Dán @username (hoặc link phòng live) vào ô “ID / @username TikTok…”, chọn loại sự kiện muốn đọc, rồi bấm “Kết nối & đọc”.")
+                                guideRow("4", "Nghe đọc realtime", "App đọc bình luận + tặng quà/follow/chia sẻ ngay khi khán giả gửi. Ưu tiên đọc quà/follow/share trước.")
+                                Text("Lưu ý: phải ĐANG LIVE thì mới kết nối được. Nếu báo “không tìm thấy phòng live”, kiểm tra @username đúng chưa và bạn đã bấm Go LIVE chưa. Để app đọc khi tắt màn hình, cứ để app chạy nền — âm vẫn phát.")
+                                    .font(.caption2).foregroundStyle(.secondary).padding(.top, 2)
+                                Link("Mở TikTok Studio →", destination: URL(string: "https://www.tiktok.com/studio")!)
+                                    .font(.caption)
+                            }.padding(.top, 4)
+                        } label: {
+                            Label(store.t("Hướng dẫn kết nối TikTok Studio / LIVE", "How to connect TikTok Studio / LIVE"),
+                                  systemImage: "questionmark.circle.fill")
+                                .font(.caption.bold()).foregroundStyle(Theme.accent)
+                        }
                         if let liveError {
                             Text(liveError).font(.caption2).foregroundStyle(.red)
                         }
@@ -433,6 +451,14 @@ struct TTSView: View {
             .navigationTitle(store.t("Đọc (TTS)", "Read (TTS)"))
             // Tải lại kho âm DÙNG CHUNG mỗi khi mở màn (ai thêm thì mọi người đều thấy)
             .task { await store.loadNotifSounds(); tts.reloadNotif() }
+            .task {
+                // Bơm thông tin máy chủ để đọc ElevenLabs bằng KEY DÙNG CHUNG (admin đặt).
+                tts.serverBase = store.baseURL
+                tts.serverToken = store.token
+                if let cfg = try? await store.api.storeConfig() {
+                    tts.elevenServerKey = (cfg.elevenServerKey ?? false)
+                }
+            }
         }
     }
 
@@ -839,6 +865,18 @@ struct TTSView: View {
         .background(selected ? Color.green.opacity(0.10) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         Divider()
+    }
+
+    // Một dòng hướng dẫn: số thứ tự tròn + tiêu đề + mô tả.
+    @ViewBuilder private func guideRow(_ n: String, _ title: String, _ desc: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(n).font(.caption2.bold()).foregroundStyle(.white)
+                .frame(width: 20, height: 20).background(Circle().fill(Theme.accent))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.bold())
+                Text(desc).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
     }
 
     // ----- TikTok Live helpers -----

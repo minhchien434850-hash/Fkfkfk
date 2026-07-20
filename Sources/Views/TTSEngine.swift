@@ -71,6 +71,12 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     // Tên giọng hiển thị — tự động lấy từ API khi nhập Voice ID
     @Published var elevenVoiceName: String = UserDefaults.standard.string(forKey: "eleven_voice_name") ?? ""
 
+    // KEY DÙNG CHUNG do ADMIN đặt trên MÁY CHỦ. Khi bật, app đọc ElevenLabs qua máy chủ
+    // (POST serverBase/tts/eleven) → khách CHỈ cần nhập Voice ID, không cần & không thấy key.
+    @Published var elevenServerKey: Bool = false
+    var serverBase: String = ""       // URL máy chủ (do AppStore bơm vào)
+    var serverToken: String? = nil    // token đăng nhập để gọi /tts/eleven
+
     func fetchElevenVoiceName(_ vid: String) {
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
         guard !key.isEmpty, let url = URL(string: "https://api.elevenlabs.io/v1/voices/\(vid)") else { return }
