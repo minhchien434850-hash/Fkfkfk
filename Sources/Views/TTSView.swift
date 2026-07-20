@@ -393,25 +393,33 @@ struct TTSView: View {
                             }.padding(.vertical, 4)
                         }
 
-                        Text("Kiểu giọng (Chỉ dành cho iOS · Siri · Google — không áp dụng cho ElevenLabs)").font(.caption).foregroundStyle(.secondary)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack {
-                                ForEach(kVoiceStyles) { s in
-                                    let on = (tts.pitch == s.pitch && tts.rate == s.rate)
-                                    Button { tts.pitch = s.pitch; tts.rate = s.rate } label: {
-                                        Label(s.label, systemImage: s.icon).font(.caption)
-                                            .padding(.horizontal, 12).padding(.vertical, 8)
-                                            .background(on ? Theme.accent.opacity(0.25) : Color(.secondarySystemBackground))
-                                            .clipShape(Capsule())
-                                    }.buttonStyle(.plain)
+                        // TỐC ĐỘ theo GIỌNG ĐANG CHỌN. ElevenLabs → thanh riêng 0.5–2.0 (ngay ở đây,
+                        // không cần vào Cấu hình API). iOS/Siri/Google → tốc độ + cao độ + kiểu giọng.
+                        if tts.engineType == .elevenlabs {
+                            sliderD("Tốc độ đọc (ElevenLabs)", value: $tts.elevenSpeed, range: 0.5...2.0)
+                            slider("Âm lượng", value: $tts.volume, range: 0...1)
+                            Text("Kéo trái = chậm rõ · phải = nhanh (0.5× → 2.0×, 1.0× là bình thường). Áp dụng cho giọng ElevenLabs đang chọn.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        } else {
+                            Text("Kiểu giọng (iOS · Siri · Google)").font(.caption).foregroundStyle(.secondary)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack {
+                                    ForEach(kVoiceStyles) { s in
+                                        let on = (tts.pitch == s.pitch && tts.rate == s.rate)
+                                        Button { tts.pitch = s.pitch; tts.rate = s.rate } label: {
+                                            Label(s.label, systemImage: s.icon).font(.caption)
+                                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                                .background(on ? Theme.accent.opacity(0.25) : Color(.secondarySystemBackground))
+                                                .clipShape(Capsule())
+                                        }.buttonStyle(.plain)
+                                    }
                                 }
                             }
+                            slider("Tốc độ", value: $tts.rate,
+                                   range: AVSpeechUtteranceMinimumSpeechRate...AVSpeechUtteranceMaximumSpeechRate)
+                            slider("Cao độ", value: $tts.pitch, range: 0.5...2.0)
+                            slider("Âm lượng", value: $tts.volume, range: 0...1)
                         }
-
-                        slider("Tốc độ", value: $tts.rate,
-                               range: AVSpeechUtteranceMinimumSpeechRate...AVSpeechUtteranceMaximumSpeechRate)
-                        slider("Cao độ", value: $tts.pitch, range: 0.5...2.0)
-                        slider("Âm lượng", value: $tts.volume, range: 0...1)
 
                         // ElevenLabs — đọc tiếng Việt (chỉ PRO)
                         if tts.engineType == .elevenlabs && store.isPro {
@@ -477,27 +485,27 @@ struct TTSView: View {
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
 
-                            Divider().padding(.vertical, 4)
-                            NavigationLink {
-                                ElevenLabsKeyView(elevenKey: $tts.elevenKey, elevenVoiceId: $tts.elevenVoiceId, elevenVoiceName: $tts.elevenVoiceName)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: tts.elevenKey.isEmpty
-                                          ? "key.slash.fill" : "key.fill")
-                                        .foregroundStyle(tts.elevenKey.isEmpty ? .orange : .green)
-                                        .frame(width: 28)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Cấu hình giọng ElevenLabs")
-                                            .font(.subheadline.bold())
-                                        Text(tts.elevenKey.isEmpty
-                                             ? "Chưa có key — nhấn để thiết lập"
-                                             : "✓ API key đã lưu (Keychain)")
-                                            .font(.caption2)
-                                            .foregroundStyle(tts.elevenKey.isEmpty ? .orange : .green)
-                                    }
-                                    Spacer()
+                            // CẤU HÌNH API KEY — CHỈ ADMIN vào được. Khách chỉ nhập Voice ID + chỉnh
+                            // tốc độ ở trên; giọng ElevenLabs dùng key admin trên máy chủ.
+                            if store.isAdmin {
+                                Divider().padding(.vertical, 4)
+                                NavigationLink {
+                                    ElevenLabsKeyView(elevenKey: $tts.elevenKey, elevenVoiceId: $tts.elevenVoiceId, elevenVoiceName: $tts.elevenVoiceName)
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "key.fill").foregroundStyle(.green).frame(width: 28)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Cấu hình API key ElevenLabs (Admin)")
+                                                .font(.subheadline.bold())
+                                            Text("Thiết lập & đồng bộ key dùng chung lên máy chủ")
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                    }.padding(.vertical, 4)
                                 }
-                                .padding(.vertical, 4)
+                            } else {
+                                Text("Giọng ElevenLabs do admin cấp — bạn chỉ cần nhập Voice ID ở trên và chỉnh tốc độ. Không cần API key.")
+                                    .font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
                             }
                         }
                     }
@@ -1173,6 +1181,17 @@ struct TTSView: View {
                 Text(label).font(.caption)
                 Spacer()
                 Text(String(format: "%.2f", value.wrappedValue)).font(.caption2).foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range)
+        }
+    }
+    // Bản Double (dùng cho tốc độ ElevenLabs 0.5–2.0)
+    private func sliderD(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label).font(.caption)
+                Spacer()
+                Text(String(format: "%.2f×", value.wrappedValue)).font(.caption2.bold()).foregroundStyle(Theme.accent)
             }
             Slider(value: value, in: range)
         }

@@ -19,9 +19,9 @@ func elevenLabsRequestBody(text: String, model: String,
         "style": style,
         "use_speaker_boost": speakerBoost
     ]
-    // Tốc độ đọc (0.7–1.2). Chỉ gửi khi khác 1.0 để không ảnh hưởng giọng mặc định.
+    // Tốc độ đọc (0.5–2.0). Chỉ gửi khi khác 1.0 để không ảnh hưởng giọng mặc định.
     if abs(speed - 1.0) > 0.001 {
-        settings["speed"] = max(0.7, min(speed, 1.2))
+        settings["speed"] = max(0.5, min(speed, 2.0))
     }
     let outText = elevenAugmentedText(text, model: model)
     var body: [String: Any] = [

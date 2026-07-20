@@ -2456,7 +2456,7 @@ def tts_eleven(b: ElevenTTSIn, user=Depends(get_user)):
         "style": b.style, "use_speaker_boost": b.use_speaker_boost,
     }
     if abs(b.speed - 1.0) > 0.001:
-        vs["speed"] = max(0.7, min(b.speed, 1.2))
+        vs["speed"] = max(0.5, min(b.speed, 2.0))
     payload = {"text": text, "model_id": b.model_id, "voice_settings": vs}
     if b.model_id != "eleven_multilingual_v2":
         payload["language_code"] = "vi"
@@ -4741,7 +4741,7 @@ def reader_tts(b: ReaderTTSIn, k: str):
     vs = {"stability": (0.5 if is_v3 else 0.5), "similarity_boost": 0.75,
           "style": 0.0, "use_speaker_boost": True}
     if abs(speed - 1.0) > 0.001:
-        vs["speed"] = max(0.7, min(speed, 1.2))
+        vs["speed"] = max(0.5, min(speed, 2.0))
     payload = {"text": text, "model_id": model, "voice_settings": vs}
     if model != "eleven_multilingual_v2":
         payload["language_code"] = "vi"

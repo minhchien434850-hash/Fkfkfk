@@ -138,23 +138,6 @@ struct ElevenLabsKeyView: View {
                 Text("Vào elevenlabs.io → Voices → chọn giọng → Copy Voice ID → dán vào đây. Tên giọng sẽ tự hiện.")
             }
 
-            // ----- Tốc độ đọc (ai cũng chỉnh được) -----
-            Section {
-                HStack {
-                    Image(systemName: "tortoise.fill").foregroundStyle(.secondary)
-                    Slider(value: $speed, in: 0.7...1.2, step: 0.05)
-                        .onChange(of: speed) { v in UserDefaults.standard.set(v, forKey: "eleven_speed") }
-                    Image(systemName: "hare.fill").foregroundStyle(.secondary)
-                }
-                HStack {
-                    Text(String(format: "Tốc độ: %.2f×", speed)).font(.caption.bold())
-                    Spacer()
-                    Button("Đặt lại 1.0×") { speed = 1.0; UserDefaults.standard.set(1.0, forKey: "eleven_speed") }
-                        .font(.caption)
-                }
-            } header: { Text("Tốc độ đọc") } footer: {
-                Text("Kéo sang trái = đọc chậm rõ, sang phải = đọc nhanh. 1.0× là bình thường. Cả admin và khách đều chỉnh được (lưu riêng trên máy).")
-            }
 
             // ----- Chọn Model -----
             Section {
