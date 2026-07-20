@@ -8456,6 +8456,11 @@ def _tg_welcome_members(token: str, chat: dict, members: list) -> None:
     gname = chat.get("title", "nhóm")
     chat_id = str(chat.get("id"))
     count = _tg_member_count(token, chat_id)
+    # Lời chào TỰ XOÁ sau tg_welcome_del_sec giây (mặc định 5s; đặt 0 để giữ lại).
+    try:
+        del_sec = int(get_setting("tg_welcome_del_sec", "5") or 0)
+    except Exception:
+        del_sec = 5
     for m in members:
         if m.get("is_bot"): continue
         txt = tmpl.replace("{name}", _tg_mention(m)).replace("{group}", gname)
@@ -8463,13 +8468,19 @@ def _tg_welcome_members(token: str, chat: dict, members: list) -> None:
         txt += "\n\n" + _tg_user_info_block(m, count)
         # ẢNH: ưu tiên avatar CỦA NGƯỜI MỚI; không có thì dùng ảnh admin đặt.
         photo = _tg_user_avatar_file_id(token, m.get("id")) or custom_photo
+        mid = None
         if photo:
             params = {"chat_id": chat_id, "photo": photo, "caption": txt, "parse_mode": "HTML"}
             if buttons:
                 params["reply_markup"] = {"inline_keyboard": buttons}
-            if _tg_call(token, "sendPhoto", **params).get("ok"):
-                continue
-        _tg_send(token, chat_id, txt, buttons=buttons)
+            _r = _tg_call(token, "sendPhoto", **params)
+            if _r.get("ok"):
+                mid = ((_r.get("result") or {}).get("message_id"))
+        if mid is None:
+            _r = _tg_send(token, chat_id, txt, buttons=buttons)
+            mid = ((_r or {}).get("result") or {}).get("message_id")
+        if del_sec > 0 and mid:
+            _tg_delete_later(token, [(chat_id, mid)], del_sec)
 
 def _tg_goodbye_member(token: str, chat: dict, m: dict) -> None:
     if get_setting("tg_goodbye_on", "1") != "1" or not m or m.get("is_bot"): return
