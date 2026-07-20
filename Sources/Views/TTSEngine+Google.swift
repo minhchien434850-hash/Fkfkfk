@@ -3,17 +3,42 @@ import AVFoundation
 // ======================== Chị Google (online, prefetch để hết khoảng lặng) ========================
 extension TTSEngine {
 
-    func playGoogleTTS(_ text: String, priority: Bool = false) {
+    func playGoogleTTS(_ text: String, level: Int = TTSEngine.SpeakPriority.comment.rawValue) {
         // Google TTS giới hạn ~200 ký tự/yêu cầu → chia 180 và đọc lần lượt TOÀN BỘ.
         let chunks = splitTextIntoChunks(text, maxLen: 180)
-        // Ưu tiên (follow/tặng quà/chia sẻ) → chèn LÊN ĐẦU (giữ đúng thứ tự các đoạn) để đọc trước.
-        // KHÔNG cắt bỏ hàng đợi: đọc ĐẦY ĐỦ từng bình luận, xong mới sang cái kế tiếp.
-        if priority { googleQueue.insert(contentsOf: chunks, at: 0) }
-        else { googleQueue.append(contentsOf: chunks) }
+        guard !chunks.isEmpty else { return }
+
+        // Người vào phòng (mức thấp nhất): khi live đông, hàng loạt lời chào dồn về sẽ nghẽn
+        // hàng đợi và làm bình luận đọc chậm. → Chỉ giữ tối đa `maxJoinBacklog` lời chào chờ đọc,
+        // bỏ bớt lời chào CŨ nhất để welcome luôn mới và không chặn bình luận.
+        if level == TTSEngine.SpeakPriority.join.rawValue {
+            trimGoogleJoinBacklog()
+        }
+
+        // Chèn theo mức ưu tiên: quà/follow/share > bình luận > người vào.
+        // Bình luận LUÔN chèn TRƯỚC các lời chào "người vào" đang chờ.
+        let idx = queueInsertIndex(googlePrio, level: level)
+        googleQueue.insert(contentsOf: chunks, at: idx)
+        googlePrio.insert(contentsOf: Array(repeating: level, count: chunks.count), at: idx)
+        // Nếu chèn lên ĐẦU hàng đợi → audio prefetch của đoạn đầu cũ không còn đúng → bỏ để tải lại.
+        if idx == 0 { googleNextData = nil }
+
         pendingCount = googleQueue.count + elevenQueue.count
         if !isPlayingGoogle {
             playNextGoogleItem()
         }
+    }
+
+    // Bỏ bớt lời chào "người vào" CŨ nhất khi đang tồn đọng quá nhiều.
+    private func trimGoogleJoinBacklog() {
+        let joinLevel = TTSEngine.SpeakPriority.join.rawValue
+        while googlePrio.filter({ $0 == joinLevel }).count >= maxJoinBacklog,
+              let first = googlePrio.firstIndex(of: joinLevel) {
+            googleQueue.remove(at: first)
+            googlePrio.remove(at: first)
+            if first == 0 { googleNextData = nil }   // đã bỏ đoạn đầu → prefetch cũ không còn đúng
+        }
+        pendingCount = googleQueue.count + elevenQueue.count
     }
 
     // Chia đoạn THÔNG MINH: GIỮ trọn câu (tách theo . ? ! ; xuống dòng) rồi GỘP các câu
@@ -97,6 +122,7 @@ extension TTSEngine {
             isPlayingGoogle = false
             isSpeaking = false
             googleNextData = nil
+            googlePrio.removeAll()
             pendingCount = elevenQueue.count
             updateNowPlaying(playing: false)
             return
@@ -107,6 +133,7 @@ extension TTSEngine {
         googleItemToken += 1
         let token = googleItemToken
         let text = googleQueue.removeFirst()
+        if !googlePrio.isEmpty { googlePrio.removeFirst() }
         pendingCount = googleQueue.count + elevenQueue.count
 
         // Nếu đã prefetch sẵn đoạn này → phát NGAY (không đợi mạng = không có khoảng lặng).

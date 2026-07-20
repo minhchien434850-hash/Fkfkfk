@@ -1049,12 +1049,14 @@ struct TTSView: View {
                     liveStatus = r.status
                     if let e = r.error { liveError = e }
                     for ev in r.events {
+                        // CHỈ hiện các loại sự kiện ĐANG BẬT lên bảng tin → khi tắt "Người vào",
+                        // lời chào người vào KHÔNG tràn bảng tin nữa, BÌNH LUẬN mới hiện rõ.
+                        guard readTypes.contains(ev.type) else { continue }
+                        // Bình luận lên ĐẦU danh sách chờ đọc (announce ưu tiên comment > join).
                         liveFeed.append(ev)
-                        if readTypes.contains(ev.type) {
-                            let text = await liveSpeechText(ev)
-                            // Phát âm thanh thông báo (quà/follow/share) TRƯỚC rồi mới đọc.
-                            tts.announce(text, eventType: ev.type)
-                        }
+                        let text = await liveSpeechText(ev)
+                        // Phát âm thanh thông báo (quà/follow/share) TRƯỚC rồi mới đọc.
+                        tts.announce(text, eventType: ev.type)
                     }
                     if liveFeed.count > 120 { liveFeed.removeFirst(liveFeed.count - 120) }
                     lastEventId = r.last

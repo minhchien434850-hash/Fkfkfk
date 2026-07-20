@@ -159,15 +159,22 @@ extension TTSEngine {
         }
     }
 
-    /// Thông báo 1 sự kiện: phát âm thanh (nếu là gift/follow/share) TRƯỚC rồi mới đọc.
-    /// gift/follow/share = ƯU TIÊN → chèn lên đầu hàng đợi, đọc TRƯỚC các bình luận đang chờ.
+    /// Thông báo 1 sự kiện theo mức ƯU TIÊN đọc:
+    ///  · quà/follow/share → phát âm thanh TRƯỚC + đọc ở mức CAO NHẤT (đọc trước bình luận).
+    ///  · bình luận (comment) → mức GIỮA: LUÔN đọc TRƯỚC lời chào "người vào" đang chờ.
+    ///  · người vào (join) → mức THẤP NHẤT: chỉ đọc khi rảnh, tồn đọng nhiều thì bỏ bớt cái cũ.
     func announce(_ text: String, eventType: String) {
         activateSession()
         if silentPlayer == nil { startBackgroundMode() }
         if Self.notifEventTypes.contains(eventType) {
-            playNotif(for: eventType) { [weak self] in self?.speak(text, priority: true) }
+            playNotif(for: eventType) { [weak self] in
+                self?.speak(text, level: TTSEngine.SpeakPriority.event.rawValue)
+            }
         } else {
-            speak(text)
+            let level = (eventType == "join")
+                ? TTSEngine.SpeakPriority.join.rawValue
+                : TTSEngine.SpeakPriority.comment.rawValue
+            speak(text, level: level)
         }
     }
 }

@@ -33,8 +33,14 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     var notifPlayer: AVAudioPlayer?   // phát âm thanh thông báo (follow/quà/share…) TRƯỚC khi đọc
     var notifDataCache: [String: Data] = [:]   // cache audio meme tải từ link (khỏi tải lại mỗi lần)
 
+    // Mức ƯU TIÊN đọc: sự kiện quà/follow/share > bình luận > người vào phòng.
+    // Bình luận LUÔN được đọc TRƯỚC lời chào "người vào" đang chờ.
+    enum SpeakPriority: Int { case join = 0, comment = 1, event = 2 }
+    var maxJoinBacklog = 3   // giữ tối đa 3 lời chào "người vào" chờ đọc → welcome luôn mới, không nghẽn bình luận
+
     // Google TTS Queue
     var googleQueue: [String] = []
+    var googlePrio: [Int] = []           // mức ưu tiên song song với googleQueue (mỗi đoạn 1 mức)
     var googleAudio: AVAudioPlayer?      // phát từ Data đã tải sẵn (mượt, không khoảng lặng)
     var googleNextData: Data?            // PREFETCH: audio của đoạn KẾ đã tải sẵn trong lúc đọc đoạn này
     var isPlayingGoogle = false
@@ -106,6 +112,7 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     }
     var elevenPlayer: AVAudioPlayer?
     var elevenQueue: [String] = []
+    var elevenPrio: [Int] = []           // mức ưu tiên song song với elevenQueue
     var isPlayingEleven = false
 
     @Published var isSpeaking = false
@@ -186,8 +193,16 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         try? s.setActive(true, options: [])
     }
 
-    /// priority=true (follow/tặng quà/chia sẻ) → CHÈN LÊN ĐẦU hàng đợi để đọc TRƯỚC bình luận.
-    func speak(_ text: String, priority: Bool = false) {
+    /// Vị trí chèn 1 mục MỚI (mức `level`) vào hàng đợi theo mức ưu tiên:
+    /// chèn TRƯỚC mục đầu tiên có mức thấp hơn → mức cao đọc trước, cùng mức giữ đúng thứ tự đến.
+    func queueInsertIndex(_ prios: [Int], level: Int) -> Int {
+        for (i, p) in prios.enumerated() where p < level { return i }
+        return prios.count
+    }
+
+    /// level: 2 (quà/follow/share) > 1 (bình luận) > 0 (người vào). Mục mức cao được CHÈN LÊN TRƯỚC
+    /// các mục mức thấp đang chờ → bình luận luôn đọc trước lời chào "người vào".
+    func speak(_ text: String, level: Int = SpeakPriority.comment.rawValue) {
         // Chuẩn hóa văn bản:
         // · ElevenLabs: GIỮ NGUYÊN văn bản gốc (model tự xử lý ngữ điệu/cảm xúc).
         // · Chị Google: chuẩn hóa đầy đủ (kèm mở rộng tiếng lóng).
@@ -208,11 +223,11 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
 
         switch engineType {
         case .google:
-            playGoogleTTS(t, priority: priority)
+            playGoogleTTS(t, level: level)
         case .siri:
             playSiriTTS(t)
         case .elevenlabs:
-            playElevenLabsTTS(t, priority: priority)
+            playElevenLabsTTS(t, level: level)
         case .system:
             playSystemTTS(t)
         }
@@ -221,11 +236,13 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     func stop() {
         synth.stopSpeaking(at: .immediate)
         googleQueue.removeAll()
+        googlePrio.removeAll()
         googleNextData = nil
         googleAudio?.stop()
         googleAudio = nil
         isPlayingGoogle = false
         elevenQueue.removeAll()
+        elevenPrio.removeAll()
         elevenPlayer?.stop()
         elevenPlayer = nil
         isPlayingEleven = false

@@ -166,17 +166,17 @@ private func hasAllCapsWord(_ text: String) -> Bool {
 // ======================== Giọng ElevenLabs (AI · đọc tiếng Việt) ========================
 extension TTSEngine {
 
-    func playElevenLabsTTS(_ text: String, priority: Bool = false) {
+    func playElevenLabsTTS(_ text: String, level: Int = TTSEngine.SpeakPriority.comment.rawValue) {
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
         let vid = elevenVoiceId.trimmingCharacters(in: .whitespaces)
         // Dùng ElevenLabs khi có Voice ID VÀ (key riêng của mình HOẶC key dùng chung của máy chủ).
         let canUse = !vid.isEmpty && (!key.isEmpty || (elevenServerKey && !serverBase.isEmpty))
         if canUse {
-            playElevenLabs(text, priority: priority)
+            playElevenLabs(text, level: level)
             return
         }
         // Chưa có Voice ID (hoặc chưa có key nào) → fallback Google TTS
-        playGoogleTTS(text, priority: priority)
+        playGoogleTTS(text, level: level)
     }
 
     // Hàm dự phòng: đọc bằng giọng Việt trên thiết bị khi Google TTS không khả dụng
@@ -197,11 +197,22 @@ extension TTSEngine {
         synth.speak(u)
     }
 
-    func playElevenLabs(_ text: String, priority: Bool = false) {
-        // Ưu tiên (follow/tặng quà/chia sẻ) → chèn LÊN ĐẦU để đọc trước bình luận thường.
-        // KHÔNG cắt bỏ hàng đợi nữa: đọc ĐẦY ĐỦ từng bình luận, xong mới sang cái kế tiếp.
-        if priority { elevenQueue.insert(text, at: 0) }
-        else { elevenQueue.append(text) }
+    func playElevenLabs(_ text: String, level: Int = TTSEngine.SpeakPriority.comment.rawValue) {
+        // Người vào phòng (mức thấp nhất): giữ tối đa `maxJoinBacklog` lời chào chờ đọc,
+        // bỏ bớt cái CŨ nhất để welcome luôn mới và không nghẽn bình luận.
+        if level == TTSEngine.SpeakPriority.join.rawValue {
+            let joinLevel = TTSEngine.SpeakPriority.join.rawValue
+            while elevenPrio.filter({ $0 == joinLevel }).count >= maxJoinBacklog,
+                  let first = elevenPrio.firstIndex(of: joinLevel) {
+                elevenQueue.remove(at: first)
+                elevenPrio.remove(at: first)
+            }
+        }
+        // Chèn theo mức ưu tiên: quà/follow/share > bình luận > người vào.
+        // Bình luận LUÔN chèn TRƯỚC các lời chào "người vào" đang chờ.
+        let idx = queueInsertIndex(elevenPrio, level: level)
+        elevenQueue.insert(text, at: idx)
+        elevenPrio.insert(level, at: idx)
         pendingCount = googleQueue.count + elevenQueue.count
         if !isPlayingEleven { playNextEleven() }
     }
@@ -210,6 +221,7 @@ extension TTSEngine {
         guard !elevenQueue.isEmpty else {
             isPlayingEleven = false
             isSpeaking = false
+            elevenPrio.removeAll()
             pendingCount = googleQueue.count
             updateNowPlaying(playing: false)
             return
@@ -218,6 +230,7 @@ extension TTSEngine {
         isSpeaking = true
         updateNowPlaying(playing: true)
         let text = elevenQueue.removeFirst()
+        if !elevenPrio.isEmpty { elevenPrio.removeFirst() }
         pendingCount = googleQueue.count + elevenQueue.count
         let key = elevenKey.trimmingCharacters(in: .whitespaces)
         let vid = elevenVoiceId.trimmingCharacters(in: .whitespaces)
