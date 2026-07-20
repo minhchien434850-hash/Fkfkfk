@@ -4679,9 +4679,9 @@ def _reader_token(uid: int) -> str:
     return hmac.new(SECRET.encode(), f"reader:{uid}".encode(), hashlib.sha256).hexdigest()[:24]
 
 def _reader_base_url() -> str:
-    # Ưu tiên setting riêng cho link trình đọc → biến môi trường → IP VPS mới (chạy HTTP).
+    # Ưu tiên setting riêng cho link trình đọc → biến môi trường → TÊN MIỀN HTTPS mới.
     return (get_setting("reader_base", "") or os.getenv("READER_BASE", "")
-            or "http://160.25.168.234").rstrip("/")
+            or "https://kenios.io.vn").rstrip("/")
 
 def _reader_cfg(tok: str) -> dict:
     raw = get_setting(f"reader_cfg_{tok}", "")
@@ -12371,9 +12371,9 @@ APP_BUNDLE_ID = os.getenv("APP_BUNDLE_ID", "com.kenios.codebox")
 
 def _ipa_base_url() -> str:
     # Domain HTTPS cho cài OTA. Ưu tiên cấu hình admin → biến môi trường →
-    # mặc định app.kenios.store (đã dựng sẵn) để KHÔNG cần cấu hình vẫn ký/cài được.
+    # mặc định TÊN MIỀN MỚI kenios.io.vn (có SSL).
     return (get_setting("ipa_sign_base", "") or os.getenv("IPA_SIGN_BASE", "")
-            or "https://app.kenios.store").rstrip("/")
+            or "https://kenios.io.vn").rstrip("/")
 
 def _extract_ipa_meta(ipa_path: str) -> dict:
     import zipfile, plistlib

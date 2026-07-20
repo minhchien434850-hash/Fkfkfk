@@ -112,6 +112,17 @@ final class AppStore: ObservableObject {
             }
             d.set(true, forKey: "didMigrateServer_v2_newIP")
         }
+        // v3 — chuyển sang TÊN MIỀN HTTPS mới (có SSL). Ai đang dùng IP VPS/tên miền cũ
+        // sẽ tự sang https://kenios.io.vn; nếu domain/SSL chưa sẵn sàng, app né sang IP.
+        let toDomainHosts = deadHosts + ["http://160.25.168.234", "https://160.25.168.234",
+                                         "http://160.25.168.234/", "https://160.25.168.234/"]
+        if !d.bool(forKey: "didMigrateServer_v3_domain") {
+            if savedURL.isEmpty || toDomainHosts.contains(savedURL) {
+                savedURL = Config.defaultServerURL
+                d.set(savedURL, forKey: "baseURL")
+            }
+            d.set(true, forKey: "didMigrateServer_v3_domain")
+        }
         baseURL = savedURL.isEmpty ? Config.defaultServerURL : savedURL
         serverType = d.string(forKey: "serverType") ?? Config.defaultServerType
         username = d.string(forKey: "username")
