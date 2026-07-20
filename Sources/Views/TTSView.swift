@@ -1233,6 +1233,11 @@ struct TTSView: View {
                 content = tr.text
             }
         }
+        // KIỂM SOÁT CHÍNH TẢ TRỰC TIẾP TRÊN BÌNH LUẬN — áp cho MỌI giọng (kể cả iOS/Siri):
+        // mở rộng tiếng lóng/viết tắt, phục hồi dấu chữ không dấu, đọc rõ chữ cái.
+        if !content.isEmpty {
+            content = VietnameseTextNormalizer.normalize(content)
+        }
         let template: String
         switch ev.type {
         case "join": template = templateJoin

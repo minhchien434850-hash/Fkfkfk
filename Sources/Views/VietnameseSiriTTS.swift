@@ -195,7 +195,16 @@ struct VietnameseTextNormalizer {
         "cuoi": "cười", "uong": "uống", "com": "cơm", "nuoc": "nước",
         "tien": "tiền", "tot": "tốt", "xau": "xấu", "som": "sớm",
         "chieu": "chiều", "that": "thật", "vay": "vậy", "gi": "gì",
-        "cuu": "cứu", "giup": "giúp", "luon": "luôn", "nhe": "nhé"
+        "cuu": "cứu", "giup": "giúp", "luon": "luôn", "nhe": "nhé",
+        // Bổ sung từ phổ biến (chọn nghĩa áp đảo trong văn nói/chat):
+        "toi": "tôi", "ban": "bạn", "lam": "làm", "cung": "cũng", "gio": "giờ",
+        "hom": "hôm", "noi": "nói", "di": "đi", "ve": "về", "den": "đến",
+        "lai": "lại", "len": "lên", "xuong": "xuống", "vao": "vào", "cua": "của",
+        "va": "và", "nhung": "nhưng", "neu": "nếu", "thi": "thì", "la": "là",
+        "co": "có", "can": "cần", "phai": "phải", "nen": "nên", "ghet": "ghét",
+        "chet": "chết", "hoc": "học", "lon": "lớn", "dai": "dài", "me": "mẹ",
+        "ong": "ông", "troi": "trời", "met": "mệt", "khoe": "khỏe",
+        "binh": "bình", "luan": "luận", "cam": "cảm", "ngheo": "nghèo"
     ]
 
     /// Tên chữ cái tiếng Việt để ĐÁNH VẦN rõ ràng (đọc "A" ra "a", "qr" ra "quy rờ")
