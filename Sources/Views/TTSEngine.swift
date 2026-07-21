@@ -203,34 +203,24 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     ]
 
     /// Từ khoá khiêu khích/anti để KÍCH HOẠT cà khịa (kèm dạng không dấu thường gặp).
-    private static let provokeWords: [String] = [
-        "ngu", "gà", "ga ", "dốt", "dot", "đần", "kém", "kem", "dở", "do te", "tệ",
-        "óc", "xấu", "xau", "rác", "rac", "vô dụng", "vo dung", "lừa", "lua dao",
-        "scam", "fake", "giả", "gia tao", "bịp", "bip", "lùa gà", "lua ga", "phèn",
-        "phen", "nổ", "chém gió", "chem gio", "ảo", "vl", "vcl", "clm", "đm", "dm",
-        "cc", "đmm", "vkl", "súc", "suc vat", "chửi", "chui", "đồ", "khịa", "khia"
+    private static let provokeWords: Set<String> = [
+        "ngu", "đần", "dan", "tuất", "tuat", "chó", "cho", "súc", "suc", "cút", "cut",
+        "khốn", "phò", "đĩ", "địt", "dit", "lồn", "buồi", "dái",
+        "cc", "cl", "clm", "đm", "dm", "đmm", "dmm", "đcm", "dcm", "đkm", "dkm",
+        "vl", "vcl", "vkl", "loz", "vloz", "cmm"
+    ]
+    /// Cụm nhiều từ toxic nặng (khớp nguyên cụm).
+    private static let provokePhrases: [String] = [
+        "hack ngu", "óc chó", "oc cho", "súc vật", "suc vat",
+        "vô học", "vo hoc", "mất dạy", "mat day", "im mồm", "im mom", "ngu người"
     ]
 
-    /// Câu cà khịa DO NGƯỜI DÙNG tự thêm trong app (lưu trên máy, không cần build lại).
-    @Published var customRoasts: [String] =
-        UserDefaults.standard.stringArray(forKey: "tts_custom_roasts") ?? [] {
-        didSet { UserDefaults.standard.set(customRoasts, forKey: "tts_custom_roasts") }
-    }
-
-    /// Thêm 1 câu cà khịa của người dùng (bỏ trùng & khoảng trắng thừa).
-    func addCustomRoast(_ s: String) {
-        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, !customRoasts.contains(t) else { return }
-        customRoasts.append(t)
-    }
-
-    /// Xoá 1 câu cà khịa của người dùng.
-    func removeCustomRoast(_ s: String) { customRoasts.removeAll { $0 == s } }
-
-    /// Có nên cà khịa lại bình luận này không (chứa từ khiêu khích)?
+    /// Có nên cà khịa lại bình luận này không — CHỈ khi có từ/cụm TOXIC NẶNG.
     func shouldRoast(_ comment: String) -> Bool {
-        let low = " " + comment.lowercased() + " "
-        return Self.provokeWords.contains { low.contains($0) }
+        let low = comment.lowercased()
+        for p in Self.provokePhrases where low.contains(p) { return true }
+        let tokens = Set(low.split { !$0.isLetter && !$0.isNumber }.map(String.init))
+        return !tokens.isDisjoint(with: Self.provokeWords)
     }
 
     /// Ghép tên vào câu cà khịa: có {name} thì thay bằng tên; không có thì chèn "tên ơi, " phía trước.
