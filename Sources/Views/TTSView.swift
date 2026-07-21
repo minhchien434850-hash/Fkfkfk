@@ -279,11 +279,11 @@ struct TTSView: View {
 
                         DisclosureGroup {
                             VStack(alignment: .leading, spacing: 8) {
-                                guideRow("1", "Đặt giọng ở app", "Chọn giọng (ElevenLabs/Google), Voice ID, tốc độ, loại sự kiện muốn đọc — rồi bấm “Tạo & đồng bộ đường dẫn”.")
-                                guideRow("2", "Sao chép đường dẫn", "Bấm “Sao chép”. Gửi/mở đường dẫn này trên MÁY TÍNH đang phát live.")
-                                guideRow("3", "Thêm vào OBS / TikTok Studio", "OBS: + → Browser → dán đường dẫn (bật “Control audio via OBS”). Hoặc chỉ cần mở đường dẫn bằng Chrome trên máy phát live.")
-                                guideRow("4", "Bấm “Bắt đầu đọc”", "Trên trang vừa mở, bấm “Bắt đầu đọc”. Nó tự kết nối phòng LIVE của bạn và đọc bình luận bằng đúng giọng đã đồng bộ.")
-                                Text("Lưu ý: đổi giọng/tốc độ trong app thì bấm “Cập nhật đồng bộ lại” rồi tải lại trang. Giọng ElevenLabs dùng key admin trên máy chủ (khách không cần key).")
+                                guideRow("1", "Chọn giọng ElevenLabs ở app", "Nên chọn động cơ ElevenLabs + Voice ID (giọng này phát qua máy chủ nên đọc được trong OBS). Chọn tốc độ, loại sự kiện — rồi bấm “Tạo & đồng bộ đường dẫn”.")
+                                guideRow("2", "Sao chép đường dẫn", "Bấm “Sao chép”. Dùng đường dẫn này cho OBS hoặc mở bằng Chrome trên máy phát live.")
+                                guideRow("3", "Thêm vào OBS / TikTok Studio", "OBS: + → Browser → dán đường dẫn, TICK “Control audio via OBS”. Trang TỰ ĐỘNG kết nối & đọc — KHÔNG cần bấm gì (OBS không bấm nút được).")
+                                guideRow("4", "Xong — đọc tự động", "Vừa thêm vào OBS là nó tự kết nối phòng LIVE và đọc bình luận bằng đúng giọng đã đồng bộ. Mở bằng Chrome cũng tự đọc (nếu bị chặn tiếng thì chạm 1 lần vào trang).")
+                                Text("Lưu ý: OBS đọc tốt nhất với giọng ElevenLabs (giọng trình duyệt không có tiếng Việt trong OBS). Đổi giọng/tốc độ thì bấm “Cập nhật đồng bộ lại” rồi tải lại nguồn (refresh cache) trong OBS.")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }.padding(.top, 4)
                         } label: {

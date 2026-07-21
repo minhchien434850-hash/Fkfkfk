@@ -4990,6 +4990,15 @@ async function start(){var r=await fetch(API+"/live-reader/data?k="+TOKEN);if(!r
 function stop(){running=false;if(poll)clearTimeout(poll);q=[];playing=false;try{speechSynthesis.cancel();$("au").pause();}catch(e){}
  $("go").textContent="▶️ Bắt đầu đọc";$("go").classList.remove("stop");setStatus("đã dừng");}
 $("go").onclick=function(){running?stop():start();};
+// TỰ ĐỘNG chạy khi mở trang (cho OBS / TikTok Studio Browser Source — KHÔNG cần bấm).
+// OBS cho phép autoplay nên đọc được luôn. Thử lại vài lần nếu mạng/khởi động chậm.
+var _autoTries=0;
+function autoStart(){ if(running)return; _autoTries++; try{ start(); }catch(e){}
+  if(_autoTries<5){ setTimeout(function(){ if(!running) autoStart(); }, 3000); } }
+if(document.readyState==="complete"||document.readyState==="interactive"){ setTimeout(autoStart,300); }
+else{ window.addEventListener("DOMContentLoaded",function(){ setTimeout(autoStart,300); }); }
+// Trong trình duyệt thường (Chrome) autoplay có thể bị chặn tới khi có tương tác — chạm 1 lần là chạy.
+document.addEventListener("click",function(){ if(!running) start(); },{once:true});
 </script></body></html>"""
 
 @app.get("/r/{tok}", response_class=HTMLResponse)
