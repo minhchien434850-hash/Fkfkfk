@@ -87,10 +87,10 @@ struct VietnameseTextNormalizer {
         "sll": "số lượng lớn", "fomo": "phô mô", "ot": "tăng ca", "bst": "bộ sưu tập",
         "sgbb": "sư gơ bây bi", "sgdd": "sư gơ đe đi",
         // --- Tiếng lóng có nghĩa (đọc rõ nghĩa) ---
-        "gato": "ghen ăn tức ở", "flex": "khoe khoang", "slay": "đỉnh cao",
+        "gato": "ghen ăn tức ở",
         "trapboy": "kẻ lừa tình", "trapgirl": "kẻ lừa tình",
         "redflag": "cờ đỏ", "greenflag": "cờ xanh", "mukbang": "mấc banh",
-        "vlog": "vê lốc", "ode": "làm quá", "checkvar": "chéc va", "quayxe": "quay xe",
+        "vlog": "vê lốc", "checkvar": "chéc va", "quayxe": "quay xe",
         "etoet": "cứu với", "xinvia": "xin vía", "travia": "trả vía",
         "dinhchop": "đỉnh chóp", "xitkeo": "xịt keo", "phongbat": "phông bạt",
         "cmn": "chuẩn mẹ nó", "cmnr": "chuẩn mẹ nó rồi", "cmnl": "chuẩn mẹ nó luôn",
