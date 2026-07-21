@@ -2531,10 +2531,34 @@ def _backup_make_zip(include_uploads: bool = True) -> str:
         import shutil as _sh
         _sh.copy2(DB_PATH, db_snapshot)
     n_files = 0; total_bytes = 0
+    n_members = -1
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(db_snapshot, "kenios.db")
         if os.path.exists(_key_file):
             z.write(_key_file, "kenios_enc.key")
+        # DANH SÁCH THÀNH VIÊN + GÓI (đọc được NGAY, không cần mở DB) — JSON + CSV.
+        # Bắt buộc có trong MỌI bản backup: đầy đủ tài khoản + gói (plan) + hạn dùng.
+        try:
+            import json as _json, csv as _csv, io as _io
+            _u = sqlite3.connect(db_snapshot)
+            _u.row_factory = sqlite3.Row
+            _cols = [r[1] for r in _u.execute("PRAGMA table_info(users)").fetchall()]
+            _want = [c for c in ["id", "username", "email", "phone", "is_admin",
+                                 "banned", "plan", "plan_expires", "credits",
+                                 "lang", "created_at"] if c in _cols]
+            _rows = _u.execute(f"SELECT {','.join(_want)} FROM users ORDER BY id").fetchall()
+            _u.close()
+            _members = [dict(r) for r in _rows]
+            z.writestr("members.json", _json.dumps(_members, ensure_ascii=False, indent=2))
+            _buf = _io.StringIO()
+            _w = _csv.DictWriter(_buf, fieldnames=_want)
+            _w.writeheader()
+            for _m in _members:
+                _w.writerow(_m)
+            z.writestr("members.csv", _buf.getvalue())
+            n_members = len(_members)
+        except Exception as _e:
+            log.warning("Backup: không xuất được danh sách thành viên: %s", _e)
         # ĐÓNG GÓI TOÀN BỘ file đã tải lên (âm thanh/ảnh/media/file sản phẩm).
         if include_uploads and os.path.isdir(UPLOAD_DIR):
             for root, _dirs, files in os.walk(UPLOAD_DIR):
@@ -2552,6 +2576,7 @@ def _backup_make_zip(include_uploads: bool = True) -> str:
         # Ghi kèm mốc thời gian + thống kê để biết bản này của lúc nào
         z.writestr("backup_info.txt",
                    f"KENIOS backup\ncreated_utc={time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())}\n"
+                   f"members={n_members}\n"
                    f"uploads_included={'1' if include_uploads else '0'}\n"
                    f"uploads_files={n_files}\nuploads_bytes={total_bytes}\n")
     try: os.remove(db_snapshot)
