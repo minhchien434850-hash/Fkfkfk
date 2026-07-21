@@ -72,6 +72,8 @@ struct TTSView: View {
 
     // ----- Model ElevenLabs — cho MỌI thành viên tự chọn (đồng bộ theo tài khoản) -----
     @AppStorage("eleven_model") private var elevenModel = "eleven_multilingual_v2"
+    // Biểu cảm tự động v3 — MẶC ĐỊNH TẮT (bật lên dễ đọc lệch ngữ cảnh tiếng Việt).
+    @AppStorage("eleven_auto_emotion") private var elevenAutoEmotion = false
     private let elevenModels: [(id: String, label: String, desc: String)] = [
         ("eleven_v3",              "Eleven v3 ✦ Biểu cảm nhất (mới)", "Model mới nhất — ngữ điệu & cảm xúc tự nhiên nhất. Cần key/gói hỗ trợ v3."),
         ("eleven_multilingual_v2", "Multilingual v2 ✦ Ổn định",       "Đọc tiếng Việt chuẩn, hoạt động với MỌI key. Nên chọn nếu v3 báo lỗi."),
@@ -705,6 +707,15 @@ struct TTSView: View {
             }
             Text("Chọn v3 để biểu cảm nhất (cần key/gói hỗ trợ v3). Nếu v3 báo lỗi/không đọc, chọn Multilingual v2 — chạy với mọi key.")
                 .font(.caption2).foregroundStyle(.secondary)
+
+            if elevenModel == "eleven_v3" {
+                Divider().padding(.vertical, 2)
+                Toggle(isOn: $elevenAutoEmotion) {
+                    Label("Biểu cảm tự động (v3)", systemImage: "theatermasks.fill").font(.subheadline)
+                }.tint(Theme.accent)
+                Text("TẮT (khuyên dùng): v3 đọc tiếng Việt tự nhiên, ĐÚNG ngữ cảnh. BẬT: tự chèn cảm xúc — sinh động hơn nhưng đôi khi đọc lệch ngữ điệu tiếng Việt.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -36,14 +36,17 @@ func elevenLabsRequestBody(text: String, model: String,
     return body
 }
 
-// v3: tự thêm thẻ cảm xúc theo nội dung (chỉ v3; tôn trọng công tắc; không thêm nếu đã có thẻ).
-// Dùng chung cho cả đường GỌI TRỰC TIẾP lẫn GỌI QUA MÁY CHỦ (dùng chung 1 cách xử lý text).
+// v3: tự thêm thẻ cảm xúc theo nội dung — MẶC ĐỊNH TẮT (thẻ cảm xúc tối ưu cho tiếng Anh,
+// nhét vào câu tiếng Việt dễ làm v3 đọc SAI NGỮ CẢNH). Chỉ thêm khi người dùng BẬT rõ ràng.
+// Khi bật cũng CHỈ chèn TỐI ĐA 1 thẻ để hạn chế lệch ngữ điệu tiếng Việt.
 func elevenAugmentedText(_ text: String, model: String) -> String {
     guard model == "eleven_v3",
-          UserDefaults.standard.object(forKey: "eleven_auto_emotion") as? Bool != false else { return text }
+          UserDefaults.standard.bool(forKey: "eleven_auto_emotion") else { return text }
     let tag = elevenLabsAutoEmotionTag(for: text)
     if !tag.isEmpty && !text.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
-        return tag + " " + text
+        // Chỉ lấy thẻ ĐẦU TIÊN (1 thẻ) — nhiều thẻ càng làm v3 đọc lệch tiếng Việt.
+        let firstTag = tag.split(separator: "]").first.map { String($0) + "]" } ?? tag
+        return firstTag + " " + text
     }
     return text
 }

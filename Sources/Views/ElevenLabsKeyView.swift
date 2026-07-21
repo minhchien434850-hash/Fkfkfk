@@ -17,7 +17,7 @@ struct ElevenLabsKeyView: View {
     @State private var draftVoiceId: String = ""
     @State private var selectedModel: String = UserDefaults.standard.string(forKey: "eleven_model") ?? "eleven_multilingual_v2"
     // v3: tự thêm thẻ cảm xúc theo nội dung bình luận (mặc định BẬT)
-    @State private var autoEmotion: Bool = (UserDefaults.standard.object(forKey: "eleven_auto_emotion") as? Bool) ?? true
+    @State private var autoEmotion: Bool = UserDefaults.standard.bool(forKey: "eleven_auto_emotion")
     // Tốc độ đọc (0.7 chậm → 1.2 nhanh). Ai cũng chỉnh được (lưu trên máy).
     @State private var speed: Double = (UserDefaults.standard.object(forKey: "eleven_speed") as? Double) ?? 1.0
     @State private var testStatus: TestStatus = .idle

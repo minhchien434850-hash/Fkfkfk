@@ -23,7 +23,8 @@ enum TTSSettingsSync {
     static let doubleKeys = ["eleven_speed", "tts_auto_announce_minutes"]
     static let floatKeys  = ["tts_rate", "tts_pitch", "tts_volume"]
     static let boolKeys   = ["tts_translate_to_vi", "tts_only_vi_voices",
-                             "tts_auto_announce_on", "tts_auto_roast_on"]
+                             "tts_auto_announce_on", "tts_auto_roast_on",
+                             "eleven_auto_emotion"]
     static let stringArrayKeys = ["tts_custom_roasts"]
 
     static func snapshotJSON() -> String {
