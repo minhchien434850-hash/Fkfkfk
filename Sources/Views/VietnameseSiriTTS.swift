@@ -48,6 +48,7 @@ struct VietnameseTextNormalizer {
         "tbn": "thế mới nói", "th": "trường hợp", "chg": "chẳng",
         "qtqd": "quá trời quá đất",
         // --- Động từ / tính từ / trạng từ ---
+        "chs": "chơi", "ah": "anh",
         "ns": "nói", "nc": "nói chuyện", "bl": "bình luận", "cmt": "bình luận",
         "stt": "trạng thái", "tl": "trả lời", "rep": "trả lời", "nt": "nhắn tin",
         "ib": "nhắn tin riêng", "pm": "nhắn tin riêng",
