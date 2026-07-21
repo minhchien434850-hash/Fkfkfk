@@ -216,6 +216,22 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         "vô học", "vo hoc", "mất dạy", "mat day", "im mồm", "im mom", "ngu người"
     ]
 
+    /// Câu cà khịa DO NGƯỜI DÙNG tự thêm trong app (lưu trên máy, không cần build lại).
+    @Published var customRoasts: [String] =
+        UserDefaults.standard.stringArray(forKey: "tts_custom_roasts") ?? [] {
+        didSet { UserDefaults.standard.set(customRoasts, forKey: "tts_custom_roasts") }
+    }
+
+    /// Thêm 1 câu cà khịa của người dùng (bỏ trùng & khoảng trắng thừa).
+    func addCustomRoast(_ s: String) {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !customRoasts.contains(t) else { return }
+        customRoasts.append(t)
+    }
+
+    /// Xoá 1 câu cà khịa của người dùng.
+    func removeCustomRoast(_ s: String) { customRoasts.removeAll { $0 == s } }
+
     /// Có nên cà khịa lại bình luận này không — CHỈ khi có từ/cụm TOXIC NẶNG.
     func shouldRoast(_ comment: String) -> Bool {
         let low = comment.lowercased()
