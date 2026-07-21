@@ -1050,6 +1050,8 @@ def _migrate() -> None:
         ("payments", "plan_days", "INTEGER DEFAULT 0"),
         # Âm thanh thông báo (quà/follow/share) lưu theo user → cài lại app/build lại vẫn còn
         ("users", "notif_sounds", "TEXT"),
+        # Thiết lập TTS (giọng/tốc độ/mẫu câu/cà khịa…) lưu theo user → xoá app cài lại vẫn còn
+        ("users", "tts_settings", "TEXT"),
         # §1.1 — Ảnh đính kèm thông báo (rich notification có hình sản phẩm)
         ("notifications", "image", "TEXT DEFAULT ''"),
         # §7 Đợt 1 — Giao diện + hồ sơ cửa hàng cá nhân (ảnh bìa + slogan riêng)
@@ -2395,6 +2397,26 @@ def save_notif_sounds(b: NotifSoundsIn, admin=Depends(get_admin)) -> dict[str, A
 def get_notif_sounds(user=Depends(get_user)) -> dict[str, Any]:
     """Đọc bộ âm thanh thông báo dùng chung (admin đã đồng bộ) — khách nào cũng tải được."""
     return {"json": get_setting("notif_sounds_global", "")}
+
+
+class TTSSettingsIn(BaseModel):
+    json: str   # chuỗi JSON các thiết lập TTS (giọng, tốc độ, mẫu câu, cà khịa…) của user
+
+
+@app.post("/tts/settings")
+def save_tts_settings(b: TTSSettingsIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Lưu thiết lập TTS THEO TÀI KHOẢN → đổi máy / xoá app cài lại vẫn giữ nguyên."""
+    with db() as c:
+        c.execute("UPDATE users SET tts_settings=? WHERE id=?", (b.json, user["id"]))
+    return {"ok": True}
+
+
+@app.get("/tts/settings")
+def get_tts_settings(user=Depends(get_user)) -> dict[str, Any]:
+    """Lấy thiết lập TTS đã lưu của tài khoản (rỗng nếu chưa từng đồng bộ)."""
+    with db() as c:
+        row = c.execute("SELECT tts_settings FROM users WHERE id=?", (user["id"],)).fetchone()
+    return {"json": (row["tts_settings"] if row and row["tts_settings"] else "")}
 
 
 # ============ ElevenLabs DÙNG CHUNG: ADMIN đặt API key 1 lần → MỌI khách dùng ============

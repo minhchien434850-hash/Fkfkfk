@@ -60,12 +60,15 @@ struct TTSView: View {
     @State private var readerBusy = false
     @State private var readerMsg: String?
 
-    // ----- Cấu hình câu phát (greetings) -----
-    @State private var templateJoin = UserDefaults.standard.string(forKey: "tts_event_template_join") ?? "Chào mừng {name} đã vào phòng"
-    @State private var templateGift = UserDefaults.standard.string(forKey: "tts_event_template_gift") ?? "Cảm ơn {name} đã tặng {content}"
-    @State private var templateComment = UserDefaults.standard.string(forKey: "tts_event_template_comment") ?? "{name} bình luận: {content}"
-    @State private var templateFollow = UserDefaults.standard.string(forKey: "tts_event_template_follow") ?? "Cảm ơn {name} đã theo dõi"
-    @State private var templateShare = UserDefaults.standard.string(forKey: "tts_event_template_share") ?? "Cảm ơn {name} đã chia sẻ live"
+    // ----- Cấu hình câu phát (greetings) — @AppStorage: tự lưu & tự cập nhật khi đồng bộ -----
+    @AppStorage("tts_event_template_join") private var templateJoin = "Chào mừng {name} đã vào phòng"
+    @AppStorage("tts_event_template_gift") private var templateGift = "Cảm ơn {name} đã tặng {content}"
+    @AppStorage("tts_event_template_comment") private var templateComment = "{name} bình luận: {content}"
+    @AppStorage("tts_event_template_follow") private var templateFollow = "Cảm ơn {name} đã theo dõi"
+    @AppStorage("tts_event_template_share") private var templateShare = "Cảm ơn {name} đã chia sẻ live"
+
+    // Cờ đã kéo cấu hình TTS từ máy chủ về (chỉ kéo 1 lần mỗi phiên).
+    @State private var ttsSyncedFromServer = false
 
     // Cache danh sách giọng 1 lần khi mở app (speechVoices() rất nặng — tránh gọi mỗi lần render gây lag/đứng)
     private static let cachedVoices: [AVSpeechSynthesisVoice] =
@@ -569,7 +572,39 @@ struct TTSView: View {
                     tts.elevenServerKey = (cfg.elevenServerKey ?? false)
                 }
             }
+            // ĐỒNG BỘ THIẾT LẬP TTS TỪ MÁY CHỦ (theo tài khoản) — chỉ kéo 1 lần mỗi phiên.
+            .task { await pullTTSSettings() }
+            // Rời màn / đổi tab → đẩy thiết lập hiện tại lên máy chủ để lưu.
+            .onDisappear { pushTTSSettings() }
+            // App vào nền → cũng lưu (phòng khi bị tắt app mà chưa rời màn).
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                pushTTSSettings()
+            }
         }
+    }
+
+    /// Kéo cấu hình TTS đã lưu trên máy chủ về & áp dụng (1 lần/phiên). Nếu máy chủ chưa có
+    /// thì đẩy cấu hình hiện tại lên để lần sau có.
+    private func pullTTSSettings() async {
+        guard !ttsSyncedFromServer, store.token != nil else { return }
+        ttsSyncedFromServer = true
+        if let json = try? await store.api.getTTSSettings(), !json.isEmpty {
+            if TTSSettingsSync.apply(json: json) {
+                tts.reloadFromDefaults()
+                readTypes = TTSView.loadReadTypes()   // @State cần nạp lại thủ công
+            }
+        } else {
+            // Máy chủ chưa có → lưu cấu hình hiện tại lên để đồng bộ về sau.
+            pushTTSSettings()
+        }
+    }
+
+    /// Đẩy toàn bộ thiết lập TTS hiện tại lên máy chủ (theo tài khoản).
+    private func pushTTSSettings() {
+        guard store.token != nil else { return }
+        let json = TTSSettingsSync.snapshotJSON()
+        guard !json.isEmpty else { return }
+        Task { try? await store.api.saveTTSSettings(json) }
     }
 
     // ----- Âm thanh thông báo cho 3 sự kiện: tặng quà · follow · chia sẻ -----

@@ -10,6 +10,50 @@ import MediaPlayer
 //   • TTSEngine+ElevenLabs.swift  — giọng ElevenLabs (AI)
 //   • TTSEngine+Sounds.swift      — âm thanh thông báo (quà/follow/share)
 //   • TTSEngine+Background.swift  — chạy nền, Now Playing, Control Center
+/// Gói toàn bộ thiết lập TTS trong UserDefaults thành JSON để ĐỒNG BỘ LÊN MÁY CHỦ
+/// (theo tài khoản) — đổi máy / xoá app cài lại vẫn giữ nguyên.
+enum TTSSettingsSync {
+    static let stringKeys = [
+        "tts_engine_type", "tts_system_voice_id", "tts_siri_voice_id",
+        "eleven_voice_id", "eleven_voice_name", "eleven_tone_id", "eleven_model",
+        "tts_tiktok_id", "tts_read_types", "tts_auto_announce_text",
+        "tts_event_template_join", "tts_event_template_gift", "tts_event_template_comment",
+        "tts_event_template_follow", "tts_event_template_share"
+    ]
+    static let doubleKeys = ["eleven_speed", "tts_auto_announce_minutes"]
+    static let floatKeys  = ["tts_rate", "tts_pitch", "tts_volume"]
+    static let boolKeys   = ["tts_translate_to_vi", "tts_only_vi_voices",
+                             "tts_auto_announce_on", "tts_auto_roast_on"]
+    static let stringArrayKeys = ["tts_custom_roasts"]
+
+    static func snapshotJSON() -> String {
+        let d = UserDefaults.standard
+        var out: [String: Any] = [:]
+        for k in stringKeys { if let v = d.string(forKey: k) { out[k] = v } }
+        for k in doubleKeys { if d.object(forKey: k) != nil { out[k] = d.double(forKey: k) } }
+        for k in floatKeys  { if d.object(forKey: k) != nil { out[k] = Double(d.float(forKey: k)) } }
+        for k in boolKeys   { if d.object(forKey: k) != nil { out[k] = d.bool(forKey: k) } }
+        for k in stringArrayKeys { if let v = d.stringArray(forKey: k) { out[k] = v } }
+        guard let data = try? JSONSerialization.data(withJSONObject: out),
+              let s = String(data: data, encoding: .utf8) else { return "" }
+        return s
+    }
+
+    /// Ghi cấu hình từ máy chủ vào UserDefaults. Trả về true nếu có áp dụng gì đó.
+    @discardableResult
+    static func apply(json: String) -> Bool {
+        guard let data = json.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+        let d = UserDefaults.standard
+        for k in stringKeys { if let v = obj[k] as? String { d.set(v, forKey: k) } }
+        for k in doubleKeys { if let v = obj[k] as? NSNumber { d.set(v.doubleValue, forKey: k) } }
+        for k in floatKeys  { if let v = obj[k] as? NSNumber { d.set(v.floatValue, forKey: k) } }
+        for k in boolKeys   { if let v = obj[k] as? NSNumber { d.set(v.boolValue, forKey: k) } }
+        for k in stringArrayKeys { if let v = obj[k] as? [String] { d.set(v, forKey: k) } }
+        return !obj.isEmpty
+    }
+}
+
 final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     enum EngineType: String, CaseIterable, Identifiable {
         case system = "system"
@@ -422,6 +466,26 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     deinit {
         autoAnnounceTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
+    }
+
+    /// Nạp lại các thiết lập @Published từ UserDefaults (sau khi kéo cấu hình từ máy chủ về).
+    func reloadFromDefaults() {
+        let d = UserDefaults.standard
+        if let s = d.string(forKey: "tts_engine_type"), let t = EngineType(rawValue: s) { engineType = t }
+        if let v = d.string(forKey: "tts_system_voice_id"), !v.isEmpty { voiceId = v }
+        siriVoiceId = d.string(forKey: "tts_siri_voice_id") ?? siriVoiceId
+        elevenVoiceId = d.string(forKey: "eleven_voice_id") ?? elevenVoiceId
+        elevenVoiceName = d.string(forKey: "eleven_voice_name") ?? elevenVoiceName
+        elevenToneId = d.string(forKey: "eleven_tone_id") ?? elevenToneId
+        if d.object(forKey: "eleven_speed") != nil { elevenSpeed = d.double(forKey: "eleven_speed") }
+        if d.object(forKey: "tts_rate") != nil { rate = d.float(forKey: "tts_rate") }
+        if d.object(forKey: "tts_pitch") != nil { pitch = d.float(forKey: "tts_pitch") }
+        if d.object(forKey: "tts_volume") != nil { volume = d.float(forKey: "tts_volume") }
+        autoAnnounceText = d.string(forKey: "tts_auto_announce_text") ?? autoAnnounceText
+        if d.object(forKey: "tts_auto_announce_minutes") != nil { autoAnnounceMinutes = d.double(forKey: "tts_auto_announce_minutes") }
+        if d.object(forKey: "tts_auto_announce_on") != nil { autoAnnounceOn = d.bool(forKey: "tts_auto_announce_on") }
+        if d.object(forKey: "tts_auto_roast_on") != nil { autoRoastOn = d.bool(forKey: "tts_auto_roast_on") }
+        customRoasts = d.stringArray(forKey: "tts_custom_roasts") ?? customRoasts
     }
 
     // delegate AVSpeechSynthesizer

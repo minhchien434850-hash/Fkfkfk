@@ -179,6 +179,16 @@ struct APIClient {
         let r: R = try decode(try await send("/notif-sounds", auth: true))
         return r.json
     }
+    /// Lưu thiết lập TTS THEO TÀI KHOẢN lên máy chủ (đổi máy / xoá app cài lại vẫn còn).
+    func saveTTSSettings(_ json: String) async throws {
+        _ = try await send("/tts/settings", method: "POST", json: ["json": json])
+    }
+    /// Lấy thiết lập TTS đã lưu của tài khoản — trả về chuỗi JSON ("" nếu chưa từng đồng bộ).
+    func getTTSSettings() async throws -> String {
+        struct R: Decodable { let json: String }
+        let r: R = try decode(try await send("/tts/settings", auth: true))
+        return r.json
+    }
     func forgot(_ username: String) async throws -> ForgotResponse {
         try decode(try await send("/auth/forgot-password", method: "POST",
                                   json: ["username": username], auth: false))
