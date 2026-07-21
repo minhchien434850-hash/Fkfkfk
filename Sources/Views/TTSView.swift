@@ -33,18 +33,26 @@ struct TTSView: View {
     // ----- Câu cà khịa tự thêm -----
     @State private var newRoast = ""
 
-    // ----- Dịch tự động sang tiếng Việt + lọc giọng -----
-    @State private var translateToVi = true
-    @State private var onlyVietnameseVoices = false
+    // ----- Dịch tự động sang tiếng Việt + lọc giọng (LƯU LẠI — giữ nguyên khi mở lại app) -----
+    @AppStorage("tts_translate_to_vi") private var translateToVi = true
+    @AppStorage("tts_only_vi_voices") private var onlyVietnameseVoices = false
 
     // ----- TikTok Live: tự động đọc bình luận (như TikFinity) -----
-    @State private var tiktokId = ""
+    @AppStorage("tts_tiktok_id") private var tiktokId = ""
     @State private var liveConnected = false
     @State private var liveStatus = ""
     @State private var liveError: String?
     @State private var lastEventId = 0
     @State private var pollTask: Task<Void, Never>?
-    @State private var readTypes: Set<String> = ["comment", "gift", "follow", "share", "join"]
+    @State private var readTypes: Set<String> = TTSView.loadReadTypes()
+
+    // Loại sự kiện đọc — nhớ lại lựa chọn (lưu chuỗi phân tách bằng dấu phẩy).
+    private static func loadReadTypes() -> Set<String> {
+        if let s = UserDefaults.standard.string(forKey: "tts_read_types") {
+            return Set(s.split(separator: ",").map(String.init))
+        }
+        return ["comment", "gift", "follow", "share", "join"]
+    }
     @State private var liveFeed: [TikTokLiveEvent] = []
     @State private var liveCounts: [String: Int] = [:]   // chẩn đoán: máy chủ NHẬN được loại nào
     // ----- Trình đọc trên trình duyệt (TikTok Studio / OBS) -----
@@ -548,6 +556,9 @@ struct TTSView: View {
                 .padding()
             }
             .navigationTitle(store.t("Đọc (TTS)", "Read (TTS)"))
+            .onChange(of: readTypes) { v in
+                UserDefaults.standard.set(v.sorted().joined(separator: ","), forKey: "tts_read_types")
+            }
             // Tải lại kho âm DÙNG CHUNG mỗi khi mở màn (ai thêm thì mọi người đều thấy)
             .task { await store.loadNotifSounds(); tts.reloadNotif() }
             .task {

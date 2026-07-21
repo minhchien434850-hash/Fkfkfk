@@ -238,7 +238,9 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     @Published var isSpeaking = false
     @Published var isPaused = false
 
-    @Published var voiceId: String = ""          // identifier của AVSpeechSynthesisVoice
+    @Published var voiceId: String = UserDefaults.standard.string(forKey: "tts_system_voice_id") ?? "" {
+        didSet { UserDefaults.standard.set(voiceId, forKey: "tts_system_voice_id") }   // nhớ giọng hệ thống đã chọn
+    }
     // Giọng riêng cho chế độ "Giọng Siri (iOS)" — người dùng tự chọn trong app, app nhớ lại.
     @Published var siriVoiceId: String = UserDefaults.standard.string(forKey: "tts_siri_voice_id") ?? "" {
         didSet { UserDefaults.standard.set(siriVoiceId, forKey: "tts_siri_voice_id") }
@@ -276,11 +278,13 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
     override init() {
         super.init()
         synth.delegate = self
-        // chọn mặc định 1 giọng tiếng Việt nếu có
-        if let vi = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.language.hasPrefix("vi") }) {
-            voiceId = vi.identifier
-        } else if let any = AVSpeechSynthesisVoice.speechVoices().first {
-            voiceId = any.identifier
+        // CHỈ chọn giọng mặc định khi CHƯA có giọng đã lưu (giữ nguyên lựa chọn của người dùng).
+        if voiceId.isEmpty {
+            if let vi = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.language.hasPrefix("vi") }) {
+                voiceId = vi.identifier
+            } else if let any = AVSpeechSynthesisVoice.speechVoices().first {
+                voiceId = any.identifier
+            }
         }
 
         if let savedEngine = UserDefaults.standard.string(forKey: "tts_engine_type"),
