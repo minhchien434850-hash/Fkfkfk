@@ -70,6 +70,15 @@ struct TTSView: View {
     // Cờ đã kéo cấu hình TTS từ máy chủ về (chỉ kéo 1 lần mỗi phiên).
     @State private var ttsSyncedFromServer = false
 
+    // ----- Model ElevenLabs — cho MỌI thành viên tự chọn (đồng bộ theo tài khoản) -----
+    @AppStorage("eleven_model") private var elevenModel = "eleven_multilingual_v2"
+    private let elevenModels: [(id: String, label: String, desc: String)] = [
+        ("eleven_v3",              "Eleven v3 ✦ Biểu cảm nhất (mới)", "Model mới nhất — ngữ điệu & cảm xúc tự nhiên nhất. Cần key/gói hỗ trợ v3."),
+        ("eleven_multilingual_v2", "Multilingual v2 ✦ Ổn định",       "Đọc tiếng Việt chuẩn, hoạt động với MỌI key. Nên chọn nếu v3 báo lỗi."),
+        ("eleven_flash_v2_5",      "Flash v2.5 ⚡ Nhanh & rẻ",         "Tốc độ cao, tốn ít credit hơn ~3×. Tiếng Việt khá tốt."),
+        ("eleven_turbo_v2_5",      "Turbo v2.5",                       "Cân bằng giữa tốc độ và chất lượng."),
+    ]
+
     // Cache danh sách giọng 1 lần khi mở app (speechVoices() rất nặng — tránh gọi mỗi lần render gây lag/đứng)
     private static let cachedVoices: [AVSpeechSynthesisVoice] =
         AVSpeechSynthesisVoice.speechVoices().sorted { ($0.language, $0.name) < ($1.language, $1.name) }
@@ -467,6 +476,11 @@ struct TTSView: View {
                         if tts.engineType == .elevenlabs && store.isPro {
                             Divider().padding(.vertical, 4)
 
+                            // --- Chọn MODEL ElevenLabs (MỌI thành viên chọn được) ---
+                            elevenModelPicker
+
+                            Divider().padding(.vertical, 4)
+
                             // --- Chọn tông giọng ElevenLabs ---
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Tông giọng ElevenLabs")
@@ -659,6 +673,38 @@ struct TTSView: View {
                       systemImage: "checkmark.circle.fill")
                     .font(.caption2).foregroundStyle(.green)
             }
+        }
+    }
+
+    // ----- Chọn MODEL ElevenLabs — hiện ngoài màn TTS cho mọi thành viên -----
+    @ViewBuilder private var elevenModelPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Model ElevenLabs").font(.caption).foregroundStyle(.secondary)
+            ForEach(elevenModels, id: \.id) { m in
+                let on = elevenModel == m.id
+                Button {
+                    elevenModel = m.id
+                    UserDefaults.standard.set(m.id, forKey: "eleven_model")
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: on ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(on ? Color.green : Theme.accent)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(m.label).font(.subheadline.bold())
+                                .foregroundStyle(on ? Color.green : .primary)
+                            Text(m.desc).font(.caption2).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                    }
+                    .padding(.vertical, 6).padding(.horizontal, on ? 8 : 0)
+                    .background(on ? Color.green.opacity(0.10) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain)
+            }
+            Text("Chọn v3 để biểu cảm nhất (cần key/gói hỗ trợ v3). Nếu v3 báo lỗi/không đọc, chọn Multilingual v2 — chạy với mọi key.")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
