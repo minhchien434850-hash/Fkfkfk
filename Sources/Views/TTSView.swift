@@ -708,14 +708,12 @@ struct TTSView: View {
             Text("Chọn v3 để biểu cảm nhất (cần key/gói hỗ trợ v3). Nếu v3 báo lỗi/không đọc, chọn Multilingual v2 — chạy với mọi key.")
                 .font(.caption2).foregroundStyle(.secondary)
 
-            if elevenModel == "eleven_v3" {
-                Divider().padding(.vertical, 2)
-                Toggle(isOn: $elevenAutoEmotion) {
-                    Label("Biểu cảm tự động (v3)", systemImage: "theatermasks.fill").font(.subheadline)
-                }.tint(Theme.accent)
-                Text("TẮT (khuyên dùng): v3 đọc tiếng Việt tự nhiên, ĐÚNG ngữ cảnh. BẬT: tự chèn cảm xúc — sinh động hơn nhưng đôi khi đọc lệch ngữ điệu tiếng Việt.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
+            Divider().padding(.vertical, 2)
+            Toggle(isOn: $elevenAutoEmotion) {
+                Label("Biểu cảm tự động (v3)", systemImage: "theatermasks.fill").font(.subheadline)
+            }.tint(Theme.accent)
+            Text("Chỉ áp dụng cho model v3. TẮT (khuyên dùng): đọc tiếng Việt tự nhiên, ĐÚNG ngữ cảnh. BẬT: tự chèn cảm xúc — sinh động hơn nhưng đôi khi đọc lệch ngữ điệu tiếng Việt. Ai cũng bật/tắt được.")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
