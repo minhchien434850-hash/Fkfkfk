@@ -4687,103 +4687,127 @@ async def _tiktok_live_runner(username: str) -> None:
         else:
             sess["events"].append(item)
 
-    client = TikTokLiveClient(unique_id=f"@{username}")
-    sess["client"] = client
+    state = {"connected": False}
 
-    @client.on(ConnectEvent)
-    async def _on_connect(_e):
-        sess["status"] = "connected"
+    def _build_and_register():
+        client = TikTokLiveClient(unique_id=f"@{username}")
+        sess["client"] = client
 
-    @client.on(CommentEvent)
-    async def _on_comment(e):
-        u = getattr(e, "user", None)
-        name = (getattr(u, "nickname", "") or getattr(u, "unique_id", "")
-                or getattr(u, "display_id", "") or "")
-        # Text bình luận: các bản TikTokLive dùng tên field khác nhau → thử lần lượt.
-        text = (getattr(e, "comment", None) or getattr(e, "text", None)
-                or getattr(e, "content", None) or "")
-        push("comment", name, str(text))
+        @client.on(ConnectEvent)
+        async def _on_connect(_e):
+            state["connected"] = True
+            sess["status"] = "connected"
+            sess["error"] = None
 
-    @client.on(GiftEvent)
-    async def _on_gift(e):
-        g = getattr(e, "gift", None)
-        # quà có streak: chỉ đọc khi chuỗi kết thúc để tránh đọc lặp
-        if g is not None and getattr(g, "streakable", False) and getattr(e, "streaking", False):
-            return
-        name = getattr(getattr(e, "user", None), "nickname", "")
-        push("gift", name, getattr(g, "name", "quà"))
+        @client.on(CommentEvent)
+        async def _on_comment(e):
+            u = getattr(e, "user", None)
+            name = (getattr(u, "nickname", "") or getattr(u, "unique_id", "")
+                    or getattr(u, "display_id", "") or "")
+            text = (getattr(e, "comment", None) or getattr(e, "text", None)
+                    or getattr(e, "content", None) or "")
+            push("comment", name, str(text))
 
-    @client.on(FollowEvent)
-    async def _on_follow(e):
-        push("follow", getattr(getattr(e, "user", None), "nickname", ""))
+        @client.on(GiftEvent)
+        async def _on_gift(e):
+            g = getattr(e, "gift", None)
+            if g is not None and getattr(g, "streakable", False) and getattr(e, "streaking", False):
+                return
+            name = getattr(getattr(e, "user", None), "nickname", "")
+            push("gift", name, getattr(g, "name", "qua"))
 
-    @client.on(ShareEvent)
-    async def _on_share(e):
-        push("share", getattr(getattr(e, "user", None), "nickname", ""))
+        @client.on(FollowEvent)
+        async def _on_follow(e):
+            push("follow", getattr(getattr(e, "user", None), "nickname", ""))
 
-    @client.on(JoinEvent)
-    async def _on_join(e):
-        push("join", getattr(getattr(e, "user", None), "nickname", ""))
+        @client.on(ShareEvent)
+        async def _on_share(e):
+            push("share", getattr(getattr(e, "user", None), "nickname", ""))
 
-    @client.on(LiveEndEvent)
-    async def _on_end(_e):
-        sess["status"] = "ended"
+        @client.on(JoinEvent)
+        async def _on_join(e):
+            push("join", getattr(getattr(e, "user", None), "nickname", ""))
 
-    # ---- BỘ ĐẾM TỔNG QUÁT: đăng ký lên MỌI lớp *Event của thư viện để biết CHÍNH XÁC
-    # máy chủ NHẬN được loại sự kiện nào (kể cả bình luận nếu tới dưới tên lớp khác).
-    # Đồng thời làm LƯỚI AN TOÀN: bất kỳ sự kiện dạng bình luận/chat nào (dù khác tên
-    # lớp CommentEvent) đều được ĐẨY để đọc → không bỏ sót bình luận.
-    try:
-        import TikTokLive.events as _ttev
+        @client.on(LiveEndEvent)
+        async def _on_end(_e):
+            sess["status"] = "ended"
 
-        def _mk_catch(cname: str):
-            async def _h(e):
+        # Luoi an toan: bat MOI lop *Event de dem + khong bo sot binh luan/chat.
+        try:
+            import TikTokLive.events as _ttev
+
+            def _mk_catch(cname: str):
+                async def _h(e):
+                    try:
+                        sess["counts"][cname] = sess["counts"].get(cname, 0) + 1
+                        low = cname.lower()
+                        if ("comment" in low or "chat" in low) and cname != "CommentEvent":
+                            u = getattr(e, "user", None)
+                            nm = (getattr(u, "nickname", "") or getattr(u, "unique_id", "")
+                                  or getattr(u, "display_id", "") or "")
+                            txt = (getattr(e, "comment", None) or getattr(e, "text", None)
+                                   or getattr(e, "content", None) or "")
+                            if txt:
+                                push("comment", nm, str(txt))
+                    except Exception:
+                        pass
+                return _h
+
+            for _n in dir(_ttev):
+                _obj = getattr(_ttev, _n, None)
+                if isinstance(_obj, type) and _n.endswith("Event"):
+                    try:
+                        client.on(_obj)(_mk_catch(_n))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Khoa ky EulerStream (tuy chon) — on dinh nhan su kien.
+        try:
+            _sk = (get_setting("tiktok_sign_key", "") or os.getenv("TIKTOK_SIGN_KEY", "")).strip()
+            if _sk:
                 try:
-                    sess["counts"][cname] = sess["counts"].get(cname, 0) + 1
-                    low = cname.lower()
-                    if ("comment" in low or "chat" in low) and cname != "CommentEvent":
-                        u = getattr(e, "user", None)
-                        nm = (getattr(u, "nickname", "") or getattr(u, "unique_id", "")
-                              or getattr(u, "display_id", "") or "")
-                        txt = (getattr(e, "comment", None) or getattr(e, "text", None)
-                               or getattr(e, "content", None) or "")
-                        if txt:
-                            push("comment", nm, str(txt))
+                    from TikTokLive.client.web.web_settings import WebDefaults
+                    WebDefaults.tiktok_sign_api_key = _sk
                 except Exception:
                     pass
-            return _h
+        except Exception:
+            pass
+        return client
 
-        for _n in dir(_ttev):
-            _obj = getattr(_ttev, _n, None)
-            if isinstance(_obj, type) and _n.endswith("Event"):
-                try:
-                    client.on(_obj)(_mk_catch(_n))
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    fail = 0
+    # TU DONG NOI LAI: TikTok hay rot WebSocket -> neu khong noi lai thi "dung" binh luan
+    # (lau lau khong hien). Vong lap noi lai toi khi user ngat / live ket thuc.
+    while _tiktok_live_sessions.get(username) is sess and sess.get("status") != "ended":
+        state["connected"] = False
+        client = _build_and_register()
+        try:
+            await client.start()
+        except asyncio.CancelledError:
+            break
+        except Exception as ex:
+            sess["error"] = (f"Khong ket noi duoc LIVE cua @{username}: {ex}. "
+                             "(Nguoi dung phai dang phat truc tiep.)")
 
-    # ---- Khoá ký EulerStream (TÙY CHỌN): giúp nhận ĐỦ sự kiện (nhất là BÌNH LUẬN) ổn định,
-    # tránh bị giới hạn ở pool ký miễn phí dùng chung. Admin đặt qua ENV TIKTOK_SIGN_KEY
-    # hoặc setting 'tiktok_sign_key'. Không có key thì vẫn chạy như cũ.
-    try:
-        _sk = (get_setting("tiktok_sign_key", "") or os.getenv("TIKTOK_SIGN_KEY", "")).strip()
-        if _sk:
-            try:
-                from TikTokLive.client.web.web_settings import WebDefaults
-                WebDefaults.tiktok_sign_api_key = _sk
-            except Exception:
-                pass
-    except Exception:
-        pass
+        # User da ngat hoac live ket thuc -> thoat han.
+        if _tiktok_live_sessions.get(username) is not sess or sess.get("status") == "ended":
+            break
 
-    try:
-        await client.start()
-    except asyncio.CancelledError:
-        pass
-    except Exception as ex:
-        sess["status"] = "error"
-        sess["error"] = f"Không kết nối được LIVE của @{username}: {ex}. (Người dùng phải đang phát trực tiếp.)"
+        if state["connected"]:
+            fail = 0                      # da tung ket noi roi moi rot -> noi lai
+        else:
+            fail += 1                     # lan nay chua ket noi duoc
+            if fail >= 5:
+                sess["status"] = "error"
+                break
+
+        sess["status"] = "connecting"
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        await asyncio.sleep(4)            # cho ngan roi noi lai (giu nguyen buffer da co)
 
 
 class TikTokLiveIn(BaseModel):
