@@ -4930,39 +4930,82 @@ def reader_data(k: str) -> dict[str, Any]:
 class ReaderTTSIn(BaseModel):
     text: str
 
+def _reader_server_tts(text: str) -> bytes:
+    """Tạo audio tiếng Việt NGAY TRÊN MÁY CHỦ (gTTS trước, edge-tts dự phòng) để OBS
+    LUÔN có tiếng — OBS/trình duyệt CEF không có sẵn giọng đọc tiếng Việt."""
+    text = (text or "").strip()
+    if not text:
+        return b""
+    # 1) gTTS (đồng bộ, đơn giản) — cần mạng (Google TTS).
+    try:
+        from gtts import gTTS
+        import io as _io
+        buf = _io.BytesIO()
+        gTTS(text=text, lang="vi").write_to_fp(buf)
+        data = buf.getvalue()
+        if data:
+            return data
+    except Exception:
+        pass
+    # 2) edge-tts qua CLI (giọng Việt đẹp) — dự phòng.
+    try:
+        import subprocess, tempfile, os as _os
+        out = tempfile.mktemp(suffix=".mp3")
+        subprocess.run(["edge-tts", "--voice", "vi-VN-HoaiMyNeural",
+                        "--text", text, "--write-media", out],
+                       timeout=60, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(out, "rb") as f:
+            data = f.read()
+        try:
+            _os.remove(out)
+        except OSError:
+            pass
+        return data
+    except Exception:
+        return b""
+
+
 @app.post("/live-reader/tts")
 def reader_tts(b: ReaderTTSIn, k: str):
     cfg = _reader_cfg(k)
     if not cfg:
         raise HTTPException(status_code=404, detail="Link không hợp lệ.")
+    text = (b.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Thiếu nội dung đọc.")
     key = _eleven_server_key()
     vid = (cfg.get("voice_id") or "").strip()
-    text = (b.text or "").strip()
-    if not key or not vid or not text:
-        raise HTTPException(status_code=400, detail="Chưa đủ điều kiện đọc ElevenLabs.")
-    model = cfg.get("model") or "eleven_multilingual_v2"
-    try:
-        speed = float(cfg.get("speed") or 1.0)
-    except Exception:
-        speed = 1.0
-    is_v3 = (model == "eleven_v3")
-    vs = {"stability": (0.5 if is_v3 else 0.5), "similarity_boost": 0.75,
-          "style": 0.0, "use_speaker_boost": True}
-    if abs(speed - 1.0) > 0.001:
-        vs["speed"] = max(0.5, min(speed, 2.0))
-    payload = {"text": text, "model_id": model, "voice_settings": vs}
-    if model != "eleven_multilingual_v2":
-        payload["language_code"] = "vi"
-    try:
-        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
-                       headers={"xi-api-key": key, "Content-Type": "application/json",
-                                "Accept": "audio/mpeg"},
-                       json=payload, timeout=60)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
-    if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"ElevenLabs {r.status_code}")
-    return Response(content=r.content, media_type="audio/mpeg")
+    # 1) ƯU TIÊN ElevenLabs nếu admin có key + có Voice ID. Lỗi thì RỚT XUỐNG giọng máy chủ
+    #    (không để OBS im lặng chỉ vì ElevenLabs trục trặc).
+    if key and vid:
+        model = cfg.get("model") or "eleven_multilingual_v2"
+        try:
+            speed = float(cfg.get("speed") or 1.0)
+        except Exception:
+            speed = 1.0
+        vs = {"stability": 0.5, "similarity_boost": 0.75,
+              "style": 0.0, "use_speaker_boost": True}
+        if abs(speed - 1.0) > 0.001:
+            vs["speed"] = max(0.5, min(speed, 2.0))
+        payload = {"text": text, "model_id": model, "voice_settings": vs}
+        if model != "eleven_multilingual_v2":
+            payload["language_code"] = "vi"
+        try:
+            r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
+                           headers={"xi-api-key": key, "Content-Type": "application/json",
+                                    "Accept": "audio/mpeg"},
+                           json=payload, timeout=60)
+            if r.status_code == 200 and r.content:
+                return Response(content=r.content, media_type="audio/mpeg")
+        except Exception:
+            pass
+    # 2) DỰ PHÒNG: giọng máy chủ (gTTS/edge-tts) → OBS luôn có tiếng dù không có ElevenLabs.
+    data = _reader_server_tts(text)
+    if not data:
+        raise HTTPException(status_code=502,
+                            detail="Máy chủ chưa tạo được audio. Cài trên VPS: pip install gTTS edge-tts")
+    return Response(content=data, media_type="audio/mpeg")
 
 _READER_HTML = r"""<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -4993,8 +5036,10 @@ function tpl(ev){var t=(cfg.tpl&&cfg.tpl[ev.type])||DEF[ev.type]||DEF.comment;re
 async function speakEleven(text){var r=await fetch(API+"/live-reader/tts?k="+TOKEN,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:text})});if(!r.ok)throw new Error("tts "+r.status);return URL.createObjectURL(await r.blob());}
 function speakBrowser(text){return new Promise(function(res){var u=new SpeechSynthesisUtterance(text);u.lang="vi-VN";u.rate=Math.max(.6,Math.min(cfg.speed||1,1.4));u.onend=res;u.onerror=res;speechSynthesis.speak(u);});}
 async function playNext(){if(playing)return;var item=q.shift();if(!item){playing=false;return;}playing=true;
- try{if(cfg.engine==="eleven"&&cfg._eleven&&cfg.voice_id){var url=await speakEleven(item);var au=$("au");au.src=url;au.onended=function(){URL.revokeObjectURL(url);playing=false;playNext();};au.onerror=function(){playing=false;playNext();};await au.play();}
- else{await speakBrowser(item);playing=false;playNext();}}catch(e){playing=false;setTimeout(playNext,300);}}
+ // LUÔN phát audio TỪ MÁY CHỦ (ElevenLabs hoặc gTTS dự phòng) -> chạy được trong OBS
+ // (OBS không có giọng đọc trình duyệt). Giọng trình duyệt chỉ là phương án cuối (Chrome).
+ try{var url=await speakEleven(item);var au=$("au");au.src=url;au.onended=function(){URL.revokeObjectURL(url);playing=false;playNext();};au.onerror=function(){playing=false;playNext();};await au.play();}
+ catch(e){try{await speakBrowser(item);}catch(_){}playing=false;setTimeout(playNext,300);}}
 function enqueue(text,prio){if(!text)return;if(prio)q.unshift(text);else q.push(text);if(!playing)playNext();}
 function setStatus(s){$("status").textContent="Trạng thái: "+(s||"...")+(playing?" · đang đọc":"");}
 async function connect(){await fetch(API+"/social/tiktok/live/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:user})});}
@@ -5008,7 +5053,7 @@ async function loop(){if(!running)return;
 async function start(){var r=await fetch(API+"/live-reader/data?k="+TOKEN);if(!r.ok){$("status").textContent="Link lỗi — tạo lại trong app.";return;}
  var d=await r.json();cfg=d.config;cfg._eleven=d.eleven;user=cfg.username||"";
  if(!user){$("status").textContent="Chưa có @username — vào app đặt lại.";return;}
- $("who").textContent="Phòng LIVE: @"+user+" · Giọng: "+(cfg.engine==="eleven"&&cfg._eleven?"ElevenLabs (đồng bộ app)":"Trình duyệt");
+ $("who").textContent="Phòng LIVE: @"+user+" · Giọng: "+(cfg._eleven&&cfg.voice_id?"ElevenLabs (máy chủ)":"Máy chủ (tiếng Việt)");
  running=true;$("go").textContent="⏹ Dừng";$("go").classList.add("stop");
  await connect();await drainOld();loop();}
 function stop(){running=false;if(poll)clearTimeout(poll);q=[];playing=false;try{speechSynthesis.cancel();$("au").pause();}catch(e){}
