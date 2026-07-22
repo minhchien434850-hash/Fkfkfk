@@ -70,6 +70,9 @@ struct TTSView: View {
     // Cờ đã kéo cấu hình TTS từ máy chủ về (chỉ kéo 1 lần mỗi phiên).
     @State private var ttsSyncedFromServer = false
 
+    // Chống đọc bình luận TRÙNG (spam cùng 1 câu) — nhớ thời điểm gần nhất theo người+nội dung.
+    @State private var recentComments: [String: Date] = [:]
+
     // ----- Model ElevenLabs — cho MỌI thành viên tự chọn (đồng bộ theo tài khoản) -----
     @AppStorage("eleven_model") private var elevenModel = "eleven_multilingual_v2"
     // Biểu cảm tự động v3 — MẶC ĐỊNH TẮT (bật lên dễ đọc lệch ngữ cảnh tiếng Việt).
@@ -1365,6 +1368,8 @@ struct TTSView: View {
                         guard readTypes.contains(ev.type) else { continue }
                         // Bình luận lên ĐẦU danh sách chờ đọc (announce ưu tiên comment > join).
                         liveFeed.append(ev)
+                        // BỎ ĐỌC bình luận rác/trùng (vẫn hiện ở bảng tin, chỉ không đọc).
+                        if ev.type == "comment", !shouldReadComment(ev) { continue }
                         let text = await liveSpeechText(ev)
                         // Phát âm thanh thông báo (quà/follow/share) TRƯỚC rồi mới đọc.
                         tts.announce(text, eventType: ev.type)
@@ -1392,6 +1397,25 @@ struct TTSView: View {
         tts.stopBackgroundMode() // Tắt chạy ngầm
         let id = tiktokId.trimmingCharacters(in: .whitespacesAndNewlines)
         Task { try? await store.api.tiktokLiveDisconnect(username: id) }
+    }
+
+    /// Có nên ĐỌC bình luận này không? Bỏ qua: rỗng / chỉ emoji-ký hiệu / chỉ là link / TRÙNG lặp.
+    private func shouldReadComment(_ ev: TikTokLiveEvent) -> Bool {
+        let content = ev.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Rỗng hoặc không có chữ/số (toàn emoji, ký hiệu) → không đọc.
+        guard content.contains(where: { $0.isLetter || $0.isNumber }) else { return false }
+        let low = content.lowercased()
+        // Chỉ là đường link → không đọc (đọc link rất khó chịu).
+        if low.hasPrefix("http://") || low.hasPrefix("https://") || low.hasPrefix("www.") { return false }
+        // Trùng lặp: cùng người + cùng nội dung trong ~25 giây → bỏ (spam).
+        let key = ev.name + "|" + low
+        let now = Date()
+        if let t = recentComments[key], now.timeIntervalSince(t) < 25 { return false }
+        recentComments[key] = now
+        if recentComments.count > 200 {
+            recentComments = recentComments.filter { now.timeIntervalSince($0.value) < 60 }
+        }
+        return true
     }
 
     /// Dịch nội dung 1 sự kiện live sang tiếng Việt (giữ tên người + mẫu câu Việt), rồi trả về câu để đọc.

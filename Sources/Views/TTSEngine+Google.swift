@@ -148,8 +148,20 @@ extension TTSEngine {
                     if let data {
                         self.playGoogleData(data, token: token, retryText: nil)
                     } else {
-                        // Google chặn/timeout đoạn này → bỏ qua, đọc tiếp ngay (không đứng im).
-                        self.playNextGoogleItem()
+                        // Lỗi mạng/timeout thoáng qua → THỬ LẠI 1 lần sau 0.4s rồi mới bỏ (ít rớt).
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                            guard let self, self.googleItemToken == token, self.isPlayingGoogle else { return }
+                            self.fetchGoogle(text) { [weak self] data2 in
+                                DispatchQueue.main.async {
+                                    guard let self, self.googleItemToken == token, self.isPlayingGoogle else { return }
+                                    if let data2 {
+                                        self.playGoogleData(data2, token: token, retryText: nil)
+                                    } else {
+                                        self.playNextGoogleItem()
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
