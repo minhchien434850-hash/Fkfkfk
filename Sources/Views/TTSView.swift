@@ -1369,8 +1369,8 @@ struct TTSView: View {
                         // Phát âm thanh thông báo (quà/follow/share) TRƯỚC rồi mới đọc.
                         tts.announce(text, eventType: ev.type)
                         // Tự động CÀ KHỊA lại bình luận khiêu khích: GỌI TÊN người rồi khịa,
-                        // đọc NGAY SAU bình luận đó.
-                        if ev.type == "comment", tts.autoRoastOn, tts.shouldRoast(ev.content) {
+                        // đọc NGAY SAU bình luận đó. Có giãn cách (roastDue) để không khịa liên tục.
+                        if ev.type == "comment", tts.autoRoastOn, tts.shouldRoast(ev.content), tts.roastDue() {
                             tts.announce(tts.randomRoast(name: cleanLiveName(ev.name)), eventType: "comment")
                         }
                     }

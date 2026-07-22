@@ -278,7 +278,13 @@ extension TTSEngine {
             ]
             req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         }
-        URLSession.shared.dataTask(with: req) { [weak self] data, resp, _ in
+        elevenSend(req, attempt: 1)
+    }
+
+    /// Gửi 1 request ElevenLabs, TỰ THỬ LẠI 1 lần khi lỗi TẠM THỜI (mạng/429/5xx) trước khi bỏ đoạn.
+    /// Giúp ít bị "rớt" bình luận do trục trặc mạng thoáng qua.
+    func elevenSend(_ req: URLRequest, attempt: Int) {
+        URLSession.shared.dataTask(with: req) { [weak self] data, resp, err in
             guard let self else { return }
             DispatchQueue.main.async {
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -295,8 +301,16 @@ extension TTSEngine {
                         self.playNextEleven()
                     }
                 } else {
-                    // Lỗi key/mạng → bỏ đoạn này, đọc tiếp phần còn lại
-                    self.playNextEleven()
+                    // Lỗi TẠM THỜI (mất mạng=0, 429 quá tải, 5xx máy chủ) → thử lại 1 lần sau 0.5s.
+                    let transient = (err != nil) || code == 0 || code == 429 || code >= 500
+                    if attempt < 2 && transient {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self.elevenSend(req, attempt: attempt + 1)
+                        }
+                    } else {
+                        // Lỗi thật (key/Voice ID/nội dung) → bỏ đoạn này, đọc tiếp phần còn lại.
+                        self.playNextEleven()
+                    }
                 }
             }
         }.resume()

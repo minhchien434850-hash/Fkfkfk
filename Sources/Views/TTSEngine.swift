@@ -200,7 +200,24 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         "{name} vô đây khịa mà mình vẫn vui, vậy là {name} thua rồi đó.",
         "Câu này hay đó {name}, tiếc là nói sai người rồi.",
         "Thôi {name} ra ngoài hít tí khí trời cho tỉnh táo lại nha.",
-        "Bình luận của {name} mình nghe rồi, nhẹ như gió thoảng à."
+        "Bình luận của {name} mình nghe rồi, nhẹ như gió thoảng à.",
+        "{name} ơi, năng lượng này để dành khen mình đi cho đỡ phí nha.",
+        "Mình đọc bình luận của {name} bằng giọng dễ thương nhất luôn đó, thấy chưa.",
+        "{name} chê hăng vậy chắc thầm thương mình lắm đúng không.",
+        "Cảm ơn {name} đã ở lại lâu vậy, đúng là fan ruột rồi còn gì.",
+        "{name} nói nữa đi, mình còn nhiều câu trả lời hay lắm nha.",
+        "Người ta livestream vui vẻ, {name} vô mang theo nguyên cục mây đen ha.",
+        "{name} giỏi bình luận vậy sao không thử tự làm một buổi live xem.",
+        "Mình cười cho {name} một cái, chúc buổi tối bớt tiêu cực nha.",
+        "{name} ơi, ghét của nào trời trao của nấy, coi chừng ghiền mình luôn đó.",
+        "Khen thì khó chứ chê thì {name} nhanh ghê, luyện lại kỹ năng khen nha.",
+        "{name} tốn công gõ nhiêu đây, mình tốn có ba giây đọc thôi à.",
+        "Thương {name} ghê, chắc hôm nay có chuyện buồn nên mới vô đây xả.",
+        "{name} cứ tự nhiên, phòng live này miễn phí cho cả người dễ thương lẫn người khó ở.",
+        "Nghe xong mình vẫn xinh vẫn vui, còn {name} thì sao rồi.",
+        "{name} ơi, gõ chậm thôi kẻo mỏi tay mà mình vẫn chưa quạu nha.",
+        "Mình ghi nhận ý kiến của {name}, xếp vào thùng kỷ niệm vui vui.",
+        "{name} vô đây là mình biết hôm nay view lại tăng rồi, cảm ơn nha."
     ]
 
     /// Từ khoá khiêu khích/anti để KÍCH HOẠT cà khịa (kèm dạng không dấu thường gặp).
@@ -238,6 +255,17 @@ final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, 
         for p in Self.provokePhrases where low.contains(p) { return true }
         let tokens = Set(low.split { !$0.isLetter && !$0.isNumber }.map(String.init))
         return !tokens.isDisjoint(with: Self.provokeWords)
+    }
+
+    // Giãn cách cà khịa: KHÔNG khịa lại liên tục (tránh spam, để đúng lúc & đỡ nhàm).
+    private var lastRoastAt: Date = .distantPast
+    var roastCooldown: TimeInterval = 18   // giây giữa 2 lần cà khịa
+    /// Đã đủ giãn cách để cà khịa tiếp chưa (đồng thời ghi nhận thời điểm nếu đủ).
+    func roastDue() -> Bool {
+        let now = Date()
+        guard now.timeIntervalSince(lastRoastAt) >= roastCooldown else { return false }
+        lastRoastAt = now
+        return true
     }
 
     /// Ghép tên vào câu cà khịa: có {name} thì thay bằng tên; không có thì chèn "tên ơi, " phía trước.

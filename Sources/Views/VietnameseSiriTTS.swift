@@ -49,6 +49,9 @@ struct VietnameseTextNormalizer {
         "qtqd": "quá trời quá đất",
         // --- Động từ / tính từ / trạng từ ---
         "chs": "chơi", "ah": "anh", "khc": "khác", "tc": "tử chiến",
+        "khum": "không", "hoy": "thôi", "zị": "vậy", "trl": "trả lời", "dth": "dễ thương",
+        "cfm": "xác nhận", "info": "thông tin", "reg": "đăng ký", "mess": "tin nhắn",
+        "omg": "ôi trời", "wtf": "gì vậy trời", "onl": "ôn lai", "gud": "tốt",
         "ns": "nói", "nc": "nói chuyện", "bl": "bình luận", "cmt": "bình luận",
         "stt": "trạng thái", "tl": "trả lời", "rep": "trả lời", "nt": "nhắn tin",
         "ib": "nhắn tin riêng", "pm": "nhắn tin riêng",
