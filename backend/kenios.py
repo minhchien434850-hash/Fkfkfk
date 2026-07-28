@@ -4636,12 +4636,15 @@ def _narrate_tts(text: str, out_mp3: str, opt: dict) -> bool:
     return _tts_vi(text, out_mp3)
 
 
-def _schedule_no_overlap(items: list, video_dur: float, gap: float = 0.35) -> tuple:
-    """XẾP LỊCH KHÔNG CHỒNG TIẾNG.
+def _schedule_no_overlap(items: list, video_dur: float, gap: float = 0.12) -> tuple:
+    """XẾP LỊCH LIỀN MẠCH, KHÔNG CHỒNG TIẾNG.
     items: [(mốc_giờ_mong_muốn, đường_dẫn_mp3, độ_dài_audio_giây)].
-    • Mỗi đoạn bắt đầu SỚM NHẤT là sau khi đoạn trước đọc xong + `gap`.
-    • Nếu tổng vượt quá thời lượng video → TĂNG TỐC ĐỌC (atempo) vừa đủ để lọt.
-    • Vẫn không lọt (kể cả ở tốc độ tối đa) → BỎ các đoạn cuối thay vì để tràn/đè.
+    • Các đoạn đọc NỐI TIẾP NHAU (chỉ nghỉ hơi `gap` rất ngắn) → nghe như MỘT BÀI liền mạch,
+      KHÔNG để khoảng lặng dài gây cảm giác "ngắt khúc".
+    • Vẫn bám mốc cảnh: đoạn không bao giờ bắt đầu TRƯỚC mốc của nó; nếu đoạn trước đọc lố
+      thì đoạn sau nối ngay sau đó (không đè lên nhau).
+    • Nếu tổng vượt thời lượng video → TĂNG TỐC ĐỌC (atempo) vừa đủ để lọt.
+    • Vẫn không lọt → BỎ các đoạn cuối thay vì để tràn/đè.
     Trả về (danh_sách_đã_xếp, tốc_độ_atempo)."""
     if not items:
         return [], 1.0
@@ -4650,7 +4653,10 @@ def _schedule_no_overlap(items: list, video_dur: float, gap: float = 0.35) -> tu
         out, cursor = [], 0.0
         for (t, mp3, da) in items:
             d = da / sp
-            start = max(t, cursor)
+            # Bám mốc cảnh, nhưng KHÔNG chờ lâu: nếu mốc còn xa mà vừa đọc xong thì
+            # chỉ nghỉ tối đa 0.6s rồi đọc tiếp → giữ mạch liên tục.
+            start = max(t, cursor) if t <= cursor + 0.6 else min(t, cursor + 0.6)
+            start = max(start, cursor)
             out.append((start, mp3, d))
             cursor = start + d + gap
         return out, cursor
@@ -4702,21 +4708,29 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
         upd(step="AI đang viết lời bình khớp từng cảnh…", progress=30)
         style = (opt.get("style") or "thuyết minh tự nhiên, cuốn hút").strip()
         tl = ", ".join(f"{t}s" for t, _ in frames)
+        # NGÂN SÁCH CHỮ: giọng Việt đọc ~2.6 từ/giây → tính đủ chữ để LỜI BÌNH CHẠY SUỐT video,
+        # không bị hụt rồi im lặng. Chia đều cho từng mốc để lời luôn bám kịp hình.
+        total_words = max(30, int(dur * 2.6))
+        per_seg = max(10, int(total_words / max(1, len(frames))))
         prompt = (
             f"Đây là các KHUNG HÌNH lấy lần lượt tại các mốc giây: {tl} của MỘT video dài {dur:.1f} giây.\n"
             "NHIỆM VỤ: XEM KỸ từng khung để hiểu ĐÚNG NGỮ CẢNH (ai/cái gì, đang làm gì, ở đâu, "
-            "chữ hiện trên màn hình nếu có), rồi viết LỜI BÌNH tiếng Việt BÁM SÁT nội dung thật.\n"
+            "chữ hiện trên màn hình nếu có), rồi viết MỘT BÀI THUYẾT MINH TIẾNG VIỆT LIỀN MẠCH "
+            "chạy XUYÊN SUỐT từ đầu đến cuối video.\n"
             f"Giọng điệu: {style}.\n"
             "TRẢ VỀ DUY NHẤT một mảng JSON, không thêm chữ nào khác, mỗi phần tử gồm:\n"
             '[{"t": 0, "scene": "thấy gì trong khung (mô tả thật, ngắn)", "text": "lời bình để đọc"}]\n'
             "QUY TẮC BẮT BUỘC:\n"
-            f"• t là giây bắt đầu đọc (0 ≤ t < {dur:.1f}), TĂNG DẦN, phủ đều toàn bộ video.\n"
-            "• 'scene' phải là điều BẠN THẬT SỰ NHÌN THẤY trong khung tại mốc đó.\n"
-            "• 'text' phải KHỚP với 'scene' — TUYỆT ĐỐI KHÔNG bịa chi tiết không có trong hình. "
-            "Nếu không rõ nội dung, hãy mô tả trung tính thay vì đoán bừa.\n"
-            "• Nếu trong hình có CHỮ (tiêu đề, phụ đề, tên món, giá…), hãy dùng đúng thông tin đó.\n"
-            "• Các đoạn PHẢI liền mạch thành một câu chuyện, không lặp ý, không mâu thuẫn nhau.\n"
-            "• Mỗi đoạn 8–25 từ (đọc khoảng 3–6 giây), cách nhau đủ để đọc kịp, KHÔNG chồng lấn.\n"
+            f"• Viết ĐỦ {len(frames)} phần tử, mỗi mốc giây ở trên MỘT phần tử, t đúng bằng mốc đó.\n"
+            f"• TỔNG độ dài lời bình khoảng {total_words} từ (mỗi phần tử khoảng {per_seg} từ) — "
+            f"đủ để đọc liên tục hết {dur:.0f} giây, KHÔNG được viết quá ngắn gây im lặng giữa chừng.\n"
+            "• QUAN TRỌNG NHẤT — LIỀN MẠCH: toàn bộ các phần tử ghép lại phải đọc trôi chảy như MỘT BÀI "
+            "DUY NHẤT. Câu sau NỐI TIẾP ý câu trước (dùng từ nối: rồi, sau đó, lúc này, tiếp đến, "
+            "không ngờ, cuối cùng…). TUYỆT ĐỐI KHÔNG viết kiểu mỗi câu một chủ đề rời rạc, "
+            "không lặp lại cách mở đầu, không liệt kê cụt lủn.\n"
+            "• 'scene' là điều BẠN THẬT SỰ NHÌN THẤY. 'text' phải khớp 'scene' — KHÔNG bịa chi tiết. "
+            "Nếu trong hình có CHỮ (tiêu đề, tên món, giá…), dùng đúng thông tin đó.\n"
+            "• Mở đầu có câu dẫn nhập, kết thúc có câu chốt gọn.\n"
             "• Không emoji, không hashtag, không nói 'khung hình'/'hình ảnh cho thấy'."
         )
         raw = _ai_vision(prompt, [b for _, b in frames], max_tokens=8192, json_mode=True)
