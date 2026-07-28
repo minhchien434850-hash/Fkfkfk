@@ -39,6 +39,8 @@ struct VideoScriptView: View {
     @State private var savingPhotos = false
     @State private var saveMsg: String?
     @State private var narTask: Task<Void, Never>?
+    @State private var narVoiceUsed = ""
+    @State private var narVoiceNote = ""
 
     // ----- Xem trước video (tải 1 lần về cache, dùng chung cho xem trước & lưu máy) -----
     @State private var showPreview = false
@@ -274,6 +276,11 @@ struct VideoScriptView: View {
                         if narSize > 0 {
                             Text(byteText(narSize)).font(.caption2).foregroundStyle(.secondary)
                         }
+                        if !narVoiceUsed.isEmpty {
+                            Text("Giọng đã dùng: \(narVoiceUsed)")
+                                .font(.caption2)
+                                .foregroundStyle(narVoiceUsed.hasPrefix("ElevenLabs") ? .green : .orange)
+                        }
                     }
                 }
                 HStack(spacing: 8) {
@@ -292,6 +299,10 @@ struct VideoScriptView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }.buttonStyle(.borderedProminent).tint(.green).disabled(savingPhotos)
+                }
+                if !narVoiceNote.isEmpty {
+                    Text("⚠️ " + narVoiceNote).font(.caption2).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let saveMsg {
                     Text(saveMsg).font(.caption2)
@@ -330,6 +341,8 @@ struct VideoScriptView: View {
                     narStep = st.step ?? ""
                     narProgress = st.progress ?? narProgress
                     if st.status == "done" {
+                        narVoiceUsed = st.voiceUsed ?? ""
+                        narVoiceNote = st.voiceNote ?? ""
                         narFileId = st.fileId
                         narFilename = st.filename ?? "video.mp4"
                         narSize = st.size ?? 0

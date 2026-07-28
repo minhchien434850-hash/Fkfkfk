@@ -4317,7 +4317,8 @@ def _extract_video_frames(path: str, count: int = 8, width: int = 512) -> list:
 
 
 def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg",
-               max_tokens: int = 4096, json_mode: bool = False) -> str:
+               max_tokens: int = 4096, json_mode: bool = False,
+               temperature: float = 0.6) -> str:
     """Gọi AI CÓ HÌNH ẢNH (vision) qua CHUỖI backend admin (Gemini/Claude/OpenAI-vision).
     Groq llama thường KHÔNG có vision → tự nhảy sang con kế. images_b64: base64 thô (không data:).
 
@@ -4338,7 +4339,7 @@ def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg",
                 gbase = base[:-7] if base.endswith("/openai") else base
                 parts = [{"text": prompt}] + [{"inline_data": {"mime_type": mime, "data": b}} for b in imgs]
                 mdl = model or "gemini-2.5-flash"
-                gcfg: dict[str, Any] = {"maxOutputTokens": max_tokens, "temperature": 0.6}
+                gcfg: dict[str, Any] = {"maxOutputTokens": max_tokens, "temperature": temperature}
                 # Tắt 'thinking' để TOÀN BỘ token dành cho câu trả lời (tránh cụt/rỗng).
                 gcfg["thinkingConfig"] = {"thinkingBudget": 0}
                 if json_mode:
@@ -4353,7 +4354,7 @@ def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg",
                 r = _call(gcfg)
                 # Model cũ không hiểu thinkingConfig/responseMimeType → bỏ ra rồi gọi lại.
                 if r.status_code == 400:
-                    basic = {"maxOutputTokens": max_tokens, "temperature": 0.6}
+                    basic = {"maxOutputTokens": max_tokens, "temperature": temperature}
                     r = _call(basic)
                 if r.status_code >= 400:
                     last = _ai_err(r.status_code, r.text); continue
@@ -4371,7 +4372,7 @@ def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg",
                 r = _hx.post(base + "/messages", timeout=120,
                              headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                                       "content-type": "application/json"},
-                             json={"model": model, "max_tokens": 1600,
+                             json={"model": model, "max_tokens": max_tokens,
                                    "messages": [{"role": "user", "content": content}]})
                 if r.status_code >= 400:
                     last = _ai_err(r.status_code, r.text); continue
@@ -4385,7 +4386,7 @@ def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg",
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b}"}} for b in imgs]
                 r = _hx.post(base + "/chat/completions", timeout=120,
                              headers={"Authorization": "Bearer " + key, "content-type": "application/json"},
-                             json={"model": model, "max_tokens": 1600, "temperature": 0.6,
+                             json={"model": model, "max_tokens": max_tokens, "temperature": temperature,
                                    "messages": [{"role": "user", "content": content}]})
                 if r.status_code >= 400:
                     last = _ai_err(r.status_code, r.text); continue
@@ -4590,35 +4591,64 @@ def _prose_into_slots(text: str, n_slots: int) -> list:
 
 def _eleven_tts_file(text: str, out_mp3: str, voice_id: str, model_id: str,
                      stability: float, similarity: float, style_v: float,
-                     speaker_boost: bool, speed: float) -> bool:
-    """Tạo 1 file mp3 bằng ElevenLabs (KEY MÁY CHỦ do admin đặt). True nếu thành công."""
+                     speaker_boost: bool, speed: float) -> tuple:
+    """Tạo 1 file mp3 bằng ElevenLabs (KEY MÁY CHỦ do admin đặt).
+    Trả (thành_công, lý_do_nếu_hỏng) — có lý do để KHÔNG âm thầm đổi sang giọng khác."""
     key = _eleven_server_key()
     vid = (voice_id or "").strip()
     txt = (text or "").strip()
-    if not key or not vid or not txt:
-        return False
-    is_v3 = (model_id == "eleven_v3")
-    stab = min([0.0, 0.5, 1.0], key=lambda x: abs(x - stability)) if is_v3 else stability
-    vs: dict[str, Any] = {"stability": stab, "similarity_boost": similarity,
-                          "style": style_v, "use_speaker_boost": speaker_boost}
-    if abs(speed - 1.0) > 0.001:
-        vs["speed"] = max(0.5, min(speed, 2.0))
-    payload: dict[str, Any] = {"text": txt, "model_id": model_id or "eleven_multilingual_v2",
-                               "voice_settings": vs}
-    if (model_id or "") != "eleven_multilingual_v2":
-        payload["language_code"] = "vi"
-    try:
-        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
-                       headers={"xi-api-key": key, "Content-Type": "application/json",
-                                "Accept": "audio/mpeg"},
-                       json=payload, timeout=90)
-        if r.status_code != 200 or len(r.content) < 800:
-            return False
-        with open(out_mp3, "wb") as f:
-            f.write(r.content)
-        return True
-    except Exception:
-        return False
+    if not key:
+        return False, "máy chủ chưa có khoá ElevenLabs (admin cần lưu khoá)"
+    if not vid:
+        return False, "chưa chọn Voice ID ElevenLabs"
+    if not txt:
+        return False, "đoạn chữ rỗng"
+    def _try(mdl: str) -> tuple:
+        is_v3 = (mdl == "eleven_v3")
+        stab = min([0.0, 0.5, 1.0], key=lambda x: abs(x - stability)) if is_v3 else stability
+        vs: dict[str, Any] = {"stability": stab, "similarity_boost": similarity,
+                              "style": style_v, "use_speaker_boost": speaker_boost}
+        if abs(speed - 1.0) > 0.001:
+            vs["speed"] = max(0.5, min(speed, 2.0))
+        body: dict[str, Any] = {"text": txt if is_v3 else _strip_emotion_tags(txt),
+                                "model_id": mdl, "voice_settings": vs}
+        if mdl != "eleven_multilingual_v2":
+            body["language_code"] = "vi"
+        try:
+            r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
+                           headers={"xi-api-key": key, "Content-Type": "application/json",
+                                    "Accept": "audio/mpeg"},
+                           json=body, timeout=90)
+        except Exception as e:
+            return False, f"lỗi mạng tới ElevenLabs: {e}"
+        if r.status_code == 200 and len(r.content) >= 800:
+            try:
+                with open(out_mp3, "wb") as f:
+                    f.write(r.content)
+                return True, ""
+            except Exception as e:
+                return False, f"không ghi được file: {e}"
+        why = f"ElevenLabs lỗi {r.status_code}"
+        try:
+            j = r.json()
+            d = (j.get("detail") or {})
+            why += ": " + str(d.get("message") or d.get("status") or j.get("detail") or "")[:160]
+        except Exception:
+            pass
+        return False, why
+
+    mdl0 = model_id or "eleven_multilingual_v2"
+    ok, why = _try(mdl0)
+    if ok:
+        return True, ""
+    # Model yêu cầu không dùng được (vd gói chưa có v3) → THỬ LẠI bằng model ổn định,
+    # để vẫn giữ ĐÚNG GIỌNG người dùng chọn thay vì đổi sang giọng máy chủ.
+    if mdl0 != "eleven_multilingual_v2":
+        ok2, why2 = _try("eleven_multilingual_v2")
+        if ok2:
+            return True, f"model {mdl0} không dùng được → đã đọc bằng eleven_multilingual_v2"
+        return False, f"{why} · thử lại v2 cũng lỗi: {why2}"
+    return False, why
 
 
 def _narrate_tts(text: str, out_mp3: str, opt: dict) -> bool:
@@ -4631,7 +4661,7 @@ def _narrate_tts(text: str, out_mp3: str, opt: dict) -> bool:
     if not text.strip():
         return False
     if is_eleven:
-        ok = _eleven_tts_file(
+        ok, why = _eleven_tts_file(
             text, out_mp3,
             voice_id=opt.get("eleven_voice_id") or "",
             model_id=opt.get("eleven_model") or "eleven_multilingual_v2",
@@ -4641,7 +4671,15 @@ def _narrate_tts(text: str, out_mp3: str, opt: dict) -> bool:
             speaker_boost=bool(opt.get("speaker_boost", True)),
             speed=float(opt.get("eleven_speed", 1.0) or 1.0))
         if ok:
+            opt["_voice_used"] = "ElevenLabs"
+            if why:
+                opt["_voice_note"] = why      # vd: đã hạ model nhưng VẪN đúng giọng
             return True
+        # Ghi RÕ vì sao không dùng được ElevenLabs (trước đây im lặng đổi giọng).
+        opt["_voice_used"] = "Giọng máy chủ (dự phòng)"
+        opt["_voice_note"] = why or "không rõ nguyên nhân"
+    else:
+        opt.setdefault("_voice_used", "Giọng máy chủ")
     return _tts_vi(text, out_mp3)
 
 
@@ -4722,11 +4760,18 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
             "• BÁM CHỦ ĐỀ: mọi câu phải phục vụ chủ đề chính đã xác định ở BƯỚC 1.\n"
             "• 'text' phải khớp 'scene' của CHÍNH ô đó — KHÔNG kể trước chuyện của ô sau, KHÔNG kể "
             "lại chuyện ô trước. Nếu trong hình có CHỮ (tiêu đề, tên món, giá…), dùng đúng thông tin đó.\n"
+            "• ĐỘ CHÍNH XÁC LÀ TRÊN HẾT — CẤM BỊA: chỉ nói những gì NHÌN THẤY RÕ trong khung. "
+            "KHÔNG bịa màu sắc, con số, tên riêng, thương hiệu, địa điểm, lời thoại hay cảm xúc "
+            "nhân vật nếu hình không thể hiện. KHÔNG suy diễn chuyện xảy ra ngoài khung hình. "
+            "Chỗ nào không chắc thì mô tả TRUNG TÍNH, chung chung — thà nói ít mà đúng còn hơn "
+            "nói hay mà sai. Nếu không nhận ra vật thể, gọi tên chung (vd 'một chiếc xe') thay vì "
+            "đoán hiệu xe/đời xe.\n"
             "• Ô đầu có câu dẫn nhập, ô cuối có câu chốt.\n"
             + tag_rule +
             "• Không emoji, không hashtag, không nói 'khung hình'/'hình ảnh cho thấy'."
         )
-        raw = _ai_vision(prompt, [b for _, _e, b in slots_raw], max_tokens=8192, json_mode=True)
+        raw = _ai_vision(prompt, [b for _, _e, b in slots_raw], max_tokens=8192,
+                         json_mode=True, temperature=0.25)   # nhiệt độ THẤP = bớt bịa, bám hình
         segs = _parse_slot_script(raw, len(slots))
         # DỰ PHÒNG: AI trả văn xuôi / hỏng → chia kịch bản (của AI hoặc của người dùng) vào các ô.
         if not segs and raw and not raw.startswith("⚠️"):
@@ -4844,6 +4889,7 @@ def _narrate_finish(jid: str, path: str, tmp: str, segs: list, slots: list, dur:
             if k is not None and k in by_i:
                 used.append(f"[{start:.0f}s] {by_i[k]}")
         upd(status="done", step="Xong", progress=100, file_id=fid, filename=name, size=size,
+            voice_used=opt.get("_voice_used") or "", voice_note=opt.get("_voice_note") or "",
             script="\n".join(used) if used else
                    "\n".join(f"[{slots[int(s['i'])][0]:.0f}s] {s['text']}"
                              for s in segs if int(s["i"]) < len(slots)))

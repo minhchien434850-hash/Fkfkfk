@@ -956,6 +956,8 @@ struct APIClient {
         let duration: Double?
         let segments: Int?
         let script: String?
+        let voiceUsed: String?    // giọng THỰC SỰ đã dùng khi ghép video
+        let voiceNote: String?    // lý do nếu phải đổi giọng/model
     }
     /// Bắt đầu lồng tiếng cả video (chạy nền trên máy chủ). Trả job_id để hỏi tiến độ.
     func startVideoNarrate(url: String? = nil, fileId: Int? = nil, style: String? = nil,
