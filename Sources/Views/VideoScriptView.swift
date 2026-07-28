@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
+import Photos
 
 // AI XEM video (trích khung hình) → VIẾT KỊCH BẢN thuyết minh tiếng Việt → ĐỌC bằng giọng TTS.
 // TTSEngine() tự nạp lại giọng/động cơ đã lưu → đọc ĐÚNG giọng người dùng chọn ở mục "Đọc (TTS)".
@@ -19,6 +20,24 @@ struct VideoScriptView: View {
     @State private var showLibrary = false           // chọn video đã có trong Thư viện app
     @State private var libFiles: [FileItem] = []
     @State private var libLoading = false
+
+    // ----- Lồng tiếng TOÀN BỘ video (khớp thời gian) + làm nét + lưu về máy -----
+    @State private var lastSource: (url: String?, fileId: Int?) = (nil, nil)
+    @State private var narHeight = 1080
+    @State private var narSharpen = 0.8
+    @State private var narDenoise = false
+    @State private var narKeepOrig = true
+    @State private var narOrigVol = 0.18
+    @State private var narBusy = false
+    @State private var narStep = ""
+    @State private var narProgress = 0
+    @State private var narError: String?
+    @State private var narFileId: Int?
+    @State private var narFilename = ""
+    @State private var narSize = 0
+    @State private var savingPhotos = false
+    @State private var saveMsg: String?
+    @State private var narTask: Task<Void, Never>?
 
     // ----- Khoá AI dùng chung (CHỈ ADMIN) — AI cần khoá này mới "xem" được video -----
     @State private var aiKeyDraft = ""
@@ -104,6 +123,9 @@ struct VideoScriptView: View {
                         }
                     }
 
+                    // LỒNG TIẾNG TOÀN BỘ video (khớp thời gian) + làm nét + lưu về máy
+                    narrateSection
+
                     // ADMIN: khoá AI dùng chung — AI phải có khoá này mới XEM được video.
                     if store.isAdmin { adminAIKeySection }
 
@@ -150,6 +172,162 @@ struct VideoScriptView: View {
             // Chọn video ĐÃ CÓ trong Thư viện app → dùng thẳng file_id (không cần tải lại).
             .sheet(isPresented: $showLibrary) { librarySheet }
         }
+    }
+
+    // ----- LỒNG TIẾNG CẢ VIDEO: cấu hình làm nét + tiến độ + lưu về máy -----
+    @ViewBuilder private var narrateSection: some View {
+        localSection("Lồng tiếng cả video (khớp thời gian)") {
+            Text("AI xem hết video, viết lời bình THEO MỐC GIỜ rồi ghép giọng đọc vào đúng cảnh, xuất ra video mới để lưu về máy.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            // Độ nét / phân giải
+            Text("Độ nét (phân giải)").font(.caption).foregroundStyle(.secondary)
+            Picker("Độ nét", selection: $narHeight) {
+                Text("720p").tag(720)
+                Text("1080p (Full HD)").tag(1080)
+                Text("2K").tag(1440)
+                Text("4K").tag(2160)
+            }.pickerStyle(.segmented)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Làm nét: \(String(format: "%.1f", narSharpen))\(narSharpen < 0.05 ? " (tắt)" : "")")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Slider(value: $narSharpen, in: 0...1.6).tint(Theme.accent)
+            }
+            Toggle(isOn: $narDenoise) {
+                Label("Khử nhiễu (video mờ/tối)", systemImage: "sparkles").font(.caption)
+            }.tint(Theme.accent)
+            Toggle(isOn: $narKeepOrig) {
+                Label("Giữ tiếng gốc (nhỏ) dưới lời bình", systemImage: "waveform").font(.caption)
+            }.tint(Theme.accent)
+            if narKeepOrig {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Âm lượng tiếng gốc: \(Int(narOrigVol * 100))%")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Slider(value: $narOrigVol, in: 0...0.6).tint(Theme.accent)
+                }
+            }
+
+            // Bắt đầu / tiến độ
+            if narBusy {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: Double(narProgress), total: 100).tint(Theme.accent)
+                    HStack {
+                        Text("\(narStep) (\(narProgress)%)").font(.caption2).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Huỷ") { narTask?.cancel(); narTask = nil; narBusy = false; narStep = "" }
+                            .font(.caption2)
+                    }
+                    Text("Video dài có thể mất vài phút. Bạn cứ để màn hình này mở.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            } else {
+                Button { startNarrate() } label: {
+                    Label("Lồng tiếng cả video", systemImage: "waveform.badge.mic")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent).tint(.purple)
+                .disabled(busy || (lastSource.url == nil && lastSource.fileId == nil))
+                if lastSource.url == nil && lastSource.fileId == nil {
+                    Text("Hãy chọn nguồn video ở trên trước (dán link hoặc chọn video).")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+
+            if let narError {
+                Text("⚠️ " + narError).font(.caption2).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Kết quả → lưu về máy
+            if let fid = narFileId {
+                Divider()
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Xong: \(narFilename)").font(.caption.bold()).lineLimit(1)
+                        if narSize > 0 {
+                            Text(byteText(narSize)).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Button { Task { await saveToPhotos(fid) } } label: {
+                    HStack {
+                        if savingPhotos { ProgressView().scaleEffect(0.7).padding(.trailing, 2) }
+                        Label("Lưu video về máy", systemImage: "square.and.arrow.down.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                }.buttonStyle(.borderedProminent).tint(.green).disabled(savingPhotos)
+                if let saveMsg {
+                    Text(saveMsg).font(.caption2)
+                        .foregroundStyle(saveMsg.hasSuffix("✓") ? .green : .red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func startNarrate() {
+        narError = nil; narFileId = nil; saveMsg = nil
+        narBusy = true; narProgress = 0; narStep = "Đang gửi yêu cầu…"
+        narTask = Task {
+            do {
+                let r = try await store.api.startVideoNarrate(
+                    url: lastSource.url, fileId: lastSource.fileId, style: style,
+                    height: narHeight, sharpen: narSharpen, denoise: narDenoise,
+                    keepOriginal: narKeepOrig, origVolume: narOrigVol)
+                // Hỏi tiến độ mỗi 2 giây cho tới khi xong/lỗi.
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if Task.isCancelled { break }
+                    let st = try await store.api.videoNarrateStatus(r.job_id)
+                    narStep = st.step ?? ""
+                    narProgress = st.progress ?? narProgress
+                    if st.status == "done" {
+                        narFileId = st.file_id
+                        narFilename = st.filename ?? "video.mp4"
+                        narSize = st.size ?? 0
+                        if let s = st.script, !s.isEmpty { script = s }
+                        narBusy = false; return
+                    }
+                    if st.status == "error" {
+                        narError = st.error ?? "Lỗi không rõ."
+                        narBusy = false; return
+                    }
+                }
+            } catch {
+                narError = error.localizedDescription
+            }
+            narBusy = false
+        }
+    }
+
+    /// Tải video kết quả rồi LƯU VÀO THƯ VIỆN ẢNH của máy.
+    private func saveToPhotos(_ fileId: Int) async {
+        savingPhotos = true; saveMsg = nil
+        do {
+            let (tmpURL, filename) = try await store.api.downloadFileRaw(fileId)
+            let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            let dest = cache.appendingPathComponent(filename)
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: tmpURL, to: dest)
+
+            let status = await withCheckedContinuation { (c: CheckedContinuation<PHAuthorizationStatus, Never>) in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { c.resume(returning: $0) }
+            }
+            guard status == .authorized || status == .limited else {
+                saveMsg = "Chưa được cấp quyền. Vào Cài đặt > KENIOS > Ảnh để bật."
+                savingPhotos = false; return
+            }
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetCreationRequest.creationRequestForAssetFromVideo(atFileURL: dest)
+            }
+            try? FileManager.default.removeItem(at: dest)
+            saveMsg = "Đã lưu video vào Thư viện máy ✓"
+        } catch {
+            saveMsg = "Lưu thất bại: \(error.localizedDescription)"
+        }
+        savingPhotos = false
     }
 
     // ----- ADMIN: nhập khoá AI dùng chung (bắt buộc để AI xem được video) -----
@@ -342,6 +520,8 @@ struct VideoScriptView: View {
 
     private func generate(url: String?, fileId: Int?) async {
         busy = true; errorMsg = nil; script = ""
+        lastSource = (url, fileId)   // nhớ nguồn để dùng cho "Lồng tiếng cả video"
+        narFileId = nil; narError = nil; saveMsg = nil
         status = fileId != nil ? "AI đang xem video & viết kịch bản…" : "Đang tải & phân tích video…"
         do {
             let r = try await store.api.videoScript(url: url, fileId: fileId, style: style)

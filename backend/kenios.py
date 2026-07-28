@@ -33,7 +33,7 @@ TÍNH NĂNG MỚI / SỬA LỖI (v4.2):
 """
 
 import os, re, time, json, hmac, base64, hashlib, secrets, io, zipfile
-import sqlite3, logging, asyncio, subprocess, tempfile, sys, shutil
+import sqlite3, logging, asyncio, subprocess, tempfile, sys, shutil, threading
 from typing import Any, Optional
 
 import httpx
@@ -4351,6 +4351,276 @@ async def social_video_script(b: VideoScriptIn, user=Depends(get_user)) -> dict[
     )
     script = await asyncio.to_thread(_ai_vision, prompt, frames)
     return {"script": script, "frames": len(frames)}
+
+
+# =============== LỒNG TIẾNG TOÀN BỘ VIDEO (khớp thời gian) + LÀM NÉT + XUẤT FILE ===============
+# Luồng: lấy video → đo thời lượng → trích khung hình KÈM MỐC GIỜ → AI viết kịch bản CÓ MỐC GIỜ
+# (JSON) → tạo giọng đọc từng đoạn → ffmpeg chèn đúng mốc + trộn tiếng gốc + làm nét/nâng phân giải
+# → xuất MP4 vào thư viện để tải về máy. Chạy NỀN, app hỏi tiến độ bằng job_id.
+_narrate_jobs: dict[str, dict[str, Any]] = {}
+_narrate_lock = threading.Lock()
+
+
+def _ffprobe_duration(path: str) -> float:
+    import subprocess
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                            "-of", "default=nw=1:nk=1", path],
+                           capture_output=True, text=True, timeout=30)
+        return float((r.stdout or "0").strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def _has_audio_stream(path: str) -> bool:
+    import subprocess
+    try:
+        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a",
+                            "-show_entries", "stream=index", "-of", "csv=p=0", path],
+                           capture_output=True, text=True, timeout=30)
+        return bool((r.stdout or "").strip())
+    except Exception:
+        return False
+
+
+def _extract_frames_timed(path: str, duration: float, count: int, width: int = 512) -> list:
+    """Trích khung hình KÈM MỐC GIỜ → [(giây, base64jpg), …] để AI biết cảnh nào ở phút nào."""
+    import subprocess, tempfile, shutil as _sh, os as _os
+    out: list = []
+    if not _sh.which("ffmpeg") or duration <= 0:
+        return out
+    tmp = tempfile.mkdtemp(prefix="nframes_")
+    try:
+        for i in range(count):
+            t = duration * (i + 0.5) / count
+            fp = _os.path.join(tmp, f"f{i:03d}.jpg")
+            subprocess.run(["ffmpeg", "-y", "-ss", f"{t:.2f}", "-i", path, "-frames:v", "1",
+                            "-vf", f"scale={width}:-1", "-q:v", "4", fp],
+                           capture_output=True, timeout=60)
+            if _os.path.exists(fp):
+                try:
+                    with open(fp, "rb") as f:
+                        out.append((round(t, 1), base64.b64encode(f.read()).decode()))
+                except Exception:
+                    pass
+    finally:
+        _sh.rmtree(tmp, ignore_errors=True)
+    return out
+
+
+def _parse_timed_script(raw: str, duration: float) -> list:
+    """Đọc JSON [{"t": giây, "text": "..."}] từ câu trả lời AI (chịu được chữ thừa quanh JSON)."""
+    s = (raw or "").strip()
+    i, j = s.find("["), s.rfind("]")
+    if i >= 0 and j > i:
+        s = s[i:j + 1]
+    segs = []
+    try:
+        for it in (json.loads(s) or []):
+            if not isinstance(it, dict):
+                continue
+            try:
+                t = float(it.get("t", it.get("time", 0)) or 0)
+            except Exception:
+                t = 0.0
+            txt = str(it.get("text", "") or "").strip()
+            if txt:
+                segs.append({"t": max(0.0, min(t, max(0.0, duration - 0.5))), "text": txt[:600]})
+    except Exception:
+        return []
+    segs.sort(key=lambda x: x["t"])
+    return segs[:60]
+
+
+def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) -> None:
+    """Chạy nền: AI viết lời theo mốc giờ → tạo giọng → ghép + làm nét → lưu file."""
+    import subprocess, tempfile, shutil as _sh, os as _os
+
+    def upd(**kw):
+        with _narrate_lock:
+            if jid in _narrate_jobs:
+                _narrate_jobs[jid].update(kw)
+
+    tmp = tempfile.mkdtemp(prefix="narr_")
+    try:
+        if not _sh.which("ffmpeg"):
+            upd(status="error", error="Máy chủ chưa cài ffmpeg. Cài: apt install -y ffmpeg")
+            return
+        dur = _ffprobe_duration(path)
+        if dur <= 0:
+            upd(status="error", error="Không đọc được thời lượng video.")
+            return
+        upd(status="running", step="Đang xem video…", progress=10, duration=round(dur, 1))
+
+        # 1) Trích khung hình theo mốc giờ (video càng dài càng nhiều khung, tối đa 16).
+        n = max(6, min(16, int(dur // 4) or 6))
+        frames = _extract_frames_timed(path, dur, n)
+        if not frames:
+            upd(status="error", error="Không trích được khung hình từ video.")
+            return
+
+        # 2) AI viết KỊCH BẢN CÓ MỐC GIỜ khớp diễn biến.
+        upd(step="AI đang viết lời bình khớp video…", progress=30)
+        style = (opt.get("style") or "thuyết minh tự nhiên, cuốn hút").strip()
+        tl = ", ".join(f"{t}s" for t, _ in frames)
+        prompt = (
+            f"Đây là các KHUNG HÌNH lấy lần lượt tại các mốc giây: {tl} của MỘT video dài {dur:.1f} giây.\n"
+            f"Hãy viết LỜI BÌNH (thuyết minh) TIẾNG VIỆT bám ĐÚNG diễn biến, KHỚP THỜI GIAN, phủ TOÀN BỘ video.\n"
+            f"Giọng điệu: {style}.\n"
+            "TRẢ VỀ DUY NHẤT một mảng JSON, không thêm chữ nào khác, dạng:\n"
+            '[{"t": 0, "text": "câu mở đầu"}, {"t": 6.5, "text": "câu tiếp"}]\n'
+            f"Quy tắc: t là giây bắt đầu đọc (0 ≤ t < {dur:.1f}), tăng dần; mỗi đoạn 8–25 từ đọc trong "
+            "khoảng 3–6 giây; các đoạn cách nhau đủ để đọc kịp, KHÔNG chồng lấn; không dùng emoji, "
+            "không ghi 'khung hình', không hashtag."
+        )
+        raw = _ai_vision(prompt, [b for _, b in frames])
+        segs = _parse_timed_script(raw, dur)
+        if not segs:
+            upd(status="error",
+                error="AI chưa trả về được kịch bản theo mốc giờ. Kiểm tra khoá AI (nên dùng Gemini).")
+            return
+        upd(step=f"Đang tạo giọng đọc ({len(segs)} đoạn)…", progress=45, segments=len(segs))
+
+        # 3) Tạo giọng đọc cho từng đoạn (edge-tts/gTTS trên máy chủ).
+        made = []
+        for idx, sg in enumerate(segs):
+            mp3 = _os.path.join(tmp, f"s{idx:03d}.mp3")
+            if _tts_vi(sg["text"], mp3):
+                made.append((sg["t"], mp3))
+            upd(progress=45 + int(20 * (idx + 1) / max(1, len(segs))))
+        if not made:
+            upd(status="error",
+                error="Máy chủ chưa tạo được giọng đọc. Cài trên VPS: pip install gTTS edge-tts")
+            return
+
+        # 4) Ghép: chèn từng đoạn đúng mốc + trộn tiếng gốc + LÀM NÉT / nâng phân giải.
+        upd(step="Đang ghép tiếng vào video & làm nét…", progress=70)
+        height = int(opt.get("height") or 1080)
+        sharpen = float(opt.get("sharpen") or 0.0)
+        denoise = bool(opt.get("denoise"))
+        keep_orig = bool(opt.get("keep_original", True))
+        orig_vol = float(opt.get("orig_volume", 0.18))
+        voice_vol = float(opt.get("voice_volume", 1.6))
+
+        vf = [f"scale=-2:{height}:flags=lanczos"]
+        if denoise:
+            vf.append("hqdn3d=2:1.5:3:2.5")
+        if sharpen > 0.01:
+            vf.append(f"unsharp=5:5:{min(sharpen, 2.0):.2f}:5:5:0.0")
+        cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", path]
+        for _, mp3 in made:
+            cmd += ["-i", mp3]
+
+        parts = [f"[0:v]{','.join(vf)}[v]"]
+        mixes = []
+        has_a = _has_audio_stream(path)
+        if has_a and keep_orig:
+            parts.append(f"[0:a]volume={max(0.0, min(orig_vol, 1.0)):.2f}[a0]")
+            mixes.append("[a0]")
+        for k, (t, _) in enumerate(made, start=1):
+            ms = int(max(0.0, t) * 1000)
+            parts.append(f"[{k}:a]adelay={ms}|{ms},volume={max(0.1, min(voice_vol, 3.0)):.2f}[n{k}]")
+            mixes.append(f"[n{k}]")
+        parts.append(f"{''.join(mixes)}amix=inputs={len(mixes)}:duration=first:"
+                     f"dropout_transition=0:normalize=0[a]")
+        out_mp4 = _os.path.join(tmp, "out.mp4")
+        cmd += ["-filter_complex", ";".join(parts), "-map", "[v]", "-map", "[a]",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", out_mp4]
+        try:
+            pr = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        except Exception as e:
+            upd(status="error", error=f"Lỗi ghép video: {e}")
+            return
+        if not _os.path.exists(out_mp4) or _os.path.getsize(out_mp4) < 1000:
+            upd(status="error", error=f"Ghép video thất bại: {(pr.stderr or '')[-300:]}")
+            return
+
+        # 5) Lưu vào thư viện của tài khoản để app tải về máy.
+        upd(step="Đang lưu file…", progress=92)
+        size = _os.path.getsize(out_mp4)
+        name = f"loi-binh-{time.strftime('%Y%m%d-%H%M%S')}.mp4"
+        with db() as c:
+            cur = c.execute("INSERT INTO files(user_id,name,category,mime,size,data,created_at) "
+                            "VALUES(?,?,?,?,?,'',?)",
+                            (opt["user_id"], name, "document", "video/mp4", size, int(time.time())))
+            fid = cur.lastrowid
+        _sh.move(out_mp4, _os.path.join(UPLOAD_DIR, str(fid)))
+        upd(status="done", step="Xong", progress=100, file_id=fid, filename=name, size=size,
+            script="\n".join(f"[{s['t']:.0f}s] {s['text']}" for s in segs))
+    except Exception as e:
+        upd(status="error", error=f"Lỗi: {e}")
+    finally:
+        _sh.rmtree(tmp, ignore_errors=True)
+        if cleanup_dir:
+            _sh.rmtree(cleanup_dir, ignore_errors=True)
+
+
+class VideoNarrateIn(BaseModel):
+    url: Optional[str] = None
+    file_id: Optional[int] = None
+    style: Optional[str] = "thuyết minh tự nhiên, cuốn hút"
+    height: Optional[int] = 1080          # 720 · 1080 · 1440 · 2160 (làm nét / nâng phân giải)
+    sharpen: Optional[float] = 0.8        # 0 = tắt, 0.5–1.5 nét dần
+    denoise: Optional[bool] = False
+    keep_original: Optional[bool] = True  # giữ tiếng gốc (nhỏ) phía dưới lời bình
+    orig_volume: Optional[float] = 0.18
+    voice_volume: Optional[float] = 1.6
+
+
+@app.post("/social/video-narrate")
+async def social_video_narrate(b: VideoNarrateIn, user=Depends(get_user)) -> dict[str, Any]:
+    """Bắt đầu LỒNG TIẾNG TOÀN BỘ video (khớp thời gian) + làm nét. Trả job_id để hỏi tiến độ."""
+    import tempfile, glob, shutil
+    path, cleanup_dir = None, None
+    if b.file_id:
+        p = os.path.join(UPLOAD_DIR, str(b.file_id))
+        if os.path.exists(p):
+            path = p
+    if path is None and (b.url or "").strip():
+        if not shutil.which("yt-dlp"):
+            raise HTTPException(status_code=400, detail="Máy chủ chưa cài yt-dlp.")
+        tmp = tempfile.mkdtemp(prefix="nv_"); cleanup_dir = tmp
+        cmd = ["yt-dlp", "-f", "best[height<=1080]/best", "--merge-output-format", "mp4",
+               "--no-playlist", "--no-warnings", "-o", os.path.join(tmp, "v.%(ext)s"), b.url.strip()]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await asyncio.wait_for(proc.communicate(), timeout=900)
+        except Exception as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=f"Không tải được video: {e}")
+        fs = [f for f in glob.glob(os.path.join(tmp, "*")) if os.path.isfile(f)]
+        if fs:
+            path = max(fs, key=os.path.getsize)
+    if not path or not os.path.exists(path):
+        if cleanup_dir:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="Thiếu video — hãy dán link hoặc chọn video.")
+
+    jid = secrets.token_hex(8)
+    with _narrate_lock:
+        _narrate_jobs[jid] = {"status": "queued", "step": "Đang chuẩn bị…", "progress": 0,
+                              "user_id": user["id"], "created": int(time.time())}
+    opt = {"style": b.style, "height": b.height, "sharpen": b.sharpen, "denoise": b.denoise,
+           "keep_original": b.keep_original, "orig_volume": b.orig_volume,
+           "voice_volume": b.voice_volume, "user_id": user["id"]}
+    threading.Thread(target=_narrate_worker, args=(jid, path, cleanup_dir, opt),
+                     daemon=True, name=f"narrate-{jid}").start()
+    return {"job_id": jid, "status": "queued"}
+
+
+@app.get("/social/video-narrate/{jid}")
+def social_video_narrate_status(jid: str, user=Depends(get_user)) -> dict[str, Any]:
+    """Hỏi tiến độ / kết quả của job lồng tiếng."""
+    with _narrate_lock:
+        j = _narrate_jobs.get(jid)
+        if not j:
+            raise HTTPException(status_code=404, detail="Không tìm thấy tiến trình.")
+        if j.get("user_id") != user["id"] and not user["is_admin"]:
+            raise HTTPException(status_code=404, detail="Không tìm thấy tiến trình.")
+        out = {k: v for k, v in j.items() if k != "user_id"}
+    return out
 
 
 def _parse_cookie_string(cookies_str: str) -> dict[str, str]:

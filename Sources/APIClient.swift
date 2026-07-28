@@ -916,6 +916,39 @@ struct APIClient {
         return r.voices
     }
 
+    // ====== LỒNG TIẾNG TOÀN BỘ VIDEO (khớp thời gian) + làm nét → xuất file tải về máy ======
+    struct NarrateStartResp: Decodable { let job_id: String; let status: String }
+    struct NarrateStatus: Decodable {
+        let status: String            // queued | running | done | error
+        let step: String?
+        let progress: Int?
+        let error: String?
+        let file_id: Int?
+        let filename: String?
+        let size: Int?
+        let duration: Double?
+        let segments: Int?
+        let script: String?
+    }
+    /// Bắt đầu lồng tiếng cả video (chạy nền trên máy chủ). Trả job_id để hỏi tiến độ.
+    func startVideoNarrate(url: String? = nil, fileId: Int? = nil, style: String? = nil,
+                           height: Int = 1080, sharpen: Double = 0.8, denoise: Bool = false,
+                           keepOriginal: Bool = true, origVolume: Double = 0.18,
+                           voiceVolume: Double = 1.6) async throws -> NarrateStartResp {
+        var body: [String: Any] = [
+            "height": height, "sharpen": sharpen, "denoise": denoise,
+            "keep_original": keepOriginal, "orig_volume": origVolume, "voice_volume": voiceVolume,
+        ]
+        if let url, !url.isEmpty { body["url"] = url }
+        if let fileId { body["file_id"] = fileId }
+        if let style, !style.isEmpty { body["style"] = style }
+        return try decode(try await send("/social/video-narrate", method: "POST", json: body))
+    }
+    /// Hỏi tiến độ / kết quả job lồng tiếng.
+    func videoNarrateStatus(_ jobId: String) async throws -> NarrateStatus {
+        try decode(try await send("/social/video-narrate/\(jobId)"))
+    }
+
     // ============ AI xem video → viết kịch bản thuyết minh (để đọc bằng TTS) ============
     struct VideoScriptResp: Decodable { let script: String; let frames: Int }
     /// AI xem video (qua link HOẶC file_id đã tải lên) rồi viết kịch bản tiếng Việt để đọc.
