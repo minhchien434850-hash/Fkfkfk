@@ -67,8 +67,17 @@ struct TTSVoicePickerSection: View {
             if expanded {
                 Divider()
                 enginePicker
-                if tts.engineType == .elevenlabs && store.isPro {
-                    elevenSection
+                // Đang chọn ElevenLabs → LUÔN hiện phần ElevenLabs (kể cả chưa PRO, để còn
+                // thấy lý do & đổi được), không rơi nhầm sang phần Chị Google.
+                if tts.engineType == .elevenlabs {
+                    if store.isPro {
+                        elevenSection
+                    } else {
+                        Label("Giọng ElevenLabs chỉ có ở gói PRO. Hãy chọn động cơ khác ở trên hoặc nâng cấp PRO.",
+                              systemImage: "crown.fill")
+                            .font(.caption2).foregroundStyle(Theme.gold)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 } else if tts.engineType == .system || tts.engineType == .siri {
                     deviceVoiceSection
                 } else {
@@ -89,6 +98,15 @@ struct TTSVoicePickerSection: View {
                 tts.elevenServerKey = (cfg.elevenServerKey ?? false)
             }
             await refreshKeyStatus()
+            // TỰ TẢI danh sách giọng ElevenLabs ngay (trước đây phải bấm "Tải danh sách"
+            // mới có, nên mở ra thấy trống → tưởng không chọn được giọng).
+            if tts.engineType == .elevenlabs && store.isPro { await loadVoices() }
+        }
+        // Vừa đổi sang ElevenLabs → tải danh sách giọng ngay, khỏi phải bấm thêm.
+        .onChange(of: tts.engineType) { t in
+            if t == .elevenlabs && store.isPro && elevenVoices.isEmpty {
+                Task { await loadVoices() }
+            }
         }
     }
 
@@ -120,7 +138,11 @@ struct TTSVoicePickerSection: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Động cơ giọng").font(.caption).foregroundStyle(.secondary)
             Picker("Động cơ", selection: $tts.engineType) {
-                ForEach(TTSEngine.EngineType.allCases.filter { store.isPro || $0 != .elevenlabs }) { t in
+                // LUÔN hiện ElevenLabs nếu ĐANG chọn nó (tránh Picker kẹt trạng thái vì
+                // giá trị đang chọn không có trong danh sách → bấm không đổi được).
+                ForEach(TTSEngine.EngineType.allCases.filter {
+                    store.isPro || $0 != .elevenlabs || tts.engineType == .elevenlabs
+                }) { t in
                     Text(t.label).tag(t)
                 }
             }
@@ -302,6 +324,10 @@ struct TTSVoicePickerSection: View {
             }
             if let voicesError {
                 Text("⚠️ " + voicesError).font(.caption2).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if elevenVoices.isEmpty && !loadingVoices {
+                Text("Chưa có giọng nào. Cần ADMIN đã lưu khoá ElevenLabs bên dưới, và máy chủ đã cập nhật bản mới.")
+                    .font(.caption2).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !elevenVoices.isEmpty {
