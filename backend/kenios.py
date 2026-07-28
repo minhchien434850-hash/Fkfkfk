@@ -4233,14 +4233,20 @@ def _extract_video_frames(path: str, count: int = 8, width: int = 512) -> list:
     return out[:count]
 
 
-def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg") -> str:
+def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg",
+               max_tokens: int = 4096, json_mode: bool = False) -> str:
     """Gọi AI CÓ HÌNH ẢNH (vision) qua CHUỖI backend admin (Gemini/Claude/OpenAI-vision).
-    Groq llama thường KHÔNG có vision → tự nhảy sang con kế. images_b64: base64 thô (không data:)."""
+    Groq llama thường KHÔNG có vision → tự nhảy sang con kế. images_b64: base64 thô (không data:).
+
+    LƯU Ý QUAN TRỌNG (gemini-2.5-*): model bật 'thinking' MẶC ĐỊNH và token suy nghĩ bị TRỪ VÀO
+    maxOutputTokens → để mức thấp sẽ khiến câu trả lời BỊ CẮT GIỮA CHỪNG hoặc TRỐNG RỖNG.
+    Vì vậy ta TẮT thinking (thinkingBudget=0) và nới hẳn maxOutputTokens.
+    json_mode=True → ép Gemini trả về JSON hợp lệ (responseMimeType)."""
     import httpx as _hx
     backends = _ai_backends()
     if not backends:
         return "⚠️ Máy chủ chưa cấu hình khoá AI. Admin thêm khoá (nên dùng Gemini có xem ảnh)."
-    imgs = images_b64[:10]
+    imgs = images_b64[:16]
     last = ""
     for (prov, base, model, key) in backends:
         try:
@@ -4249,10 +4255,23 @@ def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg") -> str:
                 gbase = base[:-7] if base.endswith("/openai") else base
                 parts = [{"text": prompt}] + [{"inline_data": {"mime_type": mime, "data": b}} for b in imgs]
                 mdl = model or "gemini-2.5-flash"
-                r = _hx.post(f"{gbase}/models/{mdl}:generateContent", timeout=120,
-                             headers={"x-goog-api-key": key, "content-type": "application/json"},
-                             json={"contents": [{"role": "user", "parts": parts}],
-                                   "generationConfig": {"maxOutputTokens": 1600, "temperature": 0.6}})
+                gcfg: dict[str, Any] = {"maxOutputTokens": max_tokens, "temperature": 0.6}
+                # Tắt 'thinking' để TOÀN BỘ token dành cho câu trả lời (tránh cụt/rỗng).
+                gcfg["thinkingConfig"] = {"thinkingBudget": 0}
+                if json_mode:
+                    gcfg["responseMimeType"] = "application/json"
+
+                def _call(cfg):
+                    return _hx.post(f"{gbase}/models/{mdl}:generateContent", timeout=180,
+                                    headers={"x-goog-api-key": key, "content-type": "application/json"},
+                                    json={"contents": [{"role": "user", "parts": parts}],
+                                          "generationConfig": cfg})
+
+                r = _call(gcfg)
+                # Model cũ không hiểu thinkingConfig/responseMimeType → bỏ ra rồi gọi lại.
+                if r.status_code == 400:
+                    basic = {"maxOutputTokens": max_tokens, "temperature": 0.6}
+                    r = _call(basic)
                 if r.status_code >= 400:
                     last = _ai_err(r.status_code, r.text); continue
                 d = r.json(); c = d.get("candidates") or []
@@ -4260,7 +4279,9 @@ def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg") -> str:
                 txt = "".join(p.get("text", "") for p in ps if "text" in p).strip()
                 if txt:
                     return txt
-                last = "(AI không trả lời)"
+                # Trống → nêu rõ lý do (hay gặp: MAX_TOKENS do thinking, hoặc bị chặn an toàn).
+                fr = (c[0].get("finishReason") if c else "") or ""
+                last = f"(AI không trả lời — finishReason={fr or 'không rõ'})"
             elif prov == "anthropic":
                 content = [{"type": "text", "text": prompt}] + [
                     {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b}} for b in imgs]
@@ -4411,6 +4432,10 @@ def _extract_frames_timed(path: str, duration: float, count: int, width: int = 5
 def _parse_timed_script(raw: str, duration: float) -> list:
     """Đọc JSON [{"t": giây, "text": "..."}] từ câu trả lời AI (chịu được chữ thừa quanh JSON)."""
     s = (raw or "").strip()
+    # Bỏ rào markdown ```json … ``` nếu AI bọc quanh.
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+        s = re.sub(r"\s*```$", "", s).strip()
     i, j = s.find("["), s.rfind("]")
     if i >= 0 and j > i:
         s = s[i:j + 1]
@@ -4432,6 +4457,49 @@ def _parse_timed_script(raw: str, duration: float) -> list:
         return []
     segs.sort(key=lambda x: x["t"])
     return segs[:60]
+
+
+def _segments_from_prose(text: str, duration: float) -> list:
+    """DỰ PHÒNG: từ 1 đoạn văn xuôi → tách câu rồi RẢI ĐỀU theo thời lượng video.
+    Nhờ vậy kịch bản ĐÃ CÓ vẫn lồng tiếng được, kể cả khi AI không trả về JSON mốc giờ."""
+    s = (text or "").strip()
+    if not s or duration <= 0:
+        return []
+    # Bỏ tiền tố mốc giờ nếu là kịch bản dạng "[12s] ..." do chính app hiển thị.
+    s = re.sub(r"\[\s*\d+(?:\.\d+)?\s*s\s*\]", " ", s)
+    raw_parts = re.split(r"(?<=[.!?…])\s+|\n+", s)
+    parts: list[str] = []
+    for p in raw_parts:
+        p = p.strip()
+        if not p:
+            continue
+        # Câu quá dài → cắt nhỏ theo dấu phẩy cho vừa nhịp đọc.
+        if len(p) > 160:
+            buf = ""
+            for piece in p.split(","):
+                piece = piece.strip()
+                if not piece:
+                    continue
+                if len(buf) + len(piece) + 2 <= 160:
+                    buf = (buf + ", " + piece) if buf else piece
+                else:
+                    if buf:
+                        parts.append(buf)
+                    buf = piece
+            if buf:
+                parts.append(buf)
+        else:
+            parts.append(p)
+    parts = [p for p in parts if len(p) > 1][:60]
+    if not parts:
+        return []
+    # Rải đều: đoạn i bắt đầu ở duration * i / n (chừa 0.3s đầu cho êm).
+    n = len(parts)
+    out = []
+    for i, p in enumerate(parts):
+        t = (duration * i) / n
+        out.append({"t": round(min(max(t, 0.0), max(0.0, duration - 0.5)), 2), "text": p[:600]})
+    return out
 
 
 def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) -> None:
@@ -4462,7 +4530,17 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
             upd(status="error", error="Không trích được khung hình từ video.")
             return
 
-        # 2) AI viết KỊCH BẢN CÓ MỐC GIỜ khớp diễn biến.
+        # 2) KỊCH BẢN.
+        #    ƯU TIÊN dùng ĐÚNG kịch bản người dùng đang thấy/đã sửa (gửi kèm từ app) →
+        #    đọc ĐÚNG CHỮ ĐÃ TẠO, chạy được ngay, không phụ thuộc AI lần 2.
+        user_script = (opt.get("script") or "").strip()
+        if user_script:
+            upd(step="Đang dùng kịch bản đã có…", progress=35)
+            segs = _segments_from_prose(user_script, dur)
+            if segs:
+                upd(step=f"Đang tạo giọng đọc ({len(segs)} đoạn)…", progress=45, segments=len(segs))
+                return _narrate_finish(jid, path, tmp, segs, dur, opt, upd)
+
         upd(step="AI đang viết lời bình khớp video…", progress=30)
         style = (opt.get("style") or "thuyết minh tự nhiên, cuốn hút").strip()
         tl = ", ".join(f"{t}s" for t, _ in frames)
@@ -4483,14 +4561,34 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
             "• Mỗi đoạn 8–25 từ (đọc khoảng 3–6 giây), cách nhau đủ để đọc kịp, KHÔNG chồng lấn.\n"
             "• Không emoji, không hashtag, không nói 'khung hình'/'hình ảnh cho thấy'."
         )
-        raw = _ai_vision(prompt, [b for _, b in frames])
+        raw = _ai_vision(prompt, [b for _, b in frames], max_tokens=8192, json_mode=True)
         segs = _parse_timed_script(raw, dur)
+        # DỰ PHÒNG 1: AI trả về văn xuôi (không phải JSON) → tự chia câu & rải đều theo thời lượng.
+        if not segs and raw and not raw.startswith("⚠️"):
+            segs = _segments_from_prose(raw, dur)
+        # DỰ PHÒNG 2: dùng KỊCH BẢN NGƯỜI DÙNG ĐÃ CÓ (gửi kèm từ app) — luôn chạy được.
+        if not segs and (opt.get("script") or "").strip():
+            segs = _segments_from_prose(opt["script"], dur)
         if not segs:
             upd(status="error",
-                error="AI chưa trả về được kịch bản theo mốc giờ. Kiểm tra khoá AI (nên dùng Gemini).")
+                error=f"Chưa tạo được lời bình theo mốc giờ. AI trả về: {(raw or '')[:200]}")
             return
         upd(step=f"Đang tạo giọng đọc ({len(segs)} đoạn)…", progress=45, segments=len(segs))
+        return _narrate_finish(jid, path, tmp, segs, dur, opt, upd)
+    except Exception as e:
+        upd(status="error", error=f"Lỗi: {e}")
+    finally:
+        _sh.rmtree(tmp, ignore_errors=True)
+        if cleanup_dir:
+            _sh.rmtree(cleanup_dir, ignore_errors=True)
 
+
+def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
+                    opt: dict, upd) -> None:
+    """Bước 3–5 dùng CHUNG cho cả 2 luồng (kịch bản người dùng / kịch bản AI):
+    tạo giọng đọc → ghép đúng mốc giờ + làm nét → lưu file cho app tải về."""
+    import subprocess, shutil as _sh, os as _os
+    try:
         # 3) Tạo giọng đọc cho từng đoạn (edge-tts/gTTS trên máy chủ).
         made = []
         for idx, sg in enumerate(segs):
@@ -4559,11 +4657,7 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
         upd(status="done", step="Xong", progress=100, file_id=fid, filename=name, size=size,
             script="\n".join(f"[{s['t']:.0f}s] {s['text']}" for s in segs))
     except Exception as e:
-        upd(status="error", error=f"Lỗi: {e}")
-    finally:
-        _sh.rmtree(tmp, ignore_errors=True)
-        if cleanup_dir:
-            _sh.rmtree(cleanup_dir, ignore_errors=True)
+        upd(status="error", error=f"Lỗi ghép: {e}")
 
 
 class VideoNarrateIn(BaseModel):
@@ -4576,6 +4670,7 @@ class VideoNarrateIn(BaseModel):
     keep_original: Optional[bool] = True  # giữ tiếng gốc (nhỏ) phía dưới lời bình
     orig_volume: Optional[float] = 0.18
     voice_volume: Optional[float] = 1.6
+    script: Optional[str] = None   # kịch bản người dùng đã có/đã sửa → dùng luôn, khỏi bắt AI làm lại
 
 
 @app.post("/social/video-narrate")
@@ -4614,7 +4709,7 @@ async def social_video_narrate(b: VideoNarrateIn, user=Depends(get_user)) -> dic
                               "user_id": user["id"], "created": int(time.time())}
     opt = {"style": b.style, "height": b.height, "sharpen": b.sharpen, "denoise": b.denoise,
            "keep_original": b.keep_original, "orig_volume": b.orig_volume,
-           "voice_volume": b.voice_volume, "user_id": user["id"]}
+           "voice_volume": b.voice_volume, "script": b.script, "user_id": user["id"]}
     threading.Thread(target=_narrate_worker, args=(jid, path, cleanup_dir, opt),
                      daemon=True, name=f"narrate-{jid}").start()
     return {"job_id": jid, "status": "queued"}

@@ -934,7 +934,7 @@ struct APIClient {
     func startVideoNarrate(url: String? = nil, fileId: Int? = nil, style: String? = nil,
                            height: Int = 1080, sharpen: Double = 0.8, denoise: Bool = false,
                            keepOriginal: Bool = true, origVolume: Double = 0.18,
-                           voiceVolume: Double = 1.6) async throws -> NarrateStartResp {
+                           voiceVolume: Double = 1.6, script: String? = nil) async throws -> NarrateStartResp {
         var body: [String: Any] = [
             "height": height, "sharpen": sharpen, "denoise": denoise,
             "keep_original": keepOriginal, "orig_volume": origVolume, "voice_volume": voiceVolume,
@@ -942,6 +942,10 @@ struct APIClient {
         if let url, !url.isEmpty { body["url"] = url }
         if let fileId { body["file_id"] = fileId }
         if let style, !style.isEmpty { body["style"] = style }
+        // Gửi kèm KỊCH BẢN đang hiển thị (đã sửa) → máy chủ đọc ĐÚNG chữ này.
+        if let script, !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["script"] = script
+        }
         return try decode(try await send("/social/video-narrate", method: "POST", json: body))
     }
     /// Hỏi tiến độ / kết quả job lồng tiếng.

@@ -307,7 +307,8 @@ struct VideoScriptView: View {
                 let r = try await store.api.startVideoNarrate(
                     url: lastSource.url, fileId: lastSource.fileId, style: style,
                     height: narHeight, sharpen: narSharpen, denoise: narDenoise,
-                    keepOriginal: narKeepOrig, origVolume: narOrigVol)
+                    keepOriginal: narKeepOrig, origVolume: narOrigVol,
+                    script: script)   // đọc ĐÚNG kịch bản đang hiển thị/đã sửa
                 // Hỏi tiến độ mỗi 2 giây cho tới khi xong/lỗi.
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
