@@ -311,10 +311,10 @@ struct TTSVoicePickerSection: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 ScrollView {
                     VStack(spacing: 4) {
-                        ForEach(filteredEleven, id: \.voice_id) { v in
-                            let on = tts.elevenVoiceId == v.voice_id
+                        ForEach(filteredEleven, id: \.voiceId) { v in
+                            let on = tts.elevenVoiceId == v.voiceId
                             Button {
-                                tts.elevenVoiceId = v.voice_id
+                                tts.elevenVoiceId = v.voiceId
                                 tts.elevenVoiceName = v.name
                                 UserDefaults.standard.set(v.name, forKey: "eleven_voice_name")
                             } label: {

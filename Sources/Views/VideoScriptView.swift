@@ -312,11 +312,11 @@ struct VideoScriptView: View {
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     if Task.isCancelled { break }
-                    let st = try await store.api.videoNarrateStatus(r.job_id)
+                    let st = try await store.api.videoNarrateStatus(r.jobId)
                     narStep = st.step ?? ""
                     narProgress = st.progress ?? narProgress
                     if st.status == "done" {
-                        narFileId = st.file_id
+                        narFileId = st.fileId
                         narFilename = st.filename ?? "video.mp4"
                         narSize = st.size ?? 0
                         if let s = st.script, !s.isEmpty { script = s }
@@ -477,12 +477,12 @@ struct VideoScriptView: View {
             aiKeyDraft = ""
             if k.isEmpty {
                 aiKeyMsg = "✓ Đã xoá khoá AI."
-            } else if r.test_ok == false {
-                aiKeyMsg = "Khoá đã lưu nhưng gọi thử LỖI: \(r.test_msg ?? "không rõ")"
+            } else if r.testOk == false {
+                aiKeyMsg = "Khoá đã lưu nhưng gọi thử LỖI: \(r.testMsg ?? "không rõ")"
             } else {
                 aiKeyMsg = "✓ Đã lưu & gọi thử OK (\(r.provider) · \(r.model))."
             }
-            aiVisionReady = r.vision_ready ?? true
+            aiVisionReady = r.visionReady ?? true
             await refreshAIKey()
         } catch {
             aiKeyMsg = error.localizedDescription

@@ -887,7 +887,7 @@ struct APIClient {
     }
     struct AIKeySaveResp: Decodable {
         let ok: Bool; let set: Bool; let provider: String; let model: String
-        let test_ok: Bool?; let test_msg: String?; let vision_ready: Bool?
+        let testOk: Bool?; let testMsg: String?; let visionReady: Bool?
     }
     /// ADMIN: xem trạng thái khoá AI trên máy chủ.
     func aiKeyStatus() async throws -> AIKeyStatus {
@@ -902,12 +902,12 @@ struct APIClient {
 
     // ============ Danh sách ĐẦY ĐỦ giọng ElevenLabs (dùng key máy chủ của admin) ============
     struct ElevenVoice: Decodable, Identifiable, Hashable {
-        let voice_id: String
+        let voiceId: String
         let name: String
         let desc: String
         let category: String
         let preview: String
-        var id: String { voice_id }
+        var id: String { voiceId }
     }
     private struct ElevenVoicesResp: Decodable { let voices: [ElevenVoice] }
     /// Lấy toàn bộ giọng ElevenLabs để người dùng CHỌN THEO TÊN (không cần chép Voice ID).
@@ -917,13 +917,13 @@ struct APIClient {
     }
 
     // ====== LỒNG TIẾNG TOÀN BỘ VIDEO (khớp thời gian) + làm nét → xuất file tải về máy ======
-    struct NarrateStartResp: Decodable { let job_id: String; let status: String }
+    struct NarrateStartResp: Decodable { let jobId: String; let status: String }
     struct NarrateStatus: Decodable {
         let status: String            // queued | running | done | error
         let step: String?
         let progress: Int?
         let error: String?
-        let file_id: Int?
+        let fileId: Int?
         let filename: String?
         let size: Int?
         let duration: Double?
