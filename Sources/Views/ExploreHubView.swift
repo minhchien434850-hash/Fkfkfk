@@ -5,7 +5,7 @@ import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case liveNow, fileTools, library, read, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, winApp, remoteDesktop, remoteServer
+    case liveNow, fileTools, library, read, videoScript, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, winApp, remoteDesktop, remoteServer
     var id: String { rawValue }
 
     var title: String {
@@ -14,6 +14,7 @@ enum HubDest: String, Identifiable {
         case .fileTools:      return "Công cụ tệp"
         case .library:        return "Thư viện"
         case .read:           return "Đọc (TTS)"
+        case .videoScript:    return "AI xem video"
         case .fun:            return "Giải trí"
         case .games:          return "Trò chơi"
         case .appLauncher:    return "App Launcher"
@@ -36,6 +37,7 @@ enum HubDest: String, Identifiable {
         case .fileTools:      return "PDF · Âm thanh · Quét · Ảnh"
         case .library:        return "Video · file đã tải"
         case .read:           return "Đọc văn bản · giọng mới"
+        case .videoScript:    return "Nhìn video · viết kịch bản · đọc"
         case .fun:            return "Phim · nhạc · web"
         case .games:          return "Chơi game trong app"
         case .appLauncher:    return "Thêm app của bạn · Mở nhanh"
@@ -58,6 +60,7 @@ enum HubDest: String, Identifiable {
         case .fileTools:      return "File Tools"
         case .library:        return "Library"
         case .read:           return "Read (TTS)"
+        case .videoScript:    return "AI Video Script"
         case .fun:            return "Entertainment"
         case .games:          return "Games"
         case .appLauncher:    return "App Launcher"
@@ -80,6 +83,7 @@ enum HubDest: String, Identifiable {
         case .fileTools:      return "PDF · Audio · Scan · Image"
         case .library:        return "Videos · downloaded files"
         case .read:           return "Read text · new voices"
+        case .videoScript:    return "Watch video · write script · read"
         case .fun:            return "Movies · music · web"
         case .games:          return "Play games in app"
         case .appLauncher:    return "Add your apps · Launch fast"
@@ -102,6 +106,7 @@ enum HubDest: String, Identifiable {
         case .fileTools:      return "doc.badge.gearshape.fill"
         case .library:        return "clock.arrow.circlepath"
         case .read:           return "speaker.wave.2.fill"
+        case .videoScript:    return "film.stack.fill"
         case .fun:            return "play.tv.fill"
         case .games:          return "gamecontroller.fill"
         case .appLauncher:    return "bolt.heart.fill"
@@ -124,6 +129,7 @@ enum HubDest: String, Identifiable {
         case .fileTools:      return [Color(red: 0.0, green: 0.7, blue: 0.65), Color(red: 0.0, green: 0.45, blue: 0.7)]
         case .library:        return [Color(red: 0.0, green: 0.6, blue: 0.95), Color(red: 0.0, green: 0.4, blue: 0.85)]
         case .read:           return [Color(red: 0.0, green: 0.78, blue: 0.7), Color(red: 0.0, green: 0.55, blue: 0.7)]
+        case .videoScript:    return [Color(red: 0.98, green: 0.45, blue: 0.15), Color(red: 0.85, green: 0.2, blue: 0.45)]
         case .fun:            return [Color(red: 0.95, green: 0.3, blue: 0.5), Color(red: 0.75, green: 0.2, blue: 0.55)]
         case .games:          return [Color(red: 0.55, green: 0.4, blue: 0.95), Color(red: 0.35, green: 0.3, blue: 0.9)]
         case .appLauncher:    return [Color(red: 1.0, green: 0.35, blue: 0.0), Color(red: 0.9, green: 0.15, blue: 0.0)]
@@ -151,7 +157,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .winApp, .remoteDesktop, .remoteServer, .certImport, .ipaLibrary, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .videoScript, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .winApp, .remoteDesktop, .remoteServer, .certImport, .ipaLibrary, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -208,6 +214,7 @@ struct ExploreHubView: View {
         case .fileTools:      FileToolsView()
         case .library:        LibraryView()
         case .read:           TTSView()
+        case .videoScript:    VideoScriptView()
         case .fun:            MediaWebView(model: browserModel)
         case .games:          GameZoneView()
         case .appLauncher:    AppLauncherView()

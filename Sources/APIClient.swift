@@ -880,6 +880,17 @@ struct APIClient {
     /// URL công khai của 1 file media theo id (ảnh/video bài đăng) — tải bằng AsyncImage được.
     func mediaURL(fileId: Int) -> URL? { URL(string: "\(root)/media/\(fileId)") }
 
+    // ============ AI xem video → viết kịch bản thuyết minh (để đọc bằng TTS) ============
+    struct VideoScriptResp: Decodable { let script: String; let frames: Int }
+    /// AI xem video (qua link HOẶC file_id đã tải lên) rồi viết kịch bản tiếng Việt để đọc.
+    func videoScript(url: String? = nil, fileId: Int? = nil, style: String? = nil) async throws -> VideoScriptResp {
+        var body: [String: Any] = [:]
+        if let url, !url.isEmpty { body["url"] = url }
+        if let fileId { body["file_id"] = fileId }
+        if let style, !style.isEmpty { body["style"] = style }
+        return try decode(try await send("/social/video-script", method: "POST", json: body))
+    }
+
     // ============ Trình đọc trên trình duyệt (TikTok Studio / OBS) ============
     struct ReaderSaveResp: Decodable { let url: String; let token: String }
     /// Lưu & ĐỒNG BỘ thiết lập giọng lên máy chủ, trả về ĐƯỜNG DẪN trang đọc.

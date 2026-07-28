@@ -4113,6 +4113,165 @@ async def social_download(b: SocialDownloadIn, user=Depends(get_user)) -> dict[s
     return {"file_id": fid, "filename": fname, "size": size}
 
 
+# ======================== AI XEM VIDEO → VIẾT KỊCH BẢN (voiceover) ========================
+def _extract_video_frames(path: str, count: int = 8, width: int = 512) -> list:
+    """Trích `count` khung hình rải đều theo thời gian từ video → list base64 JPEG."""
+    import subprocess, tempfile, glob, shutil as _sh
+    if not _sh.which("ffmpeg"):
+        return []
+    dur = 0.0
+    try:
+        pr = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                             "-of", "default=nw=1:nk=1", path],
+                            capture_output=True, text=True, timeout=30)
+        dur = float((pr.stdout or "0").strip() or 0)
+    except Exception:
+        dur = 0.0
+    tmp = tempfile.mkdtemp(prefix="vframes_")
+    out: list = []
+    try:
+        if dur > 0.5:
+            for i in range(count):
+                t = dur * (i + 0.5) / count
+                fp = os.path.join(tmp, f"f{i:02d}.jpg")
+                subprocess.run(["ffmpeg", "-y", "-ss", f"{t:.2f}", "-i", path, "-frames:v", "1",
+                                "-vf", f"scale={width}:-1", "-q:v", "4", fp],
+                               capture_output=True, timeout=60)
+        else:
+            subprocess.run(["ffmpeg", "-y", "-i", path, "-vf", f"scale={width}:-1,fps=1",
+                            "-frames:v", str(count), os.path.join(tmp, "f%02d.jpg")],
+                           capture_output=True, timeout=120)
+        for fp in sorted(glob.glob(os.path.join(tmp, "*.jpg"))):
+            try:
+                with open(fp, "rb") as f:
+                    out.append(base64.b64encode(f.read()).decode())
+            except Exception:
+                pass
+    finally:
+        _sh.rmtree(tmp, ignore_errors=True)
+    return out[:count]
+
+
+def _ai_vision(prompt: str, images_b64: list, mime: str = "image/jpeg") -> str:
+    """Gọi AI CÓ HÌNH ẢNH (vision) qua CHUỖI backend admin (Gemini/Claude/OpenAI-vision).
+    Groq llama thường KHÔNG có vision → tự nhảy sang con kế. images_b64: base64 thô (không data:)."""
+    import httpx as _hx
+    backends = _ai_backends()
+    if not backends:
+        return "⚠️ Máy chủ chưa cấu hình khoá AI. Admin thêm khoá (nên dùng Gemini có xem ảnh)."
+    imgs = images_b64[:10]
+    last = ""
+    for (prov, base, model, key) in backends:
+        try:
+            base = (base or "").rstrip("/")
+            if prov == "gemini":
+                gbase = base[:-7] if base.endswith("/openai") else base
+                parts = [{"text": prompt}] + [{"inline_data": {"mime_type": mime, "data": b}} for b in imgs]
+                mdl = model or "gemini-2.5-flash"
+                r = _hx.post(f"{gbase}/models/{mdl}:generateContent", timeout=120,
+                             headers={"x-goog-api-key": key, "content-type": "application/json"},
+                             json={"contents": [{"role": "user", "parts": parts}],
+                                   "generationConfig": {"maxOutputTokens": 1600, "temperature": 0.6}})
+                if r.status_code >= 400:
+                    last = _ai_err(r.status_code, r.text); continue
+                d = r.json(); c = d.get("candidates") or []
+                ps = ((c[0].get("content") or {}).get("parts") or []) if c else []
+                txt = "".join(p.get("text", "") for p in ps if "text" in p).strip()
+                if txt:
+                    return txt
+                last = "(AI không trả lời)"
+            elif prov == "anthropic":
+                content = [{"type": "text", "text": prompt}] + [
+                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b}} for b in imgs]
+                r = _hx.post(base + "/messages", timeout=120,
+                             headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                                      "content-type": "application/json"},
+                             json={"model": model, "max_tokens": 1600,
+                                   "messages": [{"role": "user", "content": content}]})
+                if r.status_code >= 400:
+                    last = _ai_err(r.status_code, r.text); continue
+                d = r.json()
+                txt = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip()
+                if txt:
+                    return txt
+                last = "(AI không trả lời)"
+            else:
+                content = [{"type": "text", "text": prompt}] + [
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b}"}} for b in imgs]
+                r = _hx.post(base + "/chat/completions", timeout=120,
+                             headers={"Authorization": "Bearer " + key, "content-type": "application/json"},
+                             json={"model": model, "max_tokens": 1600, "temperature": 0.6,
+                                   "messages": [{"role": "user", "content": content}]})
+                if r.status_code >= 400:
+                    last = _ai_err(r.status_code, r.text); continue
+                d = r.json()
+                txt = ((d.get("choices") or [{}])[0].get("message", {}).get("content", "") or "").strip()
+                if txt:
+                    return txt
+                last = "(AI không trả lời)"
+        except Exception as e:
+            last = f"⚠️ Lỗi gọi AI vision ({prov}): {e}"
+    return last or "⚠️ AI chưa xem được video. Admin nên cấu hình khoá Gemini (miễn phí, có xem ảnh)."
+
+
+class VideoScriptIn(BaseModel):
+    url: Optional[str] = None
+    file_id: Optional[int] = None
+    style: Optional[str] = "thuyết minh tự nhiên, cuốn hút"
+
+
+@app.post("/social/video-script")
+async def social_video_script(b: VideoScriptIn, user=Depends(get_user)) -> dict[str, Any]:
+    """AI XEM video (trích khung hình) rồi VIẾT KỊCH BẢN thuyết minh tiếng Việt để app đọc bằng TTS.
+    Nhận link (yt-dlp tải về) HOẶC file_id (video đã tải lên). Ai cũng dùng (khoá AI của máy chủ)."""
+    import tempfile, glob, shutil
+    path = None
+    cleanup_dir = None
+    if b.file_id:
+        p = os.path.join(UPLOAD_DIR, str(b.file_id))
+        if os.path.exists(p):
+            path = p
+    if path is None and (b.url or "").strip():
+        if not shutil.which("yt-dlp"):
+            raise HTTPException(status_code=400, detail="Máy chủ chưa cài yt-dlp.")
+        tmp = tempfile.mkdtemp(prefix="vs_"); cleanup_dir = tmp
+        cmd = ["yt-dlp", "-f", "best[height<=720]/best", "--merge-output-format", "mp4",
+               "--no-playlist", "--no-warnings", "-o", os.path.join(tmp, "v.%(ext)s"), b.url.strip()]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            _, err = await asyncio.wait_for(proc.communicate(), timeout=600)
+        except Exception as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=f"Không tải được video: {e}")
+        fs = [f for f in glob.glob(os.path.join(tmp, "*")) if os.path.isfile(f)]
+        if fs:
+            path = max(fs, key=os.path.getsize)
+    if not path or not os.path.exists(path):
+        if cleanup_dir:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="Thiếu video — hãy dán link hoặc chọn file video.")
+
+    frames = await asyncio.to_thread(_extract_video_frames, path, 8, 512)
+    if cleanup_dir:
+        shutil.rmtree(cleanup_dir, ignore_errors=True)
+    if not frames:
+        raise HTTPException(status_code=400,
+            detail="Không trích được khung hình (máy chủ thiếu ffmpeg hoặc video hỏng).")
+
+    style = (b.style or "thuyết minh tự nhiên, cuốn hút").strip()
+    prompt = (
+        "Đây là các KHUNG HÌNH trích theo thứ tự thời gian từ MỘT video ngắn. "
+        "Hãy XEM kỹ và VIẾT MỘT KỊCH BẢN LỜI THOẠI / THUYẾT MINH bằng TIẾNG VIỆT để đọc lồng tiếng (voiceover). "
+        f"Giọng điệu: {style}. "
+        "Yêu cầu: viết thành ĐOẠN VĂN LIỀN MẠCH, tự nhiên như người dẫn chuyện, bám đúng diễn biến/hình ảnh; "
+        "độ dài vừa phải (khoảng 60–160 từ). CHỈ trả về đúng lời để đọc — KHÔNG gạch đầu dòng, KHÔNG ghi 'khung hình 1/2', "
+        "KHÔNG chú thích kỹ thuật, KHÔNG hashtag."
+    )
+    script = await asyncio.to_thread(_ai_vision, prompt, frames)
+    return {"script": script, "frames": len(frames)}
+
+
 def _parse_cookie_string(cookies_str: str) -> dict[str, str]:
     """Đọc cookie ở dạng JSON (mảng {name,value} hoặc object) hoặc chuỗi 'a=b; c=d'."""
     cookies_str = (cookies_str or "").strip()
