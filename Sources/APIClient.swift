@@ -900,6 +900,33 @@ struct APIClient {
         return try decode(try await send("/admin/ai-key", method: "POST", json: body))
     }
 
+    // ====== NHIỀU khoá AI (chuỗi dự phòng): hết lượt khoá này → tự nhảy khoá kế ======
+    struct AIKeyItem: Decodable, Identifiable, Hashable {
+        let index: Int
+        let main: Bool
+        let provider: String
+        let model: String
+        let masked: String
+        var id: Int { index }
+    }
+    private struct AIKeysResp: Decodable { let items: [AIKeyItem]; let total: Int }
+    /// ADMIN: liệt kê toàn bộ khoá AI trong chuỗi dự phòng (theo đúng thứ tự sẽ dùng).
+    func aiKeys() async throws -> [AIKeyItem] {
+        let r: AIKeysResp = try decode(try await send("/admin/ai-keys"))
+        return r.items
+    }
+    /// ADMIN: thêm 1 khoá AI vào cuối chuỗi dự phòng.
+    func addAIKey(_ key: String, provider: String? = nil, model: String? = nil) async throws {
+        var body: [String: Any] = ["key": key]
+        if let provider, !provider.isEmpty { body["provider"] = provider }
+        if let model, !model.isEmpty { body["model"] = model }
+        _ = try await send("/admin/ai-keys", method: "POST", json: body)
+    }
+    /// ADMIN: xoá 1 khoá theo vị trí (-1 = khoá chính).
+    func deleteAIKey(index: Int) async throws {
+        _ = try await send("/admin/ai-keys/\(index)", method: "DELETE")
+    }
+
     // ============ Danh sách ĐẦY ĐỦ giọng ElevenLabs (dùng key máy chủ của admin) ============
     struct ElevenVoice: Decodable, Identifiable, Hashable {
         let voiceId: String

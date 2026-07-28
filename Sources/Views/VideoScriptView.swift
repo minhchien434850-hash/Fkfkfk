@@ -57,6 +57,7 @@ struct VideoScriptView: View {
     @State private var aiKeyBusy = false
     @State private var aiKeyMsg: String?
     @State private var aiVisionReady = true
+    @State private var aiKeyList: [APIClient.AIKeyItem] = []
 
     private var linkTrim: String { link.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -176,7 +177,7 @@ struct VideoScriptView: View {
             }
             .navigationTitle("AI xem video")
             .navigationBarTitleDisplayMode(.inline)
-            .task { await refreshAIKey() }
+            .task { await refreshAIKey(); await loadAIKeys() }
             .sheet(isPresented: $showPicker) {
                 DocumentPicker(contentTypes: [.movie, .video, .mpeg4Movie],
                                allowsMultipleSelection: false, asCopy: true) { urls in
@@ -430,36 +431,109 @@ struct VideoScriptView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            SecureField("Dán khoá AI (nên dùng Gemini: AIza… / AQ.…)", text: $aiKeyDraft)
+            Divider()
+
+            // ---- CHUỖI KHOÁ DỰ PHÒNG: hết lượt khoá này → tự nhảy khoá kế ----
+            HStack {
+                Label("Chuỗi khoá (\(aiKeyList.count))", systemImage: "key.horizontal.fill")
+                    .font(.caption.bold()).foregroundStyle(Theme.accent)
+                Spacer()
+                Button { Task { await loadAIKeys() } } label: {
+                    Image(systemName: "arrow.clockwise").font(.caption2)
+                }.buttonStyle(.bordered)
+            }
+            Text("Thêm NHIỀU khoá Gemini. Hết lượt (429) hoặc lỗi ở khoá đang dùng, máy chủ TỰ nhảy sang khoá kế tiếp theo đúng thứ tự dưới đây.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(Array(aiKeyList.enumerated()), id: \.element.id) { pos, k in
+                HStack(spacing: 8) {
+                    Text("\(pos + 1)").font(.caption2.bold())
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Theme.accent.opacity(0.20)))
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 4) {
+                            Text(k.masked).font(.caption2.bold())
+                            if k.main {
+                                Text("CHÍNH").font(.system(size: 9).bold())
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(Capsule().fill(Color.green.opacity(0.25)))
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                        Text("\(k.provider) · \(k.model)").font(.system(size: 10))
+                            .foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Button { Task { await removeAIKey(k.index) } } label: {
+                        Image(systemName: "trash").font(.caption2)
+                    }.buttonStyle(.plain).foregroundStyle(.red).disabled(aiKeyBusy)
+                }
+                .padding(.vertical, 5).padding(.horizontal, 8)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+
+            SecureField("Dán khoá Gemini để THÊM (AIza… / AQ.…)", text: $aiKeyDraft)
                 .font(.caption).autocorrectionDisabled().textInputAutocapitalization(.never)
                 .padding(8).background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
-            HStack {
-                Button { Task { await saveAIKey(aiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)) } } label: {
-                    HStack {
-                        if aiKeyBusy { ProgressView().scaleEffect(0.7).padding(.trailing, 2) }
-                        Label("Lưu & kiểm tra", systemImage: "checkmark.circle.fill").font(.caption)
-                    }
-                }
-                .buttonStyle(.borderedProminent).tint(.green)
-                .disabled(aiKeyBusy || aiKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                if aiKeySet {
-                    Button { Task { await saveAIKey("") } } label: {
-                        Label("Xoá", systemImage: "trash").font(.caption)
-                    }.buttonStyle(.bordered).tint(.red).disabled(aiKeyBusy)
+            Button { Task { await addAIKey(aiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)) } } label: {
+                HStack {
+                    if aiKeyBusy { ProgressView().scaleEffect(0.7).padding(.trailing, 2) }
+                    Label(aiKeyList.isEmpty ? "Lưu khoá (đặt làm chính)" : "Thêm khoá dự phòng",
+                          systemImage: "plus.circle.fill").font(.caption)
+                        .frame(maxWidth: .infinity)
                 }
             }
+            .buttonStyle(.borderedProminent).tint(.green)
+            .disabled(aiKeyBusy || aiKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
 
             if let aiKeyMsg {
                 Text(aiKeyMsg).font(.caption2)
                     .foregroundStyle(aiKeyMsg.hasPrefix("✓") ? .green : .red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Khoá lưu trên máy chủ, KHÔNG hiện cho khách. Đặt 1 lần → mọi khách dùng được “AI xem video”. Lấy khoá Gemini miễn phí tại aistudio.google.com.")
+            Text("Khoá lưu trên máy chủ, KHÔNG hiện cho khách. Lấy khoá Gemini miễn phí tại aistudio.google.com (mỗi tài khoản 1 khoá → thêm nhiều khoá để dùng được nhiều lượt hơn).")
                 .font(.caption2).foregroundStyle(.secondary)
         }
+    }
+
+    /// Nạp danh sách khoá trong chuỗi dự phòng.
+    private func loadAIKeys() async {
+        guard store.isAdmin else { return }
+        if let list = try? await store.api.aiKeys() { aiKeyList = list }
+    }
+
+    /// Thêm 1 khoá vào chuỗi (khoá đầu tiên sẽ thành khoá chính).
+    private func addAIKey(_ k: String) async {
+        guard !k.isEmpty else { return }
+        aiKeyBusy = true; aiKeyMsg = nil
+        do {
+            try await store.api.addAIKey(k)
+            aiKeyDraft = ""
+            aiKeyMsg = "✓ Đã thêm khoá vào chuỗi dự phòng."
+            await loadAIKeys()
+            await refreshAIKey()
+        } catch {
+            aiKeyMsg = error.localizedDescription
+        }
+        aiKeyBusy = false
+    }
+
+    /// Xoá 1 khoá khỏi chuỗi.
+    private func removeAIKey(_ idx: Int) async {
+        aiKeyBusy = true; aiKeyMsg = nil
+        do {
+            try await store.api.deleteAIKey(index: idx)
+            aiKeyMsg = "✓ Đã xoá khoá."
+            await loadAIKeys()
+            await refreshAIKey()
+        } catch {
+            aiKeyMsg = error.localizedDescription
+        }
+        aiKeyBusy = false
     }
 
     private func refreshAIKey() async {
@@ -469,26 +543,6 @@ struct VideoScriptView: View {
             aiProvider = st.provider; aiModel = st.model
             aiVisionReady = ["gemini", "anthropic", "openai"].contains(st.provider)
         }
-    }
-
-    private func saveAIKey(_ k: String) async {
-        aiKeyBusy = true; aiKeyMsg = nil
-        do {
-            let r = try await store.api.setAIServerKey(k)
-            aiKeyDraft = ""
-            if k.isEmpty {
-                aiKeyMsg = "✓ Đã xoá khoá AI."
-            } else if r.testOk == false {
-                aiKeyMsg = "Khoá đã lưu nhưng gọi thử LỖI: \(r.testMsg ?? "không rõ")"
-            } else {
-                aiKeyMsg = "✓ Đã lưu & gọi thử OK (\(r.provider) · \(r.model))."
-            }
-            aiVisionReady = r.visionReady ?? true
-            await refreshAIKey()
-        } catch {
-            aiKeyMsg = error.localizedDescription
-        }
-        aiKeyBusy = false
     }
 
     @ViewBuilder private func localSection<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {

@@ -2495,6 +2495,89 @@ def admin_set_ai_key(b: AIKeyIn, admin=Depends(get_admin)) -> dict[str, Any]:
     return out
 
 
+def _mask_key(k: str) -> str:
+    k = (k or "").strip()
+    return (k[:6] + "•••••" + k[-4:]) if len(k) > 14 else ("•••••" if k else "")
+
+
+class AIExtraKeyIn(BaseModel):
+    key: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    base: Optional[str] = None
+
+
+@app.get("/admin/ai-keys")
+def admin_list_ai_keys(admin=Depends(get_admin)) -> dict[str, Any]:
+    """DANH SÁCH toàn bộ khoá AI trong CHUỖI DỰ PHÒNG (khoá chính + các khoá thêm).
+    Khi 1 khoá hết lượt/lỗi, máy chủ TỰ nhảy sang khoá kế tiếp theo đúng thứ tự này."""
+    prov, base, model, key = _ai_cfg()
+    items: list[dict[str, Any]] = []
+    if key:
+        items.append({"index": -1, "main": True, "provider": prov,
+                      "model": model, "masked": _mask_key(key)})
+    try:
+        for i, e in enumerate(json.loads(get_setting("tg_ai_backends", "[]") or "[]")):
+            k2 = (e.get("k") or "").strip()
+            if not k2:
+                continue
+            p2 = _ai_norm_provider(e.get("p"), k2, e.get("b"))
+            _db, _dm = _AI_PROVIDER_DEFAULTS.get(p2, _AI_PROVIDER_DEFAULTS["openai"])
+            items.append({"index": i, "main": False, "provider": p2,
+                          "model": (e.get("m") or _dm), "masked": _mask_key(k2)})
+    except Exception:
+        pass
+    return {"items": items, "total": len(_ai_backends())}
+
+
+@app.post("/admin/ai-keys")
+def admin_add_ai_key(b: AIExtraKeyIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    """THÊM 1 khoá AI dự phòng vào cuối chuỗi (vd thêm nhiều khoá Gemini).
+    Hết lượt khoá này → máy chủ tự dùng khoá tiếp theo."""
+    k = (b.key or "").strip()
+    if not k:
+        raise HTTPException(status_code=400, detail="Thiếu khoá.")
+    base = (b.base or "").strip().rstrip("/")
+    pv = _ai_norm_provider(b.provider, k, base)
+    # Nếu CHƯA có khoá chính → đặt luôn làm khoá chính cho tiện.
+    _, _, _, cur_main = _ai_cfg()
+    if not cur_main:
+        set_setting("tg_ai_key", k)
+        if b.provider:
+            set_setting("tg_ai_provider", pv)
+        if b.model:
+            set_setting("tg_ai_model", (b.model or "").strip())
+        if base:
+            set_setting("tg_ai_base", base)
+        return {"ok": True, "as_main": True, "provider": pv, "total": len(_ai_backends())}
+    try:
+        lst = json.loads(get_setting("tg_ai_backends", "[]") or "[]")
+    except Exception:
+        lst = []
+    if any((e.get("k") or "").strip() == k for e in lst) or k == cur_main:
+        raise HTTPException(status_code=400, detail="Khoá này đã có trong danh sách.")
+    lst.append({"p": pv, "k": k, "m": (b.model or "").strip(), "b": base})
+    set_setting("tg_ai_backends", json.dumps(lst))
+    return {"ok": True, "as_main": False, "provider": pv, "total": len(_ai_backends())}
+
+
+@app.delete("/admin/ai-keys/{idx}")
+def admin_del_ai_key(idx: int, admin=Depends(get_admin)) -> dict[str, Any]:
+    """Xoá 1 khoá dự phòng theo vị trí (idx = -1 để xoá khoá CHÍNH)."""
+    if idx < 0:
+        set_setting("tg_ai_key", "")
+        return {"ok": True, "total": len(_ai_backends())}
+    try:
+        lst = json.loads(get_setting("tg_ai_backends", "[]") or "[]")
+    except Exception:
+        lst = []
+    if 0 <= idx < len(lst):
+        lst.pop(idx)
+        set_setting("tg_ai_backends", json.dumps(lst))
+        return {"ok": True, "total": len(_ai_backends())}
+    raise HTTPException(status_code=404, detail="Không tìm thấy khoá.")
+
+
 @app.get("/tts/eleven/voices")
 def tts_eleven_voices(user=Depends(get_user)) -> dict[str, Any]:
     """DANH SÁCH ĐẦY ĐỦ giọng ElevenLabs (dùng key máy chủ do admin đặt) → app cho khách CHỌN
