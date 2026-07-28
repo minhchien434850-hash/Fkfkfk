@@ -4585,6 +4585,88 @@ def _segments_from_prose(text: str, duration: float) -> list:
     return out
 
 
+def _eleven_tts_file(text: str, out_mp3: str, voice_id: str, model_id: str,
+                     stability: float, similarity: float, style_v: float,
+                     speaker_boost: bool, speed: float) -> bool:
+    """Tạo 1 file mp3 bằng ElevenLabs (KEY MÁY CHỦ do admin đặt). True nếu thành công."""
+    key = _eleven_server_key()
+    vid = (voice_id or "").strip()
+    txt = (text or "").strip()
+    if not key or not vid or not txt:
+        return False
+    is_v3 = (model_id == "eleven_v3")
+    stab = min([0.0, 0.5, 1.0], key=lambda x: abs(x - stability)) if is_v3 else stability
+    vs: dict[str, Any] = {"stability": stab, "similarity_boost": similarity,
+                          "style": style_v, "use_speaker_boost": speaker_boost}
+    if abs(speed - 1.0) > 0.001:
+        vs["speed"] = max(0.5, min(speed, 2.0))
+    payload: dict[str, Any] = {"text": txt, "model_id": model_id or "eleven_multilingual_v2",
+                               "voice_settings": vs}
+    if (model_id or "") != "eleven_multilingual_v2":
+        payload["language_code"] = "vi"
+    try:
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}",
+                       headers={"xi-api-key": key, "Content-Type": "application/json",
+                                "Accept": "audio/mpeg"},
+                       json=payload, timeout=90)
+        if r.status_code != 200 or len(r.content) < 800:
+            return False
+        with open(out_mp3, "wb") as f:
+            f.write(r.content)
+        return True
+    except Exception:
+        return False
+
+
+def _narrate_tts(text: str, out_mp3: str, opt: dict) -> bool:
+    """Tạo giọng đọc cho 1 đoạn, dùng ĐÚNG GIỌNG người dùng đã chọn trong app.
+    ElevenLabs (nếu chọn & máy chủ có khoá) → nếu hỏng thì lùi về giọng máy chủ (edge-tts/gTTS)."""
+    if (opt.get("engine") or "").lower() == "elevenlabs":
+        ok = _eleven_tts_file(
+            text, out_mp3,
+            voice_id=opt.get("eleven_voice_id") or "",
+            model_id=opt.get("eleven_model") or "eleven_multilingual_v2",
+            stability=float(opt.get("stability", 0.5) or 0.5),
+            similarity=float(opt.get("similarity", 0.85) or 0.85),
+            style_v=float(opt.get("style_v", 0.25) or 0.25),
+            speaker_boost=bool(opt.get("speaker_boost", True)),
+            speed=float(opt.get("eleven_speed", 1.0) or 1.0))
+        if ok:
+            return True
+    return _tts_vi(text, out_mp3)
+
+
+def _schedule_no_overlap(items: list, video_dur: float, gap: float = 0.35) -> tuple:
+    """XẾP LỊCH KHÔNG CHỒNG TIẾNG.
+    items: [(mốc_giờ_mong_muốn, đường_dẫn_mp3, độ_dài_audio_giây)].
+    • Mỗi đoạn bắt đầu SỚM NHẤT là sau khi đoạn trước đọc xong + `gap`.
+    • Nếu tổng vượt quá thời lượng video → TĂNG TỐC ĐỌC (atempo) vừa đủ để lọt.
+    • Vẫn không lọt (kể cả ở tốc độ tối đa) → BỎ các đoạn cuối thay vì để tràn/đè.
+    Trả về (danh_sách_đã_xếp, tốc_độ_atempo)."""
+    if not items:
+        return [], 1.0
+
+    def layout(sp: float):
+        out, cursor = [], 0.0
+        for (t, mp3, da) in items:
+            d = da / sp
+            start = max(t, cursor)
+            out.append((start, mp3, d))
+            cursor = start + d + gap
+        return out, cursor
+
+    placed, end = layout(1.0)
+    speed = 1.0
+    if video_dur > 1.0 and end > video_dur:
+        # Cần nhanh hơn bao nhiêu lần thì vừa. Giới hạn 1.5× để còn nghe rõ.
+        need = end / video_dur
+        speed = min(1.5, max(1.0, need))
+        placed, end = layout(speed)
+        if end > video_dur:   # vẫn dài → cắt bớt đoạn cuối cho khỏi tràn
+            placed = [p for p in placed if p[0] + p[2] <= video_dur]
+    return placed, speed
+
+
 def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) -> None:
     """Chạy nền: AI viết lời theo mốc giờ → tạo giọng → ghép + làm nét → lưu file."""
     import subprocess, tempfile, shutil as _sh, os as _os
@@ -4613,18 +4695,11 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
             upd(status="error", error="Không trích được khung hình từ video.")
             return
 
-        # 2) KỊCH BẢN.
-        #    ƯU TIÊN dùng ĐÚNG kịch bản người dùng đang thấy/đã sửa (gửi kèm từ app) →
-        #    đọc ĐÚNG CHỮ ĐÃ TẠO, chạy được ngay, không phụ thuộc AI lần 2.
+        # 2) KỊCH BẢN — ƯU TIÊN để AI viết THEO MỐC GIỜ dựa trên KHUNG HÌNH thật.
+        #    Chỉ cách này lời bình mới KHỚP ĐÚNG CẢNH. Kịch bản văn xuôi (nếu có) chỉ
+        #    dùng DỰ PHÒNG khi AI hỏng, vì rải đều theo thời lượng sẽ KHÔNG khớp cảnh.
         user_script = (opt.get("script") or "").strip()
-        if user_script:
-            upd(step="Đang dùng kịch bản đã có…", progress=35)
-            segs = _segments_from_prose(user_script, dur)
-            if segs:
-                upd(step=f"Đang tạo giọng đọc ({len(segs)} đoạn)…", progress=45, segments=len(segs))
-                return _narrate_finish(jid, path, tmp, segs, dur, opt, upd)
-
-        upd(step="AI đang viết lời bình khớp video…", progress=30)
+        upd(step="AI đang viết lời bình khớp từng cảnh…", progress=30)
         style = (opt.get("style") or "thuyết minh tự nhiên, cuốn hút").strip()
         tl = ", ".join(f"{t}s" for t, _ in frames)
         prompt = (
@@ -4676,12 +4751,21 @@ def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
         made = []
         for idx, sg in enumerate(segs):
             mp3 = _os.path.join(tmp, f"s{idx:03d}.mp3")
-            if _tts_vi(sg["text"], mp3):
-                made.append((sg["t"], mp3))
+            # Dùng ĐÚNG GIỌNG người dùng chọn (ElevenLabs nếu có), không mặc định giọng máy chủ.
+            if _narrate_tts(sg["text"], mp3, opt):
+                da = _ffprobe_duration(mp3)          # ĐO độ dài THẬT của đoạn đọc
+                if da > 0.05:
+                    made.append((sg["t"], mp3, da))
             upd(progress=45 + int(20 * (idx + 1) / max(1, len(segs))))
         if not made:
             upd(status="error",
                 error="Máy chủ chưa tạo được giọng đọc. Cài trên VPS: pip install gTTS edge-tts")
+            return
+
+        # 3b) XẾP LỊCH KHÔNG CHỒNG TIẾNG: mỗi đoạn chỉ bắt đầu sau khi đoạn trước đọc xong.
+        made, tempo = _schedule_no_overlap(made, dur)
+        if not made:
+            upd(status="error", error="Lời bình quá dài so với video. Hãy rút ngắn kịch bản.")
             return
 
         # 4) Ghép: chèn từng đoạn đúng mốc + trộn tiếng gốc + LÀM NÉT / nâng phân giải.
@@ -4699,7 +4783,7 @@ def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
         if sharpen > 0.01:
             vf.append(f"unsharp=5:5:{min(sharpen, 2.0):.2f}:5:5:0.0")
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", path]
-        for _, mp3 in made:
+        for _, mp3, _d in made:
             cmd += ["-i", mp3]
 
         parts = [f"[0:v]{','.join(vf)}[v]"]
@@ -4708,9 +4792,12 @@ def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
         if has_a and keep_orig:
             parts.append(f"[0:a]volume={max(0.0, min(orig_vol, 1.0)):.2f}[a0]")
             mixes.append("[a0]")
-        for k, (t, _) in enumerate(made, start=1):
+        # atempo chỉ nhận 0.5–2.0; ta luôn ở trong khoảng này (tối đa 1.5).
+        sp = f"atempo={tempo:.3f}," if abs(tempo - 1.0) > 0.01 else ""
+        for k, (t, _mp3, _d) in enumerate(made, start=1):
             ms = int(max(0.0, t) * 1000)
-            parts.append(f"[{k}:a]adelay={ms}|{ms},volume={max(0.1, min(voice_vol, 3.0)):.2f}[n{k}]")
+            parts.append(f"[{k}:a]{sp}adelay={ms}|{ms},"
+                         f"volume={max(0.1, min(voice_vol, 3.0)):.2f}[n{k}]")
             mixes.append(f"[n{k}]")
         parts.append(f"{''.join(mixes)}amix=inputs={len(mixes)}:duration=first:"
                      f"dropout_transition=0:normalize=0[a]")
@@ -4737,8 +4824,15 @@ def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
                             (opt["user_id"], name, "document", "video/mp4", size, int(time.time())))
             fid = cur.lastrowid
         _sh.move(out_mp4, _os.path.join(UPLOAD_DIR, str(fid)))
+        # Trả về mốc giờ THỰC TẾ đã ghép (sau khi xếp lại cho khỏi chồng tiếng),
+        # ghép đúng thứ tự với câu chữ đã đọc → app hiện đúng cái đã nghe.
+        used = []
+        for i, (st, _m, _d) in enumerate(made):
+            if i < len(segs):
+                used.append(f"[{st:.0f}s] {segs[i]['text']}")
         upd(status="done", step="Xong", progress=100, file_id=fid, filename=name, size=size,
-            script="\n".join(f"[{s['t']:.0f}s] {s['text']}" for s in segs))
+            script="\n".join(used) if used else
+                   "\n".join(f"[{s['t']:.0f}s] {s['text']}" for s in segs))
     except Exception as e:
         upd(status="error", error=f"Lỗi ghép: {e}")
 
@@ -4753,7 +4847,16 @@ class VideoNarrateIn(BaseModel):
     keep_original: Optional[bool] = True  # giữ tiếng gốc (nhỏ) phía dưới lời bình
     orig_volume: Optional[float] = 0.18
     voice_volume: Optional[float] = 1.6
-    script: Optional[str] = None   # kịch bản người dùng đã có/đã sửa → dùng luôn, khỏi bắt AI làm lại
+    script: Optional[str] = None   # kịch bản người dùng đã có/đã sửa (chỉ dùng DỰ PHÒNG)
+    # ----- GIỌNG ĐỌC người dùng đang chọn trong app (để lồng tiếng ĐÚNG giọng đó) -----
+    engine: Optional[str] = None            # "elevenlabs" | khác = giọng máy chủ
+    eleven_voice_id: Optional[str] = None
+    eleven_model: Optional[str] = "eleven_multilingual_v2"
+    eleven_speed: Optional[float] = 1.0
+    stability: Optional[float] = 0.5
+    similarity: Optional[float] = 0.85
+    style_v: Optional[float] = 0.25
+    speaker_boost: Optional[bool] = True
 
 
 @app.post("/social/video-narrate")
@@ -4792,7 +4895,11 @@ async def social_video_narrate(b: VideoNarrateIn, user=Depends(get_user)) -> dic
                               "user_id": user["id"], "created": int(time.time())}
     opt = {"style": b.style, "height": b.height, "sharpen": b.sharpen, "denoise": b.denoise,
            "keep_original": b.keep_original, "orig_volume": b.orig_volume,
-           "voice_volume": b.voice_volume, "script": b.script, "user_id": user["id"]}
+           "voice_volume": b.voice_volume, "script": b.script, "user_id": user["id"],
+           "engine": b.engine, "eleven_voice_id": b.eleven_voice_id,
+           "eleven_model": b.eleven_model, "eleven_speed": b.eleven_speed,
+           "stability": b.stability, "similarity": b.similarity,
+           "style_v": b.style_v, "speaker_boost": b.speaker_boost}
     threading.Thread(target=_narrate_worker, args=(jid, path, cleanup_dir, opt),
                      daemon=True, name=f"narrate-{jid}").start()
     return {"job_id": jid, "status": "queued"}

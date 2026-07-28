@@ -961,7 +961,11 @@ struct APIClient {
     func startVideoNarrate(url: String? = nil, fileId: Int? = nil, style: String? = nil,
                            height: Int = 1080, sharpen: Double = 0.8, denoise: Bool = false,
                            keepOriginal: Bool = true, origVolume: Double = 0.18,
-                           voiceVolume: Double = 1.6, script: String? = nil) async throws -> NarrateStartResp {
+                           voiceVolume: Double = 1.6, script: String? = nil,
+                           engine: String? = nil, elevenVoiceId: String? = nil,
+                           elevenModel: String? = nil, elevenSpeed: Double = 1.0,
+                           stability: Double = 0.5, similarity: Double = 0.85,
+                           styleV: Double = 0.25, speakerBoost: Bool = true) async throws -> NarrateStartResp {
         var body: [String: Any] = [
             "height": height, "sharpen": sharpen, "denoise": denoise,
             "keep_original": keepOriginal, "orig_volume": origVolume, "voice_volume": voiceVolume,
@@ -969,10 +973,19 @@ struct APIClient {
         if let url, !url.isEmpty { body["url"] = url }
         if let fileId { body["file_id"] = fileId }
         if let style, !style.isEmpty { body["style"] = style }
-        // Gửi kèm KỊCH BẢN đang hiển thị (đã sửa) → máy chủ đọc ĐÚNG chữ này.
+        // Gửi kèm KỊCH BẢN đang hiển thị (dự phòng khi AI không viết được theo mốc giờ).
         if let script, !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             body["script"] = script
         }
+        // GIỌNG đang chọn → máy chủ lồng tiếng bằng ĐÚNG giọng đó (vd ElevenLabs).
+        if let engine, !engine.isEmpty { body["engine"] = engine }
+        if let elevenVoiceId, !elevenVoiceId.isEmpty { body["eleven_voice_id"] = elevenVoiceId }
+        if let elevenModel, !elevenModel.isEmpty { body["eleven_model"] = elevenModel }
+        body["eleven_speed"] = elevenSpeed
+        body["stability"] = stability
+        body["similarity"] = similarity
+        body["style_v"] = styleV
+        body["speaker_boost"] = speakerBoost
         return try decode(try await send("/social/video-narrate", method: "POST", json: body))
     }
     /// Hỏi tiến độ / kết quả job lồng tiếng.

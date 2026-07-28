@@ -202,6 +202,8 @@ struct VideoScriptView: View {
         localSection("Lồng tiếng cả video (khớp thời gian)") {
             Text("AI xem hết video, viết lời bình THEO MỐC GIỜ rồi ghép giọng đọc vào đúng cảnh, xuất ra video mới để lưu về máy.")
                 .font(.caption2).foregroundStyle(.secondary)
+            Text("Đọc bằng ĐÚNG giọng bạn chọn ở khối “Giọng đọc”. Các câu được xếp KHÔNG CHỒNG TIẾNG; nếu lời dài hơn video, máy chủ tự đọc nhanh hơn một chút cho vừa.")
+                .font(.caption2).foregroundStyle(.secondary)
 
             // Độ nét / phân giải
             Text("Độ nét (phân giải)").font(.caption).foregroundStyle(.secondary)
@@ -309,7 +311,17 @@ struct VideoScriptView: View {
                     url: lastSource.url, fileId: lastSource.fileId, style: style,
                     height: narHeight, sharpen: narSharpen, denoise: narDenoise,
                     keepOriginal: narKeepOrig, origVolume: narOrigVol,
-                    script: script)   // đọc ĐÚNG kịch bản đang hiển thị/đã sửa
+                    script: script,          // dự phòng nếu AI không viết được theo mốc giờ
+                    // Lồng tiếng bằng ĐÚNG GIỌNG đang chọn ở khối "Giọng đọc" phía trên.
+                    engine: tts.engineType.rawValue,
+                    elevenVoiceId: tts.elevenVoiceId,
+                    elevenModel: UserDefaults.standard.string(forKey: "eleven_model")
+                                 ?? "eleven_multilingual_v2",
+                    elevenSpeed: tts.elevenSpeed,
+                    stability: tts.currentTone.stability,
+                    similarity: tts.currentTone.similarityBoost,
+                    styleV: tts.currentTone.style,
+                    speakerBoost: tts.currentTone.speakerBoost)
                 // Hỏi tiến độ mỗi 2 giây cho tới khi xong/lỗi.
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
