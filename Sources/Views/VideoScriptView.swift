@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PhotosUI
 
 // AI XEM video (trích khung hình) → VIẾT KỊCH BẢN thuyết minh tiếng Việt → ĐỌC bằng giọng TTS.
 // TTSEngine() tự nạp lại giọng/động cơ đã lưu → đọc ĐÚNG giọng người dùng chọn ở mục "Đọc (TTS)".
@@ -13,7 +14,11 @@ struct VideoScriptView: View {
     @State private var status = ""
     @State private var script = ""
     @State private var errorMsg: String?
-    @State private var showPicker = false
+    @State private var showPicker = false            // bộ chọn TỆP (Files)
+    @State private var photoItem: PhotosPickerItem?  // chọn từ THƯ VIỆN ảnh/video của máy
+    @State private var showLibrary = false           // chọn video đã có trong Thư viện app
+    @State private var libFiles: [FileItem] = []
+    @State private var libLoading = false
 
     // ----- Khoá AI dùng chung (CHỈ ADMIN) — AI cần khoá này mới "xem" được video -----
     @State private var aiKeyDraft = ""
@@ -36,7 +41,7 @@ struct VideoScriptView: View {
                                 subtitle: "Nhìn video → viết lời thoại → đọc bằng giọng TTS")
 
                     localSection("Nguồn video") {
-                        Text("AI sẽ XEM video rồi tự viết 1 kịch bản thuyết minh tiếng Việt để đọc. Dán link (TikTok/YouTube/FB…) hoặc chọn video từ máy.")
+                        Text("AI sẽ XEM video rồi tự viết 1 kịch bản thuyết minh tiếng Việt để đọc. Dán link (TikTok/YouTube/FB…), chọn video trong THƯ VIỆN máy, trong TỆP, hoặc video đã có trong Thư viện app.")
                             .font(.caption2).foregroundStyle(.secondary)
 
                         TextField("Dán link video…", text: $link)
@@ -45,19 +50,43 @@ struct VideoScriptView: View {
                             .padding(10).background(Color(.secondarySystemBackground))
                             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                        HStack {
-                            Button { Task { await generate(url: linkTrim, fileId: nil) } } label: {
-                                HStack {
-                                    if busy { ProgressView().padding(.trailing, 4) }
-                                    Label(busy ? "Đang xử lý…" : "Tạo từ link", systemImage: "wand.and.stars")
-                                        .frame(maxWidth: .infinity)
-                                }
-                            }.buttonStyle(.borderedProminent).tint(Theme.accent)
-                                .disabled(busy || linkTrim.isEmpty)
+                        Button { Task { await generate(url: linkTrim, fileId: nil) } } label: {
+                            HStack {
+                                if busy { ProgressView().padding(.trailing, 4) }
+                                Label(busy ? "Đang xử lý…" : "Tạo từ link", systemImage: "wand.and.stars")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }.buttonStyle(.borderedProminent).tint(Theme.accent)
+                            .disabled(busy || linkTrim.isEmpty)
 
+                        Text("Hoặc chọn video có sẵn").font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            // 1) THƯ VIỆN ảnh/video của máy (Photos)
+                            PhotosPicker(selection: $photoItem, matching: .videos) {
+                                Label("Thư viện máy", systemImage: "photo.stack.fill")
+                                    .font(.caption).frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }.disabled(busy)
+
+                            // 2) Ứng dụng Tệp (Files / iCloud Drive)
                             Button { showPicker = true } label: {
-                                Label("Từ máy", systemImage: "square.and.arrow.up")
-                            }.buttonStyle(.bordered).disabled(busy)
+                                Label("Tệp", systemImage: "folder.fill")
+                                    .font(.caption).frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain).disabled(busy)
+
+                            // 3) Video đã có trong Thư viện của app (đã tải/đã lưu)
+                            Button { showLibrary = true; Task { await loadLibrary() } } label: {
+                                Label("Thư viện app", systemImage: "tray.full.fill")
+                                    .font(.caption).frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.secondarySystemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain).disabled(busy)
                         }
 
                         Text("Kiểu thuyết minh").font(.caption).foregroundStyle(.secondary)
@@ -113,6 +142,13 @@ struct VideoScriptView: View {
                     Task { await uploadThenGenerate(u) }
                 }.ignoresSafeArea()
             }
+            // Chọn video từ THƯ VIỆN ảnh/video của máy → tải lên rồi cho AI xem.
+            .onChange(of: photoItem) { item in
+                guard let item else { return }
+                Task { await handlePhotoPick(item) }
+            }
+            // Chọn video ĐÃ CÓ trong Thư viện app → dùng thẳng file_id (không cần tải lại).
+            .sheet(isPresented: $showLibrary) { librarySheet }
         }
     }
 
@@ -206,6 +242,89 @@ struct VideoScriptView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .kCard(18)
+    }
+
+    // ----- Chọn video đã có trong THƯ VIỆN của app -----
+    @ViewBuilder private var librarySheet: some View {
+        NavigationStack {
+            Group {
+                if libLoading {
+                    ProgressView("Đang tải danh sách…")
+                } else if libFiles.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "tray").font(.largeTitle).foregroundStyle(.secondary)
+                        Text("Chưa có video nào trong Thư viện app.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Tải video về bằng mục Thư viện / Chuyển đổi, hoặc dùng “Thư viện máy”.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }.padding()
+                } else {
+                    List(libFiles) { f in
+                        Button {
+                            showLibrary = false
+                            Task { await generate(url: nil, fileId: f.id) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "film.fill").foregroundStyle(Theme.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(f.name).font(.caption.bold()).lineLimit(1)
+                                    if let s = f.size {
+                                        Text(byteText(s)).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Chọn video trong app")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Đóng") { showLibrary = false }
+                }
+            }
+        }
+    }
+
+    private func byteText(_ n: Int) -> String {
+        let mb = Double(n) / 1_048_576.0
+        return mb >= 1 ? String(format: "%.1f MB", mb) : String(format: "%.0f KB", Double(n) / 1024.0)
+    }
+
+    /// Lấy các file trong Thư viện app rồi LỌC theo đuôi video.
+    private func loadLibrary() async {
+        libLoading = true
+        let exts = ["mp4", "mov", "m4v", "webm", "mkv", "avi", "3gp"]
+        if let all = try? await store.api.listFiles(category: nil) {
+            libFiles = all.filter { f in
+                exts.contains((f.name as NSString).pathExtension.lowercased())
+            }
+        } else {
+            libFiles = []
+        }
+        libLoading = false
+    }
+
+    /// Video chọn từ THƯ VIỆN máy → chép ra tệp tạm → tải lên (stream) → cho AI xem.
+    private func handlePhotoPick(_ item: PhotosPickerItem) async {
+        busy = true; errorMsg = nil; script = ""; status = "Đang đọc video từ thư viện máy…"
+        defer { photoItem = nil }
+        do {
+            guard let movie = try await item.loadTransferable(type: EditMovie.self) else {
+                busy = false; status = ""; errorMsg = "Không đọc được video đã chọn."; return
+            }
+            status = "Đang tải video lên máy chủ…"
+            let up = try await store.api.uploadFileRaw(
+                name: movie.url.lastPathComponent, category: "document", fileURL: movie.url)
+            try? FileManager.default.removeItem(at: movie.url)   // dọn tệp tạm
+            await generate(url: nil, fileId: up.id)
+        } catch {
+            busy = false; status = ""; errorMsg = error.localizedDescription
+        }
     }
 
     private func uploadThenGenerate(_ fileURL: URL) async {
