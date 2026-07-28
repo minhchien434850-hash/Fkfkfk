@@ -4423,6 +4423,8 @@ def _parse_timed_script(raw: str, duration: float) -> list:
                 t = float(it.get("t", it.get("time", 0)) or 0)
             except Exception:
                 t = 0.0
+            # CHỈ lấy lời để đọc. Trường "scene" (AI mô tả cảnh) chỉ dùng để ép AI nhìn đúng
+            # ngữ cảnh khi viết — KHÔNG đọc, KHÔNG hiện, KHÔNG ghi vào video.
             txt = str(it.get("text", "") or "").strip()
             if txt:
                 segs.append({"t": max(0.0, min(t, max(0.0, duration - 0.5))), "text": txt[:600]})
@@ -4452,9 +4454,10 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
             return
         upd(status="running", step="Đang xem video…", progress=10, duration=round(dur, 1))
 
-        # 1) Trích khung hình theo mốc giờ (video càng dài càng nhiều khung, tối đa 16).
-        n = max(6, min(16, int(dur // 4) or 6))
-        frames = _extract_frames_timed(path, dur, n)
+        # 1) Trích khung hình theo mốc giờ. LẤY DÀY & RÕ HƠN (tối đa 24 khung, rộng 640px)
+        #    để AI NHÌN ĐÚNG NGỮ CẢNH, đọc được cả chữ hiện trên màn hình.
+        n = max(8, min(24, int(dur // 3) or 8))
+        frames = _extract_frames_timed(path, dur, n, width=640)
         if not frames:
             upd(status="error", error="Không trích được khung hình từ video.")
             return
@@ -4465,13 +4468,20 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
         tl = ", ".join(f"{t}s" for t, _ in frames)
         prompt = (
             f"Đây là các KHUNG HÌNH lấy lần lượt tại các mốc giây: {tl} của MỘT video dài {dur:.1f} giây.\n"
-            f"Hãy viết LỜI BÌNH (thuyết minh) TIẾNG VIỆT bám ĐÚNG diễn biến, KHỚP THỜI GIAN, phủ TOÀN BỘ video.\n"
+            "NHIỆM VỤ: XEM KỸ từng khung để hiểu ĐÚNG NGỮ CẢNH (ai/cái gì, đang làm gì, ở đâu, "
+            "chữ hiện trên màn hình nếu có), rồi viết LỜI BÌNH tiếng Việt BÁM SÁT nội dung thật.\n"
             f"Giọng điệu: {style}.\n"
-            "TRẢ VỀ DUY NHẤT một mảng JSON, không thêm chữ nào khác, dạng:\n"
-            '[{"t": 0, "text": "câu mở đầu"}, {"t": 6.5, "text": "câu tiếp"}]\n'
-            f"Quy tắc: t là giây bắt đầu đọc (0 ≤ t < {dur:.1f}), tăng dần; mỗi đoạn 8–25 từ đọc trong "
-            "khoảng 3–6 giây; các đoạn cách nhau đủ để đọc kịp, KHÔNG chồng lấn; không dùng emoji, "
-            "không ghi 'khung hình', không hashtag."
+            "TRẢ VỀ DUY NHẤT một mảng JSON, không thêm chữ nào khác, mỗi phần tử gồm:\n"
+            '[{"t": 0, "scene": "thấy gì trong khung (mô tả thật, ngắn)", "text": "lời bình để đọc"}]\n'
+            "QUY TẮC BẮT BUỘC:\n"
+            f"• t là giây bắt đầu đọc (0 ≤ t < {dur:.1f}), TĂNG DẦN, phủ đều toàn bộ video.\n"
+            "• 'scene' phải là điều BẠN THẬT SỰ NHÌN THẤY trong khung tại mốc đó.\n"
+            "• 'text' phải KHỚP với 'scene' — TUYỆT ĐỐI KHÔNG bịa chi tiết không có trong hình. "
+            "Nếu không rõ nội dung, hãy mô tả trung tính thay vì đoán bừa.\n"
+            "• Nếu trong hình có CHỮ (tiêu đề, phụ đề, tên món, giá…), hãy dùng đúng thông tin đó.\n"
+            "• Các đoạn PHẢI liền mạch thành một câu chuyện, không lặp ý, không mâu thuẫn nhau.\n"
+            "• Mỗi đoạn 8–25 từ (đọc khoảng 3–6 giây), cách nhau đủ để đọc kịp, KHÔNG chồng lấn.\n"
+            "• Không emoji, không hashtag, không nói 'khung hình'/'hình ảnh cho thấy'."
         )
         raw = _ai_vision(prompt, [b for _, b in frames])
         segs = _parse_timed_script(raw, dur)
