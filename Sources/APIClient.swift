@@ -880,6 +880,26 @@ struct APIClient {
     /// URL công khai của 1 file media theo id (ảnh/video bài đăng) — tải bằng AsyncImage được.
     func mediaURL(fileId: Int) -> URL? { URL(string: "\(root)/media/\(fileId)") }
 
+    // ============ Khoá AI dùng chung (admin) — cho "AI xem video", trợ lý AI… ============
+    struct AIKeyStatus: Decodable {
+        let set: Bool; let masked: String; let provider: String
+        let model: String; let backends: Int
+    }
+    struct AIKeySaveResp: Decodable {
+        let ok: Bool; let set: Bool; let provider: String; let model: String
+        let test_ok: Bool?; let test_msg: String?; let vision_ready: Bool?
+    }
+    /// ADMIN: xem trạng thái khoá AI trên máy chủ.
+    func aiKeyStatus() async throws -> AIKeyStatus {
+        try decode(try await send("/admin/ai-key"))
+    }
+    /// ADMIN: lưu (rỗng = xoá) khoá AI dùng chung; `test` để thử gọi AI ngay.
+    func setAIServerKey(_ key: String, model: String? = nil, test: Bool = true) async throws -> AIKeySaveResp {
+        var body: [String: Any] = ["key": key, "test": test]
+        if let model { body["model"] = model }
+        return try decode(try await send("/admin/ai-key", method: "POST", json: body))
+    }
+
     // ============ Danh sách ĐẦY ĐỦ giọng ElevenLabs (dùng key máy chủ của admin) ============
     struct ElevenVoice: Decodable, Identifiable, Hashable {
         let voice_id: String

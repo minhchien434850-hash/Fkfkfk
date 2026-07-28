@@ -2449,6 +2449,52 @@ def admin_get_eleven_key(admin=Depends(get_admin)) -> dict[str, Any]:
     return {"set": bool(k), "masked": masked}
 
 
+class AIKeyIn(BaseModel):
+    key: str = ""
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    base: Optional[str] = None
+    test: Optional[bool] = False
+
+
+@app.get("/admin/ai-key")
+def admin_get_ai_key(admin=Depends(get_admin)) -> dict[str, Any]:
+    """ADMIN xem trạng thái khoá AI dùng chung (dùng cho 'AI xem video', trợ lý…)."""
+    prov, base, model, key = _ai_cfg()
+    masked = (key[:6] + "•••••" + key[-4:]) if len(key) > 14 else ("•••••" if key else "")
+    return {"set": bool(key), "masked": masked, "provider": prov,
+            "model": model, "base": base, "backends": len(_ai_backends())}
+
+
+@app.post("/admin/ai-key")
+def admin_set_ai_key(b: AIKeyIn, admin=Depends(get_admin)) -> dict[str, Any]:
+    """ADMIN đặt/xoá khoá AI dùng chung (key rỗng = xoá). Tự đoán nhà cung cấp theo khoá:
+    AIza…/AQ.… → Gemini (khuyên dùng, XEM ĐƯỢC ẢNH cho tính năng AI xem video),
+    sk-ant… → Anthropic, gsk_… → Groq, còn lại → OpenAI-compatible."""
+    k = (b.key or "").strip()
+    set_setting("tg_ai_key", k)
+    if b.provider is not None:
+        set_setting("tg_ai_provider", (b.provider or "").strip().lower())
+    if b.model is not None:
+        set_setting("tg_ai_model", (b.model or "").strip())
+    if b.base is not None:
+        set_setting("tg_ai_base", (b.base or "").strip().rstrip("/"))
+    prov, base, model, key = _ai_cfg()
+    out: dict[str, Any] = {"ok": True, "set": bool(key), "provider": prov, "model": model}
+    # Có thể KIỂM TRA ngay: hỏi AI 1 câu ngắn để biết khoá dùng được hay không.
+    if b.test and key:
+        try:
+            ok, txt = _ai_call_one(prov, base, model, key, "Trả lời đúng 2 chữ: xin chào")
+            out["test_ok"] = bool(ok)
+            out["test_msg"] = (txt or "")[:300]
+        except Exception as e:
+            out["test_ok"] = False
+            out["test_msg"] = f"Lỗi gọi AI: {e}"
+    # Gemini xem được ảnh → tính năng "AI xem video" chạy tốt nhất.
+    out["vision_ready"] = prov in ("gemini", "anthropic", "openai")
+    return out
+
+
 @app.get("/tts/eleven/voices")
 def tts_eleven_voices(user=Depends(get_user)) -> dict[str, Any]:
     """DANH SÁCH ĐẦY ĐỦ giọng ElevenLabs (dùng key máy chủ do admin đặt) → app cho khách CHỌN
