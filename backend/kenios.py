@@ -2448,6 +2448,41 @@ def admin_get_eleven_key(admin=Depends(get_admin)) -> dict[str, Any]:
     masked = (k[:5] + "•••••" + k[-4:]) if len(k) > 12 else ("•••••" if k else "")
     return {"set": bool(k), "masked": masked}
 
+
+@app.get("/tts/eleven/voices")
+def tts_eleven_voices(user=Depends(get_user)) -> dict[str, Any]:
+    """DANH SÁCH ĐẦY ĐỦ giọng ElevenLabs (dùng key máy chủ do admin đặt) → app cho khách CHỌN
+    GIỌNG THEO TÊN, không cần tự đi chép Voice ID. Không trả key về cho app."""
+    key = _eleven_server_key()
+    if not key:
+        raise HTTPException(status_code=400,
+            detail="Máy chủ chưa có khoá ElevenLabs. Admin thêm khoá trong mục cấu hình.")
+    try:
+        r = httpx.get("https://api.elevenlabs.io/v1/voices",
+                      headers={"xi-api-key": key, "Accept": "application/json"}, timeout=30)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Lỗi gọi ElevenLabs: {e}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=(r.status_code if r.status_code in (401, 429) else 502),
+                            detail=f"ElevenLabs lỗi {r.status_code}")
+    out = []
+    try:
+        for v in (r.json().get("voices") or []):
+            lb = v.get("labels") or {}
+            # Gộp nhãn mô tả (giới tính · độ tuổi · phong cách/cảm xúc) để app hiện cho dễ chọn.
+            desc = " · ".join(str(lb[k]) for k in ("gender", "age", "accent", "description", "use_case")
+                              if lb.get(k))
+            out.append({
+                "voice_id": v.get("voice_id", ""),
+                "name": v.get("name", ""),
+                "desc": desc,
+                "category": v.get("category", ""),
+                "preview": v.get("preview_url", "") or "",
+            })
+    except Exception:
+        pass
+    return {"voices": out}
+
 class ElevenTTSIn(BaseModel):
     text: str
     voice_id: str

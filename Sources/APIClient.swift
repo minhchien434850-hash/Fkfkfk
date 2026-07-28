@@ -880,6 +880,22 @@ struct APIClient {
     /// URL công khai của 1 file media theo id (ảnh/video bài đăng) — tải bằng AsyncImage được.
     func mediaURL(fileId: Int) -> URL? { URL(string: "\(root)/media/\(fileId)") }
 
+    // ============ Danh sách ĐẦY ĐỦ giọng ElevenLabs (dùng key máy chủ của admin) ============
+    struct ElevenVoice: Decodable, Identifiable, Hashable {
+        let voice_id: String
+        let name: String
+        let desc: String
+        let category: String
+        let preview: String
+        var id: String { voice_id }
+    }
+    private struct ElevenVoicesResp: Decodable { let voices: [ElevenVoice] }
+    /// Lấy toàn bộ giọng ElevenLabs để người dùng CHỌN THEO TÊN (không cần chép Voice ID).
+    func elevenVoices() async throws -> [ElevenVoice] {
+        let r: ElevenVoicesResp = try decode(try await send("/tts/eleven/voices"))
+        return r.voices
+    }
+
     // ============ AI xem video → viết kịch bản thuyết minh (để đọc bằng TTS) ============
     struct VideoScriptResp: Decodable { let script: String; let frames: Int }
     /// AI xem video (qua link HOẶC file_id đã tải lên) rồi viết kịch bản tiếng Việt để đọc.

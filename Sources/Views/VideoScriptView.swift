@@ -65,6 +65,10 @@ struct VideoScriptView: View {
                         }
                     }
 
+                    // CHỌN GIỌNG NGAY TẠI ĐÂY (đầy đủ giọng máy + ElevenLabs biểu cảm,
+                    // admin nhập API key tại chỗ) — không cần vào mục "Đọc (TTS)".
+                    TTSVoicePickerSection(tts: tts)
+
                     if !script.isEmpty {
                         localSection("Kịch bản (sửa được)") {
                             TextEditor(text: $script).frame(minHeight: 160)
@@ -79,7 +83,7 @@ struct VideoScriptView: View {
                                     Label("Dừng", systemImage: "stop.circle.fill")
                                 }.buttonStyle(.bordered).tint(.red)
                             }
-                            Text("Giọng đọc = giọng bạn chọn trong mục “Đọc (TTS)”. Đổi giọng ở đó thì ở đây đổi theo.")
+                            Text("Đọc bằng giọng bạn chọn ở mục “Giọng đọc” phía trên (đổi được ngay tại đây).")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
