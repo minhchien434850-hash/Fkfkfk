@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
 import Photos
+import AVKit
 
 // AI XEM video (trích khung hình) → VIẾT KỊCH BẢN thuyết minh tiếng Việt → ĐỌC bằng giọng TTS.
 // TTSEngine() tự nạp lại giọng/động cơ đã lưu → đọc ĐÚNG giọng người dùng chọn ở mục "Đọc (TTS)".
@@ -38,6 +39,14 @@ struct VideoScriptView: View {
     @State private var savingPhotos = false
     @State private var saveMsg: String?
     @State private var narTask: Task<Void, Never>?
+
+    // ----- Xem trước video (tải 1 lần về cache, dùng chung cho xem trước & lưu máy) -----
+    @State private var showPreview = false
+    @State private var previewURL: URL?
+    @State private var previewPlayer: AVPlayer?   // giữ 1 player ổn định (không tạo lại mỗi lần vẽ)
+    @State private var previewTitle = ""
+    @State private var preparing = false
+    @State private var cachedFiles: [Int: URL] = [:]
 
     // ----- Khoá AI dùng chung (CHỈ ADMIN) — AI cần khoá này mới "xem" được video -----
     @State private var aiKeyDraft = ""
@@ -108,6 +117,17 @@ struct VideoScriptView: View {
                             }.buttonStyle(.plain).disabled(busy)
                         }
 
+                        // Xem trước VIDEO NGUỒN (khi đã chọn video có sẵn trên máy chủ)
+                        if let sid = lastSource.fileId {
+                            Button { Task { await openPreview(fileId: sid, title: "Video nguồn") } } label: {
+                                HStack {
+                                    if preparing { ProgressView().scaleEffect(0.7).padding(.trailing, 2) }
+                                    Label("Xem trước video nguồn", systemImage: "play.rectangle")
+                                        .font(.caption).frame(maxWidth: .infinity)
+                                }
+                            }.buttonStyle(.bordered).disabled(preparing || busy)
+                        }
+
                         Text("Kiểu thuyết minh").font(.caption).foregroundStyle(.secondary)
                         TextField("VD: hài hước · review sản phẩm · kể chuyện…", text: $style)
                             .font(.callout)
@@ -171,6 +191,8 @@ struct VideoScriptView: View {
             }
             // Chọn video ĐÃ CÓ trong Thư viện app → dùng thẳng file_id (không cần tải lại).
             .sheet(isPresented: $showLibrary) { librarySheet }
+            // Xem trước video (nguồn hoặc kết quả)
+            .sheet(isPresented: $showPreview) { previewSheet }
         }
     }
 
@@ -251,13 +273,23 @@ struct VideoScriptView: View {
                         }
                     }
                 }
-                Button { Task { await saveToPhotos(fid) } } label: {
-                    HStack {
-                        if savingPhotos { ProgressView().scaleEffect(0.7).padding(.trailing, 2) }
-                        Label("Lưu video về máy", systemImage: "square.and.arrow.down.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                }.buttonStyle(.borderedProminent).tint(.green).disabled(savingPhotos)
+                HStack(spacing: 8) {
+                    Button { Task { await openPreview(fileId: fid, title: "Video đã lồng tiếng") } } label: {
+                        HStack {
+                            if preparing { ProgressView().scaleEffect(0.7).padding(.trailing, 2) }
+                            Label("Xem trước", systemImage: "play.rectangle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }.buttonStyle(.borderedProminent).tint(Theme.accent).disabled(preparing)
+
+                    Button { Task { await saveToPhotos(fid) } } label: {
+                        HStack {
+                            if savingPhotos { ProgressView().scaleEffect(0.7).padding(.trailing, 2) }
+                            Label("Lưu về máy", systemImage: "square.and.arrow.down.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }.buttonStyle(.borderedProminent).tint(.green).disabled(savingPhotos)
+                }
                 if let saveMsg {
                     Text(saveMsg).font(.caption2)
                         .foregroundStyle(saveMsg.hasSuffix("✓") ? .green : .red)
@@ -302,15 +334,61 @@ struct VideoScriptView: View {
         }
     }
 
+    /// Tải file về cache 1 LẦN rồi dùng lại (xem trước + lưu máy đều dùng bản này).
+    private func localCopy(_ fileId: Int) async throws -> URL {
+        if let u = cachedFiles[fileId], FileManager.default.fileExists(atPath: u.path) { return u }
+        let (tmpURL, filename) = try await store.api.downloadFileRaw(fileId)
+        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let dest = cache.appendingPathComponent("prev_\(fileId)_\(filename)")
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.copyItem(at: tmpURL, to: dest)
+        cachedFiles[fileId] = dest
+        return dest
+    }
+
+    /// Mở XEM TRƯỚC 1 video theo file_id (tải về cache nếu chưa có).
+    private func openPreview(fileId: Int, title: String) async {
+        preparing = true; saveMsg = nil
+        do {
+            let u = try await localCopy(fileId)
+            previewURL = u
+            previewPlayer = AVPlayer(url: u)
+            previewTitle = title
+            showPreview = true
+        } catch {
+            saveMsg = "Không xem trước được: \(error.localizedDescription)"
+        }
+        preparing = false
+    }
+
+    /// Xem trước video kết quả / nguồn.
+    @ViewBuilder private var previewSheet: some View {
+        NavigationStack {
+            Group {
+                if let p = previewPlayer {
+                    VideoPlayer(player: p)
+                        .ignoresSafeArea(edges: .bottom)
+                        .onAppear { p.play() }
+                        .onDisappear { p.pause() }
+                } else {
+                    ProgressView()
+                }
+            }
+            .navigationTitle(previewTitle.isEmpty ? "Xem trước" : previewTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Đóng") { previewPlayer?.pause(); showPreview = false }
+                }
+            }
+        }
+    }
+
     /// Tải video kết quả rồi LƯU VÀO THƯ VIỆN ẢNH của máy.
     private func saveToPhotos(_ fileId: Int) async {
         savingPhotos = true; saveMsg = nil
         do {
-            let (tmpURL, filename) = try await store.api.downloadFileRaw(fileId)
-            let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            let dest = cache.appendingPathComponent(filename)
-            try? FileManager.default.removeItem(at: dest)
-            try FileManager.default.copyItem(at: tmpURL, to: dest)
+            let dest = try await localCopy(fileId)   // dùng lại bản đã tải cho xem trước
 
             let status = await withCheckedContinuation { (c: CheckedContinuation<PHAuthorizationStatus, Never>) in
                 PHPhotoLibrary.requestAuthorization(for: .addOnly) { c.resume(returning: $0) }
