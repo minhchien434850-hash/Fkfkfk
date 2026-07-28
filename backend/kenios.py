@@ -4487,16 +4487,20 @@ def _has_audio_stream(path: str) -> bool:
         return False
 
 
-def _extract_frames_timed(path: str, duration: float, count: int, width: int = 512) -> list:
-    """Trích khung hình KÈM MỐC GIỜ → [(giây, base64jpg), …] để AI biết cảnh nào ở phút nào."""
+def _extract_frames_slots(path: str, duration: float, count: int, width: int = 640) -> list:
+    """Chia video thành `count` Ô THỜI GIAN LIỀN NHAU phủ TỪ 0 ĐẾN HẾT video, mỗi ô lấy 1 khung
+    ở GIỮA ô làm đại diện → [(ô_bắt_đầu, ô_kết_thúc, base64jpg), …].
+    Nhờ chia ô cố định: lời bình đọc ĐÚNG LÚC cảnh đó diễn ra, không nói trước/nói chậm."""
     import subprocess, tempfile, shutil as _sh, os as _os
     out: list = []
-    if not _sh.which("ffmpeg") or duration <= 0:
+    if not _sh.which("ffmpeg") or duration <= 0 or count <= 0:
         return out
-    tmp = tempfile.mkdtemp(prefix="nframes_")
+    tmp = tempfile.mkdtemp(prefix="nslots_")
     try:
         for i in range(count):
-            t = duration * (i + 0.5) / count
+            s = duration * i / count
+            e = duration * (i + 1) / count
+            t = (s + e) / 2.0                       # khung giữa ô = đại diện nội dung ô
             fp = _os.path.join(tmp, f"f{i:03d}.jpg")
             subprocess.run(["ffmpeg", "-y", "-ss", f"{t:.2f}", "-i", path, "-frames:v", "1",
                             "-vf", f"scale={width}:-1", "-q:v", "4", fp],
@@ -4504,7 +4508,7 @@ def _extract_frames_timed(path: str, duration: float, count: int, width: int = 5
             if _os.path.exists(fp):
                 try:
                     with open(fp, "rb") as f:
-                        out.append((round(t, 1), base64.b64encode(f.read()).decode()))
+                        out.append((round(s, 2), round(e, 2), base64.b64encode(f.read()).decode()))
                 except Exception:
                     pass
     finally:
@@ -4512,76 +4516,75 @@ def _extract_frames_timed(path: str, duration: float, count: int, width: int = 5
     return out
 
 
-def _parse_timed_script(raw: str, duration: float) -> list:
-    """Đọc JSON [{"t": giây, "text": "..."}] từ câu trả lời AI (chịu được chữ thừa quanh JSON)."""
+def _fit_segments_to_slots(made: list, slots: list) -> list:
+    """Đặt MỖI đoạn đọc vào ĐÚNG Ô THỜI GIAN của cảnh đó.
+    made: [(chỉ_số_ô, mp3, độ_dài_audio)] · slots: [(bắt_đầu, kết_thúc), …]
+    • Bắt đầu đọc ĐÚNG lúc ô bắt đầu → không nói trước, không nói chậm.
+    • Đọc dài hơn ô → tăng tốc VỪA ĐỦ cho khít ô (tối đa 1.8×), rồi cắt cứng ở cuối ô
+      nên KHÔNG BAO GIỜ tràn sang cảnh sau (không chồng tiếng).
+    Trả về [(bắt_đầu, mp3, tốc_độ, độ_dài_ô)]."""
+    out = []
+    for (idx, mp3, da) in made:
+        if idx >= len(slots):
+            continue
+        s, e = slots[idx]
+        slot_len = max(0.4, e - s)
+        sp = 1.0
+        if da > slot_len:
+            sp = min(1.8, da / slot_len)
+        out.append((s, mp3, sp, slot_len))
+    return out
+
+
+def _strip_emotion_tags(text: str) -> str:
+    """Bỏ thẻ biểu cảm [excited], [laughs]… — CHỈ ElevenLabs v3 hiểu thẻ này; các giọng khác
+    sẽ ĐỌC THÀNH CHỮ nghe rất kỳ, nên phải gỡ trước khi tạo giọng."""
+    s = re.sub(r"\[[^\]\n]{1,30}\]", " ", text or "")
+    return re.sub(r"\s{2,}", " ", s).strip()
+
+
+def _parse_slot_script(raw: str, n_slots: int) -> list:
+    """Đọc JSON [{"i": chỉ_số_ô, "text": "..."}] → [(chỉ_số_ô, text)] đã sắp theo ô.
+    Thiếu ô nào thì bỏ qua ô đó (không bịa), thừa thì cắt."""
     s = (raw or "").strip()
-    # Bỏ rào markdown ```json … ``` nếu AI bọc quanh.
     if s.startswith("```"):
         s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
         s = re.sub(r"\s*```$", "", s).strip()
     i, j = s.find("["), s.rfind("]")
     if i >= 0 and j > i:
         s = s[i:j + 1]
-    segs = []
     try:
-        for it in (json.loads(s) or []):
-            if not isinstance(it, dict):
-                continue
-            try:
-                t = float(it.get("t", it.get("time", 0)) or 0)
-            except Exception:
-                t = 0.0
-            # CHỈ lấy lời để đọc. Trường "scene" (AI mô tả cảnh) chỉ dùng để ép AI nhìn đúng
-            # ngữ cảnh khi viết — KHÔNG đọc, KHÔNG hiện, KHÔNG ghi vào video.
-            txt = str(it.get("text", "") or "").strip()
-            if txt:
-                segs.append({"t": max(0.0, min(t, max(0.0, duration - 0.5))), "text": txt[:600]})
+        arr = json.loads(s) or []
     except Exception:
         return []
-    segs.sort(key=lambda x: x["t"])
-    return segs[:60]
-
-
-def _segments_from_prose(text: str, duration: float) -> list:
-    """DỰ PHÒNG: từ 1 đoạn văn xuôi → tách câu rồi RẢI ĐỀU theo thời lượng video.
-    Nhờ vậy kịch bản ĐÃ CÓ vẫn lồng tiếng được, kể cả khi AI không trả về JSON mốc giờ."""
-    s = (text or "").strip()
-    if not s or duration <= 0:
-        return []
-    # Bỏ tiền tố mốc giờ nếu là kịch bản dạng "[12s] ..." do chính app hiển thị.
-    s = re.sub(r"\[\s*\d+(?:\.\d+)?\s*s\s*\]", " ", s)
-    raw_parts = re.split(r"(?<=[.!?…])\s+|\n+", s)
-    parts: list[str] = []
-    for p in raw_parts:
-        p = p.strip()
-        if not p:
+    got: dict[int, str] = {}
+    for k, it in enumerate(arr):
+        if not isinstance(it, dict):
             continue
-        # Câu quá dài → cắt nhỏ theo dấu phẩy cho vừa nhịp đọc.
-        if len(p) > 160:
-            buf = ""
-            for piece in p.split(","):
-                piece = piece.strip()
-                if not piece:
-                    continue
-                if len(buf) + len(piece) + 2 <= 160:
-                    buf = (buf + ", " + piece) if buf else piece
-                else:
-                    if buf:
-                        parts.append(buf)
-                    buf = piece
-            if buf:
-                parts.append(buf)
-        else:
-            parts.append(p)
-    parts = [p for p in parts if len(p) > 1][:60]
-    if not parts:
+        try:
+            idx = int(it.get("i", it.get("index", k)))
+        except Exception:
+            idx = k
+        txt = str(it.get("text", "") or "").strip()
+        if txt and 0 <= idx < n_slots and idx not in got:
+            got[idx] = txt[:800]
+    return [{"i": k, "text": got[k]} for k in sorted(got)]
+
+
+def _prose_into_slots(text: str, n_slots: int) -> list:
+    """DỰ PHÒNG: chia một đoạn văn xuôi thành `n_slots` phần theo CÂU (đều nhau nhất có thể),
+    để vẫn phủ kín từ đầu tới cuối video."""
+    s = re.sub(r"\[\s*\d+(?:\.\d+)?\s*s\s*\]", " ", (text or "").strip())
+    parts = [p.strip() for p in re.split(r"(?<=[.!?…])\s+|\n+", s) if len(p.strip()) > 1]
+    if not parts or n_slots <= 0:
         return []
-    # Rải đều: đoạn i bắt đầu ở duration * i / n (chừa 0.3s đầu cho êm).
-    n = len(parts)
     out = []
-    for i, p in enumerate(parts):
-        t = (duration * i) / n
-        out.append({"t": round(min(max(t, 0.0), max(0.0, duration - 0.5)), 2), "text": p[:600]})
+    for k in range(n_slots):
+        a = (len(parts) * k) // n_slots
+        b = (len(parts) * (k + 1)) // n_slots
+        chunk = " ".join(parts[a:b]).strip()
+        if chunk:
+            out.append({"i": k, "text": chunk[:800]})
     return out
 
 
@@ -4621,7 +4624,13 @@ def _eleven_tts_file(text: str, out_mp3: str, voice_id: str, model_id: str,
 def _narrate_tts(text: str, out_mp3: str, opt: dict) -> bool:
     """Tạo giọng đọc cho 1 đoạn, dùng ĐÚNG GIỌNG người dùng đã chọn trong app.
     ElevenLabs (nếu chọn & máy chủ có khoá) → nếu hỏng thì lùi về giọng máy chủ (edge-tts/gTTS)."""
-    if (opt.get("engine") or "").lower() == "elevenlabs":
+    is_eleven = (opt.get("engine") or "").lower() == "elevenlabs"
+    model = opt.get("eleven_model") or "eleven_multilingual_v2"
+    # Thẻ biểu cảm chỉ ElevenLabs v3 hiểu → giọng khác phải gỡ, kẻo bị đọc thành chữ.
+    text = text if (is_eleven and model == "eleven_v3") else _strip_emotion_tags(text)
+    if not text.strip():
+        return False
+    if is_eleven:
         ok = _eleven_tts_file(
             text, out_mp3,
             voice_id=opt.get("eleven_voice_id") or "",
@@ -4634,43 +4643,6 @@ def _narrate_tts(text: str, out_mp3: str, opt: dict) -> bool:
         if ok:
             return True
     return _tts_vi(text, out_mp3)
-
-
-def _schedule_no_overlap(items: list, video_dur: float, gap: float = 0.12) -> tuple:
-    """XẾP LỊCH LIỀN MẠCH, KHÔNG CHỒNG TIẾNG.
-    items: [(mốc_giờ_mong_muốn, đường_dẫn_mp3, độ_dài_audio_giây)].
-    • Các đoạn đọc NỐI TIẾP NHAU (chỉ nghỉ hơi `gap` rất ngắn) → nghe như MỘT BÀI liền mạch,
-      KHÔNG để khoảng lặng dài gây cảm giác "ngắt khúc".
-    • Vẫn bám mốc cảnh: đoạn không bao giờ bắt đầu TRƯỚC mốc của nó; nếu đoạn trước đọc lố
-      thì đoạn sau nối ngay sau đó (không đè lên nhau).
-    • Nếu tổng vượt thời lượng video → TĂNG TỐC ĐỌC (atempo) vừa đủ để lọt.
-    • Vẫn không lọt → BỎ các đoạn cuối thay vì để tràn/đè.
-    Trả về (danh_sách_đã_xếp, tốc_độ_atempo)."""
-    if not items:
-        return [], 1.0
-
-    def layout(sp: float):
-        out, cursor = [], 0.0
-        for (t, mp3, da) in items:
-            d = da / sp
-            # Bám mốc cảnh, nhưng KHÔNG chờ lâu: nếu mốc còn xa mà vừa đọc xong thì
-            # chỉ nghỉ tối đa 0.6s rồi đọc tiếp → giữ mạch liên tục.
-            start = max(t, cursor) if t <= cursor + 0.6 else min(t, cursor + 0.6)
-            start = max(start, cursor)
-            out.append((start, mp3, d))
-            cursor = start + d + gap
-        return out, cursor
-
-    placed, end = layout(1.0)
-    speed = 1.0
-    if video_dur > 1.0 and end > video_dur:
-        # Cần nhanh hơn bao nhiêu lần thì vừa. Giới hạn 1.5× để còn nghe rõ.
-        need = end / video_dur
-        speed = min(1.5, max(1.0, need))
-        placed, end = layout(speed)
-        if end > video_dur:   # vẫn dài → cắt bớt đoạn cuối cho khỏi tràn
-            placed = [p for p in placed if p[0] + p[2] <= video_dur]
-    return placed, speed
 
 
 def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) -> None:
@@ -4693,13 +4665,15 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
             return
         upd(status="running", step="Đang xem video…", progress=10, duration=round(dur, 1))
 
-        # 1) Trích khung hình theo mốc giờ. LẤY DÀY & RÕ HƠN (tối đa 24 khung, rộng 640px)
-        #    để AI NHÌN ĐÚNG NGỮ CẢNH, đọc được cả chữ hiện trên màn hình.
-        n = max(8, min(24, int(dur // 3) or 8))
-        frames = _extract_frames_timed(path, dur, n, width=640)
-        if not frames:
+        # 1) CHIA video thành các Ô THỜI GIAN LIỀN NHAU phủ TỪ GIÂY 0 ĐẾN HẾT video.
+        #    Mỗi ô ~4 giây (video càng dài càng nhiều ô) → lời bình bám đúng từng cảnh và
+        #    CHẮC CHẮN đọc hết video, dù video dài mấy giây hay mấy phút.
+        n = max(3, min(45, int(round(dur / 4.0)) or 3))
+        slots_raw = _extract_frames_slots(path, dur, n, width=640)
+        if not slots_raw:
             upd(status="error", error="Không trích được khung hình từ video.")
             return
+        slots = [(s, e) for (s, e, _b) in slots_raw]
 
         # 2) KỊCH BẢN — ƯU TIÊN để AI viết THEO MỐC GIỜ dựa trên KHUNG HÌNH thật.
         #    Chỉ cách này lời bình mới KHỚP ĐÚNG CẢNH. Kịch bản văn xuôi (nếu có) chỉ
@@ -4707,46 +4681,64 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
         user_script = (opt.get("script") or "").strip()
         upd(step="AI đang viết lời bình khớp từng cảnh…", progress=30)
         style = (opt.get("style") or "thuyết minh tự nhiên, cuốn hút").strip()
-        tl = ", ".join(f"{t}s" for t, _ in frames)
-        # NGÂN SÁCH CHỮ: giọng Việt đọc ~2.6 từ/giây → tính đủ chữ để LỜI BÌNH CHẠY SUỐT video,
-        # không bị hụt rồi im lặng. Chia đều cho từng mốc để lời luôn bám kịp hình.
-        total_words = max(30, int(dur * 2.6))
-        per_seg = max(10, int(total_words / max(1, len(frames))))
+
+        # Bảng Ô THỜI GIAN gửi cho AI: ô nào từ giây mấy đến giây mấy, cần khoảng bao nhiêu từ.
+        # Giọng Việt đọc ~2.6 từ/giây → số từ TỐI THIỂU để lời phủ kín ô, không để im lặng.
+        wps = 2.6
+        lines = []
+        for i, (s, e) in enumerate(slots):
+            lines.append(f"  #{i} [{s:.1f}s → {e:.1f}s] cần ~{max(6, int((e - s) * wps))} từ")
+        slot_table = "\n".join(lines)
+        # Tag biểu cảm CHỈ dùng được với ElevenLabs v3; động cơ khác sẽ bị đọc thành chữ.
+        use_tags = ((opt.get("engine") or "").lower() == "elevenlabs"
+                    and (opt.get("eleven_model") or "") == "eleven_v3")
+        tag_rule = (
+            "• CHÈN THẺ BIỂU CẢM vào 'text' ở chỗ hợp lý để giọng đọc sinh động, ví dụ: "
+            "[excited] [happy] [laughs] [whispers] [sarcastic] [surprised] [sad] [sighs] [shouts]. "
+            "Mỗi phần tử tối đa 1–2 thẻ, đặt NGAY TRƯỚC câu/cụm cần biểu cảm, và CHỈ dùng khi thật "
+            "sự hợp ngữ cảnh (đừng chèn tràn lan).\n"
+            if use_tags else
+            "• TUYỆT ĐỐI KHÔNG chèn thẻ dạng [excited], [laughs]… vào 'text' (giọng đang dùng sẽ "
+            "đọc thành chữ, nghe rất kỳ).\n"
+        )
         prompt = (
-            f"Đây là các KHUNG HÌNH lấy lần lượt tại các mốc giây: {tl} của MỘT video dài {dur:.1f} giây.\n"
-            "NHIỆM VỤ: XEM KỸ từng khung để hiểu ĐÚNG NGỮ CẢNH (ai/cái gì, đang làm gì, ở đâu, "
-            "chữ hiện trên màn hình nếu có), rồi viết MỘT BÀI THUYẾT MINH TIẾNG VIỆT LIỀN MẠCH "
-            "chạy XUYÊN SUỐT từ đầu đến cuối video.\n"
-            f"Giọng điệu: {style}.\n"
-            "TRẢ VỀ DUY NHẤT một mảng JSON, không thêm chữ nào khác, mỗi phần tử gồm:\n"
-            '[{"t": 0, "scene": "thấy gì trong khung (mô tả thật, ngắn)", "text": "lời bình để đọc"}]\n'
+            f"Đây là các KHUNG HÌNH của MỘT video dài {dur:.1f} giây, mỗi khung đại diện cho MỘT Ô "
+            f"THỜI GIAN liền nhau phủ kín video (khung thứ k ứng với ô #k):\n{slot_table}\n\n"
+            "BƯỚC 1 — XÁC ĐỊNH CHỦ ĐỀ: xem toàn bộ khung hình để hiểu video NÓI VỀ CÁI GÌ "
+            "(chủ đề chính, nhân vật, bối cảnh, diễn biến).\n"
+            "BƯỚC 2 — VIẾT MỘT BÀI THUYẾT MINH TIẾNG VIỆT LIỀN MẠCH, BÁM CHẶT CHỦ ĐỀ đó, chia vào "
+            "đúng các ô trên sao cho lời nói ĐÚNG LÚC cảnh đang diễn ra.\n"
+            f"Giọng điệu: {style}.\n\n"
+            "TRẢ VỀ DUY NHẤT một mảng JSON, không thêm chữ nào khác:\n"
+            '[{"i": 0, "scene": "thấy gì trong ô này (thật, ngắn)", "text": "lời đọc cho ô này"}]\n'
             "QUY TẮC BẮT BUỘC:\n"
-            f"• Viết ĐỦ {len(frames)} phần tử, mỗi mốc giây ở trên MỘT phần tử, t đúng bằng mốc đó.\n"
-            f"• TỔNG độ dài lời bình khoảng {total_words} từ (mỗi phần tử khoảng {per_seg} từ) — "
-            f"đủ để đọc liên tục hết {dur:.0f} giây, KHÔNG được viết quá ngắn gây im lặng giữa chừng.\n"
-            "• QUAN TRỌNG NHẤT — LIỀN MẠCH: toàn bộ các phần tử ghép lại phải đọc trôi chảy như MỘT BÀI "
-            "DUY NHẤT. Câu sau NỐI TIẾP ý câu trước (dùng từ nối: rồi, sau đó, lúc này, tiếp đến, "
-            "không ngờ, cuối cùng…). TUYỆT ĐỐI KHÔNG viết kiểu mỗi câu một chủ đề rời rạc, "
-            "không lặp lại cách mở đầu, không liệt kê cụt lủn.\n"
-            "• 'scene' là điều BẠN THẬT SỰ NHÌN THẤY. 'text' phải khớp 'scene' — KHÔNG bịa chi tiết. "
-            "Nếu trong hình có CHỮ (tiêu đề, tên món, giá…), dùng đúng thông tin đó.\n"
-            "• Mở đầu có câu dẫn nhập, kết thúc có câu chốt gọn.\n"
+            f"• Viết ĐỦ {len(slots)} phần tử, i chạy từ 0 đến {len(slots) - 1}, KHÔNG thiếu ô nào — "
+            "để lời bình phủ kín TỪ GIÂY ĐẦU ĐẾN GIÂY CUỐI, không có quãng im lặng.\n"
+            "• Mỗi 'text' phải dài ĐÚNG TẦM số từ ghi ở ô đó (±20%) để đọc vừa khít ô. Ô dài thì "
+            "viết nhiều, ô ngắn viết ít. Bạn TỰ QUYẾT nội dung và độ dài trong khuôn đó.\n"
+            "• LIỀN MẠCH: ghép tất cả lại phải trôi chảy như MỘT BÀI DUY NHẤT — câu sau nối ý câu "
+            "trước (rồi, sau đó, lúc này, tiếp đến, không ngờ, cuối cùng…). KHÔNG mỗi ô một chủ đề "
+            "rời rạc, KHÔNG lặp cách mở đầu, KHÔNG liệt kê cụt lủn.\n"
+            "• BÁM CHỦ ĐỀ: mọi câu phải phục vụ chủ đề chính đã xác định ở BƯỚC 1.\n"
+            "• 'text' phải khớp 'scene' của CHÍNH ô đó — KHÔNG kể trước chuyện của ô sau, KHÔNG kể "
+            "lại chuyện ô trước. Nếu trong hình có CHỮ (tiêu đề, tên món, giá…), dùng đúng thông tin đó.\n"
+            "• Ô đầu có câu dẫn nhập, ô cuối có câu chốt.\n"
+            + tag_rule +
             "• Không emoji, không hashtag, không nói 'khung hình'/'hình ảnh cho thấy'."
         )
-        raw = _ai_vision(prompt, [b for _, b in frames], max_tokens=8192, json_mode=True)
-        segs = _parse_timed_script(raw, dur)
-        # DỰ PHÒNG 1: AI trả về văn xuôi (không phải JSON) → tự chia câu & rải đều theo thời lượng.
+        raw = _ai_vision(prompt, [b for _, _e, b in slots_raw], max_tokens=8192, json_mode=True)
+        segs = _parse_slot_script(raw, len(slots))
+        # DỰ PHÒNG: AI trả văn xuôi / hỏng → chia kịch bản (của AI hoặc của người dùng) vào các ô.
         if not segs and raw and not raw.startswith("⚠️"):
-            segs = _segments_from_prose(raw, dur)
-        # DỰ PHÒNG 2: dùng KỊCH BẢN NGƯỜI DÙNG ĐÃ CÓ (gửi kèm từ app) — luôn chạy được.
-        if not segs and (opt.get("script") or "").strip():
-            segs = _segments_from_prose(opt["script"], dur)
+            segs = _prose_into_slots(raw, len(slots))
+        if not segs and user_script:
+            segs = _prose_into_slots(user_script, len(slots))
         if not segs:
             upd(status="error",
-                error=f"Chưa tạo được lời bình theo mốc giờ. AI trả về: {(raw or '')[:200]}")
+                error=f"Chưa tạo được lời bình theo ô thời gian. AI trả về: {(raw or '')[:200]}")
             return
         upd(step=f"Đang tạo giọng đọc ({len(segs)} đoạn)…", progress=45, segments=len(segs))
-        return _narrate_finish(jid, path, tmp, segs, dur, opt, upd)
+        return _narrate_finish(jid, path, tmp, segs, slots, dur, opt, upd)
     except Exception as e:
         upd(status="error", error=f"Lỗi: {e}")
     finally:
@@ -4755,31 +4747,31 @@ def _narrate_worker(jid: str, path: str, cleanup_dir: Optional[str], opt: dict) 
             _sh.rmtree(cleanup_dir, ignore_errors=True)
 
 
-def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
+def _narrate_finish(jid: str, path: str, tmp: str, segs: list, slots: list, dur: float,
                     opt: dict, upd) -> None:
-    """Bước 3–5 dùng CHUNG cho cả 2 luồng (kịch bản người dùng / kịch bản AI):
-    tạo giọng đọc → ghép đúng mốc giờ + làm nét → lưu file cho app tải về."""
+    """Bước 3–5: tạo giọng đọc từng ô → đặt ĐÚNG ô thời gian (không sớm/không trễ/không chồng)
+    → làm nét → lưu file cho app tải về."""
     import subprocess, shutil as _sh, os as _os
     try:
-        # 3) Tạo giọng đọc cho từng đoạn (edge-tts/gTTS trên máy chủ).
+        # 3) Tạo giọng đọc cho từng ô, bằng ĐÚNG GIỌNG người dùng chọn.
         made = []
-        for idx, sg in enumerate(segs):
-            mp3 = _os.path.join(tmp, f"s{idx:03d}.mp3")
-            # Dùng ĐÚNG GIỌNG người dùng chọn (ElevenLabs nếu có), không mặc định giọng máy chủ.
+        for k, sg in enumerate(segs):
+            mp3 = _os.path.join(tmp, f"s{k:03d}.mp3")
             if _narrate_tts(sg["text"], mp3, opt):
                 da = _ffprobe_duration(mp3)          # ĐO độ dài THẬT của đoạn đọc
                 if da > 0.05:
-                    made.append((sg["t"], mp3, da))
-            upd(progress=45 + int(20 * (idx + 1) / max(1, len(segs))))
+                    made.append((int(sg["i"]), mp3, da))
+            upd(progress=45 + int(20 * (k + 1) / max(1, len(segs))))
         if not made:
             upd(status="error",
                 error="Máy chủ chưa tạo được giọng đọc. Cài trên VPS: pip install gTTS edge-tts")
             return
 
-        # 3b) XẾP LỊCH KHÔNG CHỒNG TIẾNG: mỗi đoạn chỉ bắt đầu sau khi đoạn trước đọc xong.
-        made, tempo = _schedule_no_overlap(made, dur)
-        if not made:
-            upd(status="error", error="Lời bình quá dài so với video. Hãy rút ngắn kịch bản.")
+        # 3b) ĐẶT MỖI ĐOẠN VÀO ĐÚNG Ô của cảnh đó: bắt đầu đúng lúc ô bắt đầu (không nói trước,
+        #     không nói chậm); đọc dài hơn ô thì tăng tốc vừa đủ rồi cắt ở cuối ô (không chồng).
+        placed = _fit_segments_to_slots(made, slots)
+        if not placed:
+            upd(status="error", error="Không xếp được lời bình vào các ô thời gian.")
             return
 
         # 4) Ghép: chèn từng đoạn đúng mốc + trộn tiếng gốc + LÀM NÉT / nâng phân giải.
@@ -4797,7 +4789,7 @@ def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
         if sharpen > 0.01:
             vf.append(f"unsharp=5:5:{min(sharpen, 2.0):.2f}:5:5:0.0")
         cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", path]
-        for _, mp3, _d in made:
+        for _s, mp3, _sp, _len in placed:
             cmd += ["-i", mp3]
 
         parts = [f"[0:v]{','.join(vf)}[v]"]
@@ -4806,12 +4798,18 @@ def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
         if has_a and keep_orig:
             parts.append(f"[0:a]volume={max(0.0, min(orig_vol, 1.0)):.2f}[a0]")
             mixes.append("[a0]")
-        # atempo chỉ nhận 0.5–2.0; ta luôn ở trong khoảng này (tối đa 1.5).
-        sp = f"atempo={tempo:.3f}," if abs(tempo - 1.0) > 0.01 else ""
-        for k, (t, _mp3, _d) in enumerate(made, start=1):
-            ms = int(max(0.0, t) * 1000)
-            parts.append(f"[{k}:a]{sp}adelay={ms}|{ms},"
-                         f"volume={max(0.1, min(voice_vol, 3.0)):.2f}[n{k}]")
+        for k, (start, _mp3, sp, slot_len) in enumerate(placed, start=1):
+            ms = int(max(0.0, start) * 1000)
+            # atempo (0.5–2.0) tăng tốc RIÊNG từng đoạn cho khít ô; atrim cắt cứng ở cuối ô
+            # nên tuyệt đối không tràn sang cảnh sau. asetpts đặt lại mốc sau khi cắt.
+            f = []
+            if abs(sp - 1.0) > 0.01:
+                f.append(f"atempo={min(2.0, max(0.5, sp)):.3f}")
+            f.append(f"atrim=0:{slot_len:.2f}")
+            f.append("asetpts=PTS-STARTPTS")
+            f.append(f"adelay={ms}|{ms}")
+            f.append(f"volume={max(0.1, min(voice_vol, 3.0)):.2f}")
+            parts.append(f"[{k}:a]{','.join(f)}[n{k}]")
             mixes.append(f"[n{k}]")
         parts.append(f"{''.join(mixes)}amix=inputs={len(mixes)}:duration=first:"
                      f"dropout_transition=0:normalize=0[a]")
@@ -4838,15 +4836,17 @@ def _narrate_finish(jid: str, path: str, tmp: str, segs: list, dur: float,
                             (opt["user_id"], name, "document", "video/mp4", size, int(time.time())))
             fid = cur.lastrowid
         _sh.move(out_mp4, _os.path.join(UPLOAD_DIR, str(fid)))
-        # Trả về mốc giờ THỰC TẾ đã ghép (sau khi xếp lại cho khỏi chồng tiếng),
-        # ghép đúng thứ tự với câu chữ đã đọc → app hiện đúng cái đã nghe.
+        # Trả về đúng lời + mốc giờ THỰC TẾ của từng ô → app hiện đúng cái đã nghe.
+        by_i = {int(s["i"]): s["text"] for s in segs}
         used = []
-        for i, (st, _m, _d) in enumerate(made):
-            if i < len(segs):
-                used.append(f"[{st:.0f}s] {segs[i]['text']}")
+        for (start, _m, _sp, _len) in placed:
+            k = next((i for i, (s0, _e0) in enumerate(slots) if abs(s0 - start) < 0.01), None)
+            if k is not None and k in by_i:
+                used.append(f"[{start:.0f}s] {by_i[k]}")
         upd(status="done", step="Xong", progress=100, file_id=fid, filename=name, size=size,
             script="\n".join(used) if used else
-                   "\n".join(f"[{s['t']:.0f}s] {s['text']}" for s in segs))
+                   "\n".join(f"[{slots[int(s['i'])][0]:.0f}s] {s['text']}"
+                             for s in segs if int(s["i"]) < len(slots)))
     except Exception as e:
         upd(status="error", error=f"Lỗi ghép: {e}")
 
