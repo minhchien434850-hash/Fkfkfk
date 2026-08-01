@@ -11285,7 +11285,9 @@ def _tg_watch_video_meta(url: str) -> dict:
         return {}
     return {"title": (d.get("title") or "")[:200],
             "desc": (d.get("description") or "").strip()[:700],
-            "url": d.get("webpage_url") or url}
+            "url": d.get("webpage_url") or url,
+            "id": str(d.get("id") or ""),
+            "ts": d.get("timestamp")}   # giây epoch lúc đăng — dùng để tính "cách đây bao lâu"
 
 
 def _tg_watch_broadcast(token: str, item: dict, ch: dict) -> None:
@@ -11397,6 +11399,52 @@ def _tg_watch_scan(token: str, notify_chat: str = "") -> int:
     return posted
 
 
+def _tg_watch_test(token: str, chat_id: str, hours: float = 1.0) -> None:
+    """Lệnh TEST — CHỈ ADMIN: quét NGAY tất cả kênh, tìm video MỚI NHẤT của mỗi kênh
+    được đăng trong khoảng `hours` giờ gần đây (mặc định 1 giờ) rồi ĐĂNG LUÔN — để kiểm
+    tra bot hoạt động đúng mà không cần chờ có video thật sự mới."""
+    import html as _h
+    lst = _tg_watch_load()
+    if not lst:
+        _tg_send(token, chat_id, "📺 Chưa có kênh nào. Thêm bằng <code>/kenhvideo them &lt;link&gt;</code>.")
+        return
+    _tg_send(token, chat_id, f"🧪 Đang kiểm tra video đăng trong ~{hours:.0f} giờ gần đây trên {len(lst)} kênh…")
+    now = time.time()
+    found = 0
+    for ch in lst:
+        try:
+            vids = _tg_watch_latest(ch.get("url") or "", limit=1)
+            if not vids:
+                continue
+            v = vids[0]
+            meta = _tg_watch_video_meta(v.get("url") or "") or {}
+            ts = meta.get("ts")
+            if ts:
+                age_h = (now - float(ts)) / 3600
+                if age_h > hours:
+                    continue   # video cũ hơn khoảng yêu cầu → bỏ qua
+            item = dict(v)
+            if meta.get("title"):
+                item["title"] = meta["title"]
+            item["desc"] = meta.get("desc", "")
+            if meta.get("url"):
+                item["url"] = meta["url"]
+            _tg_watch_broadcast(token, item, ch)
+            found += 1
+            # Ghi nhớ mốc để lần quét tự động KẾ TIẾP không đăng trùng video này lần nữa.
+            newid = meta.get("id") or v.get("id") or ""
+            if newid:
+                ch["last"] = newid
+        except Exception as e:
+            log.warning("watch test lỗi: %s", e)
+    _tg_watch_save(lst)
+    _tg_send(token, chat_id,
+             f"✅ Test xong — đã gửi <b>{found}</b> video (đăng trong {hours:.0f}h gần đây)."
+             if found else
+             f"ℹ️ Không có video nào đăng trong {hours:.0f}h gần đây trên {len(lst)} kênh.\n"
+             "(Kênh không có video mới thật sự trong khoảng này, hoặc yt-dlp không đọc được mốc thời gian.)")
+
+
 def _tg_watch_loop() -> None:
     """Nền: cứ ~5 phút quét kênh 1 lần (chỉ chạy khi admin bật /kenhvideo on)."""
     while True:
@@ -11446,7 +11494,10 @@ def _tg_watch_command(token: str, chat_id: str, msg: dict, args: str) -> None:
                  "<code>/kenhvideo xoa &lt;số&gt;</code> — xoá kênh\n"
                  "<code>/kenhvideo tong &lt;@kênh hoặc -100…&gt;</code> — đặt kênh tổng\n"
                  "<code>/kenhvideo on</code> · <code>/kenhvideo off</code> — bật/tắt tự đăng\n"
-                 "<code>/kenhvideo quet</code> — quét & đăng ngay\n"
+                 "<code>/kenhvideo quet</code> — quét & đăng NGAY video mới (theo mốc đã lưu)\n"
+                 "<code>/kenhvideo test [giờ]</code> — 🧪 CHỈ ADMIN: tìm & đăng video mới nhất "
+                 "trong X giờ gần đây (mặc định 1 giờ) để kiểm tra bot, VD: "
+                 "<code>/kenhvideo test</code> hoặc <code>/kenhvideo test 2</code>\n"
                  "<code>/kenhvideo nhom</code> — xem các nhóm sẽ nhận")
 
     if sub in ("", "list", "ds"):
@@ -11503,6 +11554,16 @@ def _tg_watch_command(token: str, chat_id: str, msg: dict, args: str) -> None:
         _tg_send(token, chat_id, "🔎 Đang quét các kênh…")
         import threading as _t
         _t.Thread(target=_tg_watch_scan, args=(token, chat_id), daemon=True).start()
+        return
+
+    if sub == "test":
+        try:
+            hrs = float(rest) if rest.strip() else 1.0
+        except Exception:
+            hrs = 1.0
+        hrs = max(0.1, min(hrs, 168.0))   # giới hạn hợp lý: 6 phút → 7 ngày
+        import threading as _t
+        _t.Thread(target=_tg_watch_test, args=(token, chat_id, hrs), daemon=True).start()
         return
 
     if sub in ("nhom", "groups"):
