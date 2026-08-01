@@ -6482,9 +6482,10 @@ def _tg_call(token: str, method: str, **params):
 # Bộ thu gom tin bot gửi ra khi đang chạy 1 lệnh trong NHÓM — để TỰ XOÁ sau N giây.
 _tg_del_ctx = None   # (thread_ident, [(chat_id, message_id), ...]) khi đang gom
 
-def _tg_send(token: str, chat_id, text: str, buttons: Optional[list] = None):
+def _tg_send(token: str, chat_id, text: str, buttons: Optional[list] = None,
+             disable_preview: bool = True):
     params = {"chat_id": chat_id, "text": text, "parse_mode": "HTML",
-              "disable_web_page_preview": True}
+              "disable_web_page_preview": disable_preview}
     if buttons:
         params["reply_markup"] = {"inline_keyboard": buttons}
     r = _tg_call(token, "sendMessage", **params)
@@ -11234,27 +11235,29 @@ def _tg_watch_live_url(ch: dict) -> str:
 
 
 def _tg_watch_live_check(ch: dict) -> tuple:
-    """Kênh có ĐANG LIVE không? → (đang_live, tiêu_đề, link_live).
+    """Kênh có ĐANG LIVE không? → (đang_live, tiêu_đề, link_live, nội_dung_mô_tả).
     Dùng yt-dlp đọc trang /live: có 'is_live' = true nghĩa là đang phát."""
     import subprocess as _sp, shutil as _sh
     if not _sh.which("yt-dlp"):
-        return False, "", ""
+        return False, "", "", ""
     lu = _tg_watch_live_url(ch)
     if not lu:
-        return False, "", ""
+        return False, "", "", ""
     try:
         r = _sp.run(["yt-dlp", "-J", "--no-warnings", "--no-playlist",
                      "--ignore-errors", lu],
                     capture_output=True, text=True, timeout=90)
         d = json.loads(r.stdout or "{}")
     except Exception:
-        return False, "", ""
+        return False, "", "", ""
     if not isinstance(d, dict):
-        return False, "", ""
+        return False, "", "", ""
     live = bool(d.get("is_live"))
     if not live:
-        return False, "", ""
-    return True, (d.get("title") or "Đang phát trực tiếp")[:200], (d.get("webpage_url") or lu)
+        return False, "", "", ""
+    desc = (d.get("description") or "").strip()[:700]
+    return (True, (d.get("title") or "Đang phát trực tiếp")[:200],
+            (d.get("webpage_url") or lu), desc)
 
 
 def _tg_watch_targets() -> list:
@@ -11266,29 +11269,53 @@ def _tg_watch_targets() -> list:
     return ids
 
 
+def _tg_watch_video_meta(url: str) -> dict:
+    """Lấy ĐẦY ĐỦ tiêu đề + NỘI DUNG (mô tả/caption) của 1 video cụ thể — khác với
+    _tg_watch_latest (--flat-playlist, chỉ có id/title rút gọn, không có mô tả)."""
+    import subprocess as _sp, shutil as _sh
+    if not _sh.which("yt-dlp") or not url:
+        return {}
+    try:
+        r = _sp.run(["yt-dlp", "-J", "--no-warnings", "--no-playlist", "--ignore-errors", url],
+                    capture_output=True, text=True, timeout=90)
+        d = json.loads(r.stdout or "{}")
+    except Exception:
+        return {}
+    if not isinstance(d, dict):
+        return {}
+    return {"title": (d.get("title") or "")[:200],
+            "desc": (d.get("description") or "").strip()[:700],
+            "url": d.get("webpage_url") or url}
+
+
 def _tg_watch_broadcast(token: str, item: dict, ch: dict) -> None:
-    """Video mới → CHỈ GỬI LINK vào mọi nhóm + kênh tổng (không tải/upload file video —
-    nhanh, gửi ngay không phải chờ tải)."""
+    """Video mới → gửi TIÊU ĐỀ + NỘI DUNG (caption) + LINK vào mọi nhóm + kênh tổng
+    (không tải/upload file video — nhanh, gửi ngay không phải chờ tải).
+    Preview BẬT (Telegram tự lấy hình thu nhỏ/nút phát từ link)."""
     import html as _h
     targets = _tg_watch_targets()
     if not targets:
         return
     src = item.get("url") or ""
     title = item.get("title") or "Video mới"
+    desc = (item.get("desc") or "").strip()
     tag = "TikTok" if ch.get("type") == "tiktok" else "YouTube"
     text = (f"🆕 <b>{_h.escape(title)}</b>\n"
-            f"📺 {tag} · {_h.escape(ch.get('name') or ch.get('key') or '')}\n"
-            f"🔗 {_h.escape(src)}")
+            f"📺 {tag} · {_h.escape(ch.get('name') or ch.get('key') or '')}\n")
+    if desc and desc != title:
+        text += f"📝 {_h.escape(desc)}\n"
+    text += f"🔗 {_h.escape(src)}"
     for cid in targets:
         try:
-            _tg_send(token, cid, text)
+            _tg_send(token, cid, text, disable_preview=False)
         except Exception:
             pass
         time.sleep(0.2)
 
 
-def _tg_watch_broadcast_live(token: str, ch: dict, title: str, url: str) -> None:
-    """Kênh vừa BẬT LIVE → gửi LINK LIVE vào mọi nhóm + kênh tổng (không tải file)."""
+def _tg_watch_broadcast_live(token: str, ch: dict, title: str, url: str, desc: str = "") -> None:
+    """Kênh vừa BẬT LIVE → gửi TIÊU ĐỀ + NỘI DUNG + LINK LIVE vào mọi nhóm + kênh tổng
+    (không tải file). Preview BẬT để hiện thẻ video/live như link dán tay."""
     import html as _h
     targets = _tg_watch_targets()
     if not targets or not url:
@@ -11297,12 +11324,14 @@ def _tg_watch_broadcast_live(token: str, ch: dict, title: str, url: str) -> None
     name = ch.get("name") or ch.get("key") or ""
     text = (f"🔴 <b>ĐANG LIVE</b> — {tag}\n"
             f"📺 {_h.escape(name)}\n"
-            f"🎬 {_h.escape(title or 'Đang phát trực tiếp')}\n"
-            f"🔗 {_h.escape(url)}\n"
-            "👉 Vào xem ngay nhé!")
+            f"🎬 {_h.escape(title or 'Đang phát trực tiếp')}\n")
+    d = (desc or "").strip()
+    if d and d != title:
+        text += f"📝 {_h.escape(d)}\n"
+    text += f"🔗 {_h.escape(url)}\n👉 Vào xem ngay nhé!"
     for cid in targets:
         try:
-            _tg_send(token, cid, text)
+            _tg_send(token, cid, text, disable_preview=False)
         except Exception:
             pass
         time.sleep(0.2)
@@ -11317,10 +11346,10 @@ def _tg_watch_scan(token: str, notify_chat: str = "") -> int:
     for ch in lst:
         # ---- 🔴 ĐANG LIVE: gửi LINK LIVE ngay khi kênh bắt đầu phát ----
         try:
-            is_live, ltitle, lurl = _tg_watch_live_check(ch)
+            is_live, ltitle, lurl, ldesc = _tg_watch_live_check(ch)
             was = (ch.get("live") or "") == "1"
             if is_live and not was:
-                _tg_watch_broadcast_live(token, ch, ltitle, lurl)
+                _tg_watch_broadcast_live(token, ch, ltitle, lurl, ldesc)
                 posted += 1
             # Nhớ trạng thái để KHÔNG báo lặp lại suốt buổi live; live tắt thì reset,
             # buổi live SAU sẽ được báo tiếp.
@@ -11346,7 +11375,16 @@ def _tg_watch_scan(token: str, notify_chat: str = "") -> int:
                     break
                 fresh.append(v)
             for v in reversed(fresh):
-                _tg_watch_broadcast(token, v, ch)
+                # Lấy ĐẦY ĐỦ tiêu đề + nội dung (mô tả) — danh sách rút gọn ở trên
+                # (--flat-playlist) không có mô tả.
+                meta = _tg_watch_video_meta(v.get("url") or "") or {}
+                item = dict(v)
+                if meta.get("title"):
+                    item["title"] = meta["title"]
+                item["desc"] = meta.get("desc", "")
+                if meta.get("url"):
+                    item["url"] = meta["url"]
+                _tg_watch_broadcast(token, item, ch)
                 posted += 1
             ch["last"] = newest["id"]
         except Exception as e:
