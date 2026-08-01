@@ -6802,16 +6802,22 @@ def _tg_send_video(token: str, chat_id, path: str, caption: str) -> bool:
     except Exception as e:
         log.warning("tg sendVideo lỗi: %s", e); return False
 
-def _tg_video_task(token: str, chat_id, arg: str) -> None:
+def _tg_video_task(token: str, chat_id, arg: str, src_url: str = "") -> None:
     import html as _h
     arg = (arg or "").strip()
     if not arg:
         _tg_send(token, chat_id, "🎬 Gửi: <code>/video &lt;link hoặc tên video&gt;</code> (YouTube/TikTok/FB…)"); return
+    # LINK GỐC để luôn gửi kèm cùng video (người dùng có cả link lẫn file).
+    link = (src_url or "").strip() or (arg if arg.lower().startswith("http") else "")
     _tg_call(token, "sendChatAction", chat_id=chat_id, action="upload_video")
-    _tg_send(token, chat_id, "🎬 Đang tải video tốc độ cao (16 luồng)…")
+    _tg_send(token, chat_id, "🎬 Đang tải video tốc độ cao (16 luồng)…"
+             + (f"\n🔗 {_h.escape(link)}" if link else ""))
     path, title, err = _tg_yt_video(arg)
     if not path:
-        _tg_send(token, chat_id, "❌ Không tải được video.\n" + _h.escape((err or "")[:300])); return
+        _tg_send(token, chat_id,
+                 "❌ Không tải được video.\n"
+                 + (f"🔗 Link: {_h.escape(link)}\n" if link else "")
+                 + _h.escape((err or "")[:300])); return
     try:
         _mb = os.path.getsize(path) / (1024 * 1024)
         parts = _tg_fit_video(path)
@@ -6823,17 +6829,27 @@ def _tg_video_task(token: str, chat_id, arg: str) -> None:
             fail = 0
             for i, p in enumerate(sendable, 1):
                 _tg_call(token, "sendChatAction", chat_id=chat_id, action="upload_video")
+                # Caption LUÔN kèm LINK GỐC → người dùng có đủ cả link lẫn video.
                 cap = f"{title} ({i}/{n})" if n > 1 else title
+                if link:
+                    cap = f"{cap}\n🔗 {link}"
                 if not _tg_send_video(token, chat_id, p, cap):
                     fail += 1
             if fail:
                 _tg_send(token, chat_id, f"⚠️ Có {fail} phần gửi chưa được, thử lại /video nhé.")
+            # Ngoài caption, gửi thêm 1 dòng link RÕ RÀNG (caption dài dễ bị cắt).
+            if link:
+                _tg_send(token, chat_id,
+                         f"🔗 <b>Link gốc:</b>\n{_h.escape(link)}")
         else:
             tk = secrets.token_hex(8)
             dst = os.path.join(_IPA_DIR, f"tgvid_{tk}.mp4")
             shutil.copy(path, dst)
             base = _ipa_base_url() or "https://app.kenios.store"
-            _tg_send(token, chat_id, f"🎬 <b>{_h.escape(title)}</b>\nFile lớn — tải tại:\n{base}/ipa/dl/tgvid_{tk}.mp4")
+            _tg_send(token, chat_id,
+                     f"🎬 <b>{_h.escape(title)}</b>\n"
+                     + (f"🔗 <b>Link gốc:</b> {_h.escape(link)}\n" if link else "")
+                     + f"📥 File lớn — tải video tại:\n{base}/ipa/dl/tgvid_{tk}.mp4")
     except Exception as e:
         log.warning("tg video gửi lỗi: %s", e)
         _tg_send(token, chat_id, "❌ Có lỗi khi gửi video.")
@@ -6841,9 +6857,36 @@ def _tg_video_task(token: str, chat_id, arg: str) -> None:
         try: shutil.rmtree(os.path.dirname(path), ignore_errors=True)
         except Exception: pass
 
-def _tg_start_video(token, chat_id, arg) -> None:
+def _tg_is_video_link(url: str) -> bool:
+    """Link này có phải video tải được không? Dùng để TỰ ĐỘNG tải khi người dùng chỉ gửi link
+    (không gõ lệnh). Chỉ nhận các nền tảng video quen thuộc + link file video trực tiếp,
+    để không đi tải nhầm mọi đường link bình thường."""
+    u = (url or "").strip().lower()
+    if not u:
+        return False
+    hosts = (
+        "youtube.com", "youtu.be", "m.youtube.com", "music.youtube.com",
+        "tiktok.com", "vt.tiktok.com", "vm.tiktok.com",
+        "facebook.com", "fb.watch", "fb.com", "m.facebook.com",
+        "instagram.com", "instagr.am",
+        "twitter.com", "x.com", "t.co",
+        "douyin.com", "iesdouyin.com", "kuaishou.com",
+        "dailymotion.com", "dai.ly", "vimeo.com",
+        "twitch.tv", "reddit.com", "v.redd.it",
+        "threads.net", "pinterest.com", "pin.it",
+        "bilibili.com", "b23.tv", "nhaccuatui.com", "zingmp3.vn",
+    )
+    if any(h in u for h in hosts):
+        return True
+    # Link file video trực tiếp (.mp4/.mov/…)
+    return any(u.split("?")[0].endswith(ext)
+               for ext in (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi"))
+
+
+def _tg_start_video(token, chat_id, arg, src_url: str = "") -> None:
     import threading
-    threading.Thread(target=_tg_video_task, args=(token, chat_id, arg), daemon=True).start()
+    threading.Thread(target=_tg_video_task, args=(token, chat_id, arg, src_url),
+                     daemon=True).start()
 
 # ---------- 🛡️ QUÉT LINK: kiểm tra virus / lừa đảo + thông tin đầy đủ ----------
 def _tg_vn_now() -> str:
@@ -10628,6 +10671,16 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         _pv = _tgtxt.split(None, 1)
         _tg_start_video(token, chat_id, _pv[1] if len(_pv) > 1 else "")
         return
+    # 🔗 TỰ ĐỘNG: gửi LINK VIDEO trần (không cần gõ lệnh) → bot tự tải & gửi lại
+    #    kèm ĐẦY ĐỦ link gốc + file video.
+    #    CHỈ áp dụng trong CHAT RIÊNG: ở nhóm phải để tin đi tiếp xuống bộ KIỂM DUYỆT
+    #    (_tg_group_message ở dưới), nếu chặn sớm tại đây thì link spam sẽ lọt lưới.
+    #    Trong nhóm vẫn dùng được lệnh /video <link> như cũ.
+    if ctype == "private" and _tgtxt and not _tgtxt.startswith("/"):
+        _auto = _tg_first_url(_tgtxt)
+        if _auto and _tg_is_video_link(_auto):
+            _tg_start_video(token, chat_id, _auto, src_url=_auto)
+            return
     # 🎙️ KỂ CHUYỆN bằng GIỌNG NÓI — luôn ra VOICE (không phụ thuộc AI bật/tắt).
     _cc0 = _tgtxt.split()[0].lstrip("/").split("@")[0].lower() if _tgtxt.startswith("/") else ""
     if _cc0 in ("kechuyen", "doctruyen", "truyen", "kechuyenma", "kevoice"):
