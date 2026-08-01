@@ -6898,92 +6898,6 @@ def _tg_first_url(text: str) -> str:
     m = _re.search(r"(https?://[^\s]+|(?:www\.|t\.me/)[^\s]+)", text or "", _re.I)
     return m.group(1) if m else ""
 
-def _tg_scan_link(url: str):
-    """Quét 1 link: mở redirect → domain/IP/HTTPS/mã, quét VirusTotal (nếu có key).
-    Trả (report_html, danger_bool)."""
-    import httpx, socket, html as _h, re as _re
-    from urllib.parse import urlparse
-    u = (url or "").strip()
-    if not _re.match(r"^https?://", u, _re.I):
-        u = "http://" + u
-    danger = False
-    final, status, server = u, "?", ""
-    try:
-        with httpx.Client(follow_redirects=True, timeout=15,
-                          headers={"User-Agent": "Mozilla/5.0"}) as c:
-            r = c.get(u)
-            final = str(r.url); status = r.status_code; server = r.headers.get("server", "")
-    except Exception as e:
-        return ("⚠️ Không mở được link này (có thể chết/chặn): " + _h.escape(str(e)[:120]) +
-                "\n🕐 " + _tg_vn_now()), True
-    host = (urlparse(final).hostname or "")
-    try:
-        ip = socket.gethostbyname(host) if host else "?"
-    except Exception:
-        ip = "?"
-    https = final.lower().startswith("https://")
-    warn = []
-    if not https:
-        warn.append("không mã hoá HTTPS")
-    if _re.match(r"^https?://\d+\.\d+\.\d+\.\d+", final):
-        warn.append("dùng IP thay tên miền")
-    shortener = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "cutt.ly",
-                 "shorturl.at", "zpr.io", "rebrand.ly", "shorten.asia"}
-    if host in shortener or (urlparse(u).hostname in shortener):
-        warn.append("link rút gọn (ẩn đích thật)")
-    bad_tld = (".zip", ".mov", ".xyz", ".top", ".tk", ".ml", ".ga", ".cf", ".gq",
-               ".click", ".country", ".work", ".rest", ".sbs")
-    if any(host.endswith(t) for t in bad_tld):
-        warn.append("tên miền lạ/hay bị lạm dụng")
-    # VirusTotal (nếu admin đặt key)
-    vt = ""
-    key = (get_setting("tg_vt_key", "") or "").strip()
-    if key:
-        try:
-            with httpx.Client(timeout=25, headers={"x-apikey": key}) as c:
-                aid = c.post("https://www.virustotal.com/api/v3/urls",
-                             data={"url": final}).json().get("data", {}).get("id", "")
-                time.sleep(3)
-                if aid:
-                    st = (c.get(f"https://www.virustotal.com/api/v3/analyses/{aid}").json()
-                          .get("data", {}).get("attributes", {}).get("stats", {}))
-                    mal, susp, harm = st.get("malicious", 0), st.get("suspicious", 0), st.get("harmless", 0)
-                    if mal or susp:
-                        danger = True
-                        vt = f"🦠 VirusTotal: <b>{mal} nơi báo ĐỘC HẠI</b>, {susp} nghi ngờ, {harm} an toàn."
-                    else:
-                        vt = f"✅ VirusTotal: không phát hiện độc hại ({harm} nơi báo an toàn)."
-        except Exception as e:
-            vt = "ℹ️ VirusTotal chưa quét được (" + _h.escape(str(e)[:60]) + ")."
-    head = "🚨 <b>CẢNH BÁO — LINK CÓ THỂ NGUY HIỂM</b>" if danger else "🔎 <b>Kết quả quét link</b>"
-    rep = [head,
-           f"🔗 Đích thật: <code>{_h.escape(final[:200])}</code>",
-           f"🌐 Tên miền: <code>{_h.escape(host)}</code> · IP: <code>{ip}</code>",
-           f"🔐 HTTPS: {'✅ có' if https else '❌ không'} · HTTP {status}" + (f" · {_h.escape(server[:40])}" if server else "")]
-    if final.rstrip("/") != u.rstrip("/"):
-        rep.append("↪️ Link gốc có CHUYỂN HƯỚNG sang địa chỉ trên.")
-    if vt:
-        rep.append(vt)
-    if warn:
-        rep.append("⚠️ Lưu ý: " + ", ".join(warn) + ".")
-    rep.append("🕐 " + _tg_vn_now())
-    if not key:
-        rep.append("💡 Bật quét virus SÂU: admin đặt VirusTotal API key (miễn phí ở virustotal.com) bằng <code>/setvt &lt;key&gt;</code>.")
-    return "\n".join(rep), danger
-
-def _tg_scan_link_task(token, chat_id, url, reply_to=None) -> None:
-    try:
-        rep, danger = _tg_scan_link(url)
-    except Exception as e:
-        log.warning("scan link lỗi: %s", e); return
-    params = {"chat_id": chat_id, "text": rep, "parse_mode": "HTML", "disable_web_page_preview": True}
-    if reply_to:
-        params["reply_to_message_id"] = reply_to
-    _tg_call(token, "sendMessage", **params)
-
-def _tg_start_scan_link(token, chat_id, url, reply_to=None) -> None:
-    import threading
-    threading.Thread(target=_tg_scan_link_task, args=(token, chat_id, url, reply_to), daemon=True).start()
 
 # ============================================================================
 #  🎮 GÓC GIẢI TRÍ & TIỆN ÍCH NHÓM — trò chơi · hài hước · bói vui · công cụ
@@ -8356,8 +8270,8 @@ _TG_RESERVED = {
     "stop", "filters", "save", "clear", "notes", "setrules", "rules", "clean", "nightmode",
     "antiflood", "captcha", "autoreact", "slowmode", "log", "diemdanh", "top", "report",
     "setwelcome", "welcome", "setwelcomebtn", "setwelcomephoto", "setgoodbye", "testwelcome",
-    "modon", "modoff", "autodel", "modadmin", "scanlink", "setvt", "kenios",
-    "video", "taivideo", "quetlink", "checklink", "scan", "chaosang", "chaotoi",
+    "modon", "modoff", "autodel", "modadmin", "kenios",
+    "video", "taivideo", "chaosang", "chaotoi",
     "kechuyen", "doctruyen", "truyen", "kechuyenma", "kevoice",
     # 🎮 lệnh giải trí & tiện ích (không cho lệnh riêng ghi đè)
     "xucxac", "slot", "phitieu", "bongda", "bongro", "bowling", "tungxu", "oantuti", "keobuabao",
@@ -10324,15 +10238,6 @@ def _tg_admin_command(token: str, chat_id: str, msg: dict, cmd: str, args: str) 
                      "(Telegram không cho bot cấm chat chủ nhóm — chỉ xoá tin được.)")
         else:
             _tg_send(token, chat_id, "👑 Kiểm duyệt CẢ ADMIN: <b>TẮT</b> — admin được miễn như bình thường.")
-    elif cmd == "scanlink":
-        a = args.strip().lower()
-        cur = get_setting("tg_scanlink_on", "1") == "1"
-        new = True if a in ("on", "bat", "bật", "1") else False if a in ("off", "tat", "tắt", "0") else not cur
-        set_setting("tg_scanlink_on", "1" if new else "0")
-        _tg_send(token, chat_id,
-                 ("🛡️ Tự quét link admin gửi: <b>BẬT</b> — admin dán link, bot tự kiểm tra virus/lừa đảo + báo thông tin đầy đủ."
-                  if new else "🛡️ Tự quét link admin gửi: <b>TẮT</b>.") +
-                 ("\n💡 Quét virus SÂU: đặt VirusTotal key bằng /setvt <key>." if new and not (get_setting("tg_vt_key","") or "").strip() else ""))
     elif cmd in ("chaosang", "chaotoi"):
         import re as _re
         slot = "morning" if cmd == "chaosang" else "evening"
@@ -10504,14 +10409,6 @@ def _tg_group_message(token: str, chat_id: str, msg: dict) -> None:
             _tg_with_autodel(token, chat_id, mid,
                              lambda: _tg_dispatch_command(token, chat_id, msg, text, uid, frm))
         return
-
-    # 🛡️ TỰ ĐỘNG QUÉT LINK admin gửi: admin dán link vào nhóm → bot tự kiểm tra virus/lừa đảo
-    # + trả thông tin đầy đủ (reply vào tin đó). Bật/tắt: /scanlink on|off (mặc định BẬT).
-    if (text and not text.startswith("/") and get_setting("tg_scanlink_on", "1") == "1"
-            and _tg_has_link(msg) and _tg_is_privileged(token, chat_id, msg)):
-        _u = _tg_first_url(text)
-        if _u:
-            _tg_start_scan_link(token, chat_id, _u, reply_to=mid)
 
     # FameRank: đếm tin nhắn · AutoReact: thả cảm xúc (chạy NỀN — không chặn vòng lặp)
     if uid:
@@ -10689,15 +10586,6 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         _topic = _pv2[1].strip() if len(_pv2) > 1 else ("kể một câu chuyện ma rùng rợn" if _cc0 == "kechuyenma" else "kể một câu chuyện hay, hấp dẫn")
         _thv.Thread(target=_tg_voice_reply, args=(token, chat_id, "Kể chuyện: " + _topic, True), daemon=True).start()
         return
-    # 🛡️ Quét link virus/lừa đảo (/quetlink) + đặt VirusTotal key (/setvt, admin)
-    if _tgtxt.startswith("/quetlink") or _tgtxt.startswith("/checklink") or _tgtxt.startswith("/scan"):
-        _pl = _tgtxt.split(None, 1)
-        _url = _pl[1].strip() if len(_pl) > 1 else _tg_first_url(((msg.get("reply_to_message") or {}).get("text") or ""))
-        if _url:
-            _tg_start_scan_link(token, chat_id, _url)
-        else:
-            _tg_send(token, chat_id, "🛡️ Dùng: <code>/quetlink https://link-can-kiem-tra</code> (hoặc reply vào tin có link).")
-        return
     # 📺 /kenhvideo — theo dõi kênh TikTok/YouTube, tự đăng video mới (CHỈ admin, chat riêng)
     if _tgtxt.startswith("/kenhvideo") or _tgtxt.startswith("/kenhtong"):
         _pk = _tgtxt.split(None, 1)
@@ -10713,21 +10601,6 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         _pk2 = _tgtxt.split(None, 1)
         _tg_kenios_cmd(token, chat_id, _pk2[1] if len(_pk2) > 1 else "")
         return
-    if _tgtxt.startswith("/setvt"):
-        _uid3 = (msg.get("from") or {}).get("id")
-        _vtadmin = (bool(admin_chat) and chat_id == str(admin_chat)) or (
-            ctype in ("group", "supergroup") and _tg_is_admin(token, chat_id, _uid3))
-        if not _vtadmin:
-            _tg_send(token, chat_id, "🔒 Chỉ ADMIN mới đặt được VirusTotal key."); return
-        _pk = _tgtxt.split(None, 1)
-        if len(_pk) > 1 and _pk[1].strip():
-            set_setting("tg_vt_key", _pk[1].strip())
-            _tg_send(token, chat_id, "✅ Đã lưu VirusTotal key — quét link giờ có kiểm tra virus SÂU. 🦠")
-        else:
-            set_setting("tg_vt_key", "")
-            _tg_send(token, chat_id, "🗑️ Đã xoá VirusTotal key (chỉ còn quét cơ bản). Lấy key miễn phí ở virustotal.com.")
-        return
-
     # 🤖 Trợ lý AI (/ai bật-tắt · /hoiai hỏi · /aikey /aimodel… cấu hình) — chạy ở nhóm & chat riêng.
     if _tgtxt.startswith("/") and _tgtxt.split():
         _aic = _tgtxt.split()[0].lstrip("/").split("@")[0].lower()
@@ -10851,7 +10724,7 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
                    "/captcha", "/autoreact", "/slowmode", "/log", "/diemdanh", "/top", "/report", "/save",
                    "/clear", "/notes", "/id", "/setwelcome", "/welcome", "/setwelcomebtn", "/setwelcomephoto",
                    "/setgoodbye", "/testwelcome", "/modon", "/modoff", "/stats", "/autodel", "/modadmin",
-                   "/scanlink", "/chaosang", "/chaotoi"}
+                   "/chaosang", "/chaotoi"}
     if text.startswith("/") and text.split("@")[0].split()[0].lower() in _GROUP_CMDS:
         _tg_send(token, chat_id,
                  "🔧 Lệnh này dùng trong <b>NHÓM</b>, không chạy khi nhắn riêng bot.\n\n"
@@ -10952,7 +10825,6 @@ def _tg_register_commands(token: str) -> None:
         ("help", "Menu & danh sách lệnh"), ("menu", "Mở menu nút bấm"),
         ("hoiai", "🤖 Hỏi trợ lý AI"),
         ("nhac", "Lấy nhạc YouTube/TikTok"), ("video", "🎬 Tải video (cắt phần nếu lớn)"),
-        ("quetlink", "🛡️ Quét link virus/lừa đảo"),
         ("kechuyen", "🎙️ Kể chuyện bằng giọng nói"),
         ("diemdanh", "Điểm danh"), ("top", "Bảng xếp hạng"),
         ("report", "Báo cáo admin (reply)"), ("rules", "Xem nội quy"),
@@ -11016,7 +10888,6 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
              else f"👋 Xin chào, tôi là <b>{_h.escape(bot)}</b>.\n\n")
     pub = ("🤖 <b>Trợ lý AI:</b> /hoiai &lt;câu hỏi&gt; — hỏi mọi câu khó, toán, lập trình (admin bật bằng /ai)\n"
            "🎵 <b>/nhac</b> &lt;bài&gt; — lấy nhạc · 🎬 <b>/video</b> &lt;link/tên&gt; — tải video (tự cắt phần nếu lớn)\n"
-           "🛡️ <b>/quetlink</b> &lt;link&gt; — kiểm tra virus/lừa đảo + thông tin đầy đủ\n"
            "🎙️ <b>/kechuyen</b> [chủ đề] — bot KỂ CHUYỆN bằng GIỌNG NÓI (voice). VD /kechuyen ma\n"
            "🧠 <b>Đố vui CÓ ĐIỂM:</b> /dovui (+10đ/câu đúng, ~1080 câu) · /goiy · /boqua · /dungdo · 🏆 /diemdo\n"
            "🃏 <b>Game bài:</b> /baicao · /xidach (/rut /dan) · /baucua bầu — thắng +5 điểm\n"
@@ -11036,7 +10907,6 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
             "🎊 <b>/kenios</b> — 1 LỆNH DUY NHẤT: tự chào SÁNG + TỐI + chúc MỌI NGÀY LỄ (dương & âm lịch) đúng giờ.\n"
             "   • /kenios on|off · /kenios sang 6:30 · /kenios toi 21:00 · /kenios le 8:00 · /kenios test\n"
             "🤖 <b>Trợ lý AI:</b> /ai on|off · /aiall on|off (nhóm trả lời mọi tin) · /aidm on|off (chat riêng tự trả lời) · /aikey &lt;khoá&gt; · /aiprovider · /aiurl · /aimodel · /aiset\n"
-            "🛡️ <b>Quét link:</b> /scanlink on|off (tự quét link admin gửi) · /setvt &lt;key&gt; (VirusTotal — quét virus sâu)\n"
             "<b>Module:</b> /clean /nightmode /antiflood /captcha /autoreact /slowmode [giây] /autodel [giây] /log · /modon /modoff · /modadmin · /config\n"
             "🔗 <b>Liên kết & lệnh riêng:</b> /addcmd &lt;tên&gt; &lt;nội dung&gt; · /delcmd · /setlinks · 📣 /broadcast")
 
