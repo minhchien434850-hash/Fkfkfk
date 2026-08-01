@@ -11267,7 +11267,8 @@ def _tg_watch_targets() -> list:
 
 
 def _tg_watch_broadcast(token: str, item: dict, ch: dict) -> None:
-    """Tải video mới rồi GỬI kèm ĐẦY ĐỦ link tới mọi nhóm + kênh tổng."""
+    """Video mới → CHỈ GỬI LINK vào mọi nhóm + kênh tổng (không tải/upload file video —
+    nhanh, gửi ngay không phải chờ tải)."""
     import html as _h
     targets = _tg_watch_targets()
     if not targets:
@@ -11275,31 +11276,15 @@ def _tg_watch_broadcast(token: str, item: dict, ch: dict) -> None:
     src = item.get("url") or ""
     title = item.get("title") or "Video mới"
     tag = "TikTok" if ch.get("type") == "tiktok" else "YouTube"
-    path, ytitle, err = _tg_yt_video(src)
-    caption = (f"🆕 <b>{_h.escape(ytitle or title)}</b>\n"
-               f"📺 {tag} · {_h.escape(ch.get('name') or ch.get('key') or '')}\n"
-               f"🔗 {_h.escape(src)}")
-    try:
-        parts = _tg_fit_video(path) if path else []
-        sendable = [p for p in parts if os.path.getsize(p) <= _TG_VIDEO_LIMIT]
-        for cid in targets:
-            try:
-                if sendable:
-                    n = len(sendable)
-                    for i, p in enumerate(sendable, 1):
-                        cap = caption if n == 1 else f"{caption}\n({i}/{n})"
-                        _tg_send_video(token, cid, p, cap)
-                else:
-                    # Không tải/gửi được file → vẫn ĐĂNG LINK để nhóm biết có video mới.
-                    _tg_send(token, cid, caption + ("\n⚠️ Không tải được file video."
-                                                    if not path else ""))
-            except Exception:
-                pass
-            time.sleep(0.2)
-    finally:
-        if path:
-            try: shutil.rmtree(os.path.dirname(path), ignore_errors=True)
-            except Exception: pass
+    text = (f"🆕 <b>{_h.escape(title)}</b>\n"
+            f"📺 {tag} · {_h.escape(ch.get('name') or ch.get('key') or '')}\n"
+            f"🔗 {_h.escape(src)}")
+    for cid in targets:
+        try:
+            _tg_send(token, cid, text)
+        except Exception:
+            pass
+        time.sleep(0.2)
 
 
 def _tg_watch_broadcast_live(token: str, ch: dict, title: str, url: str) -> None:
