@@ -7,3 +7,16 @@ Payload/
 *.ipa
 xcuserdata/
 __pycache__/
+
+# Backend: khóa bí mật, CSDL, tệp tải lên, backup — KHÔNG commit
+backend/*.key
+backend/*.db
+backend/*.db-wal
+backend/*.db-shm
+backend/uploads/
+backend/*.jsonl
+.env
+
+# Khoá mã hoá backend (KHÔNG commit)
+kenios_enc.key
+*.key

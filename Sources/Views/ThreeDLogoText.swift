@@ -1,46 +1,65 @@
 import SwiftUI
 
-/// Chữ 7 sắc cầu vồng **chạy nối tiếp liên tục** (dùng cho logo + tiêu đề).
+/// Chữ 7 sắc cầu vồng — tĩnh hoặc **chạy nối tiếp liên tục** tuỳ `animated`.
 struct RainbowText: View {
     let text: String
     var size: CGFloat = 22
     var weight: Font.Weight = .black
     var design: Font.Design = .rounded
+    var animated: Bool = true
 
-    // 7 sắc cầu vồng (lặp lại màu đầu để vòng màu liền mạch)
     private let colors: [Color] = [.red, .orange, .yellow, .green, .blue, .indigo, .purple, .red]
 
     var body: some View {
-        TimelineView(.animation) { tl in
-            // Quay vòng màu theo thời gian (5s/vòng) → các màu "chạy" liên tục
-            let secs = tl.date.timeIntervalSinceReferenceDate
-            let hue = secs.truncatingRemainder(dividingBy: 5) / 5 * 360
+        if animated {
+            TimelineView(.animation) { tl in
+                let secs = tl.date.timeIntervalSinceReferenceDate
+                let hue = secs.truncatingRemainder(dividingBy: 5) / 5 * 360
+                Text(text)
+                    .font(.system(size: size, weight: weight, design: design))
+                    .foregroundStyle(
+                        LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
+                    )
+                    .hueRotation(.degrees(hue))
+                    .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
+            }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+        } else {
             Text(text)
                 .font(.system(size: size, weight: weight, design: design))
                 .foregroundStyle(
                     LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
                 )
-                .hueRotation(.degrees(hue))
                 .shadow(color: .black.opacity(0.25), radius: 2, x: 0, y: 1)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .lineLimit(1)
-        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
-/// Logo chữ **KENIOS** — giờ là chữ cầu vồng động, dùng ở toolbar mọi màn hình.
+/// Logo chữ **KENIOS** — dùng ở toolbar mọi màn hình.
+/// Áp ĐÚNG hiệu ứng màu / font / chuyển động người dùng chọn trong Cài đặt (Logo & Hiệu ứng app).
 struct ThreeDLogoText: View {
     var size: CGFloat = 22
+    @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
+    @AppStorage("appLogoFont") private var appLogoFont = "rounded"
+    @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
     var body: some View {
-        RainbowText(text: "KENIOS", size: size)
+        AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
+                          fontStyle: appLogoFont, anim: appLogoAnim, size: size)
     }
 }
 
-/// Phiên bản lớn cho màn hình đăng nhập
+/// Phiên bản lớn cho màn hình đăng nhập — cũng theo cài đặt hiệu ứng logo app.
 struct ThreeDLogoLarge: View {
+    @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
+    @AppStorage("appLogoFont") private var appLogoFont = "rounded"
+    @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
     var body: some View {
         VStack(spacing: 6) {
-            RainbowText(text: "KENIOS", size: 40)
+            AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
+                              fontStyle: appLogoFont, anim: appLogoAnim, size: 40)
             Text("Mạng xã hội · Video · Giải trí · Công cụ")
                 .font(.caption)
                 .foregroundStyle(.secondary)

@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import PhotosUI
 
 // Media có thể chỉnh sửa (admin) — link ảnh/video, tối đa 5
 struct EditMedia: Identifiable, Hashable {
@@ -17,29 +18,93 @@ func mediaToEdit(_ items: [StoreMedia]) -> [EditMedia] {
     items.map { EditMedia(type: $0.type, url: $0.url) }
 }
 
-// Trình chỉnh sửa media dùng chung (tối đa 5)
+// Trình chỉnh sửa media dùng chung (tối đa 5) — hỗ trợ GIF/PNG/JPEG/WEBP/MP4
 struct MediaEditor: View {
     @Binding var media: [EditMedia]
+    @EnvironmentObject var store: AppStore
+    @State private var showConverter = false
+    @State private var picker: PhotosPickerItem?
+    @State private var uploading = false
+    @State private var uploadError: String?
 
     var body: some View {
-        Section("Ảnh / Video (dán link, tối đa 5)") {
+        Section {
             ForEach($media) { $m in
                 VStack(alignment: .leading, spacing: 6) {
-                    Picker("Loại", selection: $m.type) {
-                        Text("Ảnh").tag("image")
+                    Picker(store.t("Loại", "Type"), selection: $m.type) {
+                        Text("Ảnh / GIF").tag("image")
                         Text("Video").tag("video")
                     }.pickerStyle(.segmented)
-                    TextField("Dán link ảnh/video", text: $m.url)
+                    TextField(store.t("Dán link ảnh / GIF / PNG / JPEG / WEBP / MP4...", "Paste image / GIF / PNG / JPEG / WEBP / MP4 link..."), text: $m.url)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
             }
             .onDelete { media.remove(atOffsets: $0) }
+
+            // Tải ảnh/video TRỰC TIẾP từ máy → tự lên máy chủ → tự điền link
             if media.count < 5 {
+                PhotosPicker(selection: $picker, matching: .any(of: [.images, .videos])) {
+                    HStack {
+                        if uploading { ProgressView().padding(.trailing, 4) }
+                        Label(uploading ? "Đang tải lên..." : "Chọn ảnh / video từ máy",
+                              systemImage: "photo.badge.plus")
+                    }
+                }
+                .disabled(uploading)
+
                 Button { media.append(EditMedia()) } label: {
-                    Label("Thêm media", systemImage: "plus.circle")
+                    Label(store.t("Thêm ô dán link thủ công", "Add manual link field"), systemImage: "plus.circle")
                 }
             }
+            Button {
+                showConverter = true
+            } label: {
+                Label(store.t("Chuyển đổi ảnh → link GIF / PNG / JPEG", "Convert image → GIF / PNG / JPEG link"), systemImage: "wand.and.stars")
+                    .font(.caption)
+                    .foregroundStyle(store.accentColor)
+            }
+            // Gắn .sheet vào chính nút (không gắn vào Section) để mở được màn Chuyển đổi
+            .sheet(isPresented: $showConverter) {
+                MediaConverterView().environmentObject(store)
+            }
+            if let uploadError {
+                Text(uploadError).font(.caption2).foregroundStyle(.red)
+            }
+        } header: {
+            Text(store.t("Ảnh / Video (tối đa 5)", "Photo / Video (max 5)"))
+        } footer: {
+            Text(store.t("Chọn ảnh/video từ máy để tự tải lên, hoặc dán link từ Imgur, Cloudinary, Giphy... Hoặc bấm \"Chuyển đổi\" để tạo link từ ảnh.",
+                         "Pick image/video from device to auto-upload, or paste a link from Imgur, Cloudinary, Giphy... Or tap \"Convert\" to make a link from an image."))
+                .font(.caption2)
         }
+        .onChange(of: picker) { item in
+            guard let item else { return }
+            Task { await uploadPicked(item) }
+        }
+    }
+
+    private func uploadPicked(_ item: PhotosPickerItem) async {
+        uploading = true; uploadError = nil
+        defer { uploading = false; picker = nil }
+        let isVideo = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
+        do {
+            if isVideo {
+                guard let movie = try await item.loadTransferable(type: EditMovie.self),
+                      let data = try? Data(contentsOf: movie.url) else {
+                    uploadError = "Không đọc được video."; return
+                }
+                let url = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                    mime: "video/mp4", name: "v_\(Int(Date().timeIntervalSince1970)).mp4")
+                if media.count < 5 { media.append(EditMedia(type: "video", url: url)) }
+            } else {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    uploadError = "Không đọc được ảnh."; return
+                }
+                let url = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                    mime: "image/jpeg", name: "i_\(Int(Date().timeIntervalSince1970)).jpg")
+                if media.count < 5 { media.append(EditMedia(type: "image", url: url)) }
+            }
+        } catch { uploadError = error.localizedDescription }
     }
 }
 
@@ -53,6 +118,7 @@ struct StoreAdminView: View {
     @State private var error: String?
     @State private var editCategory: StoreCategory?
     @State private var newCategory = false
+    @State private var quickAdd = false
 
     var body: some View {
         NavigationStack {
@@ -61,48 +127,78 @@ struct StoreAdminView: View {
                     NavigationLink {
                         StoreConfigEditor()
                     } label: {
-                        Label("Giao diện cửa hàng (logo, banner)", systemImage: "paintpalette")
+                        Label(store.t("Giao diện cửa hàng (logo, nền)", "Store appearance (logo, background)"), systemImage: "paintpalette")
                     }
                     NavigationLink {
                         StoreContactsEditor()
                     } label: {
-                        Label("Liên hệ admin & Nhóm cộng đồng", systemImage: "bubble.left.and.text.bubble.right")
+                        Label(store.t("Liên hệ admin & Nhóm cộng đồng", "Admin contact & Community groups"), systemImage: "bubble.left.and.text.bubble.right")
                     }
                     NavigationLink {
                         StoreTopupBonusEditor()
                     } label: {
-                        Label("Khuyến mãi nạp ví (%)", systemImage: "percent")
+                        Label(store.t("Khuyến mãi (%)", "Promotions (%)"), systemImage: "percent")
                     }
                     NavigationLink {
                         StoreInventoryView()
                     } label: {
-                        Label("Kho hàng (tồn kho)", systemImage: "shippingbox")
+                        Label(store.t("Kho hàng (tồn kho)", "Inventory (stock)"), systemImage: "shippingbox")
                     }
                     NavigationLink {
                         StoreAdminOrdersView()
                     } label: {
-                        Label("Đơn hàng đã bán", systemImage: "list.bullet.rectangle")
+                        Label(store.t("Đơn hàng đã bán", "Completed orders"), systemImage: "list.bullet.rectangle")
                     }
                     NavigationLink {
-                        StoreKeysBackupView()
+                        AdminAnalyticsView()
                     } label: {
-                        Label("Sao lưu KEY / ACC đã bán", systemImage: "externaldrive.badge.checkmark")
+                        Label(store.t("Thống kê & Phân tích", "Statistics & Analytics"), systemImage: "chart.bar.xaxis")
+                    }
+                    NavigationLink {
+                        AdminPromoCodesView()
+                    } label: {
+                        Label(store.t("Mã khuyến mãi", "Promo codes"), systemImage: "tag.fill")
+                    }
+                    NavigationLink {
+                        AdminPushNotificationView()
+                    } label: {
+                        Label(store.t("Gửi thông báo (Push)", "Send notification (Push)"), systemImage: "bell.badge.fill")
+                    }
+                    NavigationLink {
+                        AdminWalletAdjustView()
+                    } label: {
+                        Label(store.t("Nạp / Trừ ví khách hàng", "Add / Deduct customer wallet"), systemImage: "dollarsign.arrow.circlepath")
                     }
                 }
 
-                Section("Danh mục (\(categories.count))") {
-                    Button { newCategory = true } label: {
-                        Label("Thêm danh mục", systemImage: "plus.circle.fill")
-                    }
+                Section(store.t("Danh mục sản phẩm", "Product categories") + " (\(categories.count))") {
                     ForEach(categories) { cat in
                         NavigationLink {
                             StoreAdminFolderList(category: cat)
                         } label: {
-                            HStack {
-                                Text(cat.name)
+                            HStack(spacing: 10) {
+                                // Thumbnail danh mục
+                                if let m = cat.media.first, m.type != "video", let url = URL(string: m.url) {
+                                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                                    placeholder: { Color(.tertiarySystemBackground) }
+                                        .frame(width: 38, height: 38)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "folder.fill")
+                                        .foregroundStyle(Theme.gold)
+                                        .frame(width: 38, height: 38)
+                                        .background(Color(.tertiarySystemBackground))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(cat.name).font(.subheadline.bold())
+                                    Text(store.t("Bấm để quản lý thư mục con", "Tap to manage subfolders"))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
                                 Spacer()
                                 Button { editCategory = cat } label: {
-                                    Image(systemName: "pencil")
+                                    Image(systemName: "pencil.circle")
+                                        .foregroundStyle(.secondary)
                                 }.buttonStyle(.borderless)
                             }
                         }
@@ -110,15 +206,31 @@ struct StoreAdminView: View {
                     .onDelete { idx in
                         Task { await deleteCategories(idx) }
                     }
+                    Button { quickAdd = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "wand.and.stars")
+                                .font(.title3).foregroundStyle(Theme.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(store.t("➕ Thêm sản phẩm (tất cả trong 1)", "➕ Add product (all-in-one)"))
+                                    .font(.headline).foregroundStyle(.primary)
+                                Text(store.t("Tạo danh mục, thư mục con, sản phẩm, giá & nhập key — tất cả trong 1 màn.",
+                                             "Create category, subfolder, product, prices & keys — all in one screen."))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
 
                 if let error { Text(error).foregroundStyle(.red).font(.caption) }
             }
-            .navigationTitle("Quản trị cửa hàng")
+            .navigationTitle(store.t("Quản trị cửa hàng", "Store admin"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
             .task { await reload() }
             .refreshable { await reload() }
+            .sheet(isPresented: $quickAdd) {
+                StoreQuickAddView { Task { await reload() } }
+            }
             .sheet(isPresented: $newCategory) {
                 StoreCategoryEditor(category: nil) { Task { await reload() } }
             }
@@ -148,666 +260,543 @@ struct StoreConfigEditor: View {
     @EnvironmentObject var store: AppStore
     @State private var logoName = ""
     @State private var logoUrl = ""
+    @State private var logoType = "image"
     @State private var bannerType = "image"
     @State private var bannerUrl = ""
+    @State private var logoEffect = "rainbow"
+    @State private var logoFont = "rounded"
+    @State private var logoAnim = "shimmer"
+    @State private var bgType = "none"
+    @State private var bgUrl = ""
+    @State private var slogan = ""
+    @State private var sloganFont = "rounded"
+    @State private var cardSize = "medium"
+    @State private var cardScale: Double = 1.0
+    @State private var sections: [String] = ["announce", "categories", "gamecat", "flash", "trust", "steps", "leaderboard",
+                                             "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "products", "footer"]
+    @State private var hiddenSections: Set<String> = ["products"]
+    // Thanh thông báo + số sản phẩm/danh mục
+    @State private var announceEnabled = false
+    @State private var announceText = ""
+    @State private var announceColor = "accent"
+    // (Lời chào toàn cục + Thông báo cập nhật phiên bản đã chuyển sang Quản trị app.)
+    @State private var gamecatLimit = 6
+    // Flash sale
+    @State private var flashEnabled = false
+    @State private var flashProductId = 0
+    @State private var flashDiscount = 0
+    @State private var flashEnd = Date().addingTimeInterval(3 * 86400)
+    @State private var flashTitle = "FLASH SALE"
+    @State private var heroTitle = ""
+    @State private var heroSubtitle = ""
+    @State private var heroEffect = "gradient"
+    @State private var heroFont = "rounded-bold"
+    @State private var heroAnim = "none"
+    @State private var heroColor = Color(hexString: "#3B6EFF")!     // màu tự chọn cho tiêu đề
+    @State private var heroSubEffect = ""                          // rỗng = giữ kiểu mặc định (trắng/xám)
+    @State private var heroSubFont = "rounded"
+    @State private var heroSubAnim = "none"
+    @State private var heroSubColor = Color.white                  // màu tự chọn cho dòng phụ
+    @State private var sloganEffect = "none"
+    @State private var sloganAnim = "none"
+    @State private var sloganColor = Color.white                   // màu tự chọn cho slogan
+    @State private var promoImageUrl = ""
+    @State private var promoProductId = 0
+    @State private var statUsersBase = 0
+    @State private var statSoldBase = 0
+    @State private var statReviewsBase = 0
     @State private var message: String?
     @State private var isError = false
+    @AppStorage("storeCfgName") private var cfgName: String = ""
+    @AppStorage("storeCfgLogo") private var cfgLogo: String = ""
+    @AppStorage("storeCfgLogoType") private var cfgLogoType: String = "image"
+    @AppStorage("storeCfgBannerType") private var cfgBannerType: String = "image"
+    @AppStorage("storeCfgBannerUrl") private var cfgBannerUrl: String = ""
+    @AppStorage("storeCfgSectionOrder") private var cfgSectionOrder: String = ""
+    @AppStorage("storeCfgSectionHidden") private var cfgSectionHidden: String = ""
+
+    private func sectionLabel(_ key: String) -> String {
+        switch key {
+        case "categories":   return "Danh mục"
+        case "products":     return "Sản phẩm"
+        case "downloads":    return "Tải về"
+        case "contacts":     return "Liên hệ & Cộng đồng"
+        case "wishlist":     return "Yêu thích"
+        case "recent":       return "Đã xem gần đây"
+        case "trust":        return "Thẻ tin cậy (4 ô)"
+        case "steps":        return "Thống kê (người dùng · đã bán · đánh giá)"
+        case "flash":        return "Flash sale (đếm ngược)"
+        case "leaderboard":  return "Bảng xếp hạng nạp"
+        case "transactions": return "Giao dịch gần đây"
+        case "topups":       return "Nạp tiền gần đây"
+        case "gamecat":      return "Danh mục Game (lưới 2 cột)"
+        case "announce":     return "Thanh thông báo"
+        case "footer":       return "Footer (logo + slogan)"
+        default:             return key
+        }
+    }
+    private let allSectionKeys = ["announce", "trust", "steps", "flash", "leaderboard", "categories", "gamecat", "products",
+                                  "transactions", "topups", "downloads", "contacts", "wishlist", "recent", "footer"]
 
     var body: some View {
         Form {
-            Section("Logo cửa hàng") {
-                TextField("Tên cửa hàng / logo", text: $logoName)
-                TextField("Link ảnh logo (tuỳ chọn)", text: $logoUrl)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-            }
-            Section("Banner đầu trang") {
-                Picker("Loại banner", selection: $bannerType) {
-                    Text("Ảnh").tag("image")
-                    Text("Video").tag("video")
+            Section {
+                TextField(store.t("Tên cửa hàng / logo", "Store name / logo"), text: $logoName)
+                Picker(store.t("Loại logo", "Logo type"), selection: $logoType) {
+                    Text("Ảnh / GIF").tag("image")
+                    Text("Video / MP4").tag("video")
                 }.pickerStyle(.segmented)
-                TextField("Dán link ảnh/video banner", text: $bannerUrl)
+                TextField(store.t("Link logo: VIDEO (MP4) hoặc PNG / GIF / JPEG / WEBP",
+                                  "Logo link: VIDEO (MP4) or PNG / GIF / JPEG / WEBP"), text: $logoUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Text("Chỉ cần dán link là cửa hàng tự cập nhật. Khách hàng chỉ thấy giao diện này.")
-                    .font(.caption).foregroundStyle(.secondary)
+                if !logoUrl.isEmpty {
+                    HStack {
+                        Spacer()
+                        StoreLogoPlayer(urlString: logoUrl, mediaType: logoType, size: 64, cornerRadius: 12)
+                        Spacer()
+                    }
+                }
+            } header: {
+                Text(store.t("Logo cửa hàng", "Store logo"))
+            } footer: {
+                Text(store.t("Logo có thể là VIDEO (dán link .mp4) hoặc ảnh PNG / GIF / JPEG / WEBP — giống các mục khác.",
+                             "The logo can be a VIDEO (paste an .mp4 link) or a PNG / GIF / JPEG / WEBP image — like the other sections."))
+                    .font(.caption2)
             }
-            Section { Button("Lưu giao diện") { Task { await save() } } }
+
+            // Ảnh / Video bìa hiển thị to ở đầu cửa hàng (phía sau tên & slogan)
+            Section {
+                Picker(store.t("Loại bìa", "Cover type"), selection: $bannerType) {
+                    Text("Ảnh / GIF").tag("image")
+                    Text("Video / MP4").tag("video")
+                }.pickerStyle(.segmented)
+                TextField(store.t("Dán link ảnh/video bìa (GIF / PNG / JPEG / WEBP / MP4)",
+                                  "Paste cover image/video link (GIF / PNG / JPEG / WEBP / MP4)"), text: $bannerUrl)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                if !bannerUrl.isEmpty {
+                    StoreMediaCarousel(media: [StoreMedia(type: bannerType, url: bannerUrl)], height: 120,
+                                       videoFit: true)   // xem trước đúng như hero (video đủ khung)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                }
+            } header: {
+                Text(store.t("Ảnh / Video bìa (banner hero)", "Cover image / video (hero banner)"))
+            } footer: {
+                Text(store.t("Ảnh hoặc video nền hiển thị to ở đầu cửa hàng, phía sau tên & slogan. Hỗ trợ link video URL hoặc PNG / GIF / JPEG / WEBP. Để trống = không hiện bìa.",
+                             "Large background image or video at the top of the store, behind the name & slogan. Supports a video URL or PNG / GIF / JPEG / WEBP. Empty = no cover."))
+                    .font(.caption2)
+            }
+
+            // Dòng giới thiệu (slogan) dưới tên cửa hàng + chọn font đa dạng
+            Section(store.t("Dòng giới thiệu (slogan)", "Slogan")) {
+                TextField(store.t("Vd: Cửa hàng sản phẩm số · key · tải về", "e.g. Digital store · keys · downloads"), text: $slogan, axis: .vertical)
+                    .lineLimit(1...3)
+                Picker(store.t("Font chữ", "Font"), selection: $sloganFont) {
+                    ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker(store.t("Hiệu ứng màu slogan", "Slogan color effect"), selection: $sloganEffect) {
+                    ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                if sloganEffect == "solid" {
+                    ColorPicker(store.t("Chọn màu slogan", "Slogan color"), selection: $sloganColor, supportsOpacity: false)
+                }
+                Picker(store.t("Chuyển động slogan", "Slogan animation"), selection: $sloganAnim) {
+                    ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                HStack { Spacer()
+                    AnimatedStoreText(
+                        text: slogan.isEmpty ? store.t("Cửa hàng sản phẩm số · key · tải về", "Digital store · keys · downloads") : slogan,
+                        effect: sloganEffect,
+                        font: keniosFont(sloganFont, size: 14),
+                        anim: sloganAnim,
+                        solidColor: sloganColor)
+                    Spacer() }
+            }
+
+            // Phần hero (banner chính): tiêu đề lớn + dòng phụ + hiệu ứng
+            Section {
+                // Xem trước cả tiêu đề + dòng phụ
+                VStack(alignment: .leading, spacing: 4) {
+                    AnimatedStoreText(
+                        text: heroTitle.isEmpty ? store.t("GAME CHẤT LƯỢNG CAO · GIÁ TỐT NHẤT", "TOP QUALITY · BEST PRICE") : heroTitle,
+                        effect: heroEffect,
+                        font: keniosFont(heroFont, size: 17),
+                        anim: heroAnim,
+                        solidColor: heroColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    AnimatedStoreText(
+                        text: heroSubtitle.isEmpty ? store.t("Uy tín · Giao key tức thì · Bảo hành trọn đời", "Trusted · Instant key · Lifetime warranty") : heroSubtitle,
+                        effect: heroSubEffect.isEmpty ? "secondary" : heroSubEffect,
+                        font: keniosFont(heroSubFont, size: 13),
+                        anim: heroSubAnim,
+                        solidColor: heroSubColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(8).frame(maxWidth: .infinity)
+                .background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 10))
+
+                TextField(store.t("Tiêu đề lớn (bỏ trống = dùng slogan)", "Hero title (blank = use slogan)"), text: $heroTitle, axis: .vertical)
+                    .lineLimit(1...3)
+                Picker(store.t("Hiệu ứng màu tiêu đề", "Title color effect"), selection: $heroEffect) {
+                    ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                if heroEffect == "solid" {
+                    ColorPicker(store.t("Chọn màu tiêu đề", "Title color"), selection: $heroColor, supportsOpacity: false)
+                }
+                Picker(store.t("Font tiêu đề", "Title font"), selection: $heroFont) {
+                    ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker(store.t("Chuyển động tiêu đề", "Title animation"), selection: $heroAnim) {
+                    ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                }
+
+                Divider()
+                TextField(store.t("Dòng phụ (bỏ trống = mặc định)", "Subtitle (blank = default)"), text: $heroSubtitle, axis: .vertical)
+                    .lineLimit(1...3)
+                Picker(store.t("Hiệu ứng màu dòng phụ", "Subtitle color effect"), selection: $heroSubEffect) {
+                    Text(store.t("Mặc định (trắng/xám)", "Default (white/gray)")).tag("")
+                    ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                if heroSubEffect == "solid" {
+                    ColorPicker(store.t("Chọn màu dòng phụ", "Subtitle color"), selection: $heroSubColor, supportsOpacity: false)
+                }
+                if !heroSubEffect.isEmpty {
+                    Picker(store.t("Font dòng phụ", "Subtitle font"), selection: $heroSubFont) {
+                        ForEach(kSloganFonts, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                    Picker(store.t("Chuyển động dòng phụ", "Subtitle animation"), selection: $heroSubAnim) {
+                        ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                    }
+                }
+            } header: {
+                Text(store.t("Phần hero (banner chính)", "Hero section (main banner)"))
+            } footer: {
+                Text(store.t("Tiêu đề lớn và dòng phụ trong banner đầu trang. Chọn “Màu tự chọn 🎨” để hiện bảng chọn màu bất kỳ, hoặc dùng gradient/7 màu và hiệu ứng động.",
+                             "Large title and subtitle in the top hero banner. Pick “Custom color 🎨” to choose any color, or use gradient/rainbow and animations."))
+                    .font(.caption2)
+            }
+
+            // Kích cỡ thẻ sản phẩm / danh mục ngoài trang — KÉO để chỉnh mượt
+            Section(store.t("Kích cỡ thẻ hiển thị", "Card display size")) {
+                // Nút nhanh
+                Picker(store.t("Kích cỡ nhanh", "Quick size"), selection: $cardSize) {
+                    Text(store.t("Nhỏ", "Small")).tag("small")
+                    Text(store.t("Vừa", "Medium")).tag("medium")
+                    Text(store.t("Lớn", "Large")).tag("large")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: cardSize) { v in
+                    cardScale = (v == "small") ? 0.8 : (v == "large" ? 1.25 : 1.0)
+                }
+
+                // Thanh kéo tinh chỉnh
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(store.t("Kéo chỉnh kích cỡ", "Drag to resize")).font(.subheadline)
+                        Spacer()
+                        Text("\(Int(cardScale * 100))%")
+                            .font(.subheadline.bold().monospacedDigit())
+                            .foregroundStyle(store.accentColor)
+                    }
+                    HStack(spacing: 8) {
+                        Image(systemName: "rectangle.compress.vertical").font(.caption).foregroundStyle(.secondary)
+                        Slider(value: $cardScale, in: 0.6...1.6, step: 0.05)
+                        Image(systemName: "rectangle.expand.vertical").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+
+                // Xem trước thẻ theo kích cỡ đang chọn
+                HStack { Spacer()
+                    VStack(spacing: 0) {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(.tertiarySystemBackground))
+                            .frame(width: 124 * cardScale, height: 84 * cardScale)
+                            .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+                        Text(store.t("Xem trước", "Preview")).font(.caption2).foregroundStyle(.secondary).padding(.top, 4)
+                    }
+                    Spacer() }
+                .padding(.vertical, 4)
+
+                Text(store.t("Kéo sang trái = thẻ nhỏ (nhiều thẻ/hàng), kéo sang phải = thẻ to. Áp cho thẻ danh mục & sản phẩm ngoài trang.",
+                             "Drag left = smaller cards (more per row), right = bigger. Applies to category & product cards on the storefront."))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            // Sắp xếp thứ tự + ẩn/hiện các mục hiển thị ngoài trang cửa hàng
+            Section {
+                ForEach(sections, id: \.self) { key in
+                    let hidden = hiddenSections.contains(key)
+                    HStack {
+                        Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
+                        Text(sectionLabel(key))
+                            .foregroundStyle(hidden ? .secondary : .primary)
+                            .strikethrough(hidden)
+                        Spacer()
+                        Button {
+                            if hidden { hiddenSections.remove(key) } else { hiddenSections.insert(key) }
+                        } label: {
+                            Image(systemName: hidden ? "eye.slash" : "eye")
+                                .foregroundStyle(hidden ? .secondary : store.accentColor)
+                        }.buttonStyle(.borderless)
+                    }
+                }
+                .onMove { from, to in sections.move(fromOffsets: from, toOffset: to) }
+            } header: {
+                HStack {
+                    Text(store.t("Sắp xếp & ẩn/hiện bố cục", "Arrange & show/hide layout"))
+                    Spacer()
+                    EditButton().font(.caption)
+                }
+            } footer: {
+                Text(store.t("Kéo ☰ để đổi vị trí; bấm 👁 để ẩn/hiện từng mục cho gọn. Thứ tự & ẩn/hiện áp dụng cho trang khách thấy.",
+                             "Drag ☰ to reorder; tap 👁 to show/hide each section. Order & visibility apply to the customer storefront."))
+                    .font(.caption2)
+            }
+
+            Section(store.t("Hiệu ứng tên/logo cửa hàng", "Store name/logo effects")) {
+                HStack { Spacer()
+                    AnimatedStoreLogo(text: logoName.isEmpty ? "KENIOS STORE" : logoName,
+                                      effect: logoEffect, fontStyle: logoFont, anim: logoAnim, size: 28)
+                    Spacer() }
+                Picker(store.t("Hiệu ứng màu", "Color effect"), selection: $logoEffect) {
+                    ForEach(kLogoEffects, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker(store.t("Kiểu chữ (font)", "Font style"), selection: $logoFont) {
+                    ForEach(kLogoFonts, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Picker(store.t("Chuyển động", "Animation"), selection: $logoAnim) {
+                    ForEach(kLogoAnims, id: \.0) { Text($0.1).tag($0.0) }
+                }
+            }
+
+            Section(store.t("Nền cửa hàng (full màn hình)", "Store background (full screen)")) {
+                Picker(store.t("Loại nền", "Background type"), selection: $bgType) {
+                    Text(store.t("Không", "None")).tag("none")
+                    Text("Ảnh / GIF").tag("image")
+                    Text("Video / MP4").tag("video")
+                }.pickerStyle(.segmented)
+                if bgType != "none" {
+                    TextField(store.t("Dán link nền (GIF / PNG / JPEG / WEBP / MP4)", "Paste background link (GIF / PNG / JPEG / WEBP / MP4)"), text: $bgUrl)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                Text(store.t("Nền chạy sâu phía dưới, mọi nội dung/nút vẫn nằm bên trên và bấm được.",
+                             "The background sits behind; all content/buttons stay on top and remain tappable."))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle(store.t("Bật Flash sale (đếm ngược)", "Enable Flash sale (countdown)"), isOn: $flashEnabled)
+                if flashEnabled {
+                    TextField(store.t("Tiêu đề (vd FLASH SALE)", "Title (e.g. FLASH SALE)"), text: $flashTitle)
+                    HStack {
+                        Text(store.t("ID sản phẩm flash", "Flash product ID"))
+                        Spacer()
+                        TextField("0", value: $flashProductId, format: .number)
+                            .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 90)
+                    }
+                    Stepper(store.t("Giảm giá", "Discount") + ": \(flashDiscount)%", value: $flashDiscount, in: 0...99, step: 1)
+                    DatePicker(store.t("Kết thúc lúc", "Ends at"), selection: $flashEnd, in: Date()...)
+                }
+            } header: {
+                Text(store.t("Flash sale", "Flash sale"))
+            } footer: {
+                Text(store.t("Nhập ID sản phẩm muốn flash (xem ID trong phần quản lý sản phẩm). Hết thời gian sẽ tự ẩn.",
+                             "Enter the product ID to feature (see ID in product management). Auto-hides when the countdown ends."))
+                    .font(.caption2)
+            }
+
+            Section {
+                TextField(store.t("Link ảnh khuyến mãi (PNG/GIF/JPEG)", "Promo image link (PNG/GIF/JPEG)"), text: $promoImageUrl)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                HStack {
+                    Text(store.t("ID sản phẩm liên kết", "Linked product ID"))
+                    Spacer()
+                    TextField("0", value: $promoProductId, format: .number)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 90)
+                }
+                if !promoImageUrl.isEmpty, let url = URL(string: promoImageUrl) {
+                    AsyncImage(url: url) { phase in
+                        if case .success(let img) = phase { img.resizable().scaledToFit() }
+                        else if case .failure = phase { Color(.tertiarySystemBackground) }
+                        else { ProgressView() }
+                    }
+                    .frame(maxHeight: 100).frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            } header: {
+                Text(store.t("Khuyến mãi (ảnh trong ví)", "Promo banner (shown in wallet)"))
+            } footer: {
+                Text(store.t("Ảnh này hiển thị trong phần Ví, liên kết đến sản phẩm khi bấm vào.",
+                             "This image appears in the Wallet section and links to the product when tapped."))
+                    .font(.caption2)
+            }
+
+            // 3 ô thống kê: Người dùng · Đã bán · Đánh giá (số ẢO + số THẬT tự cộng)
+            Section {
+                HStack {
+                    Label(store.t("Người dùng (ảo)", "Users (virtual)"), systemImage: "person.2.fill")
+                    Spacer()
+                    TextField("0", value: $statUsersBase, format: .number)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 110)
+                }
+                HStack {
+                    Label(store.t("Đã bán (ảo)", "Sold (virtual)"), systemImage: "bag.fill")
+                    Spacer()
+                    TextField("0", value: $statSoldBase, format: .number)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 110)
+                }
+                HStack {
+                    Label(store.t("Đánh giá (ảo)", "Reviews (virtual)"), systemImage: "star.fill")
+                    Spacer()
+                    TextField("0", value: $statReviewsBase, format: .number)
+                        .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 110)
+                }
+            } header: {
+                Text(store.t("Thống kê cửa hàng", "Store stats"))
+            } footer: {
+                Text(store.t("3 ô hiển thị đầu trang. Số bạn nhập là số ẢO ban đầu; hệ thống TỰ CỘNG số thật (người dùng đăng ký, sản phẩm đã bán, lượt đánh giá) vào đó.",
+                             "Three cards at the top. The number you enter is a virtual base; the system auto-adds the real counts (registered users, items sold, reviews) on top."))
+                    .font(.caption2)
+            }
+
+            // §1.2 + §1.3 — "Thông báo cập nhật phiên bản" và "Lời chào toàn cục"
+            // ĐÃ CHUYỂN sang Quản trị app (AdminView → "Thông báo & Lời chào").
+
+            // "Giọng chào toàn cục" ĐÃ CHUYỂN sang Admin của app
+            // (AdminView → "Giọng chào toàn cục"). Không đặt ở Cửa hàng nữa.
+
+            // Thanh thông báo chạy đầu trang
+            Section {
+                Toggle(store.t("Bật thanh thông báo", "Enable announcement bar"), isOn: $announceEnabled)
+                if announceEnabled {
+                    TextField(store.t("Nội dung thông báo (vd: Khuyến mãi cuối tuần -20%!)", "Announcement text (e.g. Weekend sale -20%!)"),
+                              text: $announceText, axis: .vertical).lineLimit(1...3)
+                    Picker(store.t("Màu", "Color"), selection: $announceColor) {
+                        Text(store.t("Chủ đạo", "Accent")).tag("accent")
+                        Text(store.t("Đỏ", "Red")).tag("red")
+                        Text(store.t("Xanh lá", "Green")).tag("green")
+                        Text(store.t("Vàng", "Gold")).tag("gold")
+                        Text(store.t("Tím", "Purple")).tag("purple")
+                    }
+                }
+            } header: {
+                Text(store.t("Thanh thông báo", "Announcement bar"))
+            } footer: {
+                Text(store.t("Dòng thông báo nổi bật ở đầu trang cửa hàng (vd khuyến mãi, lịch nghỉ...).",
+                             "A highlighted notice at the top of the storefront (e.g. promotions, holiday notice)."))
+                    .font(.caption2)
+            }
+
+            // Số sản phẩm hiển thị mỗi danh mục
+            Section {
+                Stepper(store.t("Số sản phẩm mỗi danh mục", "Products per category") + ": \(gamecatLimit)",
+                        value: $gamecatLimit, in: 2...20, step: 1)
+            } footer: {
+                Text(store.t("Số sản phẩm tối đa hiện trong lưới mỗi danh mục ở mục \"Danh mục Game\" (bấm \"Xem thêm\" để xem hết).",
+                             "Max products shown per category in the \"Game categories\" grid (tap \"See all\" for the rest)."))
+                    .font(.caption2)
+            }
+
+            Section { Button(store.t("Lưu giao diện", "Save appearance")) { Task { await save() } } }
             if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
         }
-        .navigationTitle("Giao diện cửa hàng")
+        .navigationTitle(store.t("Giao diện cửa hàng", "Store appearance"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
 
     private func load() async {
+        // Hiện ngay giá trị đã lưu (cache) để không bị trống/khôi phục mặc định khi mạng chậm
+        logoName = cfgName; logoUrl = cfgLogo; logoType = cfgLogoType; bannerType = cfgBannerType; bannerUrl = cfgBannerUrl
         if let c = try? await store.api.storeConfig() {
             logoName = c.logoName; logoUrl = c.logoUrl
+            logoType = c.logoType ?? cfgLogoType
             bannerType = c.bannerType; bannerUrl = c.bannerUrl
+            logoEffect = c.logoEffect ?? "rainbow"; logoFont = c.logoFont ?? "rounded"
+            logoAnim = c.logoAnim ?? "shimmer"
+            bgType = c.bgType ?? "none"; bgUrl = c.bgUrl ?? ""
+            slogan = c.slogan ?? ""; sloganFont = c.sloganFont ?? "rounded"
+            cardSize = c.cardSize ?? "medium"
+            cardScale = Double(c.cardScale ?? "") ?? ((cardSize == "small") ? 0.8 : (cardSize == "large" ? 1.25 : 1.0))
+            if let order = c.sectionOrder, !order.isEmpty {
+                let parts = order.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                let all = allSectionKeys
+                // Giữ các mục hợp lệ theo thứ tự lưu, chèn mục mới còn thiếu vào đúng vị trí
+                var merged = parts.filter { all.contains($0) }
+                for (i, k) in all.enumerated() where !merged.contains(k) {
+                    merged.insert(k, at: min(i, merged.count))
+                }
+                sections = merged
+            }
+            if let hidden = c.sectionHidden {
+                hiddenSections = Set(hidden.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+            }
+            flashEnabled = c.flashEnabled ?? false
+            flashProductId = c.flashProductId ?? 0
+            flashDiscount = c.flashDiscount ?? 0
+            flashTitle = c.flashTitle ?? "FLASH SALE"
+            if let end = c.flashEnd, end > 0 { flashEnd = Date(timeIntervalSince1970: TimeInterval(end)) }
+            heroTitle = c.heroTitle ?? ""
+            heroSubtitle = c.heroSubtitle ?? ""
+            heroEffect = c.heroEffect ?? "gradient"
+            heroFont = c.heroFont ?? "rounded-bold"
+            heroAnim = c.heroAnim ?? "none"
+            heroColor = Color(hexString: c.heroColor) ?? Color(hexString: "#3B6EFF")!
+            heroSubEffect = c.heroSubEffect ?? ""
+            heroSubFont = c.heroSubFont ?? "rounded"
+            heroSubAnim = c.heroSubAnim ?? "none"
+            heroSubColor = Color(hexString: c.heroSubColor) ?? .white
+            sloganEffect = c.sloganEffect ?? "none"
+            sloganAnim = c.sloganAnim ?? "none"
+            sloganColor = Color(hexString: c.sloganColor) ?? .white
+            promoImageUrl = c.promoImageUrl ?? ""
+            promoProductId = c.promoProductId ?? 0
+            statUsersBase = c.statUsersBase ?? 0
+            statSoldBase = c.statSoldBase ?? 0
+            statReviewsBase = c.statReviewsBase ?? 0
+            announceEnabled = c.announceEnabled ?? false
+            announceText = c.announceText ?? ""
+            announceColor = c.announceColor ?? "accent"
+            // Lời chào toàn cục + Thông báo cập nhật đã chuyển sang Quản trị app.
+            gamecatLimit = c.gamecatLimit ?? 6
         }
     }
     private func save() async {
         message = nil
         do {
-            let r = try await store.api.adminStoreSetConfig(logoName: logoName, logoUrl: logoUrl,
-                                                            bannerType: bannerType, bannerUrl: bannerUrl)
+            let r = try await store.api.adminStoreSetConfig(
+                logoName: logoName, logoUrl: logoUrl,
+                logoType: logoType,
+                bannerType: bannerType, bannerUrl: bannerUrl,
+                logoEffect: logoEffect, logoFont: logoFont, logoAnim: logoAnim,
+                bgType: bgType, bgUrl: bgUrl,
+                slogan: slogan, sloganFont: sloganFont,
+                sectionOrder: sections.joined(separator: ","),
+                sectionHidden: hiddenSections.joined(separator: ","),
+                cardSize: cardSize, cardScale: cardScale,
+                flashEnabled: flashEnabled, flashProductId: flashProductId,
+                flashEnd: Int(flashEnd.timeIntervalSince1970), flashDiscount: flashDiscount,
+                flashTitle: flashTitle,
+                heroTitle: heroTitle, heroSubtitle: heroSubtitle,
+                heroEffect: heroEffect, heroFont: heroFont, heroAnim: heroAnim,
+                heroColor: heroColor.hexStringRGB,
+                heroSubEffect: heroSubEffect, heroSubFont: heroSubFont,
+                heroSubAnim: heroSubAnim, heroSubColor: heroSubColor.hexStringRGB,
+                sloganEffect: sloganEffect, sloganAnim: sloganAnim,
+                sloganColor: sloganColor.hexStringRGB,
+                promoImageUrl: promoImageUrl.isEmpty ? nil : promoImageUrl,
+                promoProductId: promoProductId > 0 ? promoProductId : nil,
+                statUsersBase: statUsersBase, statSoldBase: statSoldBase,
+                statReviewsBase: statReviewsBase,
+                announceEnabled: announceEnabled, announceText: announceText,
+                announceColor: announceColor, gamecatLimit: gamecatLimit)
+                // Lời chào toàn cục + Thông báo cập nhật phiên bản ĐÃ CHUYỂN sang
+                // Quản trị app (AdminView → "Thông báo & Lời chào") → không gửi ở đây nữa.
+            // Lưu cache ngay để các màn khác giữ tên/logo + thứ tự bố cục mới kể cả khi mạng chậm
+            cfgName = logoName; cfgLogo = logoUrl; cfgLogoType = logoType; cfgBannerType = bannerType; cfgBannerUrl = bannerUrl
+            cfgSectionOrder = sections.joined(separator: ",")
+            cfgSectionHidden = hiddenSections.joined(separator: ",")
             isError = false; message = r.message
         } catch { isError = true; message = error.localizedDescription }
-    }
-}
-
-// ---- Sửa danh mục ----
-struct StoreCategoryEditor: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    let category: StoreCategory?
-    var onDone: () -> Void
-    @State private var name = ""
-    @State private var media: [EditMedia] = []
-    @State private var message: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Tên danh mục") {
-                    TextField("Ví dụ: Game Mod, Tài khoản, Phần mềm...", text: $name)
-                }
-                MediaEditor(media: $media)
-                Section { Button("Lưu danh mục") { Task { await save() } }.disabled(name.isEmpty) }
-                if let message { Text(message).font(.footnote).foregroundStyle(.red) }
-            }
-            .navigationTitle(category == nil ? "Thêm danh mục" : "Sửa danh mục")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
-            .onAppear {
-                if let c = category { name = c.name; media = mediaToEdit(c.media) }
-            }
-        }
-    }
-    private func save() async {
-        message = nil
-        do {
-            _ = try await store.api.adminStoreSaveCategory(id: category?.id, name: name,
-                                                           media: editMediaToPayload(media))
-            onDone(); dismiss()
-        } catch { message = error.localizedDescription }
-    }
-}
-
-// ============================ Thư mục con (admin) ============================
-struct StoreAdminFolderList: View {
-    @EnvironmentObject var store: AppStore
-    let category: StoreCategory
-    @State private var folders: [StoreFolder] = []
-    @State private var editFolder: StoreFolder?
-    @State private var newFolder = false
-    @State private var error: String?
-
-    var body: some View {
-        List {
-            Section("Thư mục con (\(folders.count))") {
-                Button { newFolder = true } label: {
-                    Label("Thêm thư mục con", systemImage: "plus.circle.fill")
-                }
-                ForEach(folders) { f in
-                    NavigationLink {
-                        StoreAdminProductList(folder: f)
-                    } label: {
-                        HStack {
-                            Text(f.name)
-                            Spacer()
-                            Button { editFolder = f } label: { Image(systemName: "pencil") }
-                                .buttonStyle(.borderless)
-                        }
-                    }
-                }
-                .onDelete { idx in Task { await deleteFolders(idx) } }
-            }
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
-        }
-        .navigationTitle(category.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await reload() }
-        .refreshable { await reload() }
-        .sheet(isPresented: $newFolder) {
-            StoreFolderEditor(categoryId: category.id, folder: nil) { Task { await reload() } }
-        }
-        .sheet(item: $editFolder) { f in
-            StoreFolderEditor(categoryId: category.id, folder: f) { Task { await reload() } }
-        }
-    }
-
-    private func reload() async {
-        folders = (try? await store.api.storeFolders(categoryId: category.id)) ?? []
-    }
-    private func deleteFolders(_ idx: IndexSet) async {
-        for i in idx { _ = try? await store.api.adminStoreDeleteFolder(folders[i].id) }
-        await reload()
-    }
-}
-
-struct StoreFolderEditor: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    let categoryId: Int
-    let folder: StoreFolder?
-    var onDone: () -> Void
-    @State private var name = ""
-    @State private var media: [EditMedia] = []
-    @State private var message: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Tên thư mục con") {
-                    TextField("Ví dụ: Liên Quân, PUBG, Free Fire...", text: $name)
-                }
-                MediaEditor(media: $media)
-                Section { Button("Lưu thư mục") { Task { await save() } }.disabled(name.isEmpty) }
-                if let message { Text(message).font(.footnote).foregroundStyle(.red) }
-            }
-            .navigationTitle(folder == nil ? "Thêm thư mục" : "Sửa thư mục")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
-            .onAppear { if let f = folder { name = f.name; media = mediaToEdit(f.media) } }
-        }
-    }
-    private func save() async {
-        message = nil
-        do {
-            _ = try await store.api.adminStoreSaveFolder(id: folder?.id, categoryId: categoryId,
-                                                         name: name, media: editMediaToPayload(media))
-            onDone(); dismiss()
-        } catch { message = error.localizedDescription }
-    }
-}
-
-// ============================ Sản phẩm (admin) ============================
-struct StoreAdminProductList: View {
-    @EnvironmentObject var store: AppStore
-    let folder: StoreFolder
-    @State private var products: [StoreProduct] = []
-    @State private var newProduct = false
-    @State private var error: String?
-
-    var body: some View {
-        List {
-            Section("Sản phẩm (\(products.count))") {
-                Button { newProduct = true } label: {
-                    Label("Thêm sản phẩm", systemImage: "plus.circle.fill")
-                }
-                ForEach(products) { p in
-                    NavigationLink {
-                        StoreProductEditor(folderId: folder.id, product: p) { Task { await reload() } }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(p.name)
-                            Text("\(p.prices.count) mốc giá · \(p.availableKeys) key khả dụng")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .onDelete { idx in Task { await deleteProducts(idx) } }
-            }
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
-        }
-        .navigationTitle(folder.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await reload() }
-        .refreshable { await reload() }
-        .sheet(isPresented: $newProduct) {
-            StoreProductEditor(folderId: folder.id, product: nil) { Task { await reload() } }
-        }
-    }
-
-    private func reload() async {
-        products = (try? await store.api.storeProducts(folderId: folder.id)) ?? []
-    }
-    private func deleteProducts(_ idx: IndexSet) async {
-        for i in idx { _ = try? await store.api.adminStoreDeleteProduct(products[i].id) }
-        await reload()
-    }
-}
-
-struct StoreProductEditor: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    let folderId: Int
-    let product: StoreProduct?
-    var onDone: () -> Void
-
-    @State private var savedId: Int?
-    @State private var name = ""
-    @State private var desc = ""
-    @State private var kind = "app"   // app (key/ứng dụng) | acc (acc game)
-    @State private var media: [EditMedia] = []
-    @State private var downloadUrl = ""
-    @State private var downloadFileId: Int?
-    @State private var uploading = false
-    @State private var showImporter = false
-    @State private var message: String?
-    @State private var isError = false
-
-    private var productId: Int? { product?.id ?? savedId }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Thông tin sản phẩm") {
-                    Picker("Loại", selection: $kind) {
-                        Text("Ứng dụng / Key").tag("app")
-                        Text("Acc game").tag("acc")
-                    }.pickerStyle(.segmented)
-                    TextField("Tên sản phẩm", text: $name)
-                    TextField("Mô tả (tuỳ chọn)", text: $desc, axis: .vertical).lineLimit(1...4)
-                    Text(kind == "acc"
-                         ? "Acc game: mỗi dòng trong kho là 1 tài khoản (vd user|pass). Khách mua xong tự nhận 1 acc."
-                         : "Ứng dụng/Key: mỗi dòng trong kho là 1 key. Khách mua xong tự nhận 1 key + bản tải.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                MediaEditor(media: $media)
-                Section("Bản tải (link hoặc file)") {
-                    TextField("Dán link tải game/app", text: $downloadUrl)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button {
-                        showImporter = true
-                    } label: {
-                        HStack {
-                            if uploading { ProgressView().padding(.trailing, 4) }
-                            Label(downloadFileId != nil ? "Đã có file (#\(downloadFileId!)) — đổi file"
-                                                        : "Tải file lên (không giới hạn dung lượng)",
-                                  systemImage: "arrow.up.doc")
-                        }
-                    }.disabled(uploading)
-                    Text("Khách mua xong sẽ thấy nút 'Tải game' đồng bộ với link/file ở đây.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section { Button("Lưu sản phẩm") { Task { await save() } }.disabled(name.isEmpty) }
-
-                if let pid = productId {
-                    Section("Cấu hình bán") {
-                        NavigationLink {
-                            StorePricesEditor(productId: pid, initial: product?.prices ?? [])
-                        } label: { Label("Bảng giá theo thời hạn", systemImage: "tag") }
-                        NavigationLink {
-                            StoreKeysManager(productId: pid)
-                        } label: { Label("Kho KEY sản phẩm", systemImage: "key") }
-                    }
-                } else {
-                    Text("Lưu sản phẩm trước để thêm bảng giá & key.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
-            }
-            .navigationTitle(product == nil ? "Thêm sản phẩm" : "Sửa sản phẩm")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
-            .onAppear {
-                if let p = product {
-                    name = p.name; desc = p.description; media = mediaToEdit(p.media)
-                    kind = p.kind ?? "app"
-                }
-            }
-            .fileImporter(isPresented: $showImporter,
-                          allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
-                if case .success(let urls) = result, let url = urls.first {
-                    Task { await uploadFile(url) }
-                }
-            }
-        }
-    }
-
-    private func save() async {
-        message = nil
-        do {
-            let r = try await store.api.adminStoreSaveProduct(
-                id: productId, folderId: folderId, name: name, description: desc,
-                media: editMediaToPayload(media), downloadUrl: downloadUrl,
-                downloadFileId: downloadFileId, kind: kind)
-            savedId = r.id ?? savedId
-            isError = false; message = "Đã lưu sản phẩm."
-            onDone()
-        } catch { isError = true; message = error.localizedDescription }
-    }
-
-    private func uploadFile(_ url: URL) async {
-        uploading = true; message = nil
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
-        do {
-            let r = try await store.api.uploadFileRaw(name: url.lastPathComponent,
-                                                      category: "store", fileURL: url)
-            downloadFileId = r.id
-            isError = false; message = "Đã tải file lên (#\(r.id)). Nhớ bấm Lưu sản phẩm."
-        } catch { isError = true; message = error.localizedDescription }
-        uploading = false
-    }
-}
-
-// ---- Bảng giá theo thời hạn ----
-struct EditPrice: Identifiable, Hashable {
-    let id = UUID()
-    var label: String = ""
-    var amount: String = ""
-}
-
-struct StorePricesEditor: View {
-    @EnvironmentObject var store: AppStore
-    let productId: Int
-    let initial: [StorePrice]
-    @State private var rows: [EditPrice] = []
-    @State private var message: String?
-    @State private var isError = false
-
-    private let presets = ["1 giờ", "1 ngày", "1 tuần", "1 tháng", "Vĩnh viễn"]
-
-    var body: some View {
-        Form {
-            Section("Các mốc giá") {
-                ForEach($rows) { $r in
-                    HStack {
-                        TextField("Thời hạn (vd 1 ngày)", text: $r.label)
-                        TextField("Giá VND", text: $r.amount).keyboardType(.numberPad)
-                            .frame(width: 110)
-                    }
-                }
-                .onDelete { rows.remove(atOffsets: $0) }
-                Button { rows.append(EditPrice()) } label: {
-                    Label("Thêm mốc giá", systemImage: "plus.circle")
-                }
-            }
-            Section("Mẫu nhanh") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(presets, id: \.self) { p in
-                            Button(p) { rows.append(EditPrice(label: p, amount: "")) }
-                                .font(.caption)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(Capsule())
-                        }
-                    }
-                }
-            }
-            Section { Button("Lưu bảng giá") { Task { await save() } } }
-            if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
-        }
-        .navigationTitle("Bảng giá")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            if rows.isEmpty {
-                rows = initial.map { EditPrice(label: $0.label, amount: "\($0.amount)") }
-                if rows.isEmpty { rows = [EditPrice()] }
-            }
-        }
-    }
-
-    private func save() async {
-        message = nil
-        let payload: [[String: Any]] = rows.compactMap { r in
-            let label = r.label.trimmingCharacters(in: .whitespaces)
-            let amount = Int(r.amount.filter { $0.isNumber }) ?? -1
-            guard !label.isEmpty, amount >= 0 else { return nil }
-            return ["label": label, "amount": amount]
-        }
-        do {
-            let r = try await store.api.adminStoreSetPrices(productId: productId, prices: payload)
-            isError = false; message = r.message
-        } catch { isError = true; message = error.localizedDescription }
-    }
-}
-
-// ---- Kho KEY ----
-struct StoreKeysManager: View {
-    @EnvironmentObject var store: AppStore
-    let productId: Int
-    @State private var info: StoreKeysInfo?
-    @State private var newKeys = ""
-    @State private var message: String?
-    @State private var isError = false
-    @State private var loading = false
-
-    var body: some View {
-        Form {
-            Section("Thêm key (mỗi dòng 1 key)") {
-                TextEditor(text: $newKeys).frame(minHeight: 120)
-                Button("Thêm key") { Task { await addKeys() } }
-                    .disabled(newKeys.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            if let info {
-                Section("Tồn kho: \(info.available) khả dụng / \(info.total) tổng") {
-                    Button("Xoá tất cả key khả dụng", role: .destructive) {
-                        Task { await deleteAvailable() }
-                    }
-                }
-                Section("Danh sách key") {
-                    if info.keys.isEmpty {
-                        Text("Chưa có key nào.").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(info.keys) { k in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(k.keyText).font(.caption.monospaced()).lineLimit(1)
-                                    Text(k.status == "sold" ? "đã bán" : "khả dụng")
-                                        .font(.caption2)
-                                        .foregroundStyle(k.status == "sold" ? .orange : .green)
-                                }
-                                Spacer()
-                                Button(role: .destructive) {
-                                    Task { await deleteKey(k.id) }
-                                } label: { Image(systemName: "trash") }
-                                .buttonStyle(.borderless)
-                            }
-                        }
-                    }
-                }
-            }
-            if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
-        }
-        .navigationTitle("Kho KEY")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await reload() }
-        .refreshable { await reload() }
-    }
-
-    private func reload() async {
-        info = try? await store.api.adminStoreListKeys(productId: productId)
-    }
-    private func addKeys() async {
-        message = nil
-        do {
-            let r = try await store.api.adminStoreAddKeys(productId: productId, text: newKeys)
-            isError = false; message = r.message; newKeys = ""
-            await reload()
-        } catch { isError = true; message = error.localizedDescription }
-    }
-    private func deleteKey(_ id: Int) async {
-        _ = try? await store.api.adminStoreDeleteKey(id)
-        await reload()
-    }
-    private func deleteAvailable() async {
-        message = nil
-        do {
-            let r = try await store.api.adminStoreDeleteAvailableKeys(productId: productId)
-            isError = false; message = r.message
-            await reload()
-        } catch { isError = true; message = error.localizedDescription }
-    }
-}
-
-// ---- Đơn hàng đã bán (admin) ----
-struct StoreAdminOrdersView: View {
-    @EnvironmentObject var store: AppStore
-    @State private var orders: [StoreAdminOrder] = []
-
-    var body: some View {
-        List {
-            if orders.isEmpty {
-                Text("Chưa có đơn nào.").foregroundStyle(.secondary)
-            } else {
-                ForEach(orders) { o in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(o.productName).font(.subheadline.bold())
-                            Spacer()
-                            Text(o.status == "completed" ? "đã thanh toán" : "chờ")
-                                .font(.caption2)
-                                .foregroundStyle(o.status == "completed" ? .green : .orange)
-                        }
-                        Text("\(kFormatVND(o.amount)) · @\(o.username)")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .navigationTitle("Đơn hàng")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { orders = (try? await store.api.adminStoreOrders()) ?? [] }
-        .refreshable { orders = (try? await store.api.adminStoreOrders()) ?? [] }
-    }
-}
-
-// ---- Khuyến mãi nạp ví (%) — admin ----
-struct StoreTopupBonusEditor: View {
-    @EnvironmentObject var store: AppStore
-    @State private var percentText = ""
-    @State private var message: String?
-    @State private var isError = false
-    private var percent: Int? { Int(percentText.filter { $0.isNumber }) }
-
-    var body: some View {
-        Form {
-            Section("Phần trăm thưởng khi khách nạp ví") {
-                HStack {
-                    TextField("Ví dụ: 20", text: $percentText).keyboardType(.numberPad)
-                    Text("%").foregroundStyle(.secondary)
-                }
-                if let p = percent, p > 0 {
-                    Text("Khách nạp 100.000đ sẽ nhận \(kFormatVND(100_000 + 100_000 * p / 100)) vào ví.")
-                        .font(.caption).foregroundStyle(.pink)
-                }
-                Text("Đặt 0 để tắt khuyến mãi. Áp dụng cho VÍ cửa hàng (tách biệt với nâng cấp PRO của app chính).")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            Section { Button("Lưu") { Task { await save() } }.disabled(percent == nil) }
-            if let message { Text(message).font(.footnote).foregroundStyle(isError ? .red : .green) }
-        }
-        .navigationTitle("Khuyến mãi nạp ví")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            if let r = try? await store.api.adminGetTopupBonus() { percentText = "\(r.percent)" }
-        }
-    }
-    private func save() async {
-        guard let p = percent else { return }
-        message = nil
-        do { let r = try await store.api.adminSetTopupBonus(percent: p); isError = false; message = r.message }
-        catch { isError = true; message = error.localizedDescription }
-    }
-}
-
-// ---- Kho hàng (tồn kho) — admin ----
-struct StoreInventoryView: View {
-    @EnvironmentObject var store: AppStore
-    @State private var inv: StoreInventory?
-
-    var body: some View {
-        List {
-            if let inv {
-                Section {
-                    HStack {
-                        invStat("Còn lại", "\(inv.totalAvailable)", .green)
-                        invStat("Đã bán", "\(inv.totalSold)", .blue)
-                        invStat("Hết hàng", "\(inv.outOfStock)", inv.outOfStock > 0 ? .red : .secondary)
-                    }
-                    .listRowBackground(Color.clear)
-                }
-                Section("Sản phẩm (\(inv.products.count)) — ưu tiên hết/sắp hết") {
-                    if inv.products.isEmpty {
-                        Text("Chưa có sản phẩm nào.").foregroundStyle(.secondary)
-                    }
-                    ForEach(inv.products) { p in
-                        HStack(spacing: 10) {
-                            Image(systemName: (p.kind ?? "app") == "acc" ? "gamecontroller.fill" : "key.fill")
-                                .foregroundStyle((p.kind ?? "app") == "acc" ? .purple : Theme.accent)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.name).font(.subheadline.bold()).lineLimit(1)
-                                Text("\(p.categoryName) › \(p.folderName)")
-                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text(p.available == 0 ? "HẾT" : "Còn \(p.available)")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(p.available == 0 ? .red : (p.available <= 5 ? .orange : .green))
-                                Text("đã bán \(p.sold)").font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-            } else {
-                HStack { Spacer(); ProgressView(); Spacer() }
-            }
-        }
-        .navigationTitle("Kho hàng")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { inv = try? await store.api.adminStoreInventory() }
-        .refreshable { inv = try? await store.api.adminStoreInventory() }
-    }
-
-    private func invStat(_ label: String, _ value: String, _ color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text(value).font(.title3.bold().monospacedDigit()).foregroundStyle(color)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-// ---- Sao lưu KEY/ACC đã bán (admin) ----
-struct StoreKeysBackupView: View {
-    @EnvironmentObject var store: AppStore
-    @State private var backup: StoreKeysBackup?
-
-    var body: some View {
-        List {
-            if let b = backup {
-                Section("Đã bán: \(b.total)") {
-                    if b.entries.isEmpty {
-                        Text("Chưa có key/acc nào được bán.").foregroundStyle(.secondary)
-                    }
-                }
-                ForEach(b.entries) { e in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text(e.productName).font(.subheadline.bold())
-                            if (e.kind ?? "app") == "acc" {
-                                Text("acc").font(.caption2).foregroundStyle(.purple)
-                            }
-                            Spacer()
-                            Text(kFormatVND(e.amount)).font(.caption).foregroundStyle(Theme.accent)
-                        }
-                        Text(e.key).font(.caption.monospaced()).textSelection(.enabled)
-                        Text("@\(e.username) · ID \(e.publicId ?? "-") · \(timeText(e.time))")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 2)
-                }
-            } else {
-                HStack { Spacer(); ProgressView(); Spacer() }
-            }
-        }
-        .navigationTitle("Sao lưu KEY/ACC")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { backup = try? await store.api.adminStoreKeysBackup() }
-        .refreshable { backup = try? await store.api.adminStoreKeysBackup() }
-    }
-
-    private func timeText(_ ts: Int) -> String {
-        let f = DateFormatter(); f.dateFormat = "dd/MM HH:mm"
-        return f.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
     }
 }

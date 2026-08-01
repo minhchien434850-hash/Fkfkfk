@@ -3,24 +3,26 @@ import UniformTypeIdentifiers
 import QuickLook
 
 struct LibraryView: View {
+    @EnvironmentObject var store: AppStore
     @State private var seg = 1
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 KHeroHeader(icon: "clock.arrow.circlepath",
-                            title: "Thư viện",
-                            subtitle: "Video đã tải · File · Lịch sử nội dung")
+                            title: store.t("Thư viện", "Library"),
+                            subtitle: store.t("Video đã tải · File · Lịch sử nội dung",
+                                              "Downloaded videos · Files · Content history"))
                     .padding(.horizontal)
                     .padding(.top, 8)
 
                 Picker("", selection: $seg) {
                     Text("File").tag(1)
-                    Text("Lịch sử").tag(0)
+                    Text(store.t("Lịch sử", "History")).tag(0)
                 }
                 .pickerStyle(.segmented).padding()
                 if seg == 0 { HistoryPane() } else { FilesPane() }
             }
-            .navigationTitle("Thư viện")
+            .navigationTitle(store.t("Thư viện", "Library"))
         }
     }
 }
@@ -38,12 +40,12 @@ struct HistoryPane: View {
         List {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Tìm kiếm...", text: $search)
+                TextField(store.t("Tìm kiếm...", "Search..."), text: $search)
             }
             Button {
                 store.openConversation(nil)
             } label: {
-                Label("Hội thoại mới", systemImage: "plus").foregroundStyle(Theme.accent)
+                Label(store.t("Hội thoại mới", "New conversation"), systemImage: "plus").foregroundStyle(Theme.accent)
             }
             ForEach(filtered) { c in
                 Button { store.openConversation(c) } label: {
@@ -64,7 +66,7 @@ struct HistoryPane: View {
         .refreshable { await store.refreshConversations() }
         .overlay {
             if store.conversations.isEmpty {
-                Text("Bạn chưa lưu cuộc trò chuyện nào").foregroundStyle(.secondary)
+                Text(store.t("Bạn chưa lưu cuộc trò chuyện nào", "You haven't saved any conversations")).foregroundStyle(.secondary)
             }
         }
     }
@@ -152,15 +154,19 @@ struct FilesPane: View {
 
                 Button { showImporter = true } label: {
                     VStack {
-                        Label("Tải file lên từ máy", systemImage: "plus")
-                        Text("Ảnh · PDF · Code · Tài liệu").font(.caption).foregroundStyle(.secondary)
+                        Label(store.t("Tải file lên từ máy", "Upload file from device"), systemImage: "plus")
+                        Text(store.t("Ảnh · PDF · Code · Tài liệu", "Images · PDF · Code · Documents")).font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity)
                 }
             }
         }
         .task { await reload() }
-        .fileImporter(isPresented: $showImporter,
-                      allowedContentTypes: [.item], allowsMultipleSelection: true) { handleImport($0) }
+        .sheet(isPresented: $showImporter) {
+            DocumentPicker(allowsMultipleSelection: true, asCopy: true) { urls in
+                handleImport(.success(urls))
+            }
+            .ignoresSafeArea()
+        }
         .fileExporter(isPresented: Binding(get: { exportDoc != nil }, set: { if !$0 { exportDoc = nil } }),
                       document: exportDoc, contentType: .data,
                       defaultFilename: exportDoc?.filename ?? "file") { _ in exportDoc = nil }
@@ -200,12 +206,18 @@ struct FilesPane: View {
                 else if ["swift", "py", "js", "ts", "java", "c", "cpp", "go", "rs", "rb", "json", "html", "css"].contains(ext) { cat = "code" }
                 else if ["pdf", "doc", "docx", "txt", "md", "xls", "xlsx", "ppt", "pptx"].contains(ext) { cat = "document" }
                 else { cat = "other" }
+                // Copy sang temp trước khi await để không mất security scope
+                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+                try? FileManager.default.removeItem(at: tmp)
+                let copied = (try? FileManager.default.copyItem(at: url, to: tmp)) != nil
+                if access { url.stopAccessingSecurityScopedResource() }
+                guard copied else { failed.append(url.lastPathComponent); continue }
                 do {
-                    _ = try await store.api.uploadFileRaw(name: url.lastPathComponent, category: cat, fileURL: url)
+                    _ = try await store.api.uploadFileRaw(name: url.lastPathComponent, category: cat, fileURL: tmp)
                 } catch {
                     failed.append(url.lastPathComponent)
                 }
-                if access { url.stopAccessingSecurityScopedResource() }
+                try? FileManager.default.removeItem(at: tmp)
             }
             await reload()
             if !failed.isEmpty { self.error = "Lỗi tải lên: \(failed.joined(separator: ", "))" }
@@ -244,6 +256,7 @@ struct FilesPane: View {
 }
 
 struct RunResultView: View {
+    @EnvironmentObject var store: AppStore
     @Environment(\.dismiss) var dismiss
     let result: FileRunResult
 
@@ -277,14 +290,14 @@ struct RunResultView: View {
                             .textSelection(.enabled)
                     }
                     if result.stdout.isEmpty && result.stderr.isEmpty {
-                        Text("Không có đầu ra.").foregroundStyle(.secondary)
+                        Text(store.t("Không có đầu ra.", "No output.")).foregroundStyle(.secondary)
                     }
                 }
                 .padding()
             }
-            .navigationTitle("Kết quả chạy")
+            .navigationTitle(store.t("Kết quả chạy", "Run result"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
         }
     }
 }

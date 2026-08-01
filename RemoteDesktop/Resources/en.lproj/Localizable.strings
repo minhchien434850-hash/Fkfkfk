@@ -1,0 +1,6 @@
+/* RemoteDesktop — user-facing strings */
+"app.name" = "RemoteDesktop";
+"login.title" = "Sign in to control your machines";
+"devices.empty" = "Run the Desktop Agent and sign in with the same account.";
+"session.trackpad.hint" = "Swipe to move · Tap = click";
+"session.reconnecting" = "Reconnecting…";

@@ -1,19 +1,41 @@
 import SwiftUI
+import PhotosUI
+import AVFoundation
+import AVKit
+import UIKit
+import UniformTypeIdentifiers
 
 struct DirectMessageChatView: View {
     let friend: FriendItem
     @EnvironmentObject var store: AppStore
+    @EnvironmentObject var calls: CallCoordinator
     @State private var messageText = ""
     @State private var timer: Timer? = nil
     @State private var isSending = false
     @State private var sendError: String? = nil
-    
+
+    // Đa phương tiện
+    @State private var photoItem: PhotosPickerItem? = nil
+    @State private var showFilePicker = false
+    @State private var uploading = false
+    @State private var fullscreenImageURL: String? = nil
+    @State private var fullscreenVideoURL: String? = nil
+    // §4.2 — avatar bạn bè (đồng bộ theo poll) + avatar của tôi (đổi ngay trong chat)
+    @State private var friendAvatarURL: String? = nil
+    @State private var myAvatarURL: String? = nil
+    @State private var avatarPickerItem: PhotosPickerItem? = nil
+    @State private var updatingAvatar = false
+    @StateObject private var recorder = ChatVoiceRecorder()
+    // Xoá tin nhắn ở phía tôi (ẩn cục bộ) + thu hồi + thông báo lưu media
+    @State private var hiddenIds: Set<Int> = []
+    @State private var savedNote: String? = nil
+
     var body: some View {
         VStack(spacing: 0) {
             // Chat history list
             ScrollViewReader { proxy in
                 ScrollView {
-                    let messages = store.directMessages[friend.id] ?? []
+                    let messages = (store.directMessages[friend.id] ?? []).filter { !hiddenIds.contains($0.id) }
                     VStack(spacing: 12) {
                         if messages.isEmpty {
                             Text("Chưa có tin nhắn nào. Hãy gửi lời chào!")
@@ -25,21 +47,17 @@ struct DirectMessageChatView: View {
                                 let isMe = msg.senderId != friend.id
                                 HStack {
                                     if isMe { Spacer() }
-                                    
+
                                     VStack(alignment: isMe ? .trailing : .leading, spacing: 4) {
-                                        Text(msg.content)
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 10)
-                                            .background(isMe ? Theme.accent : Color(.secondarySystemBackground))
-                                            .foregroundStyle(isMe ? .white : .primary)
-                                            .cornerRadius(18)
-                                        
+                                        bubble(for: msg, isMe: isMe)
+                                            .contextMenu { messageMenu(msg, isMe: isMe) }
+
                                         Text(formatTime(msg.createdAt))
                                             .font(.system(size: 9))
                                             .foregroundStyle(.secondary)
                                             .padding(.horizontal, 4)
                                     }
-                                    
+
                                     if !isMe { Spacer() }
                                 }
                                 .id(msg.id)
@@ -50,9 +68,7 @@ struct DirectMessageChatView: View {
                 }
                 .onChange(of: store.directMessages[friend.id]?.count) { _ in
                     if let last = store.directMessages[friend.id]?.last {
-                        withAnimation {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                     }
                 }
                 .onAppear {
@@ -61,22 +77,217 @@ struct DirectMessageChatView: View {
                     }
                 }
             }
-            
+
             if let err = sendError {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.horizontal)
+                Text(err).font(.caption).foregroundStyle(.red).padding(.horizontal)
             }
-            
-            // Bottom input bar
+            if let savedNote {
+                Text(savedNote).font(.caption).foregroundStyle(.green).padding(.horizontal)
+            }
+
+            if uploading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Đang tải tệp lên...").font(.caption).foregroundStyle(.secondary)
+                }.padding(.vertical, 4)
+            }
+
+            inputBar
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // §4.2 — Tiêu đề: avatar bạn + tên (avatar cập nhật theo thời gian thực qua poll)
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    avatarCircle(url: friendAvatarURL, size: 30, fallback: friend.username)
+                    Text(friend.username).font(.headline)
+                }
+            }
+            // Gọi thoại + gọi video cho bạn bè
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { calls.placeCall(to: friend, video: false) } label: {
+                    Image(systemName: "phone.fill").foregroundStyle(Theme.accent)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { calls.placeCall(to: friend, video: true) } label: {
+                    Image(systemName: "video.fill").foregroundStyle(Theme.accent)
+                }
+            }
+            // §4.2 — Avatar của tôi: bấm để đổi ảnh ngay trong màn nhắn tin
+            ToolbarItem(placement: .topBarTrailing) {
+                PhotosPicker(selection: $avatarPickerItem, matching: .images) {
+                    ZStack {
+                        avatarCircle(url: myAvatarURL, size: 30, fallback: "Tôi")
+                        if updatingAvatar {
+                            Circle().fill(.black.opacity(0.35)).frame(width: 30, height: 30)
+                            ProgressView().scaleEffect(0.6).tint(.white)
+                        } else {
+                            Image(systemName: "camera.circle.fill")
+                                .font(.caption2).foregroundStyle(.white, Theme.accent)
+                                .offset(x: 10, y: 10)
+                        }
+                    }
+                }
+                .disabled(updatingAvatar)
+            }
+        }
+        .onAppear { startPolling(); loadHidden(); Task { await refreshAvatars() } }
+        .onDisappear { stopPolling(); recorder.cancel() }
+        .onChange(of: photoItem) { item in
+            guard let item else { return }
+            Task { await handlePickedPhoto(item) }
+        }
+        .onChange(of: avatarPickerItem) { item in
+            guard let item else { return }
+            Task { await changeMyAvatar(item) }
+        }
+        .sheet(isPresented: $showFilePicker) {
+            DocumentPicker(contentTypes: [.item], allowsMultipleSelection: false, asCopy: true) { urls in
+                if let u = urls.first { Task { await handlePickedFile(u) } }
+            }.ignoresSafeArea()
+        }
+        .fullScreenCover(item: Binding(
+            get: { fullscreenImageURL.map { ChatImageURL(url: $0) } },
+            set: { fullscreenImageURL = $0?.url }
+        )) { item in
+            FullscreenImageViewer(urlString: item.url)
+        }
+        .fullScreenCover(item: Binding(
+            get: { fullscreenVideoURL.map { ChatImageURL(url: $0) } },
+            set: { fullscreenVideoURL = $0?.url }
+        )) { item in
+            ChatVideoPlayerView(urlString: item.url)
+        }
+    }
+
+    // MARK: - Bong bóng tin nhắn (văn bản / ảnh / video / âm thanh / tệp)
+    @ViewBuilder
+    private func bubble(for msg: DirectMessageItem, isMe: Bool) -> some View {
+        if let media = ChatMedia.parse(msg.content) {
+            VStack(alignment: isMe ? .trailing : .leading, spacing: 6) {
+                switch media.kind {
+                case "img":
+                    Button { fullscreenImageURL = media.url } label: {
+                        AsyncImage(url: URL(string: media.url)) { img in
+                            img.resizable().scaledToFill()
+                        } placeholder: {
+                            ZStack { Color(.tertiarySystemFill); ProgressView() }
+                        }
+                        .frame(width: 200, height: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                case "video":
+                    Button { fullscreenVideoURL = media.url } label: {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.85))
+                                .frame(width: 200, height: 130)
+                            Image(systemName: "play.circle.fill").font(.system(size: 44)).foregroundStyle(.white)
+                            VStack { Spacer(); Text("Video").font(.caption2).foregroundStyle(.white.opacity(0.9)).padding(6) }
+                                .frame(width: 200, height: 130, alignment: .bottomLeading)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                case "audio":
+                    ChatAudioBubble(url: media.url, isMe: isMe)
+                default: // tệp
+                    Link(destination: URL(string: media.url) ?? URL(string: "https://")!) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "doc.fill").font(.title3)
+                            Text(media.caption.isEmpty ? "Tệp đính kèm" : media.caption)
+                                .font(.caption).lineLimit(1)
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(isMe ? Theme.accent.opacity(0.85) : Color(.secondarySystemBackground))
+                        .foregroundStyle(isMe ? .white : .primary)
+                        .cornerRadius(14)
+                    }
+                }
+                if !media.caption.isEmpty && media.kind != "file" {
+                    Text(media.caption)
+                        .font(.caption)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(isMe ? Theme.accent : Color(.secondarySystemBackground))
+                        .foregroundStyle(isMe ? .white : .primary)
+                        .cornerRadius(14)
+                }
+            }
+        } else if msg.content.hasPrefix("📞 Cuộc gọi") || msg.content.hasPrefix("📹 Cuộc gọi") {
+            // Dòng CUỘC GỌI trong đoạn chat (như Zalo/Messenger): icon + trạng thái/thời lượng
+            let missed = msg.content.contains("nhỡ") || msg.content.contains("từ chối")
             HStack(spacing: 10) {
+                Image(systemName: msg.content.hasPrefix("📹") ? "video.fill" : "phone.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(missed ? .red : .green)
+                    .frame(width: 34, height: 34)
+                    .background((missed ? Color.red : Color.green).opacity(0.14))
+                    .clipShape(Circle())
+                Text(msg.content.dropFirst(2))   // bỏ emoji đầu (đã có icon)
+                    .font(.subheadline)
+                    .foregroundStyle(missed ? .red : .primary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .background(Color(.secondarySystemBackground))
+            .cornerRadius(18)
+        } else {
+            Text(msg.content)
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(isMe ? Theme.accent : Color(.secondarySystemBackground))
+                .foregroundStyle(isMe ? .white : .primary)
+                .cornerRadius(18)
+        }
+    }
+
+    // MARK: - Thanh nhập liệu
+    private var inputBar: some View {
+        VStack(spacing: 6) {
+            if recorder.isRecording {
+                HStack(spacing: 10) {
+                    Circle().fill(.red).frame(width: 10, height: 10)
+                        .opacity(0.4 + 0.6 * (recorder.level))
+                    Text("Đang ghi âm \(recorder.durationText)").font(.caption).foregroundStyle(.red)
+                    Spacer()
+                    Button("Huỷ") { recorder.cancel() }.font(.caption).foregroundStyle(.secondary)
+                    Button {
+                        Task { await stopAndSendVoice() }
+                    } label: {
+                        Image(systemName: "paperplane.circle.fill").font(.title2).foregroundStyle(Theme.accent)
+                    }
+                }
+                .padding(.horizontal)
+            }
+
+            HStack(spacing: 8) {
+                // Ảnh / Video — PhotosPicker TRỰC TIẾP (bấm là mở, chọn tích ảnh/video để gửi).
+                // KHÔNG đặt trong Menu vì SwiftUI hay không mở được picker khi nằm trong Menu.
+                PhotosPicker(selection: $photoItem,
+                             matching: .any(of: [.images, .videos])) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.title2).foregroundStyle(Theme.accent)
+                }
+                .disabled(uploading || recorder.isRecording)
+
+                // Tệp & ghi âm — gộp trong menu nhỏ (không dùng PhotosPicker nên an toàn).
+                Menu {
+                    Button { showFilePicker = true } label: {
+                        Label("Tệp", systemImage: "doc")
+                    }
+                    Button { recorder.start() } label: {
+                        Label("Ghi âm giọng nói", systemImage: "mic")
+                    }
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.title2).foregroundStyle(Theme.accent)
+                }
+                .disabled(uploading || recorder.isRecording)
+
                 TextField("Nhập tin nhắn...", text: $messageText)
                     .textFieldStyle(.plain)
                     .padding(12)
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(20)
-                
+
                 Button {
                     Task { await sendMessage() }
                 } label: {
@@ -84,9 +295,7 @@ struct DirectMessageChatView: View {
                         ProgressView()
                     } else {
                         Image(systemName: "paperplane.fill")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .padding(10)
+                            .font(.headline).foregroundStyle(.white).padding(10)
                             .background(messageText.trimmingCharacters(in: .whitespaces).isEmpty ? Color.gray : Theme.accent)
                             .clipShape(Circle())
                     }
@@ -94,56 +303,522 @@ struct DirectMessageChatView: View {
                 .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty || isSending)
             }
             .padding()
-            .background(.thinMaterial)
         }
-        .navigationTitle(friend.username)
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            startPolling()
-        }
-        .onDisappear {
-            stopPolling()
-        }
+        .background(.thinMaterial)
     }
-    
-    // MARK: - Helper functions
-    private func startPolling() {
-        // Initial fetch
-        Task {
-            await store.refreshDirectMessages(friendId: friend.id)
-        }
-        // Poll every 3 seconds
-        timer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
-            Task {
-                await store.refreshDirectMessages(friendId: friend.id)
-            }
-        }
-    }
-    
-    private func stopPolling() {
-        timer?.invalidate()
-        timer = nil
-    }
-    
+
+    // MARK: - Gửi văn bản
     private func sendMessage() async {
         let content = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
-        isSending = true
-        sendError = nil
+        isSending = true; sendError = nil
         do {
             _ = try await store.api.sendDirectMessage(receiverId: friend.id, content: content)
             messageText = ""
             await store.refreshDirectMessages(friendId: friend.id)
-        } catch {
-            sendError = error.localizedDescription
-        }
+        } catch { sendError = error.localizedDescription }
         isSending = false
     }
-    
+
+    // MARK: - Gửi đa phương tiện
+    private func sendMediaMessage(kind: String, url: String, caption: String) async {
+        do {
+            let payload = ChatMedia.encode(kind: kind, url: url, caption: caption)
+            _ = try await store.api.sendDirectMessage(receiverId: friend.id, content: payload)
+            await store.refreshDirectMessages(friendId: friend.id)
+        } catch { sendError = error.localizedDescription }
+    }
+
+    private func handlePickedPhoto(_ item: PhotosPickerItem) async {
+        uploading = true; sendError = nil
+        defer { uploading = false; photoItem = nil }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                sendError = "Không đọc được tệp đã chọn."; return
+            }
+            let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
+            let maxBytes = isVideo ? 700 * 1024 * 1024 : 30 * 1024 * 1024
+            if data.count > maxBytes {
+                sendError = "Tệp quá lớn (\(data.count / (1024*1024))MB)."; return
+            }
+            let mime = isVideo ? "video/mp4" : "image/jpeg"
+            let name = "\(isVideo ? "video" : "img")_\(Int(Date().timeIntervalSince1970))"
+            let link = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(), mime: mime, name: name)
+            await sendMediaMessage(kind: isVideo ? "video" : "img", url: link, caption: "")
+        } catch { sendError = error.localizedDescription }
+    }
+
+    private func handlePickedFile(_ srcURL: URL) async {
+        uploading = true; sendError = nil
+        defer { uploading = false }
+        let access = srcURL.startAccessingSecurityScopedResource()
+        defer { if access { srcURL.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try Data(contentsOf: srcURL)
+            if data.count > 700 * 1024 * 1024 { sendError = "Tệp quá lớn (>700MB)."; return }
+            let name = srcURL.lastPathComponent
+            let link = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                                                       mime: "application/octet-stream", name: name)
+            await sendMediaMessage(kind: "file", url: link, caption: name)
+        } catch { sendError = error.localizedDescription }
+    }
+
+    private func stopAndSendVoice() async {
+        uploading = true; sendError = nil
+        defer { uploading = false }
+        guard let url = recorder.stop() else { sendError = "Không ghi được âm thanh."; return }
+        do {
+            let data = try Data(contentsOf: url)
+            let link = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                                                       mime: "audio/mp4", name: "voice_\(Int(Date().timeIntervalSince1970)).m4a")
+            await sendMediaMessage(kind: "audio", url: link, caption: "")
+        } catch { sendError = error.localizedDescription }
+    }
+
+    // MARK: - §4.2 Avatar
+    @ViewBuilder
+    private func avatarCircle(url: String?, size: CGFloat, fallback: String) -> some View {
+        if let url, let u = URL(string: url), !url.isEmpty {
+            AsyncImage(url: u) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Color(.tertiarySystemFill))
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+        } else {
+            ZStack {
+                Circle().fill(Theme.accent.opacity(0.85))
+                Text(String(fallback.prefix(1)).uppercased())
+                    .font(.system(size: size * 0.5, weight: .bold)).foregroundStyle(.white)
+            }
+            .frame(width: size, height: size)
+        }
+    }
+
+    /// Lấy avatar bạn bè + của tôi (gọi lúc mở màn).
+    private func refreshAvatars() async {
+        await refreshFriendAvatar()
+        if let me = try? await store.api.myProfile() { myAvatarURL = me.avatarUrl }
+    }
+
+    /// Chỉ làm mới avatar bạn bè — gọi mỗi nhịp poll để đồng bộ gần như thời gian thực.
+    private func refreshFriendAvatar() async {
+        if let p = try? await store.api.userProfile(friend.id) { friendAvatarURL = p.avatarUrl }
+    }
+
+    /// Đổi avatar của tôi NGAY trong màn nhắn tin → bạn bè thấy sau nhịp poll kế tiếp.
+    private func changeMyAvatar(_ item: PhotosPickerItem) async {
+        updatingAvatar = true
+        defer { updatingAvatar = false; avatarPickerItem = nil }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else { return }
+            if data.count > 15 * 1024 * 1024 { sendError = "Ảnh đại diện tối đa 15MB."; return }
+            let link = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                                                       mime: "image/jpeg",
+                                                       name: "avatar_\(Int(Date().timeIntervalSince1970))")
+            _ = try await store.api.updateProfile(publicId: nil, avatarUrl: link, bio: nil)
+            myAvatarURL = link
+        } catch { sendError = error.localizedDescription }
+    }
+
+    // MARK: - Helpers
+    private func startPolling() {
+        Task { await store.refreshDirectMessages(friendId: friend.id) }
+        timer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { _ in
+            Task {
+                await store.refreshDirectMessages(friendId: friend.id)
+                await refreshFriendAvatar()      // §4.2 — đồng bộ avatar bạn bè liên tục
+            }
+        }
+    }
+    private func stopPolling() { timer?.invalidate(); timer = nil }
+
     private func formatTime(_ timestamp: Int) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+
+    // MARK: - Menu nhấn giữ tin nhắn (sao chép / lưu media / xoá / thu hồi)
+    @ViewBuilder
+    private func messageMenu(_ msg: DirectMessageItem, isMe: Bool) -> some View {
+        let media = ChatMedia.parse(msg.content)
+        if let media {
+            if media.kind == "img" {
+                Button { saveImage(media.url) } label: { Label("Lưu ảnh về máy", systemImage: "square.and.arrow.down") }
+            } else if media.kind == "video" {
+                Button { saveVideo(media.url) } label: { Label("Lưu video về máy", systemImage: "square.and.arrow.down") }
+            }
+        } else {
+            Button { UIPasteboard.general.string = msg.content } label: {
+                Label("Sao chép", systemImage: "doc.on.doc")
+            }
+        }
+        // Xoá ở phía tôi (ẩn cục bộ) — áp dụng mọi tin nhắn
+        Button(role: .destructive) { hideLocally(msg) } label: {
+            Label("Xoá ở phía tôi", systemImage: "eye.slash")
+        }
+        // Thu hồi (chỉ tin của tôi) — xoá ở cả hai phía
+        if isMe {
+            Button(role: .destructive) { Task { await recall(msg) } } label: {
+                Label("Thu hồi (xoá cả 2 bên)", systemImage: "arrow.uturn.backward")
+            }
+        }
+    }
+
+    private func recall(_ msg: DirectMessageItem) async {
+        do {
+            _ = try await store.api.recallDirectMessage(msg.id)
+            hiddenIds.remove(msg.id)   // không cần ẩn cục bộ nữa vì đã xoá thật
+            await store.refreshDirectMessages(friendId: friend.id)
+            showSaved("Đã thu hồi tin nhắn.")
+        } catch { sendError = error.localizedDescription }
+    }
+
+    // Ẩn tin nhắn ở phía mình (lưu vào máy, không đụng máy chủ).
+    private func hideLocally(_ msg: DirectMessageItem) {
+        hiddenIds.insert(msg.id)
+        UserDefaults.standard.set(Array(hiddenIds), forKey: hiddenKey)
+    }
+    private var hiddenKey: String { "dm_hidden_\(friend.id)" }
+    private func loadHidden() {
+        if let arr = UserDefaults.standard.array(forKey: hiddenKey) as? [Int] {
+            hiddenIds = Set(arr)
+        }
+    }
+
+    // MARK: - Lưu ảnh / video về Thư viện
+    private func saveImage(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let img = UIImage(data: data) {
+                    UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+                    showSaved("Đã lưu ảnh vào Thư viện.")
+                } else { sendError = "Không đọc được ảnh." }
+            } catch { sendError = "Lưu ảnh thất bại: \(error.localizedDescription)" }
+        }
+    }
+
+    private func saveVideo(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        showSaved("Đang tải video để lưu...")
+        Task {
+            do {
+                let (tmp, _) = try await URLSession.shared.download(from: url)
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("save_\(Int(Date().timeIntervalSince1970)).mp4")
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                if UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(dest.path) {
+                    UISaveVideoAtPathToSavedPhotosAlbum(dest.path, nil, nil, nil)
+                    showSaved("Đã lưu video vào Thư viện.")
+                } else {
+                    sendError = "Định dạng video không lưu được vào Thư viện."
+                }
+            } catch { sendError = "Lưu video thất bại: \(error.localizedDescription)" }
+        }
+    }
+
+    private func showSaved(_ text: String) {
+        savedNote = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            if savedNote == text { savedNote = nil }
+        }
+    }
+}
+
+// MARK: - Mã hoá/giải mã tin nhắn media (không cần đổi backend, dùng chuỗi content sẵn có)
+enum ChatMedia {
+    static let marker = "\u{2063}KMEDIA\u{2063}"   // ký tự vô hình, tránh trùng nội dung người dùng
+    static func encode(kind: String, url: String, caption: String) -> String {
+        "\(marker)\(kind)\(marker)\(url)\(marker)\(caption)"
+    }
+    static func parse(_ content: String) -> (kind: String, url: String, caption: String)? {
+        guard content.hasPrefix(marker) else { return nil }
+        let parts = content.components(separatedBy: marker)
+        // parts[0] rỗng, [1]=kind, [2]=url, [3...]=caption
+        guard parts.count >= 3, !parts[2].isEmpty else { return nil }
+        let caption = parts.count >= 4 ? parts[3...].joined(separator: marker) : ""
+        return (parts[1], parts[2], caption)
+    }
+}
+
+// MARK: - Ghi âm giọng nói cho chat
+final class ChatVoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
+    @Published var isRecording = false
+    @Published var level: Double = 0
+    @Published var durationText = "0:00"
+    private var recorder: AVAudioRecorder?
+    private var meterTimer: Timer?
+    private var startedAt: Date?
+    private(set) var fileURL: URL?
+
+    func start() {
+        let session = AVAudioSession.sharedInstance()
+        session.requestRecordPermission { [weak self] granted in
+            DispatchQueue.main.async {
+                guard granted, let self else { return }
+                self.beginRecording()
+            }
+        }
+    }
+
+    private func beginRecording() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try? session.setActive(true)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("chatvoice_\(Int(Date().timeIntervalSince1970)).m4a")
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+        do {
+            let r = try AVAudioRecorder(url: url, settings: settings)
+            r.delegate = self
+            r.isMeteringEnabled = true
+            r.record()
+            recorder = r; fileURL = url; startedAt = Date(); isRecording = true
+            meterTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+                self?.updateMeter()
+            }
+        } catch { isRecording = false }
+    }
+
+    private func updateMeter() {
+        guard let r = recorder else { return }
+        r.updateMeters()
+        let power = r.averagePower(forChannel: 0)          // -160...0 dB
+        level = max(0, min(1, Double((power + 50) / 50)))
+        if let s = startedAt {
+            let sec = Int(Date().timeIntervalSince(s))
+            durationText = String(format: "%d:%02d", sec / 60, sec % 60)
+        }
+    }
+
+    /// Dừng và trả về file ghi âm.
+    func stop() -> URL? {
+        meterTimer?.invalidate(); meterTimer = nil
+        recorder?.stop()
+        isRecording = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        return fileURL
+    }
+
+    func cancel() {
+        meterTimer?.invalidate(); meterTimer = nil
+        recorder?.stop()
+        if let u = fileURL { try? FileManager.default.removeItem(at: u) }
+        fileURL = nil
+        isRecording = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+}
+
+// MARK: - Bong bóng phát âm thanh trong chat
+struct ChatAudioBubble: View {
+    let url: String
+    let isMe: Bool
+    @StateObject private var player = ChatAudioPlayer()
+
+    var body: some View {
+        Button {
+            player.toggle(urlString: url)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 30))
+                Image(systemName: "waveform")
+                    .font(.title3)
+                Text("Tin nhắn thoại").font(.caption)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(isMe ? Theme.accent : Color(.secondarySystemBackground))
+            .foregroundStyle(isMe ? .white : .primary)
+            .cornerRadius(16)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+final class ChatAudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published var isPlaying = false
+    private var player: AVAudioPlayer?
+
+    func toggle(urlString: String) {
+        if isPlaying { player?.stop(); isPlaying = false; return }
+        guard let url = URL(string: urlString) else { return }
+        Task { @MainActor in
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                try AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+                try AVAudioSession.sharedInstance().setActive(true)
+                let p = try AVAudioPlayer(data: data)
+                p.delegate = self
+                p.play()
+                self.player = p
+                self.isPlaying = true
+            } catch { self.isPlaying = false }
+        }
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        isPlaying = false
+    }
+}
+
+// MARK: - Xem ảnh full màn hình (phóng to / lưu về máy)
+// id PHẢI ổn định theo url. Nếu để id = UUID() thì mỗi lần poll làm body dựng lại,
+// item đổi id → fullScreenCover tưởng item mới → đóng/mở liên tục (thoát ra vào lại + lag).
+struct ChatImageURL: Identifiable { var id: String { url }; let url: String }
+
+struct FullscreenImageViewer: View {
+    let urlString: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+    @State private var savedMsg: String? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            AsyncImage(url: URL(string: urlString)) { img in
+                img.resizable().scaledToFit()
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { v in scale = max(1, min(5, lastScale * v)) }
+                            .onEnded { _ in lastScale = scale }
+                    )
+                    .simultaneousGesture(
+                        DragGesture()
+                            .onChanged { v in
+                                guard scale > 1 else { return }
+                                offset = CGSize(width: lastOffset.width + v.translation.width,
+                                                height: lastOffset.height + v.translation.height)
+                            }
+                            .onEnded { _ in lastOffset = offset }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation {
+                            if scale > 1 { scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero }
+                            else { scale = 2.5; lastScale = 2.5 }
+                        }
+                    }
+            } placeholder: { ProgressView().tint(.white) }
+
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white.opacity(0.9))
+                    }
+                    Spacer()
+                    Button { saveImage() } label: {
+                        Image(systemName: "square.and.arrow.down").font(.title2).foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+                .padding()
+                Spacer()
+                if let savedMsg {
+                    Text(savedMsg).font(.caption).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.ultraThinMaterial).clipShape(Capsule()).padding(.bottom, 30)
+                }
+            }
+        }
+    }
+
+    private func saveImage() {
+        guard let url = URL(string: urlString) else { return }
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let img = UIImage(data: data) {
+                    UIImageWriteToSavedPhotosAlbum(img, nil, nil, nil)
+                    await MainActor.run { savedMsg = "Đã lưu ảnh vào Thư viện" }
+                }
+            } catch {
+                await MainActor.run { savedMsg = "Lưu thất bại" }
+            }
+        }
+    }
+}
+
+// MARK: - Phát video trong app (toàn màn hình, không mở trình duyệt)
+struct ChatVideoPlayerView: View {
+    let urlString: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer? = nil
+    @State private var savedMsg: String? = nil
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+                    .onAppear { player.play() }
+            } else {
+                ProgressView().tint(.white)
+            }
+            VStack {
+                HStack {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white.opacity(0.9))
+                    }
+                    Spacer()
+                    Button { saveVideo() } label: {
+                        Image(systemName: "square.and.arrow.down").font(.title2).foregroundStyle(.white.opacity(0.9))
+                    }
+                }
+                .padding()
+                Spacer()
+                if let savedMsg {
+                    Text(savedMsg).font(.caption).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.ultraThinMaterial).clipShape(Capsule()).padding(.bottom, 30)
+                }
+            }
+        }
+        .onAppear {
+            if let url = URL(string: urlString) {
+                try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.mixWithOthers])
+                player = AVPlayer(url: url)
+            }
+        }
+        .onDisappear { player?.pause(); player = nil }
+    }
+
+    private func saveVideo() {
+        guard let url = URL(string: urlString) else { return }
+        savedMsg = "Đang tải video để lưu..."
+        Task {
+            do {
+                let (tmp, _) = try await URLSession.shared.download(from: url)
+                let dest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("save_\(Int(Date().timeIntervalSince1970)).mp4")
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                await MainActor.run {
+                    if UIVideoAtPathIsCompatibleWithSavedPhotosAlbum(dest.path) {
+                        UISaveVideoAtPathToSavedPhotosAlbum(dest.path, nil, nil, nil)
+                        savedMsg = "Đã lưu video vào Thư viện"
+                    } else {
+                        savedMsg = "Định dạng video không lưu được"
+                    }
+                }
+            } catch {
+                await MainActor.run { savedMsg = "Lưu thất bại" }
+            }
+        }
     }
 }

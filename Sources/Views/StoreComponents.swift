@@ -1,0 +1,339 @@
+import SwiftUI
+import AVKit
+import WebKit
+import ImageIO
+
+// ============================ GIF động (dùng WKWebView, không cần thư viện ngoài) ============================
+struct GIFWebView: UIViewRepresentable {
+    let url: URL
+    var contentMode: String = "cover"   // "cover" | "contain"
+
+    func makeUIView(context: Context) -> WKWebView {
+        let cfg = WKWebViewConfiguration()
+        let w = WKWebView(frame: .zero, configuration: cfg)
+        w.scrollView.isScrollEnabled = false
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.scrollView.backgroundColor = .clear
+        return w
+    }
+
+    func updateUIView(_ w: WKWebView, context: Context) {
+        let html = """
+        <html>
+        <head><meta name='viewport' content='width=device-width,initial-scale=1'>
+        <style>body{margin:0;padding:0;background:transparent;}
+        img{width:100%;height:100vh;object-fit:\(contentMode);display:block;}</style></head>
+        <body><img src='\(url.absoluteString)'></body></html>
+        """
+        w.loadHTMLString(html, baseURL: nil)
+    }
+}
+
+// ============================ Bộ nhớ đệm ảnh (chống nhấp nháy khi quay lại trang) ============================
+/// Giữ ảnh đã tải trong RAM để khi rời trang rồi vào lại KHÔNG phải tải lại (đứng yên 100%).
+enum StoreImageCache {
+    nonisolated(unsafe) static let memory: NSCache<NSURL, UIImage> = {
+        let c = NSCache<NSURL, UIImage>()
+        c.countLimit = 100                      // giữ tối đa 100 ảnh
+        c.totalCostLimit = 60 * 1024 * 1024     // ~60MB bitmap → tự xoá bớt khi vượt, tránh tràn RAM
+        return c
+    }()
+}
+
+/// Giảm kích thước ảnh khi giải mã (ImageIO) — CHỐNG VĂNG APP: ảnh gốc 4K/8K nếu giải mã
+/// nguyên cỡ sẽ ngốn RAM khổng lồ, nhiều ảnh cùng lúc → tràn bộ nhớ → văng. Thu về tối đa
+/// `maxPixel` px giúp nhẹ RAM hàng chục lần mà nhìn vẫn nét trên màn hình điện thoại.
+func kDownsampledImage(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+    let srcOpts = [kCGImageSourceShouldCache: false] as CFDictionary
+    guard let src = CGImageSourceCreateWithData(data as CFData, srcOpts) else {
+        return UIImage(data: data)
+    }
+    let opts: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixel
+    ]
+    guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else {
+        return UIImage(data: data)
+    }
+    return UIImage(cgImage: cg)
+}
+
+/// Ảnh tải từ link có CACHE — thay cho AsyncImage để không nhấp nháy/nạp lại.
+struct CachedAsyncImage<Content: View, Placeholder: View>: View {
+    let url: URL
+    @ViewBuilder var content: (Image) -> Content
+    @ViewBuilder var placeholder: () -> Placeholder
+
+    @State private var uiImage: UIImage?
+
+    var body: some View {
+        Group {
+            if let img = uiImage ?? StoreImageCache.memory.object(forKey: url as NSURL) {
+                content(Image(uiImage: img))
+            } else {
+                placeholder().task(id: url) { await load() }
+            }
+        }
+    }
+
+    private func load() async {
+        if let cached = StoreImageCache.memory.object(forKey: url as NSURL) {
+            uiImage = cached; return
+        }
+        var req = URLRequest(url: url)
+        req.cachePolicy = .returnCacheDataElseLoad   // tận dụng URLCache trên đĩa giữa các lần mở app
+        guard let (data, _) = try? await URLSession.shared.data(for: req) else { return }
+        // Giải mã + thu nhỏ ở LUỒNG NỀN (tránh nghẽn giao diện và tràn RAM khi ảnh gốc quá lớn).
+        let img = await Task.detached(priority: .utility) {
+            kDownsampledImage(data, maxPixel: 1200)
+        }.value
+        guard let img else { return }
+        let cost = Int(img.size.width * img.size.height * img.scale * img.scale) * 4
+        StoreImageCache.memory.setObject(img, forKey: url as NSURL, cost: cost)
+        uiImage = img
+    }
+}
+
+/// True nếu link là ảnh động (GIF/WEBP) → render bằng WKWebView để chạy động.
+func isAnimatedImage(_ s: String) -> Bool {
+    let l = s.lowercased()
+    return l.contains(".gif") || l.contains(".webp")
+}
+
+/// True nếu link là video (MP4/MOV/M3U8/WEBM...) → render bằng trình phát video lặp.
+func isVideoLink(_ s: String) -> Bool {
+    let l = s.lowercased()
+    return l.contains(".mp4") || l.contains(".mov") || l.contains(".m3u8")
+        || l.contains(".webm") || l.contains(".m4v")
+}
+
+// ============================ Tiện ích chung ============================
+func kFormatVND(_ amount: Int) -> String {
+    let f = NumberFormatter()
+    f.numberStyle = .decimal
+    f.groupingSeparator = "."
+    return (f.string(from: NSNumber(value: amount)) ?? "\(amount)") + "đ"
+}
+
+// Số nguyên có dấu chấm nhóm nghìn (không có "đ") — dùng cho ô thống kê
+func kGroupNumber(_ n: Int) -> String {
+    let f = NumberFormatter()
+    f.numberStyle = .decimal
+    f.groupingSeparator = "."
+    return f.string(from: NSNumber(value: n)) ?? "\(n)"
+}
+
+// Carousel ảnh/video (link) — tối đa 5, hỗ trợ GIF động + video lặp vô hạn
+struct StoreMediaCarousel: View {
+    let media: [StoreMedia]
+    var height: CGFloat = 200
+    var videoFit: Bool = false   // true = video hiện ĐỦ khung, không bị cắt (dùng cho hero)
+
+    var body: some View {
+        if media.isEmpty {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+                .frame(height: height)
+                .overlay(Image(systemName: "photo").font(.largeTitle).foregroundStyle(.secondary))
+        } else {
+            TabView {
+                ForEach(Array(media.prefix(5).enumerated()), id: \.offset) { _, m in
+                    if m.type == "video", let url = URL(string: m.url) {
+                        LoopingVideoBackground(url: url, fit: videoFit)
+                            .frame(height: height)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.black)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    } else if let url = URL(string: m.url) {
+                        storeImage(url: url, height: height)
+                    }
+                }
+            }
+            .frame(height: height)
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+        }
+    }
+}
+
+// Hiển thị ảnh từ link — tự động dùng GIFWebView khi là .gif
+@ViewBuilder
+private func storeImage(url: URL, height: CGFloat) -> some View {
+    if isAnimatedImage(url.absoluteString) {
+        GIFWebView(url: url)
+            .frame(height: height)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+    } else {
+        CachedAsyncImage(url: url) { img in
+            img.resizable().scaledToFill()
+        } placeholder: {
+            ProgressView().frame(maxWidth: .infinity)
+        }
+        .frame(height: height)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// ============================ Logo Cửa hàng — tự nhận diện URL và phát đúng định dạng ============================
+/// Admin dán URL vào TextField → component tự kiểm tra đuôi:
+///   .mp4/.mov/.m3u8/.m4v/.webm → video lặp vô hạn (AVPlayer, tắt tiếng, ẩn nút, chặn chạm)
+///   .gif/.webp → ảnh động qua WKWebView
+///   .png/.jpg/.jpeg → ảnh tĩnh có cache
+struct StoreLogoPlayer: View {
+    let urlString: String
+    var mediaType: String? = nil
+    var size: CGFloat = 48
+    var cornerRadius: CGFloat = 11
+    var fit: Bool = false
+
+    private var isVideo: Bool {
+        if let t = mediaType { return t == "video" }
+        return isVideoLink(urlString)
+    }
+
+    var body: some View {
+        Group {
+            if let url = URL(string: urlString), !urlString.isEmpty {
+                if isVideo {
+                    LoopingVideoBackground(url: url, fit: fit)
+                } else if isAnimatedImage(urlString) {
+                    GIFWebView(url: url, contentMode: fit ? "contain" : "cover")
+                } else {
+                    CachedAsyncImage(url: url) { img in img.resizable().scaledToFill() }
+                    placeholder: { Color(.tertiarySystemBackground) }
+                }
+            } else {
+                Image(systemName: "bag.fill").font(.title2).foregroundStyle(Theme.accent)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Color.black.opacity(urlString.isEmpty ? 0 : 1))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        .allowsHitTesting(false)
+    }
+}
+
+// Ảnh/video thu nhỏ — hỗ trợ video lặp vô hạn tự động
+struct StoreThumb: View {
+    let media: [StoreMedia]
+    var height: CGFloat = 120
+
+    private var first: StoreMedia? { media.first }
+
+    var body: some View {
+        ZStack {
+            if let m = first {
+                if m.type == "video", let url = URL(string: m.url) {
+                    LoopingVideoBackground(url: url)
+                } else if let url = URL(string: m.url) {
+                    if isAnimatedImage(m.url) {
+                        GIFWebView(url: url)
+                    } else {
+                        CachedAsyncImage(url: url) { img in
+                            img.resizable().scaledToFill()
+                        } placeholder: {
+                            Color(.tertiarySystemBackground)
+                        }
+                    }
+                }
+            } else {
+                Color(.tertiarySystemBackground)
+                Image(systemName: "photo").font(.title).foregroundStyle(.secondary)
+            }
+            if media.count > 1 {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Text("\(media.count) ảnh")
+                            .font(.caption2).padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.ultraThinMaterial).clipShape(Capsule())
+                            .padding(6)
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .frame(height: height)
+        .frame(maxWidth: .infinity)
+        .clipped()
+    }
+}
+
+/// Dải tự cuộn (giao dịch / nạp tiền gần đây) — đổi 6 dòng mỗi 5 giây.
+/// TÁCH RIÊNG khỏi StoreView: timer + chỉ số cuộn nằm trong chính view này nên
+/// mỗi 5 giây CHỈ dải này vẽ lại, KHÔNG kéo cả cửa hàng vẽ lại theo (hết nháy).
+// §6.2 — Thanh cuộn vô hạn MƯỢT 100%, không bao giờ biến mất.
+// Dùng marquee: danh sách nhân đôi + cuộn offset liên tục, id theo VỊ TRÍ (không theo
+// item.id) → khi dữ liệu ảo đổi mỗi lần poll, các dòng chỉ đổi nội dung tại chỗ, KHÔNG
+// bị gỡ/chèn gây chớp hay tan biến.
+// Dải tự cuộn "giao dịch / nạp tiền gần đây".
+// QUAN TRỌNG (chống văng app): CHỈ dựng (visible + 1) dòng tại một thời điểm —
+// KHÔNG dựng cả nghìn dòng như trước (nguyên nhân lác rồi tràn bộ nhớ → crash).
+// Cứ 5 giây trượt lên đúng 1 dòng (chạy chậm, mượt) rồi xoay vòng dữ liệu.
+struct AutoScrollTicker<Item: Identifiable, Row: View>: View {
+    let items: [Item]
+    var visible: Int = 5
+    @ViewBuilder let row: (Item) -> Row
+
+    @State private var start = 0
+    @State private var slide: CGFloat = 0
+    @State private var timer: Timer? = nil
+    private let rowH: CGFloat = 54
+
+    var body: some View {
+        let h = rowH * CGFloat(visible)
+        Group {
+            if items.isEmpty {
+                Color.clear.frame(height: h)
+            } else if items.count <= visible {
+                // Ít dòng → hiện hết, đứng yên (không cần cuộn).
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, it in cell(it) }
+                }
+                .frame(maxHeight: h, alignment: .top)
+            } else {
+                // Chỉ render visible+1 dòng theo cửa sổ trượt → nhẹ, không crash.
+                VStack(spacing: 0) {
+                    ForEach(0..<(visible + 1), id: \.self) { k in
+                        cell(items[(start + k) % items.count])
+                    }
+                }
+                .offset(y: slide)
+                .frame(height: h + rowH, alignment: .top)
+                .onAppear { startTimer() }
+                .onDisappear { timer?.invalidate(); timer = nil }
+            }
+        }
+        .frame(height: h, alignment: .top)
+        .clipped()
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder private func cell(_ item: Item) -> some View {
+        VStack(spacing: 0) {
+            row(item).padding(.horizontal, 12).frame(height: rowH - 1)
+            Divider()
+        }
+        .frame(height: rowH)
+    }
+
+    private func startTimer() {
+        timer?.invalidate()
+        guard items.count > visible else { return }
+        // 5 giây trượt lên 1 dòng — chạy chậm theo yêu cầu.
+        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            withAnimation(.easeInOut(duration: 0.55)) { slide = -rowH }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.62) {
+                slide = 0
+                start = (start + 1) % max(items.count, 1)
+            }
+        }
+    }
+}
+

@@ -1,0 +1,154 @@
+import Foundation
+
+// ======================== Model thông báo qua email ========================
+struct EmailNotifyStatus: Decodable {
+    let enabled: Bool
+    let hasRelay: Bool?
+    let smtpHost: String?
+    let smtpPort: Int?
+    let smtpUser: String?
+    let mailFrom: String?
+    let smtpPassSet: Bool?
+    let testResult: String?
+    let testOk: Bool?
+}
+
+// ======================== Model Zalo Official Account (OA) ========================
+struct ZaloOAStatus: Decodable {
+    let enabled: Bool
+    let appId: String?
+    let hasSecret: Bool?
+    let connected: Bool?
+    let welcome: String?
+    let welcomeOn: Bool?
+    let autoReply: String?
+    let autoReplyOn: Bool?
+    let webhookUrl: String?
+    let connectUrl: String?
+}
+
+extension APIClient {
+    func adminGetZaloOA() async throws -> ZaloOAStatus {
+        try decode(try await send("/admin/zalo-oa"))
+    }
+    @discardableResult
+    func adminSetZaloOA(_ body: [String: Any]) async throws -> ZaloOAStatus {
+        try decode(try await send("/admin/zalo-oa", method: "POST", json: body))
+    }
+}
+
+// ======================== Model bot Telegram hỗ trợ ========================
+struct TelegramBotStatus: Decodable {
+    let enabled: Bool
+    let hasToken: Bool?
+    let adminChat: String?
+    let welcome: String?
+    let about: String?
+    let username: String?
+    let tokenOk: Bool?
+    // Quản lý nhóm
+    let modEnabled: Bool?
+    let delLinks: Bool?
+    let delStickers: Bool?
+    let delPhotos: Bool?
+    let warnLimit: Int?
+    let warnAction: String?
+    let welcomeOn: Bool?
+    let welcomeGroup: String?
+    let welcomeBtnText: String?
+    let welcomeBtnUrl: String?
+    let welcomeBtns: String?         // nhiều nút link: mỗi dòng "Tên | https://link"
+    let welcomeGroupPhoto: String?   // ảnh kèm lời chào nhóm
+    let goodbyeOn: Bool?
+    let goodbye: String?
+    // Module nâng cao
+    let antifloodOn: Bool?
+    let antifloodMax: Int?
+    let cleanService: Bool?
+    let captchaOn: Bool?
+    let nightmodeOn: Bool?
+    let nightStart: Int?
+    let nightEnd: Int?
+    let rules: String?
+    let locks: String?
+    let blacklist: String?
+    let botName: String?
+    let autoreactOn: Bool?
+    let autoreactEmoji: String?
+    let slowmode: Int?
+    let logChat: String?
+}
+
+// ======================== Model cập nhật OTA (bản đã ký) ========================
+struct AppOTAUpdate: Decodable {
+    let available: Bool
+    let installUrl: String?
+    let bundleId: String?
+    let version: String?
+    let build: Int?
+    let title: String?
+}
+
+// ======================== Model cuộc gọi ========================
+struct CallStartResult: Decodable { let callId: String }
+struct IncomingCall: Decodable {
+    let callId: String?
+    let from: Int?
+    let fromName: String?
+    let video: Bool?
+}
+struct CallStateResult: Decodable { let state: String; let video: Bool? }
+struct CallFrame: Decodable { let jpg: String; let ts: Double? }
+struct CallAudioChunk: Decodable { let seq: Int; let pcm: String }
+struct CallAudioResult: Decodable { let chunks: [CallAudioChunk] }
+
+// ======================== API cuộc gọi (relay qua máy chủ) ========================
+extension APIClient {
+    func callStart(to: Int, video: Bool) async throws -> CallStartResult {
+        try decode(try await send("/calls/start", method: "POST", json: ["to": to, "video": video]))
+    }
+    /// Trả về cuộc gọi đến đang đổ chuông (nil nếu không có).
+    func callIncoming() async throws -> IncomingCall? {
+        let c: IncomingCall = try decode(try await send("/calls/incoming"))
+        guard let id = c.callId, !id.isEmpty else { return nil }
+        return c
+    }
+    func callAnswer(_ cid: String, accept: Bool) async throws {
+        _ = try await send("/calls/\(cid)/answer?accept=\(accept)", method: "POST")
+    }
+    func callEnd(_ cid: String) async throws {
+        _ = try await send("/calls/\(cid)/end", method: "POST")
+    }
+    func callState(_ cid: String) async throws -> CallStateResult {
+        try decode(try await send("/calls/\(cid)/state"))
+    }
+    func callPutFrame(_ cid: String, jpgBase64: String) async throws {
+        _ = try await send("/calls/\(cid)/frame", method: "POST", json: ["jpg": jpgBase64])
+    }
+    /// after = mốc thời gian khung trước — máy chủ chỉ trả khi CÓ HÌNH MỚI (đỡ nghẽn mạng).
+    func callGetFrame(_ cid: String, after: Double = 0) async throws -> CallFrame {
+        try decode(try await send("/calls/\(cid)/frame?after=\(after)"))
+    }
+    func callPutAudio(_ cid: String, pcmBase64: String) async throws {
+        _ = try await send("/calls/\(cid)/audio", method: "POST", json: ["pcm": pcmBase64])
+    }
+    func callGetAudio(_ cid: String, after: Int) async throws -> CallAudioResult {
+        try decode(try await send("/calls/\(cid)/audio?after=\(after)"))
+    }
+    func callHistory() async throws -> [CallHistoryItem] {
+        try decode(try await send("/calls/history"))
+    }
+}
+
+// ======================== Model lịch sử cuộc gọi ========================
+struct CallHistoryItem: Decodable, Identifiable {
+    let id: Int
+    let incoming: Bool
+    let peerId: Int
+    let peer: String
+    let video: Bool
+    let status: String       // answered / missed / declined
+    let missed: Bool         // incoming + (missed/declined) = cuộc gọi nhỡ
+    let startedAt: Int
+    let duration: Int
+}

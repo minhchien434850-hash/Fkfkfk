@@ -5,6 +5,7 @@ on:
     branches: [ "**" ]
     paths:
       - "Sources/**"
+      - "PacketTunnelExtension/**"
       - "project.yml"
       - "build-app.sh"
       - ".github/workflows/build-app.yml"
@@ -50,6 +51,12 @@ jobs:
       - name: Build (no code signing)
         run: |
           set -eo pipefail
+          # Phiên bản hiển thị dạng X.Y ĐẸP: phần lẻ chạy 0–9 rồi lên số lớn (…3.9 → 4.0 → 4.1…).
+          # Số build (CURRENT_PROJECT_VERSION) vẫn dùng run_number để phát hiện bản mới. (ĐỒNG BỘ Swift: BASE=937)
+          IDX=$(( ${{ github.run_number }} - 937 ))
+          [ "$IDX" -lt 0 ] && IDX=0
+          APP_VERSION="$(( 1 + IDX / 10 )).$(( IDX % 10 ))"
+          echo "MARKETING_VERSION = $APP_VERSION"
           xcodebuild \
             -project KENIOS.xcodeproj \
             -scheme KENIOS \
@@ -57,6 +64,8 @@ jobs:
             -sdk iphoneos \
             -derivedDataPath build \
             -destination "generic/platform=iOS" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            MARKETING_VERSION=$APP_VERSION \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -94,5 +103,8 @@ jobs:
           name: KENIOS build ${{ github.run_number }}
           files: KENIOS.ipa
           body: "Bản build tự động KENIOS (IPA chưa ký). Tải KENIOS.ipa để sideload."
+          draft: false
+          prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

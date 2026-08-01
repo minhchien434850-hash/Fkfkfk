@@ -1,218 +1,220 @@
 import SwiftUI
 import AVKit
 import PhotosUI
+import UIKit
 
-// ======================== Video feed — "TikTok của riêng app" ========================
+// ======================== Helpers chung cho video ========================
+func keniosVideoURL(postId: Int, token: String?, baseURL: String) -> URL? {
+    var s = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !s.lowercased().hasPrefix("http") { s = "http://" + s }
+    while s.hasSuffix("/") { s.removeLast() }
+    var comp = URLComponents(string: s + "/posts/\(postId)/video")
+    if let token, !token.isEmpty {
+        comp?.queryItems = [URLQueryItem(name: "token", value: token)]
+    }
+    return comp?.url
+}
+
+final class VideoThumbCache {
+    static let shared = VideoThumbCache()
+    private let cache = NSCache<NSNumber, UIImage>()
+    func image(for postId: Int) -> UIImage? { cache.object(forKey: NSNumber(value: postId)) }
+    func set(_ img: UIImage, for postId: Int) { cache.setObject(img, forKey: NSNumber(value: postId)) }
+}
+
+func generateThumbnail(postId: Int, url: URL, completion: @escaping (UIImage?) -> Void) {
+    if let cached = VideoThumbCache.shared.image(for: postId) { completion(cached); return }
+    DispatchQueue.global(qos: .userInitiated).async {
+        let asset = AVURLAsset(url: url)
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 720, height: 1280)
+        for t in [CMTime(seconds: 0.3, preferredTimescale: 600), CMTime(seconds: 0.0, preferredTimescale: 600)] {
+            if let cg = try? gen.copyCGImage(at: t, actualTime: nil) {
+                let img = UIImage(cgImage: cg)
+                VideoThumbCache.shared.set(img, for: postId)
+                DispatchQueue.main.async { completion(img) }
+                return
+            }
+        }
+        DispatchQueue.main.async { completion(nil) }
+    }
+}
+
+// ======================== Wrapper để dùng với .sheet(item:) ========================
+struct PostIDWrapper: Identifiable { let id: Int }
+struct ProfileIDWrapper: Identifiable { let id: Int }
+
+// ======================== Main container ========================
 struct VideoFeedView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var selectedTab = 0   // 0=Của tôi, 1=Reels (fullscreen)
+    @State private var profileSheet: ProfileIDWrapper?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker("", selection: $selectedTab) {
+                    Text(store.t("Bảng tin", "Posts")).tag(2)
+                    Text(store.t("Của tôi", "My Videos")).tag(0)
+                    Text("Reels").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                if selectedTab == 2 {
+                    SocialFeedView(onOpenProfile: { uid in profileSheet = ProfileIDWrapper(id: uid) })
+                } else {
+                    MyVideosView()
+                }
+            }
+            .navigationTitle(store.t("Video", "Video"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { ThreeDLogoText(size: 20) }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 4) {
+                        Button {
+                            if let uid = store.userId {
+                                profileSheet = ProfileIDWrapper(id: uid)
+                            }
+                        } label: {
+                            Image(systemName: "person.crop.circle").font(.title3)
+                        }
+                        AppearanceMenu()
+                    }
+                }
+            }
+            .sheet(item: $profileSheet) { wrapper in
+                VideoProfileView(userId: wrapper.id)
+                    .environmentObject(store)
+            }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { selectedTab == 1 },
+            set: { if !$0 { selectedTab = 0 } }
+        )) {
+            ReelsFeedView().environmentObject(store)
+        }
+    }
+}
+
+// ======================== My Videos — lưới riêng tư ========================
+struct MyVideosView: View {
     @EnvironmentObject var store: AppStore
     @State private var posts: [PostItem] = []
     @State private var loading = false
     @State private var error: String?
-
-    // Đăng bài
-    @State private var picker: PhotosPickerItem?
-    @State private var caption = ""
-    @State private var posting = false
     @State private var showCompose = false
+    @State private var detailPost: PostItem?
 
-    // Phát video
-    @State private var playURL: URL?
+    private let columns = [GridItem(.flexible(), spacing: 2),
+                            GridItem(.flexible(), spacing: 2),
+                            GridItem(.flexible(), spacing: 2)]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    KHeroHeader(icon: "play.rectangle.on.rectangle.fill",
-                                title: "Video KENIOS",
-                                subtitle: "Đăng & xem video ngay trong app của bạn")
-
-                    Button { showCompose = true } label: {
-                        Label("Đăng video mới", systemImage: "plus.circle.fill")
-                            .frame(maxWidth: .infinity).frame(height: 46)
-                            .background(Theme.accent).foregroundStyle(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-
-                    if loading { ProgressView().frame(maxWidth: .infinity) }
-                    if let error { Text(error).foregroundStyle(.red).font(.caption) }
-                    if posts.isEmpty && !loading {
-                        Text("Chưa có video nào. Hãy đăng video đầu tiên!")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity).padding(.top, 30)
-                    }
-
-                    ForEach(posts) { p in postCard(p) }
+        ScrollView {
+            VStack(spacing: 0) {
+                Button { showCompose = true } label: {
+                    Label(store.t("Đăng video", "Post video"), systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity).frame(height: 44)
+                        .background(store.accentColor).foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .padding()
-            }
-            .navigationTitle("Video")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { ThreeDLogoText(size: 20) }
-                ToolbarItem(placement: .topBarTrailing) { AppearanceMenu() }
-            }
-            .task { await load() }
-            .refreshable { await load() }
-            .fullScreenCover(item: Binding(
-                get: { playURL.map { PlayURL(url: $0) } },
-                set: { playURL = $0?.url })) { item in
-                FeedPlayer(url: item.url)
-            }
-            .sheet(isPresented: $showCompose) { composeSheet }
-        }
-    }
 
-    private func postCard(_ p: PostItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: "person.crop.circle.fill").font(.title2).foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(p.username).font(.subheadline.bold())
-                    if let pid = p.publicId { Text("ID: \(pid)").font(.caption2).foregroundStyle(.secondary) }
+                if loading && posts.isEmpty {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                 }
-                Spacer()
-                if let uid = p.userId, p.username != store.username {
-                    Button { Task { await toggleFollow(p) } } label: {
-                        Text((p.following ?? false) ? "Đang theo dõi" : "Theo dõi")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background((p.following ?? false) ? Color.gray.opacity(0.3) : Theme.accent)
-                            .foregroundStyle((p.following ?? false) ? Color.secondary : Color.white)
-                            .clipShape(Capsule())
+                if let error {
+                    Text(error).foregroundStyle(.red).font(.caption).padding()
+                }
+                if posts.isEmpty && !loading {
+                    VStack(spacing: 12) {
+                        Image(systemName: "play.rectangle.on.rectangle")
+                            .font(.system(size: 44)).foregroundStyle(.secondary)
+                        Text(store.t("Chưa có video nào. Hãy đăng video đầu tiên!",
+                                     "No videos yet. Post your first one!"))
+                            .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
-                    .buttonStyle(.plain)
-                    .id(uid)
+                    .frame(maxWidth: .infinity).padding(.top, 40)
                 }
-                if p.username == store.username || store.isAdmin {
-                    Button(role: .destructive) { Task { await delete(p) } } label: {
-                        Image(systemName: "trash").font(.caption)
-                    }
-                }
-            }
-            Button { Task { await play(p) } } label: {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Theme.cardNavy)
-                        .frame(height: 200)
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 54)).foregroundStyle(.white.opacity(0.92))
-                }
-            }
-            if let cap = p.caption, !cap.isEmpty {
-                Text(cap).font(.subheadline)
-            }
-            HStack(spacing: 16) {
-                Button { Task { await like(p) } } label: {
-                    Label("\(p.likes)", systemImage: p.liked ? "heart.fill" : "heart")
-                        .foregroundStyle(p.liked ? .red : .secondary)
-                }
-                Spacer()
-            }.font(.subheadline)
-        }
-        .padding()
-        .kCard(18)
-    }
 
-    private var composeSheet: some View {
-        NavigationStack {
-            Form {
-                Section("Chọn video") {
-                    PhotosPicker(selection: $picker, matching: .videos) {
-                        Label(picker == nil ? "Chọn video từ máy" : "Đã chọn — đổi video",
-                              systemImage: "film")
-                    }
-                }
-                Section("Mô tả") {
-                    TextField("Viết mô tả cho video...", text: $caption, axis: .vertical)
-                        .lineLimit(2...5)
-                }
-                Section {
-                    Button {
-                        Task { await submitPost() }
-                    } label: {
-                        HStack {
-                            if posting { ProgressView().padding(.trailing, 4) }
-                            Text(posting ? "Đang đăng..." : "Đăng video")
+                LazyVGrid(columns: columns, spacing: 2) {
+                    ForEach(posts) { p in
+                        Button { detailPost = p } label: {
+                            VideoGridCell(post: p, token: store.token, baseURL: store.baseURL)
                         }
-                    }.disabled(picker == nil || posting)
+                        .buttonStyle(.plain)
+                    }
                 }
-                if let error { Text(error).foregroundStyle(.red).font(.caption) }
             }
-            .navigationTitle("Đăng video")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { showCompose = false } } }
+        }
+        .task { await load() }
+        .refreshable { await load() }
+        .sheet(isPresented: $showCompose) {
+            ComposeVideoView { await load() }
+                .environmentObject(store)
+        }
+        .fullScreenCover(item: $detailPost) { p in
+            VideoDetailView(post: p) { detailPost = nil; await load() }
+                .environmentObject(store)
         }
     }
 
-    // MARK: - Actions
     private func load() async {
         loading = true; error = nil
-        do { posts = try await store.api.getFeed() }
+        do { posts = try await store.api.getMyPosts() }
         catch { self.error = error.localizedDescription }
         loading = false
     }
-
-    private func play(_ p: PostItem) async {
-        do { playURL = try await store.api.downloadPostVideo(p.id) }
-        catch { self.error = error.localizedDescription }
-    }
-
-    private func like(_ p: PostItem) async {
-        do {
-            let r = try await store.api.likePost(p.id)
-            if let idx = posts.firstIndex(where: { $0.id == p.id }) {
-                posts[idx] = PostItem(id: p.id, caption: p.caption, likes: r.likes,
-                                      createdAt: p.createdAt, fileId: p.fileId,
-                                      userId: p.userId, username: p.username,
-                                      publicId: p.publicId, name: p.name, mime: p.mime,
-                                      liked: r.liked, following: p.following)
-            }
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func toggleFollow(_ p: PostItem) async {
-        guard let uid = p.userId else { return }
-        do {
-            if p.following ?? false { _ = try await store.api.unfollow(uid) }
-            else { _ = try await store.api.follow(uid) }
-            await load()
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func delete(_ p: PostItem) async {
-        do { _ = try await store.api.deletePost(p.id); posts.removeAll { $0.id == p.id } }
-        catch { self.error = error.localizedDescription }
-    }
-
-    private func submitPost() async {
-        guard let picker else { return }
-        posting = true; error = nil
-        do {
-            guard let movie = try await picker.loadTransferable(type: EditMovie.self) else {
-                error = "Không đọc được video."; posting = false; return
-            }
-            let up = try await store.api.uploadFileRaw(
-                name: "video_\(Int(Date().timeIntervalSince1970)).mp4",
-                category: "video", fileURL: movie.url)
-            _ = try await store.api.createPost(fileId: up.id, caption: caption)
-            caption = ""; self.picker = nil; showCompose = false
-            await load()
-        } catch { self.error = error.localizedDescription }
-        posting = false
-    }
 }
 
-private struct PlayURL: Identifiable { let url: URL; var id: String { url.absoluteString } }
+// ======================== Ô video trong lưới ========================
+struct VideoGridCell: View {
+    let post: PostItem
+    let token: String?
+    let baseURL: String
+    @State private var thumb: UIImage?
 
-struct FeedPlayer: View {
-    let url: URL
-    @Environment(\.dismiss) private var dismiss
+    private var streamURL: URL? { keniosVideoURL(postId: post.id, token: token, baseURL: baseURL) }
+
     var body: some View {
-        NavigationStack {
-            VideoPlayer(player: AVPlayer(url: url))
-                .ignoresSafeArea()
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Đóng") { dismiss() } } }
-        }
+        // Color.black định hình ô = đúng bề rộng cột × tỉ lệ 3:4 (contentMode .fit → KHÔNG tràn cột).
+        // Ảnh thumbnail phủ kín ô rồi cắt gọn, badge ghim ở đáy.
+        Color.black
+            .aspectRatio(3.0/4.0, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .overlay {
+                if let thumb {
+                    Image(uiImage: thumb).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "play.fill")
+                        .font(.title3).foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            .overlay(alignment: .bottom) {
+                // Badge riêng tư / lượt xem
+                HStack(spacing: 3) {
+                    if post.isPublic != true {
+                        Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.white)
+                    }
+                    Spacer()
+                    Image(systemName: "eye").font(.system(size: 9)).foregroundStyle(.white)
+                    Text("\(post.views ?? 0)").font(.system(size: 9)).foregroundStyle(.white)
+                }
+                .padding(.horizontal, 4).padding(.bottom, 3)
+                .frame(maxWidth: .infinity)
+                .background(
+                    LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                )
+            }
+            .clipped()
+            .contentShape(Rectangle())
+            .onAppear {
+                guard thumb == nil, let url = streamURL else { return }
+                generateThumbnail(postId: post.id, url: url) { img in self.thumb = img }
+            }
     }
 }

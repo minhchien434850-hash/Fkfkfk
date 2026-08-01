@@ -1,8 +1,24 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 struct FriendsView: View {
     @EnvironmentObject var store: AppStore
-    
+
+    // §4.2 — Đổi ảnh đại diện ngay trong khu nhắn tin
+    @State private var myAvatar = ""
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var uploadingAvatar = false
+    @State private var avatarError: String?
+    @State private var avatarCacheBust = 0   // ép CachedAsyncImage tải lại ảnh mới (không dùng cache cũ)
+
+    // URL hiển thị có tham số chống-cache → luôn thấy ảnh mới sau khi đổi.
+    private var avatarDisplayURL: URL? {
+        guard !myAvatar.isEmpty else { return nil }
+        let sep = myAvatar.contains("?") ? "&" : "?"
+        return URL(string: myAvatar + "\(sep)cb=\(avatarCacheBust)")
+    }
+
     @State private var selectedSegment = 0 // 0: Bạn bè, 1: Lời mời, 2: Tìm kiếm
     @State private var searchQuery = ""
     @State private var searchResults: [UserSearchResult] = []
@@ -11,43 +27,66 @@ struct FriendsView: View {
     
     @State private var loadingRequests = false
     @State private var loadingFriends = false
-    
+    // Cuộc gọi nhỡ chưa xem → chấm đỏ trên nút Lịch sử cuộc gọi
+    @AppStorage("lastSeenCallId") private var lastSeenCallId = 0
+    @State private var missedCount = 0
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 // Banner sang trọng
                 KHeroHeader(icon: "person.2.fill",
-                            title: "Bạn bè",
-                            subtitle: "Kết bạn · Lời mời · Nhắn tin trực tiếp")
+                            title: store.t("Bạn bè", "Friends"),
+                            subtitle: store.t("Kết bạn · Lời mời · Nhắn tin trực tiếp",
+                                              "Add friends · Requests · Direct messages"))
                     .padding(.horizontal)
                     .padding(.top, 8)
 
-                // Segmented picker
+                // Segmented picker — có tab CUỘC GỌI ngay trong phần tin nhắn (như Zalo/Messenger)
                 Picker("", selection: $selectedSegment) {
-                    Text("Bạn bè").tag(0)
-                    Text("Lời mời").tag(1)
-                    Text("Tìm kiếm").tag(2)
+                    Text(store.t("Bạn bè", "Friends")).tag(0)
+                    Text(store.t("Lời mời", "Requests")).tag(1)
+                    Text(store.t("Tìm kiếm", "Search")).tag(2)
+                    Text(missedCount > 0
+                         ? store.t("Cuộc gọi (\(missedCount))", "Calls (\(missedCount))")
+                         : store.t("Cuộc gọi", "Calls")).tag(3)
                 }
                 .pickerStyle(.segmented)
-                .padding()
-                
+                .padding(.horizontal)
+                .padding(.top)
+
+                if selectedSegment != 3 { myAvatarRow }
+
                 Group {
                     if selectedSegment == 0 {
                         friendsPane
                     } else if selectedSegment == 1 {
                         requestsPane
-                    } else {
+                    } else if selectedSegment == 2 {
                         searchPane
+                    } else {
+                        // Lịch sử cuộc gọi nằm NGAY trong phần tin nhắn
+                        CallHistoryView()
                     }
                 }
                 
                 Spacer()
             }
-            .navigationTitle("Bạn bè")
+            .navigationTitle(store.t("Bạn bè", "Friends"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ThreeDLogoText(size: 20)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink { CallHistoryView() } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "phone.arrow.up.right")
+                            if missedCount > 0 {
+                                Circle().fill(.red).frame(width: 9, height: 9).offset(x: 4, y: -3)
+                            }
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -61,10 +100,136 @@ struct FriendsView: View {
             }
             .task {
                 await refreshData()
+                await loadMyAvatar()
+                await loadMissedCalls()
+            }
+            .onChange(of: avatarItem) { item in
+                guard let item else { return }
+                Task { await uploadAvatar(item) }
+            }
+            .onChange(of: selectedSegment) { seg in
+                if seg == 3 { missedCount = 0 }   // mở tab Cuộc gọi → đã xem cuộc gọi nhỡ
             }
         }
     }
-    
+
+    // MARK: - §4.2 Đổi ảnh đại diện trong khu nhắn tin
+    private var myAvatarRow: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                if let url = avatarDisplayURL {
+                    CachedAsyncImage(url: url) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: {
+                        Color(.tertiarySystemBackground)
+                    }
+                    .id(avatarCacheBust)   // đổi ảnh → view tải lại, không giữ ảnh cũ
+                    .frame(width: 52, height: 52).clipShape(Circle())
+                } else {
+                    Circle().fill(Theme.accent.opacity(0.15)).frame(width: 52, height: 52)
+                        .overlay(Image(systemName: "person.fill").foregroundStyle(Theme.accent))
+                }
+                if uploadingAvatar {
+                    Circle().fill(.black.opacity(0.4)).frame(width: 52, height: 52)
+                    ProgressView().tint(.white)
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.t("Ảnh đại diện của bạn", "Your avatar")).font(.subheadline.bold())
+                if let avatarError {
+                    Text(avatarError).font(.caption2).foregroundStyle(.red)
+                } else {
+                    Text(store.t("Bạn bè sẽ thấy ảnh mới khi làm mới trò chuyện.",
+                                 "Friends see the new photo when the chat refreshes."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            PhotosPicker(selection: $avatarItem, matching: .images) {
+                Label(store.t("Đổi ảnh", "Change"), systemImage: "camera.fill")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Theme.accent.opacity(0.15)).clipShape(Capsule())
+            }
+            .disabled(uploadingAvatar)
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal)
+        .padding(.bottom, 6)
+    }
+
+    private func loadMyAvatar() async {
+        if let p = try? await store.api.myProfile() {
+            myAvatar = p.avatarUrl ?? ""
+        }
+    }
+
+    private func loadMissedCalls() async {
+        let hist = (try? await store.api.callHistory()) ?? []
+        missedCount = hist.filter { $0.missed && $0.id > lastSeenCallId }.count
+    }
+
+    private func uploadAvatar(_ item: PhotosPickerItem) async {
+        uploadingAvatar = true
+        avatarError = nil
+        defer { uploadingAvatar = false; avatarItem = nil }
+        guard let data = try? await item.loadTransferable(type: Data.self), !data.isEmpty,
+              let img = UIImage(data: data) else {
+            avatarError = store.t("Không đọc được ảnh đã chọn. Thử ảnh khác.",
+                                  "Couldn't read the selected image. Try another.")
+            return
+        }
+        // Thu nhỏ + nén JPEG (ảnh gốc HEIC/full-size rất lớn → hay lỗi tải lên).
+        let jpeg = Self.jpegDownsized(img, maxDimension: 1024, quality: 0.85)
+        guard !jpeg.isEmpty else {
+            avatarError = store.t("Không nén được ảnh.", "Couldn't compress the image."); return
+        }
+        do {
+            let url = try await store.api.mediaUpload(
+                dataBase64: jpeg.base64EncodedString(), mime: "image/jpeg",
+                name: "avatar_\(Int(Date().timeIntervalSince1970)).jpg")
+            _ = try await store.api.updateProfile(publicId: nil, avatarUrl: url, bio: nil)
+            // Xác minh LẠI từ máy chủ (nguồn thật) — phát hiện nếu server không lưu.
+            let serverAvatar = (try? await store.api.myProfile())?.avatarUrl ?? ""
+            if serverAvatar == url {
+                myAvatar = url
+                avatarCacheBust += 1        // ép hiển thị ảnh mới, bỏ ảnh cache cũ
+                avatarError = nil
+            } else {
+                // Upload OK nhưng máy chủ trả ảnh khác → chưa lưu (backend cũ / thiếu cột avatar_url).
+                myAvatar = serverAvatar.isEmpty ? url : serverAvatar
+                avatarCacheBust += 1
+                avatarError = store.t("Máy chủ chưa lưu được ảnh mới. Hãy cập nhật máy chủ (chạy capnhat-vps.sh) rồi thử lại.",
+                                      "The server didn't save the new photo. Update the server (run capnhat-vps.sh) and retry.")
+            }
+        } catch {
+            let raw = error.localizedDescription.lowercased()
+            if raw.contains("not found") || raw.contains("404") {
+                avatarError = store.t("Máy chủ chưa hỗ trợ đổi ảnh. Cập nhật máy chủ (capnhat-vps.sh) rồi thử lại.",
+                                      "Server doesn't support avatar yet. Update the server and retry.")
+            } else if raw.contains("large") || raw.contains("413") {
+                avatarError = store.t("Ảnh quá lớn. Chọn ảnh nhỏ hơn.", "Image too large. Pick a smaller one.")
+            } else {
+                avatarError = store.t("Đổi ảnh thất bại: ", "Change failed: ") + error.localizedDescription
+            }
+        }
+    }
+
+    // Thu nhỏ ảnh về cạnh dài tối đa + nén JPEG → tải nhanh, tránh payload quá lớn.
+    private static func jpegDownsized(_ image: UIImage, maxDimension: CGFloat, quality: CGFloat) -> Data {
+        let w = image.size.width, h = image.size.height
+        let scale = min(1, maxDimension / max(w, h))
+        let target = CGSize(width: max(1, w * scale), height: max(1, h * scale))
+        let fmt = UIGraphicsImageRendererFormat.default()
+        fmt.opaque = true; fmt.scale = 1
+        let out = UIGraphicsImageRenderer(size: target, format: fmt).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
+        return out.jpegData(compressionQuality: quality) ?? (image.jpegData(compressionQuality: quality) ?? Data())
+    }
+
     // MARK: - Friends Pane
     private var friendsPane: some View {
         ScrollView {
@@ -72,7 +237,7 @@ struct FriendsView: View {
                 if loadingFriends {
                     HStack {
                         Spacer()
-                        ProgressView("Đang tải danh sách...")
+                        ProgressView(store.t("Đang tải danh sách...", "Loading list..."))
                         Spacer()
                     }
                     .padding(.top, 40)
@@ -81,10 +246,11 @@ struct FriendsView: View {
                         Image(systemName: "person.2.slash.fill")
                             .font(.system(size: 48))
                             .foregroundStyle(.secondary)
-                        Text("Chưa có bạn bè")
+                        Text(store.t("Chưa có bạn bè", "No friends yet"))
                             .font(.headline)
                             .foregroundStyle(.secondary)
-                        Text("Hãy qua tab 'Tìm kiếm' để kết bạn với những người khác!")
+                        Text(store.t("Hãy qua tab 'Tìm kiếm' để kết bạn với những người khác!",
+                                     "Go to the 'Search' tab to add other people!"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -102,7 +268,7 @@ struct FriendsView: View {
                                     Text(friend.username)
                                         .font(.headline)
                                         .foregroundStyle(.primary)
-                                    Text("Bấm để nhắn tin")
+                                    Text(store.t("Bấm để nhắn tin", "Tap to message"))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -137,14 +303,14 @@ struct FriendsView: View {
                     let outgoingRequests = store.friendRequests.filter { $0.senderName.lowercased() == username.lowercased() }
                     
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Lời mời nhận được (\(incomingRequests.count))")
+                        Text(store.t("Lời mời nhận được", "Received requests") + " (\(incomingRequests.count))")
                             .font(.subheadline)
                             .bold()
                             .foregroundStyle(.secondary)
                             .padding(.horizontal)
-                        
+
                         if incomingRequests.isEmpty {
-                            Text("Không có lời mời nào")
+                            Text(store.t("Không có lời mời nào", "No requests"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding()
@@ -160,7 +326,7 @@ struct FriendsView: View {
                                     Text(req.senderName)
                                         .font(.headline)
                                     Spacer()
-                                    Button("Từ chối") {
+                                    Button(store.t("Từ chối", "Decline")) {
                                         Task { await respond(reqId: req.id, action: "decline") }
                                     }
                                     .font(.caption)
@@ -169,7 +335,7 @@ struct FriendsView: View {
                                     .background(Color(.systemGray5))
                                     .cornerRadius(8)
                                     
-                                    Button("Đồng ý") {
+                                    Button(store.t("Đồng ý", "Accept")) {
                                         Task { await respond(reqId: req.id, action: "accept") }
                                     }
                                     .font(.caption)
@@ -189,15 +355,15 @@ struct FriendsView: View {
                     
                     // Outgoing requests
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Yêu cầu đã gửi (\(outgoingRequests.count))")
+                        Text(store.t("Yêu cầu đã gửi", "Sent requests") + " (\(outgoingRequests.count))")
                             .font(.subheadline)
                             .bold()
                             .foregroundStyle(.secondary)
                             .padding(.horizontal)
                             .padding(.top, 10)
-                        
+
                         if outgoingRequests.isEmpty {
-                            Text("Không có yêu cầu đang chờ")
+                            Text(store.t("Không có yêu cầu đang chờ", "No pending requests"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding()
@@ -213,7 +379,7 @@ struct FriendsView: View {
                                     Text(req.receiverName)
                                         .font(.body)
                                     Spacer()
-                                    Text("Đang chờ phản hồi")
+                                    Text(store.t("Đang chờ phản hồi", "Awaiting response"))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -236,20 +402,20 @@ struct FriendsView: View {
             HStack {
                 Image(systemName: "qrcode").foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("ID của bạn").font(.caption2).foregroundStyle(.secondary)
-                    Text(store.publicId.isEmpty ? "—" : store.publicId)
+                    Text(store.t("ID của bạn", "Your ID")).font(.caption2).foregroundStyle(.secondary)
+                    Text(store.publicId.isEmpty ? "—" : store.displayPublicId)
                         .font(.subheadline.bold()).foregroundStyle(Theme.accent)
                 }
                 Spacer()
                 Button {
-                    UIPasteboard.general.string = store.publicId
+                    UIPasteboard.general.string = store.displayPublicId
                 } label: { Image(systemName: "doc.on.doc") }
             }
             .padding(12).kCard(12).padding(.horizontal)
 
             // Search Input
             HStack {
-                TextField("Nhập tên · SĐT · ID (KEN...)", text: $searchQuery)
+                TextField(store.t("Nhập tên · SĐT · ID (KEN...)", "Enter name · phone · ID (KEN...)"), text: $searchQuery)
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
@@ -280,7 +446,7 @@ struct FriendsView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     if searchResults.isEmpty && !searchQuery.isEmpty && !isSearching {
-                        Text("Không tìm thấy kết quả phù hợp")
+                        Text(store.t("Không tìm thấy kết quả phù hợp", "No matching results"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.top, 40)
@@ -321,10 +487,10 @@ struct FriendsView: View {
         if isFriend {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text("Bạn bè").font(.caption).foregroundStyle(.secondary)
+                Text(store.t("Bạn bè", "Friends")).font(.caption).foregroundStyle(.secondary)
             }
         } else if let incReq = incomingRequest {
-            Button("Chấp nhận") {
+            Button(store.t("Chấp nhận", "Accept")) {
                 Task { await respond(reqId: incReq.id, action: "accept") }
             }
             .font(.caption)
@@ -335,11 +501,11 @@ struct FriendsView: View {
             .background(Theme.accent)
             .cornerRadius(8)
         } else if outgoingRequest != nil {
-            Text("Đã gửi lời mời")
+            Text(store.t("Đã gửi lời mời", "Request sent"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            Button("Thêm bạn") {
+            Button(store.t("Thêm bạn", "Add friend")) {
                 Task { await sendRequest(friendId: user.id) }
             }
             .font(.caption)

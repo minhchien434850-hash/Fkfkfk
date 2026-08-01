@@ -30,12 +30,16 @@ echo ""
 
 # 1. Cài đặt hệ thống
 echo "▸ [1/7] Cài đặt packages hệ thống..."
-sudo apt update -y
+sudo apt update -y || true
+# Gói BẮT BUỘC để chạy backend (Python). Dùng || true để không vỡ cả script nếu 1 gói lỗi.
 sudo apt install -y python3 python3-venv python3-dev python3-pip \
     nginx certbot python3-certbot-nginx \
-    nodejs npm gcc g++ golang-go default-jdk \
-    ffmpeg \
-    zip unzip curl wget git
+    ffmpeg zip unzip curl wget git || true
+# Gói TUỲ CHỌN cho tính năng chạy code (.js/.go/.java). Bỏ "npm" vì hay xung đột nodejs.
+# Mỗi gói cài riêng + bỏ qua nếu lỗi → KHÔNG làm hỏng quá trình cài chính.
+for pkg in nodejs gcc g++ golang-go default-jdk; do
+    sudo apt install -y "$pkg" 2>/dev/null || echo "  (bỏ qua $pkg — không bắt buộc)"
+done
 
 # 2. Tạo thư mục làm việc
 echo "▸ [2/7] Tạo thư mục làm việc..."
@@ -63,14 +67,15 @@ pip install \
     "uvicorn[standard]>=0.29" \
     "httpx>=0.27" \
     "cryptography>=42" \
-    "stripe>=8.0" \
     "python-multipart>=0.0.9" \
     "pypdf" \
     "python-docx" \
     "openpyxl" \
     "TikTokLive>=6.0" \
     "aiosmtpd>=1.4" \
-    "yt-dlp"
+    "yt-dlp" \
+    "PyJWT>=2.8" \
+    "asyncssh>=2.14"
 
 # 5. Tạo file .env
 echo "▸ [5/7] Tạo file cấu hình..."
@@ -125,7 +130,8 @@ server {
     listen 80;
     server_name $PUBLIC_IP _;
 
-    client_max_body_size 4096M;
+    client_max_body_size 10240M;
+    client_body_timeout 3600s;
 
     location / {
         proxy_pass http://127.0.0.1:$PORT;
@@ -134,9 +140,10 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 1800s;
-        proxy_send_timeout 1800s;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
         proxy_connect_timeout 60s;
+        proxy_request_buffering off;
     }
 }
 EOF

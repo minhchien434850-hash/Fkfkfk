@@ -1,0 +1,532 @@
+import SwiftUI
+import AVFoundation
+import MediaPlayer
+
+// ======================== Engine TTS (đọc văn bản, phát nền) ========================
+// FILE CHÍNH: khai báo class + TOÀN BỘ stored property + vòng đời + điều khiển phát chung.
+// Các nhóm chức năng tách sang file extension cho dễ kiểm soát:
+//   • TTSEngine+Voices.swift      — giọng iOS / Siri / Siri-Anh phiên âm
+//   • TTSEngine+Google.swift      — Chị Google (online, prefetch)
+//   • TTSEngine+ElevenLabs.swift  — giọng ElevenLabs (AI)
+//   • TTSEngine+Sounds.swift      — âm thanh thông báo (quà/follow/share)
+//   • TTSEngine+Background.swift  — chạy nền, Now Playing, Control Center
+/// Gói toàn bộ thiết lập TTS trong UserDefaults thành JSON để ĐỒNG BỘ LÊN MÁY CHỦ
+/// (theo tài khoản) — đổi máy / xoá app cài lại vẫn giữ nguyên.
+enum TTSSettingsSync {
+    static let stringKeys = [
+        "tts_engine_type", "tts_system_voice_id", "tts_siri_voice_id",
+        "eleven_voice_id", "eleven_voice_name", "eleven_tone_id", "eleven_model",
+        "tts_tiktok_id", "tts_read_types", "tts_auto_announce_text",
+        "tts_event_template_join", "tts_event_template_gift", "tts_event_template_comment",
+        "tts_event_template_follow", "tts_event_template_share"
+    ]
+    static let doubleKeys = ["eleven_speed", "tts_auto_announce_minutes"]
+    static let floatKeys  = ["tts_rate", "tts_pitch", "tts_volume"]
+    static let boolKeys   = ["tts_translate_to_vi", "tts_only_vi_voices",
+                             "tts_auto_announce_on", "tts_auto_roast_on",
+                             "eleven_auto_emotion"]
+    static let stringArrayKeys = ["tts_custom_roasts"]
+
+    static func snapshotJSON() -> String {
+        let d = UserDefaults.standard
+        var out: [String: Any] = [:]
+        for k in stringKeys { if let v = d.string(forKey: k) { out[k] = v } }
+        for k in doubleKeys { if d.object(forKey: k) != nil { out[k] = d.double(forKey: k) } }
+        for k in floatKeys  { if d.object(forKey: k) != nil { out[k] = Double(d.float(forKey: k)) } }
+        for k in boolKeys   { if d.object(forKey: k) != nil { out[k] = d.bool(forKey: k) } }
+        for k in stringArrayKeys { if let v = d.stringArray(forKey: k) { out[k] = v } }
+        guard let data = try? JSONSerialization.data(withJSONObject: out),
+              let s = String(data: data, encoding: .utf8) else { return "" }
+        return s
+    }
+
+    /// Ghi cấu hình từ máy chủ vào UserDefaults. Trả về true nếu có áp dụng gì đó.
+    @discardableResult
+    static func apply(json: String) -> Bool {
+        guard let data = json.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+        let d = UserDefaults.standard
+        for k in stringKeys { if let v = obj[k] as? String { d.set(v, forKey: k) } }
+        for k in doubleKeys { if let v = obj[k] as? NSNumber { d.set(v.doubleValue, forKey: k) } }
+        for k in floatKeys  { if let v = obj[k] as? NSNumber { d.set(v.floatValue, forKey: k) } }
+        for k in boolKeys   { if let v = obj[k] as? NSNumber { d.set(v.boolValue, forKey: k) } }
+        for k in stringArrayKeys { if let v = obj[k] as? [String] { d.set(v, forKey: k) } }
+        return !obj.isEmpty
+    }
+}
+
+final class TTSEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
+    enum EngineType: String, CaseIterable, Identifiable {
+        case system = "system"
+        case google = "google"
+        case siri = "siri"
+        case elevenlabs = "elevenlabs"
+
+        var id: String { self.rawValue }
+        var label: String {
+            switch self {
+            case .system: return "Mặc định (iOS)"
+            case .google: return "Chị Google (Online)"
+            case .siri: return "Giọng Siri (iOS)"
+            case .elevenlabs: return "Giọng ElevenLabs"
+            }
+        }
+    }
+
+    let synth = AVSpeechSynthesizer()
+    var silentPlayer: AVAudioPlayer?
+    var notifPlayer: AVAudioPlayer?   // phát âm thanh thông báo (follow/quà/share…) TRƯỚC khi đọc
+    var notifDataCache: [String: Data] = [:]   // cache audio meme tải từ link (khỏi tải lại mỗi lần)
+
+    // Mức ƯU TIÊN đọc: sự kiện quà/follow/share > bình luận > người vào phòng.
+    // Bình luận LUÔN được đọc TRƯỚC lời chào "người vào" đang chờ.
+    enum SpeakPriority: Int { case join = 0, comment = 1, event = 2 }
+    var maxJoinBacklog = 3   // giữ tối đa 3 lời chào "người vào" chờ đọc → welcome luôn mới, không nghẽn bình luận
+
+    // Google TTS Queue
+    var googleQueue: [String] = []
+    var googlePrio: [Int] = []           // mức ưu tiên song song với googleQueue (mỗi đoạn 1 mức)
+    var googleAudio: AVAudioPlayer?      // phát từ Data đã tải sẵn (mượt, không khoảng lặng)
+    var googleNextData: Data?            // PREFETCH: audio của đoạn KẾ đã tải sẵn trong lúc đọc đoạn này
+    var isPlayingGoogle = false
+    var googleItemToken = 0   // chống "kẹt" 1 đoạn: watchdog so khớp token
+
+    // Tốc độ phát cho Google (map thanh rate → bội số 0.5x…2.0x; mặc định rate 0.5 = 1.0x)
+    var googleSpeed: Float { max(0.5, min(2.0, rate * 2.0)) }
+
+    // ElevenLabs (đa ngôn ngữ — đọc tiếng Việt)
+    // Key lưu trong Keychain (mã hoá iOS) — KHÔNG dùng UserDefaults cho secret.
+    @Published var elevenKey: String = Keychain.load("elevenlabs_api_key") ?? "" {
+        didSet {
+            let trimmed = elevenKey.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                Keychain.delete("elevenlabs_api_key")
+            } else {
+                Keychain.save("elevenlabs_api_key", trimmed)
+            }
+        }
+    }
+    // Voice ID của ElevenLabs — nhập từ tài khoản elevenlabs.io của bạn.
+    @Published var elevenVoiceId: String = UserDefaults.standard.string(forKey: "eleven_voice_id") ?? "" {
+        didSet {
+            UserDefaults.standard.set(elevenVoiceId, forKey: "eleven_voice_id")
+            let vid = elevenVoiceId.trimmingCharacters(in: .whitespaces)
+            if vid.isEmpty {
+                elevenVoiceName = ""
+                UserDefaults.standard.removeObject(forKey: "eleven_voice_name")
+            } else {
+                fetchElevenVoiceName(vid)
+            }
+        }
+    }
+    // Tên giọng hiển thị — tự động lấy từ API khi nhập Voice ID
+    @Published var elevenVoiceName: String = UserDefaults.standard.string(forKey: "eleven_voice_name") ?? ""
+
+    // KEY DÙNG CHUNG do ADMIN đặt trên MÁY CHỦ. Khi bật, app đọc ElevenLabs qua máy chủ
+    // (POST serverBase/tts/eleven) → khách CHỈ cần nhập Voice ID, không cần & không thấy key.
+    @Published var elevenServerKey: Bool = false
+    var serverBase: String = ""       // URL máy chủ (do AppStore bơm vào)
+    var serverToken: String? = nil    // token đăng nhập để gọi /tts/eleven
+    // Tốc độ đọc ElevenLabs (0.7 chậm → 1.2 nhanh; 1.0 = bình thường). Ai cũng chỉnh được (lưu máy).
+    @Published var elevenSpeed: Double = (UserDefaults.standard.object(forKey: "eleven_speed") as? Double) ?? 1.0 {
+        didSet { UserDefaults.standard.set(elevenSpeed, forKey: "eleven_speed") }
+    }
+
+    // ===== Tự động đọc thông báo định kỳ (quảng cáo / nhắc inbox…) =====
+    // Bật/tắt · sửa chữ · sửa số phút · nghe thử. Đọc bằng ĐÚNG giọng đang chọn (mọi động cơ).
+    @Published var autoAnnounceOn: Bool = UserDefaults.standard.bool(forKey: "tts_auto_announce_on") {
+        didSet {
+            UserDefaults.standard.set(autoAnnounceOn, forKey: "tts_auto_announce_on")
+            rescheduleAutoAnnounce()
+        }
+    }
+    @Published var autoAnnounceText: String =
+        UserDefaults.standard.string(forKey: "tts_auto_announce_text")
+        ?? "mọi người cần phần mềm này inbox phần tiểu sử cho mình" {
+        didSet { UserDefaults.standard.set(autoAnnounceText, forKey: "tts_auto_announce_text") }
+    }
+    // Số phút giữa 2 lần đọc (0.5–120). Mặc định 1 phút.
+    @Published var autoAnnounceMinutes: Double =
+        (UserDefaults.standard.object(forKey: "tts_auto_announce_minutes") as? Double) ?? 1.0 {
+        didSet {
+            UserDefaults.standard.set(autoAnnounceMinutes, forKey: "tts_auto_announce_minutes")
+            rescheduleAutoAnnounce()
+        }
+    }
+    private var autoAnnounceTimer: Timer?
+
+    /// Đặt lại hẹn giờ đọc thông báo định kỳ theo trạng thái bật/tắt & số phút hiện tại.
+    func rescheduleAutoAnnounce() {
+        autoAnnounceTimer?.invalidate()
+        autoAnnounceTimer = nil
+        guard autoAnnounceOn else { return }
+        let interval = max(30.0, autoAnnounceMinutes * 60.0)   // tối thiểu 30 giây cho an toàn
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let msg = self.autoAnnounceText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !msg.isEmpty else { return }
+            self.speak(msg)   // đọc bằng đúng giọng đang chọn
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        autoAnnounceTimer = timer
+    }
+
+    /// Nghe thử ngay câu thông báo bằng giọng đang chọn.
+    func previewAutoAnnounce() {
+        let msg = autoAnnounceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !msg.isEmpty else { return }
+        speak(msg)
+    }
+
+    // ===== Tự động CÀ KHỊA lại bình luận khiêu khích (clap-back) =====
+    @Published var autoRoastOn: Bool = UserDefaults.standard.bool(forKey: "tts_auto_roast_on") {
+        didSet { UserDefaults.standard.set(autoRoastOn, forKey: "tts_auto_roast_on") }
+    }
+
+    /// Kho câu cà khịa (vui, không tục). Dùng {name} để GỌI TÊN người bình luận
+    /// → đọc "tên ơi, ..." rồi tới câu khịa.
+    static let roastComebacks: [String] = [
+        "{name} ơi, nói người thì phải ngẫm đến ta nha.",
+        "{name} rảnh dữ ha, vô đây chỉ để bình luận nhiêu đó thôi à?",
+        "Cảm ơn {name} đã đóng góp tương tác, chúc mau khôn nha.",
+        "{name} nè, anti là fan giấu mặt đó, cảm ơn đã theo dõi mình sát sao.",
+        "{name} gõ phím nhanh vậy mà sao suy nghĩ hơi chậm nhỉ?",
+        "Khịa mình chi cho mệt {name} ơi, để sức đó lo cho bản thân đi.",
+        "{name} đúng là nhân tài, tiếc là chưa ai phát hiện ra thôi.",
+        "Nghe {name} nói xong mình càng tự tin hơn, cảm ơn nha.",
+        "{name} lo được cho mình chưa mà đã lo cho người ta rồi?",
+        "Trình của {name} tới đây thôi à? Mình tưởng còn hơn chứ.",
+        "{name} gõ phím thì mạnh, ngoài đời chắc hiền như cục đất nhỉ.",
+        "{name} vô đây khịa mà mình vẫn vui, vậy là {name} thua rồi đó.",
+        "Câu này hay đó {name}, tiếc là nói sai người rồi.",
+        "Thôi {name} ra ngoài hít tí khí trời cho tỉnh táo lại nha.",
+        "Bình luận của {name} mình nghe rồi, nhẹ như gió thoảng à.",
+        "{name} ơi, năng lượng này để dành khen mình đi cho đỡ phí nha.",
+        "Mình đọc bình luận của {name} bằng giọng dễ thương nhất luôn đó, thấy chưa.",
+        "{name} chê hăng vậy chắc thầm thương mình lắm đúng không.",
+        "Cảm ơn {name} đã ở lại lâu vậy, đúng là fan ruột rồi còn gì.",
+        "{name} nói nữa đi, mình còn nhiều câu trả lời hay lắm nha.",
+        "Người ta livestream vui vẻ, {name} vô mang theo nguyên cục mây đen ha.",
+        "{name} giỏi bình luận vậy sao không thử tự làm một buổi live xem.",
+        "Mình cười cho {name} một cái, chúc buổi tối bớt tiêu cực nha.",
+        "{name} ơi, ghét của nào trời trao của nấy, coi chừng ghiền mình luôn đó.",
+        "Khen thì khó chứ chê thì {name} nhanh ghê, luyện lại kỹ năng khen nha.",
+        "{name} tốn công gõ nhiêu đây, mình tốn có ba giây đọc thôi à.",
+        "Thương {name} ghê, chắc hôm nay có chuyện buồn nên mới vô đây xả.",
+        "{name} cứ tự nhiên, phòng live này miễn phí cho cả người dễ thương lẫn người khó ở.",
+        "Nghe xong mình vẫn xinh vẫn vui, còn {name} thì sao rồi.",
+        "{name} ơi, gõ chậm thôi kẻo mỏi tay mà mình vẫn chưa quạu nha.",
+        "Mình ghi nhận ý kiến của {name}, xếp vào thùng kỷ niệm vui vui.",
+        "{name} vô đây là mình biết hôm nay view lại tăng rồi, cảm ơn nha."
+    ]
+
+    /// Từ khoá khiêu khích/anti để KÍCH HOẠT cà khịa (kèm dạng không dấu thường gặp).
+    private static let provokeWords: Set<String> = [
+        "ngu", "đần", "dan", "tuất", "tuat", "chó", "cho", "súc", "suc", "cút", "cut",
+        "khốn", "phò", "đĩ", "địt", "dit", "lồn", "buồi", "dái",
+        "cc", "cl", "clm", "đm", "dm", "đmm", "dmm", "đcm", "dcm", "đkm", "dkm",
+        "vl", "vcl", "vkl", "loz", "vloz", "cmm"
+    ]
+    /// Cụm nhiều từ toxic nặng (khớp nguyên cụm).
+    private static let provokePhrases: [String] = [
+        "hack ngu", "óc chó", "oc cho", "súc vật", "suc vat",
+        "vô học", "vo hoc", "mất dạy", "mat day", "im mồm", "im mom", "ngu người"
+    ]
+
+    /// Câu cà khịa DO NGƯỜI DÙNG tự thêm trong app (lưu trên máy, không cần build lại).
+    @Published var customRoasts: [String] =
+        UserDefaults.standard.stringArray(forKey: "tts_custom_roasts") ?? [] {
+        didSet { UserDefaults.standard.set(customRoasts, forKey: "tts_custom_roasts") }
+    }
+
+    /// Thêm 1 câu cà khịa của người dùng (bỏ trùng & khoảng trắng thừa).
+    func addCustomRoast(_ s: String) {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !customRoasts.contains(t) else { return }
+        customRoasts.append(t)
+    }
+
+    /// Xoá 1 câu cà khịa của người dùng.
+    func removeCustomRoast(_ s: String) { customRoasts.removeAll { $0 == s } }
+
+    /// Có nên cà khịa lại bình luận này không — CHỈ khi có từ/cụm TOXIC NẶNG.
+    func shouldRoast(_ comment: String) -> Bool {
+        let low = comment.lowercased()
+        for p in Self.provokePhrases where low.contains(p) { return true }
+        let tokens = Set(low.split { !$0.isLetter && !$0.isNumber }.map(String.init))
+        return !tokens.isDisjoint(with: Self.provokeWords)
+    }
+
+    // Giãn cách cà khịa: KHÔNG khịa lại liên tục (tránh spam, để đúng lúc & đỡ nhàm).
+    private var lastRoastAt: Date = .distantPast
+    var roastCooldown: TimeInterval = 18   // giây giữa 2 lần cà khịa
+    /// Đã đủ giãn cách để cà khịa tiếp chưa (đồng thời ghi nhận thời điểm nếu đủ).
+    func roastDue() -> Bool {
+        let now = Date()
+        guard now.timeIntervalSince(lastRoastAt) >= roastCooldown else { return false }
+        lastRoastAt = now
+        return true
+    }
+
+    /// Ghép tên vào câu cà khịa: có {name} thì thay bằng tên; không có thì chèn "tên ơi, " phía trước.
+    func renderRoast(_ line: String, name: String) -> String {
+        let nm = name.trimmingCharacters(in: .whitespaces)
+        if line.contains("{name}") {
+            return line.replacingOccurrences(of: "{name}", with: nm.isEmpty ? "bạn" : nm)
+        } else if !nm.isEmpty {
+            return "\(nm) ơi, " + line
+        }
+        return line
+    }
+
+    /// 1 câu cà khịa ngẫu nhiên (gộp câu mặc định + câu người dùng tự thêm), đã GỌI TÊN người.
+    func randomRoast(name: String = "") -> String {
+        let pool = Self.roastComebacks + customRoasts
+        guard let line = pool.randomElement() else { return "" }
+        return renderRoast(line, name: name)
+    }
+
+    func fetchElevenVoiceName(_ vid: String) {
+        let key = elevenKey.trimmingCharacters(in: .whitespaces)
+        guard !key.isEmpty, let url = URL(string: "https://api.elevenlabs.io/v1/voices/\(vid)") else { return }
+        var req = URLRequest(url: url)
+        req.setValue(key, forHTTPHeaderField: "xi-api-key")
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            guard let self, let data else { return }
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let name = obj["name"] as? String {
+                DispatchQueue.main.async {
+                    self.elevenVoiceName = name
+                    UserDefaults.standard.set(name, forKey: "eleven_voice_name")
+                }
+            }
+        }.resume()
+    }
+    // Preset tông giọng TikTok đang chọn (mặc định: TikTok Nhẹ)
+    @Published var elevenToneId: String = UserDefaults.standard.string(forKey: "eleven_tone_id") ?? "tiktok_calm" {
+        didSet { UserDefaults.standard.set(elevenToneId, forKey: "eleven_tone_id") }
+    }
+    var currentTone: ElevenTonePreset {
+        kElevenTonePresets.first { $0.id == elevenToneId } ?? kElevenTonePresets[0]
+    }
+    var elevenPlayer: AVAudioPlayer?
+    var elevenQueue: [String] = []
+    var elevenPrio: [Int] = []           // mức ưu tiên song song với elevenQueue
+    var isPlayingEleven = false
+
+    @Published var isSpeaking = false
+    @Published var isPaused = false
+
+    @Published var voiceId: String = UserDefaults.standard.string(forKey: "tts_system_voice_id") ?? "" {
+        didSet { UserDefaults.standard.set(voiceId, forKey: "tts_system_voice_id") }   // nhớ giọng hệ thống đã chọn
+    }
+    // Giọng riêng cho chế độ "Giọng Siri (iOS)" — người dùng tự chọn trong app, app nhớ lại.
+    @Published var siriVoiceId: String = UserDefaults.standard.string(forKey: "tts_siri_voice_id") ?? "" {
+        didSet { UserDefaults.standard.set(siriVoiceId, forKey: "tts_siri_voice_id") }
+    }
+    @Published var rate: Float = UserDefaults.standard.object(forKey: "tts_rate") as? Float ?? AVSpeechUtteranceDefaultSpeechRate {
+        didSet {
+            UserDefaults.standard.set(rate, forKey: "tts_rate")
+            // Đổi tốc độ NGAY cho Google đang phát (không cần đợi đoạn mới)
+            googleAudio?.enableRate = true
+            googleAudio?.rate = googleSpeed
+        }
+    }
+    @Published var pitch: Float = UserDefaults.standard.object(forKey: "tts_pitch") as? Float ?? 1.0 {
+        didSet { UserDefaults.standard.set(pitch, forKey: "tts_pitch") }
+    }
+    @Published var volume: Float = UserDefaults.standard.object(forKey: "tts_volume") as? Float ?? 1.0 {
+        didSet {
+            UserDefaults.standard.set(volume, forKey: "tts_volume")
+            // Cập nhật âm lượng ngay cho audio đang phát (Google / ElevenLabs), không cần đợi đọc câu mới.
+            googleAudio?.volume = volume
+            elevenPlayer?.volume = volume
+        }
+    }
+    // Số đoạn còn đang chờ đọc trong hàng đợi (Google/ElevenLabs) — hiện ra UI để biết app có bị "ứ" bình luận không.
+    @Published var pendingCount: Int = 0
+    // Giới hạn hàng đợi khi live quá đông bình luận → bỏ bớt đoạn cũ, ưu tiên đọc đoạn mới gần thời điểm hiện tại.
+    var maxQueueSize: Int = 20
+
+    @Published var engineType: EngineType = .system {
+        didSet {
+            UserDefaults.standard.set(engineType.rawValue, forKey: "tts_engine_type")
+        }
+    }
+
+    override init() {
+        super.init()
+        synth.delegate = self
+        // CHỈ chọn giọng mặc định khi CHƯA có giọng đã lưu (giữ nguyên lựa chọn của người dùng).
+        if voiceId.isEmpty {
+            if let vi = AVSpeechSynthesisVoice.speechVoices().first(where: { $0.language.hasPrefix("vi") }) {
+                voiceId = vi.identifier
+            } else if let any = AVSpeechSynthesisVoice.speechVoices().first {
+                voiceId = any.identifier
+            }
+        }
+
+        if let savedEngine = UserDefaults.standard.string(forKey: "tts_engine_type"),
+           let type = EngineType(rawValue: savedEngine) {
+            self.engineType = type
+        }
+        setupRemoteCommands()   // điều khiển từ Control Center / màn khoá
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioInterruption),
+                                                name: AVAudioSession.interruptionNotification, object: nil)
+        rescheduleAutoAnnounce()   // khôi phục hẹn giờ đọc thông báo nếu đã bật
+    }
+
+    /// Tự khôi phục đọc/phát nền sau khi cuộc gọi đến/đi hoặc Siri… làm gián đoạn audio session.
+    @objc private func handleAudioInterruption(_ note: Notification) {
+        guard let info = note.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        if type == .ended {
+            activateSession()
+            if silentPlayer != nil { startBackgroundMode() }
+            if isPlayingEleven, !isPaused { elevenPlayer?.play() }
+            if isPlayingGoogle, !isPaused { googleAudio?.play() }
+        }
+    }
+
+    /// Bật phiên audio dạng playback để tiếp tục đọc khi khoá màn hình / chuyển app khác.
+    func activateSession() {
+        let s = AVAudioSession.sharedInstance()
+        // KHÔNG dùng .duckOthers → không hạ/tắt âm lượng nhạc app khác (Spotify/YouTube...).
+        try? s.setCategory(.playback, mode: .spokenAudio, options: [.mixWithOthers])
+        try? s.setActive(true, options: [])
+    }
+
+    /// Vị trí chèn 1 mục MỚI (mức `level`) vào hàng đợi theo mức ưu tiên:
+    /// chèn TRƯỚC mục đầu tiên có mức thấp hơn → mức cao đọc trước, cùng mức giữ đúng thứ tự đến.
+    func queueInsertIndex(_ prios: [Int], level: Int) -> Int {
+        for (i, p) in prios.enumerated() where p < level { return i }
+        return prios.count
+    }
+
+    /// level: 2 (quà/follow/share) > 1 (bình luận) > 0 (người vào). Mục mức cao được CHÈN LÊN TRƯỚC
+    /// các mục mức thấp đang chờ → bình luận luôn đọc trước lời chào "người vào".
+    func speak(_ text: String, level: Int = SpeakPriority.comment.rawValue) {
+        // Chuẩn hóa văn bản:
+        // · ElevenLabs: GIỮ NGUYÊN văn bản gốc (model tự xử lý ngữ điệu/cảm xúc).
+        // · Chị Google: chuẩn hóa đầy đủ (kèm mở rộng tiếng lóng).
+        // · Giọng iOS (mặc định · Siri · Siri Anh-Việt): BỎ bộ lọc tiếng lóng,
+        //   chỉ giữ chuẩn hóa số tiền/ký hiệu/emoji để đọc tự nhiên, mượt hơn.
+        let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t: String
+        switch engineType {
+        // ElevenLabs & Chị Google: chuẩn hóa ĐẦY ĐỦ (mở rộng tiếng lóng/viết tắt +
+        // đánh vần chữ cái rõ ràng "qr→quy rờ", đọc tiếng Việt không lẫn tiếng Anh).
+        case .elevenlabs: t = VietnameseTextNormalizer.normalize(raw)
+        case .google:     t = VietnameseTextNormalizer.normalize(raw)
+        default:          t = VietnameseTextNormalizer.normalize(raw, slang: false)
+        }
+        guard !t.isEmpty else { return }
+        activateSession()
+        // Tự bật chế độ nền (giữ audio sống khi chuyển app / khoá màn hình)
+        if silentPlayer == nil { startBackgroundMode() }
+        updateNowPlaying(playing: true)   // hiện ở Control Center / màn khoá
+
+        switch engineType {
+        case .google:
+            playGoogleTTS(t, level: level)
+        case .siri:
+            playSiriTTS(t)
+        case .elevenlabs:
+            playElevenLabsTTS(t, level: level)
+        case .system:
+            playSystemTTS(t)
+        }
+    }
+
+    func stop() {
+        synth.stopSpeaking(at: .immediate)
+        googleQueue.removeAll()
+        googlePrio.removeAll()
+        googleNextData = nil
+        googleAudio?.stop()
+        googleAudio = nil
+        isPlayingGoogle = false
+        elevenQueue.removeAll()
+        elevenPrio.removeAll()
+        elevenPlayer?.stop()
+        elevenPlayer = nil
+        isPlayingEleven = false
+        notifPlayer?.stop()
+        notifPlayer = nil
+        isSpeaking = false
+        isPaused = false
+        pendingCount = 0
+        updateNowPlaying(playing: false)
+        stopBackgroundMode()
+    }
+
+    /// Bỏ qua đoạn đang đọc, chuyển ngay sang đoạn tiếp theo trong hàng đợi (hữu ích khi live bình luận đông, đọc không kịp).
+    func skipCurrent() {
+        if isPlayingEleven {
+            elevenPlayer?.stop()
+            playNextEleven()
+        } else if isPlayingGoogle {
+            googleAudio?.stop()
+            playNextGoogleItem()
+        } else if synth.isSpeaking {
+            synth.stopSpeaking(at: .immediate)
+        }
+    }
+
+    // ElevenLabs / Google phát xong 1 đoạn → đọc đoạn tiếp theo
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if player === elevenPlayer { playNextEleven() }
+        else if player === googleAudio { playNextGoogleItem() }
+    }
+
+    func pauseOrContinue() {
+        if isPlayingEleven {
+            if isPaused { elevenPlayer?.play(); isPaused = false }
+            else if isSpeaking { elevenPlayer?.pause(); isPaused = true }
+        } else if engineType == .google {
+            if isPaused {
+                googleAudio?.play()
+                isPaused = false
+            } else if isSpeaking {
+                googleAudio?.pause()
+                isPaused = true
+            }
+        } else {
+            if synth.isPaused { synth.continueSpeaking(); isPaused = false }
+            else if synth.isSpeaking { synth.pauseSpeaking(at: .word); isPaused = true }
+        }
+    }
+
+    deinit {
+        autoAnnounceTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    /// Nạp lại các thiết lập @Published từ UserDefaults (sau khi kéo cấu hình từ máy chủ về).
+    func reloadFromDefaults() {
+        let d = UserDefaults.standard
+        if let s = d.string(forKey: "tts_engine_type"), let t = EngineType(rawValue: s) { engineType = t }
+        if let v = d.string(forKey: "tts_system_voice_id"), !v.isEmpty { voiceId = v }
+        siriVoiceId = d.string(forKey: "tts_siri_voice_id") ?? siriVoiceId
+        elevenVoiceId = d.string(forKey: "eleven_voice_id") ?? elevenVoiceId
+        elevenVoiceName = d.string(forKey: "eleven_voice_name") ?? elevenVoiceName
+        elevenToneId = d.string(forKey: "eleven_tone_id") ?? elevenToneId
+        if d.object(forKey: "eleven_speed") != nil { elevenSpeed = d.double(forKey: "eleven_speed") }
+        if d.object(forKey: "tts_rate") != nil { rate = d.float(forKey: "tts_rate") }
+        if d.object(forKey: "tts_pitch") != nil { pitch = d.float(forKey: "tts_pitch") }
+        if d.object(forKey: "tts_volume") != nil { volume = d.float(forKey: "tts_volume") }
+        autoAnnounceText = d.string(forKey: "tts_auto_announce_text") ?? autoAnnounceText
+        if d.object(forKey: "tts_auto_announce_minutes") != nil { autoAnnounceMinutes = d.double(forKey: "tts_auto_announce_minutes") }
+        if d.object(forKey: "tts_auto_announce_on") != nil { autoAnnounceOn = d.bool(forKey: "tts_auto_announce_on") }
+        if d.object(forKey: "tts_auto_roast_on") != nil { autoRoastOn = d.bool(forKey: "tts_auto_roast_on") }
+        customRoasts = d.stringArray(forKey: "tts_custom_roasts") ?? customRoasts
+    }
+
+    // delegate AVSpeechSynthesizer
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didStart u: AVSpeechUtterance) { isSpeaking = true }
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
+        if !s.isSpeaking { isSpeaking = false; isPaused = false; updateNowPlaying(playing: false) }
+    }
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) { isSpeaking = false }
+}

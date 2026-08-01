@@ -1,5 +1,20 @@
 import Foundation
 import SwiftUI
+import UIKit
+import UserNotifications
+
+// Bảng màu accent người dùng có thể chọn
+let kAccentColors: [(name: String, color: Color)] = [
+    ("blue",   Color(red: 0.0,  green: 0.58, blue: 0.96)),
+    ("purple", Color(red: 0.65, green: 0.45, blue: 0.95)),
+    ("pink",   Color(red: 0.96, green: 0.22, blue: 0.60)),
+    ("orange", Color(red: 0.98, green: 0.50, blue: 0.05)),
+    ("green",  Color(red: 0.20, green: 0.78, blue: 0.35)),
+    ("teal",   Color(red: 0.00, green: 0.80, blue: 0.78)),
+    ("red",    Color(red: 0.95, green: 0.18, blue: 0.18)),
+    ("gold",   Color(red: 1.00, green: 0.84, blue: 0.00)),
+    ("indigo", Color(red: 0.35, green: 0.34, blue: 0.84)),
+]
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -12,7 +27,17 @@ final class AppStore: ObservableObject {
     @Published var isAdmin: Bool = false
     @Published var plan: String = "free"
     @Published var credits: Int = 0
+    @Published var planExpires: Int = 0          // unix giây; 0 = không hạn / vĩnh viễn
+    @Published var planExpiredNotice = false     // gói vừa hết hạn → hiện thông báo 1 lần
     @Published var publicId: String = ""
+    @Published var userId: Int?
+
+    // §6.1 — ID hiển thị: bỏ tiền tố "KEN" ở đầu (kể cả khi máy chủ chưa cập nhật).
+    var displayPublicId: String {
+        let p = publicId
+        if p.uppercased().hasPrefix("KEN") { return String(p.dropFirst(3)) }
+        return p
+    }
 
     // Bảo trì (admin bật → khoá app người dùng)
     @Published var maintenance: Bool = false
@@ -20,6 +45,13 @@ final class AppStore: ObservableObject {
 
     /// Admin luôn Pro vĩnh viễn; còn lại tuỳ gói.
     var isPro: Bool { isAdmin || plan.lowercased() == "pro" }
+
+    /// Ngày hết hạn gói (dd/MM/yyyy) hoặc nil nếu vĩnh viễn / không có hạn.
+    var planExpiryText: String? {
+        guard !isAdmin, planExpires > 0 else { return nil }
+        let f = DateFormatter(); f.dateFormat = "dd/MM/yyyy"
+        return f.string(from: Date(timeIntervalSince1970: TimeInterval(planExpires)))
+    }
 
     @Published var providers: [Provider] = []
     @Published var configuredKeys: Set<String> = []
@@ -33,6 +65,18 @@ final class AppStore: ObservableObject {
     @Published var themeMode: String
     @Published var language: String
     @Published var systemPrompt: String
+    @Published var showPlanIntro: Bool = false   // hiện màn giới thiệu gói PRO/Free sau đăng nhập
+
+    // Màu accent người dùng chọn (tên: "blue", "purple", ...)
+    @Published var accentColorName: String
+    // Logo có hiệu ứng động hay không
+    @Published var logoAnimated: Bool
+
+    // Lời chào khi mở app (TTS)
+    @Published var welcomeEnabled: Bool
+    @Published var welcomeText: String
+    @Published var welcomeVoiceId: String   // AVSpeechSynthesisVoice.identifier hoặc "" = mặc định
+    @Published var welcomeRate: Float       // 0.3 (chậm) … 0.65 (nhanh); mặc định 0.5
 
     @Published var profiles: [ServerProfile] = []
 
@@ -46,23 +90,70 @@ final class AppStore: ObservableObject {
 
     private let d = UserDefaults.standard
 
+    /// Màu accent hiện tại của app (phụ thuộc vào accentColorName)
+    var accentColor: Color {
+        kAccentColors.first(where: { $0.name == accentColorName })?.color
+            ?? Color(red: 0.0, green: 0.58, blue: 0.96)
+    }
+
     init() {
-        let savedURL = d.string(forKey: "baseURL") ?? ""
+        var savedURL = d.string(forKey: "baseURL") ?? ""
+        // Chuyển MỌI máy chủ cũ đã chết (IP cũ 103.131.56.11 + tên miền app.kenios.store)
+        // → VPS MỚI (Config.defaultServerURL). CHỈ CHẠY 1 LẦN (cờ v2). Sau đó tôn trọng lựa
+        // chọn của người dùng, không tự đổi lại nữa.
+        let deadHosts = ["http://103.131.56.11", "https://103.131.56.11",
+                         "http://103.131.56.11/", "https://103.131.56.11/",
+                         "https://app.kenios.store", "http://app.kenios.store",
+                         "https://app.kenios.store/", "http://app.kenios.store/"]
+        if !d.bool(forKey: "didMigrateServer_v2_newIP") {
+            if savedURL.isEmpty || deadHosts.contains(savedURL) {
+                savedURL = Config.defaultServerURL
+                d.set(savedURL, forKey: "baseURL")
+            }
+            d.set(true, forKey: "didMigrateServer_v2_newIP")
+        }
+        // v3 — chuyển sang TÊN MIỀN HTTPS mới (có SSL). Ai đang dùng IP VPS/tên miền cũ
+        // sẽ tự sang https://kenios.io.vn; nếu domain/SSL chưa sẵn sàng, app né sang IP.
+        let toDomainHosts = deadHosts + ["http://160.25.168.234", "https://160.25.168.234",
+                                         "http://160.25.168.234/", "https://160.25.168.234/"]
+        if !d.bool(forKey: "didMigrateServer_v3_domain") {
+            if savedURL.isEmpty || toDomainHosts.contains(savedURL) {
+                savedURL = Config.defaultServerURL
+                d.set(savedURL, forKey: "baseURL")
+            }
+            d.set(true, forKey: "didMigrateServer_v3_domain")
+        }
         baseURL = savedURL.isEmpty ? Config.defaultServerURL : savedURL
         serverType = d.string(forKey: "serverType") ?? Config.defaultServerType
         username = d.string(forKey: "username")
         email = d.string(forKey: "email")
         phone = d.string(forKey: "phone")
+        // Cài app mới: Keychain trên iOS KHÔNG tự xoá khi gỡ app → token cũ còn sót
+        // làm app "tự vào thẳng". UserDefaults bị xoá khi gỡ app, nên dùng cờ này
+        // để phát hiện lần cài mới và xoá token cũ → luôn bắt đầu ở màn đăng nhập.
+        if !d.bool(forKey: "kenios_installed_flag") {
+            Keychain.delete("token")
+            d.set(true, forKey: "kenios_installed_flag")
+        }
         token = Keychain.load("token")
         isAdmin = d.bool(forKey: "isAdmin")
         plan = d.string(forKey: "plan") ?? "free"
         credits = d.integer(forKey: "credits")
         publicId = d.string(forKey: "publicId") ?? ""
+        let uid = d.integer(forKey: "userId")
+        userId = uid > 0 ? uid : nil
         isDark = d.object(forKey: "isDark") as? Bool ?? true
         themeMode = d.string(forKey: "themeMode") ?? ((d.object(forKey: "isDark") as? Bool ?? true) ? "dark" : "light")
         language = d.string(forKey: "language") ?? "vi"
         systemPrompt = d.string(forKey: "systemPrompt") ?? ""
         biometricsEnabled = d.bool(forKey: "biometricsEnabled")
+        accentColorName = d.string(forKey: "accentColorName") ?? "blue"
+        logoAnimated = d.bool(forKey: "logoAnimated")
+        welcomeEnabled = d.bool(forKey: "welcomeEnabled")
+        welcomeText = d.string(forKey: "welcomeText") ?? "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"
+        // Mặc định "chị Google" (online) cho mọi thành viên; admin đổi giọng thì đồng bộ qua server.
+        welcomeVoiceId = d.string(forKey: "welcomeVoiceId") ?? "google"
+        welcomeRate = d.object(forKey: "welcomeRate") as? Float ?? 0.5
         if let data = d.data(forKey: "profiles"),
            let list = try? JSONDecoder().decode([ServerProfile].self, from: data) {
             profiles = list
@@ -89,9 +180,115 @@ final class AppStore: ObservableObject {
         default: return nil
         }
     }
-    func setLanguage(_ v: String) { language = v; d.set(v, forKey: "language") }
+    func setLanguage(_ v: String) {
+        language = v; d.set(v, forKey: "language")
+        objectWillChange.send()   // ép toàn app vẽ lại ngay khi đổi ngôn ngữ
+    }
+
+    /// Dịch sang ngôn ngữ hiện tại.
+    /// vi = chuỗi tiếng Việt, en = chuỗi tiếng Anh (cũng là khoá tra cứu bảng dịch).
+    func t(_ vi: String, _ en: String) -> String {
+        switch language {
+        case "vi": return vi
+        case "en": return en
+        default:   return L10n.translate(en, to: language) ?? en
+        }
+    }
+
+    // ===== Nhớ tài khoản & mật khẩu (lưu trong Keychain, có mã hoá) =====
+    var rememberLogin: Bool {
+        get { d.bool(forKey: "rememberLogin") }
+        set { d.set(newValue, forKey: "rememberLogin") }
+    }
+    var savedUsername: String { Keychain.load("saved_username") ?? "" }
+    var savedPassword: String { Keychain.load("saved_password") ?? "" }
+
+    func saveCredentials(_ u: String, _ p: String) {
+        Keychain.save("saved_username", u)
+        Keychain.save("saved_password", p)
+        rememberLogin = true
+    }
+    func forgetCredentials() {
+        Keychain.delete("saved_username")
+        Keychain.delete("saved_password")
+        rememberLogin = false
+    }
     func setSystemPrompt(_ v: String) { systemPrompt = v; d.set(v, forKey: "systemPrompt") }
     func setBiometrics(_ v: Bool) { biometricsEnabled = v; d.set(v, forKey: "biometricsEnabled") }
+
+    func setAccentColor(_ name: String) { accentColorName = name; d.set(name, forKey: "accentColorName") }
+    func setLogoAnimated(_ v: Bool) { logoAnimated = v; d.set(v, forKey: "logoAnimated") }
+    func setWelcomeEnabled(_ v: Bool) { welcomeEnabled = v; d.set(v, forKey: "welcomeEnabled") }
+    func setWelcomeText(_ v: String) { welcomeText = v; d.set(v, forKey: "welcomeText") }
+    func setWelcomeVoiceId(_ v: String) { welcomeVoiceId = v; d.set(v, forKey: "welcomeVoiceId") }
+    func setWelcomeRate(_ v: Float) { welcomeRate = v; d.set(v, forKey: "welcomeRate") }
+
+    /// Xin quyền thông báo từ iOS (không force, người dùng chủ động bấm)
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+    }
+
+    /// Gửi local notification thông thường
+    func postLocalNotification(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let req = UNNotificationRequest(identifier: UUID().uuidString,
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
+
+    /// Thông báo sản phẩm mới — hiện banner (kèm ẢNH sản phẩm nếu có) + đọc giọng khi app đang mở
+    func postProductNotification(title: String = "🛒 KENIOS Cửa hàng", body: String, imageURL: String? = nil) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = NotifSoundFile.sound   // chuông tuỳ chỉnh — kêu cả khi tắt app
+        content.categoryIdentifier = "KENIOS_PRODUCT"
+
+        func submit(_ attachments: [UNNotificationAttachment]) {
+            content.attachments = attachments
+            let req = UNNotificationRequest(identifier: "prod-\(UUID().uuidString)",
+                                            content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+        }
+
+        // Có ảnh → tải về tệp tạm rồi đính kèm (rich notification có hình như kênh cửa hàng).
+        if let s = imageURL?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty,
+           let url = URL(string: s) {
+            Task {
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    let ext = url.pathExtension.isEmpty ? "jpg" : url.pathExtension
+                    let tmp = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("notif_\(UUID().uuidString).\(ext)")
+                    try data.write(to: tmp)
+                    let att = try UNNotificationAttachment(identifier: "img", url: tmp, options: nil)
+                    await MainActor.run { submit([att]) }
+                } catch {
+                    await MainActor.run { submit([]) }   // lỗi tải ảnh → vẫn hiện thông báo chữ
+                }
+            }
+        } else {
+            submit([])
+        }
+    }
+
+    /// Thông báo bảo trì — hiện banner + đọc giọng nói khi app đang mở
+    func postMaintenanceNotification(message: String) {
+        let body = message.isEmpty
+            ? "Ứng dụng KENIOS đang được nâng cấp phiên bản. Vui lòng chờ trong giây lát."
+            : message
+        let content = UNMutableNotificationContent()
+        content.title = "🔧 KENIOS - Thông báo bảo trì"
+        content.body = body
+        content.sound = NotifSoundFile.sound   // chuông tuỳ chỉnh — kêu cả khi tắt app
+        content.categoryIdentifier = "KENIOS_MAINTENANCE"
+        let req = UNNotificationRequest(identifier: "maint-\(UUID().uuidString)",
+                                        content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
 
     func saveServer(url: String, type: String) {
         baseURL = url; serverType = type
@@ -112,6 +309,11 @@ final class AppStore: ObservableObject {
         profiles.removeAll { $0.id == p.id }; persistProfiles()
     }
 
+    /// Định danh thiết bị (để trial 7 ngày chỉ 1 lần/máy). Ổn định trên cùng 1 máy/cùng nhà cung cấp.
+    var deviceId: String {
+        UIDevice.current.identifierForVendor?.uuidString ?? ""
+    }
+
     func setAuth(_ resp: AuthResponse) {
         token = resp.token; username = resp.user.username
         email = resp.user.email; phone = resp.user.phone
@@ -119,6 +321,7 @@ final class AppStore: ObservableObject {
         plan = resp.user.plan ?? "free"
         credits = resp.user.credits ?? 0
         publicId = resp.user.publicId ?? ""
+        userId = resp.user.id
         Keychain.save("token", resp.token)
         d.set(resp.user.username, forKey: "username")
         d.set(resp.user.email ?? "", forKey: "email")
@@ -127,6 +330,66 @@ final class AppStore: ObservableObject {
         d.set(plan, forKey: "plan")
         d.set(credits, forKey: "credits")
         d.set(publicId, forKey: "publicId")
+        d.set(resp.user.id, forKey: "userId")
+        showPlanIntro = true   // hiện màn giới thiệu gói PRO/Free sau khi đăng nhập
+        // Tải âm thanh thông báo DÙNG CHUNG (toàn cục) từ máy chủ
+        Task { await loadNotifSounds() }
+    }
+
+    /// Tải cấu hình âm thanh thông báo dùng chung từ máy chủ và áp vào máy.
+    func loadNotifSounds() async {
+        if let json = try? await api.getNotifSounds(), !json.isEmpty {
+            applyNotifSounds(json)
+        }
+    }
+
+    /// Ghi cấu hình âm thanh thông báo (JSON từ máy chủ) vào UserDefaults để TTS dùng.
+    func applyNotifSounds(_ json: String) {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        for ev in ["gift", "follow", "share"] {
+            guard let s = obj[ev] as? [String: String] else { continue }
+            if let id = s["id"], !id.isEmpty { d.set(id, forKey: "tts_sound_\(ev)") }
+            if let url = s["url"] { d.set(url, forKey: "tts_sound_url_\(ev)") }
+        }
+        // GỘP kho âm dùng chung (admin đồng bộ) với kho âm KHÁCH tự thêm trên máy →
+        // âm admin luôn có, mà âm riêng của khách KHÔNG bị mất mỗi lần mở app.
+        if let serverLib = obj["library"] as? [[String: String]] {
+            var merged = serverLib
+            var seen = Set(serverLib.compactMap { $0["url"] })
+            if let raw = d.string(forKey: "tts_custom_sounds"),
+               let data = raw.data(using: .utf8),
+               let localLib = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                for item in localLib {
+                    let url = item["url"] ?? ""
+                    if !url.isEmpty, !seen.contains(url) { merged.append(item); seen.insert(url) }
+                }
+            }
+            if let ld = try? JSONSerialization.data(withJSONObject: merged),
+               let ls = String(data: ld, encoding: .utf8) {
+                d.set(ls, forKey: "tts_custom_sounds")
+            }
+        }
+    }
+
+    /// CHỈ ADMIN: đồng bộ bộ âm thanh thông báo (3 sự kiện + kho tùy chỉnh) LÊN MÁY CHỦ dùng chung.
+    /// Sau khi đồng bộ, mọi khách tải về dùng được. Khách gọi hàm này sẽ bị bỏ qua (chỉ lưu cục bộ).
+    /// Trả về true nếu đã đồng bộ thành công.
+    @discardableResult
+    func saveNotifSounds() async -> Bool {
+        guard isAdmin else { return false }   // khách không được ghi đè bộ dùng chung
+        var dict: [String: Any] = [:]
+        for ev in ["gift", "follow", "share"] {
+            dict[ev] = ["id": d.string(forKey: "tts_sound_\(ev)") ?? "",
+                        "url": d.string(forKey: "tts_sound_url_\(ev)") ?? ""]
+        }
+        if let raw = d.string(forKey: "tts_custom_sounds"),
+           let data = raw.data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+            dict["library"] = arr
+        }
+        do { try await api.saveNotifSounds(dict); return true }
+        catch { return false }
     }
 
     /// Tải lại hồ sơ + trạng thái bảo trì.
@@ -134,14 +397,31 @@ final class AppStore: ObservableObject {
         if let me = try? await api.getMe() {
             isAdmin = me.isAdmin ?? false
             plan = me.plan ?? "free"
+            planExpires = me.planExpires ?? 0
+            if me.planExpired == true { planExpiredNotice = true }
             publicId = me.publicId ?? publicId
+            userId = me.id
             d.set(isAdmin, forKey: "isAdmin"); d.set(plan, forKey: "plan")
             d.set(publicId, forKey: "publicId")
+            d.set(me.id, forKey: "userId")
         }
         if let st = try? await api.appStatus() {
+            let wasOff = !maintenance
             maintenance = st.maintenance
             maintenanceMessage = st.message
+            // Đồng bộ vào UserDefaults để background task đọc được
+            d.set(st.maintenance, forKey: "bgLastMaintenance")
+            // Phát thông báo + giọng khi bảo trì vừa bật (chỉ với người dùng thường)
+            if st.maintenance && wasOff && !isAdmin {
+                postMaintenanceNotification(message: st.message)
+            }
         }
+    }
+
+    /// Lưu trạng thái hiện tại vào UserDefaults để background task dùng khi app bị tắt
+    func syncStateForBackground() {
+        d.set(maintenance, forKey: "bgLastMaintenance")
+        // bgLastCatCount được cập nhật từ StoreView sau mỗi lần reload
     }
 
     func refreshCredits() async {
@@ -156,6 +436,10 @@ final class AppStore: ObservableObject {
         if let phone { self.phone = phone; d.set(phone, forKey: "phone") }
     }
 
+    /// Bỏ qua tự-đăng-nhập đúng 1 lần ngay sau khi người dùng bấm Đăng xuất
+    /// (tránh kẹt: vừa đăng xuất lại tự vào). Lần mở app sau vẫn tự đăng nhập.
+    var suppressAutoLogin = false
+
     func logout() {
         token = nil; username = nil; isAdmin = false; plan = "free"; credits = 0
         Keychain.delete("token")
@@ -164,6 +448,8 @@ final class AppStore: ObservableObject {
         favorites = []; promptTemplates = []
         friends = []; friendRequests = []; directMessages = [:]
         d.set(false, forKey: "isAdmin")
+        showPlanIntro = false
+        suppressAutoLogin = true   // sau khi đăng xuất chỉ điền sẵn, không tự đăng nhập ngay
     }
 
     func loadProviders() async {

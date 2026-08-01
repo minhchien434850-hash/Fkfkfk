@@ -22,10 +22,11 @@ struct LiveView: View {
                                 title: "Live",
                                 subtitle: "Mở phòng live · bình luận thời gian thực")
 
+                    // Mở phòng (dán link HLS từ OBS/Larix, hoặc live bằng chữ)
                     Button { newTitle = ""; newHLS = ""; showCreate = true } label: {
-                        Label("Mở phòng live", systemImage: "video.fill.badge.plus")
+                        Label("Mở phòng (dán link / live chữ)", systemImage: "video.fill.badge.plus")
                             .frame(maxWidth: .infinity).frame(height: 46)
-                            .background(Color.red).foregroundStyle(.white)
+                            .background(Color.red.opacity(0.85)).foregroundStyle(.white)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
 
