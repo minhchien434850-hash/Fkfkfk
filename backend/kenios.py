@@ -11221,6 +11221,42 @@ def _tg_watch_latest(url: str, limit: int = 3) -> list:
     return out
 
 
+def _tg_watch_live_url(ch: dict) -> str:
+    """Suy ra link TRANG LIVE của kênh từ link đã lưu."""
+    u = (ch.get("url") or "").strip().rstrip("/")
+    if not u:
+        return ""
+    if u.endswith("/videos"):          # YouTube đã chuẩn hoá về .../videos
+        u = u[: -len("/videos")]
+    if u.endswith("/live"):
+        return u
+    return u + "/live"
+
+
+def _tg_watch_live_check(ch: dict) -> tuple:
+    """Kênh có ĐANG LIVE không? → (đang_live, tiêu_đề, link_live).
+    Dùng yt-dlp đọc trang /live: có 'is_live' = true nghĩa là đang phát."""
+    import subprocess as _sp, shutil as _sh
+    if not _sh.which("yt-dlp"):
+        return False, "", ""
+    lu = _tg_watch_live_url(ch)
+    if not lu:
+        return False, "", ""
+    try:
+        r = _sp.run(["yt-dlp", "-J", "--no-warnings", "--no-playlist",
+                     "--ignore-errors", lu],
+                    capture_output=True, text=True, timeout=90)
+        d = json.loads(r.stdout or "{}")
+    except Exception:
+        return False, "", ""
+    if not isinstance(d, dict):
+        return False, "", ""
+    live = bool(d.get("is_live"))
+    if not live:
+        return False, "", ""
+    return True, (d.get("title") or "Đang phát trực tiếp")[:200], (d.get("webpage_url") or lu)
+
+
 def _tg_watch_targets() -> list:
     """Nơi sẽ ĐĂNG: mọi nhóm có bot + KÊNH TỔNG (nếu admin đã đặt)."""
     ids = list(_tg_greet_chats())
@@ -11266,6 +11302,27 @@ def _tg_watch_broadcast(token: str, item: dict, ch: dict) -> None:
             except Exception: pass
 
 
+def _tg_watch_broadcast_live(token: str, ch: dict, title: str, url: str) -> None:
+    """Kênh vừa BẬT LIVE → gửi LINK LIVE vào mọi nhóm + kênh tổng (không tải file)."""
+    import html as _h
+    targets = _tg_watch_targets()
+    if not targets or not url:
+        return
+    tag = "TikTok" if ch.get("type") == "tiktok" else "YouTube"
+    name = ch.get("name") or ch.get("key") or ""
+    text = (f"🔴 <b>ĐANG LIVE</b> — {tag}\n"
+            f"📺 {_h.escape(name)}\n"
+            f"🎬 {_h.escape(title or 'Đang phát trực tiếp')}\n"
+            f"🔗 {_h.escape(url)}\n"
+            "👉 Vào xem ngay nhé!")
+    for cid in targets:
+        try:
+            _tg_send(token, cid, text)
+        except Exception:
+            pass
+        time.sleep(0.2)
+
+
 def _tg_watch_scan(token: str, notify_chat: str = "") -> int:
     """Quét tất cả kênh đang theo dõi; có video mới thì đăng. Trả số video đã đăng."""
     lst = _tg_watch_load()
@@ -11273,6 +11330,18 @@ def _tg_watch_scan(token: str, notify_chat: str = "") -> int:
         return 0
     posted = 0
     for ch in lst:
+        # ---- 🔴 ĐANG LIVE: gửi LINK LIVE ngay khi kênh bắt đầu phát ----
+        try:
+            is_live, ltitle, lurl = _tg_watch_live_check(ch)
+            was = (ch.get("live") or "") == "1"
+            if is_live and not was:
+                _tg_watch_broadcast_live(token, ch, ltitle, lurl)
+                posted += 1
+            # Nhớ trạng thái để KHÔNG báo lặp lại suốt buổi live; live tắt thì reset,
+            # buổi live SAU sẽ được báo tiếp.
+            ch["live"] = "1" if is_live else ""
+        except Exception as e:
+            log.warning("watch live lỗi: %s", e)
         try:
             vids = _tg_watch_latest(ch.get("url") or "", limit=3)
             if not vids:
@@ -11341,9 +11410,11 @@ def _tg_watch_command(token: str, chat_id: str, msg: dict, args: str) -> None:
         main = get_setting("tg_watch_main", "") or "(chưa đặt)"
         rows = "\n".join(
             f"{i + 1}. [{c.get('type')}] {_h.escape(c.get('name') or c.get('key') or c.get('url'))}"
+            + (" 🔴 ĐANG LIVE" if (c.get('live') or '') == '1' else "")
             for i, c in enumerate(lst)) or "(chưa có kênh nào)"
         _tg_send(token, chat_id,
                  "📺 <b>THEO DÕI KÊNH TikTok / YouTube</b>\n"
+                 "(báo cả VIDEO MỚI và khi kênh BẬT LIVE)\n"
                  f"Tự đăng: <b>{'BẬT' if on else 'TẮT'}</b> · Kênh tổng: <code>{_h.escape(str(main))}</code>\n"
                  f"Nhóm sẽ nhận: <b>{len(_tg_watch_targets())}</b>\n\n"
                  f"<b>Kênh đang theo dõi:</b>\n{rows}\n\n"
