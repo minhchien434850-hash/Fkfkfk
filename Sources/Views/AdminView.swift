@@ -7,6 +7,7 @@ struct AdminView: View {
     @State private var message: String?
     @State private var pwUser: AdminUser?
     @State private var walletUser: AdminUser?
+    @State private var deleteUser: AdminUser?
     @State private var paymentId = ""
     @State private var showBank = false
     @State private var showErrors = false
@@ -15,10 +16,34 @@ struct AdminView: View {
     @State private var showPro = false
     @State private var pendingPayments: [PaymentRecord] = []
     @State private var maintMsg = "Ứng dụng đang nâng cấp phiên bản. Vui lòng đợi trong giây lát."
+    // §9.1 — cảnh báo xâm nhập
+    @State private var secEnabled = false
+    @State private var emailNotify = true
+    @State private var secToken = ""
+    @State private var secChat = ""
+    // Cấu hình SMTP (Gmail) để gửi thông báo ra ngoài
+    @State private var smtpHost = ""
+    @State private var smtpPort = "587"
+    @State private var smtpUser = ""
+    @State private var smtpPass = ""
+    @State private var mailFrom = ""
+    @State private var smtpPassSet = false
+    @State private var smtpTestTo = ""
+    @State private var smtpMsg: String?
+    @State private var smtpSaving = false
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    KHeroHeader(icon: "crown.fill",
+                                title: store.t("Quản trị", "Admin"),
+                                subtitle: store.t("Thống kê · người dùng · đơn hàng · hệ thống",
+                                                  "Stats · users · orders · system"),
+                                useLogo: true)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
                 // ==================== 📊 Thống kê ====================
                 Section {
                     if let stats {
@@ -61,6 +86,10 @@ struct AdminView: View {
                     }
                     Button { showErrors = true } label: {
                         Label(store.t("Log lỗi hệ thống", "System error log"), systemImage: "exclamationmark.triangle")
+                    }
+                    NavigationLink { BackupRestoreView() } label: {
+                        Label(store.t("Sao lưu & Khôi phục", "Backup & Restore"),
+                              systemImage: "externaldrive.fill.badge.timemachine")
                     }
                 }
 
@@ -123,6 +152,109 @@ struct AdminView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
+                // "Giọng chào toàn cục", "Lời chào popup" và "Thông báo cập nhật phiên bản"
+                // đã GỘP HẾT vào Cài đặt → "Lời chào khi mở app" (block admin) cho dễ dùng.
+
+                // ("Duyệt rút tiền người bán" đã gỡ theo yêu cầu — cùng với cửa hàng người bán.)
+
+                // §9.1 — Cảnh báo xâm nhập qua Telegram
+                Section {
+                    Toggle(store.t("Bật cảnh báo xâm nhập", "Enable intrusion alerts"), isOn: $secEnabled)
+                    SecureField(store.t("Bot Token Telegram", "Telegram Bot Token"), text: $secToken)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField(store.t("Chat ID nhận cảnh báo", "Alert chat_id"), text: $secChat)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    HStack {
+                        Button(store.t("Lưu", "Save")) { Task { await saveSecurityAlert(test: false) } }
+                            .buttonStyle(.borderedProminent)
+                        Spacer()
+                        Button(store.t("Gửi thử", "Send test")) { Task { await saveSecurityAlert(test: true) } }
+                            .buttonStyle(.bordered)
+                    }
+                } header: {
+                    Text(store.t("Bảo mật — Cảnh báo xâm nhập", "Security — Intrusion alerts"))
+                } footer: {
+                    Text(store.t("Khi phát hiện dò quét/spam (vượt rate-limit), hệ thống gửi cảnh báo tới Telegram của bạn. Tạo bot ở @BotFather để lấy Token & chat_id.",
+                                 "On scan/spam (rate-limit breach), the server alerts your Telegram. Create a bot via @BotFather for the Token & chat_id."))
+                        .font(.caption2)
+                }
+
+                // Bot Telegram hỗ trợ khách (chỉ admin)
+                Section {
+                    NavigationLink { TelegramBotView() } label: {
+                        Label(store.t("Bot Telegram hỗ trợ", "Telegram support bot"),
+                              systemImage: "paperplane.fill")
+                    }
+                } footer: {
+                    Text(store.t("Khách nhắn bot Telegram → tin về admin; admin reply là trả lời khách. Cấu hình token & bật/tắt tại đây.",
+                                 "Customers message the Telegram bot → forwarded to admin; reply to answer them. Configure token & toggle here."))
+                        .font(.caption2)
+                }
+
+                // Zalo Official Account — kênh chính thống (chỉ admin)
+                Section {
+                    NavigationLink { ZaloOAView() } label: {
+                        Label(store.t("Zalo OA (chào & trả lời)", "Zalo OA (greet & reply)"),
+                              systemImage: "bubble.left.and.text.bubble.right.fill")
+                    }
+                } footer: {
+                    Text(store.t("Kênh Zalo CHÍNH THỐNG: người quan tâm OA được bot tự chào, nhắn OA được tự trả lời. (Zalo không cho bot vào nhóm chat thường.)",
+                                 "Official Zalo channel: OA followers get auto-greeted, messages auto-replied. (Zalo doesn't allow bots in normal groups.)"))
+                        .font(.caption2)
+                }
+
+                // Thông báo qua email/Gmail (miễn phí) khi người dùng offline
+                Section {
+                    Toggle(store.t("Gửi thông báo qua email khi offline", "Email notifications when offline"),
+                           isOn: Binding(get: { emailNotify }, set: { on in
+                        emailNotify = on
+                        Task { try? await store.api.adminSetEmailNotify(on) }
+                    }))
+                } header: {
+                    Text(store.t("📧 Thông báo qua Email (miễn phí)", "📧 Email notifications (free)"))
+                } footer: {
+                    Text(store.t("Gửi email cho khách khi: có SẢN PHẨM MỚI, PHIÊN BẢN MỚI, hoặc tin nhắn/cuộc gọi lúc họ tắt app. BẮT BUỘC cấu hình SMTP Gmail bên dưới thì email mới gửi được.",
+                                 "Emails customers on: NEW PRODUCTS, NEW VERSIONS, or messages/calls while offline. REQUIRES the Gmail SMTP config below to actually send."))
+                        .font(.caption2)
+                }
+
+                // Cấu hình SMTP Gmail — nhập thì email mới gửi được ra ngoài
+                Section {
+                    HStack {
+                        Image(systemName: smtpPassSet && !smtpHost.isEmpty ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(smtpPassSet && !smtpHost.isEmpty ? .green : .orange)
+                        Text(smtpPassSet && !smtpHost.isEmpty
+                             ? store.t("Đã cấu hình gửi email", "Email sending configured")
+                             : store.t("Chưa cấu hình — email chưa gửi được", "Not configured — email won't send"))
+                            .font(.caption)
+                    }
+                    TextField("SMTP host (vd smtp.gmail.com)", text: $smtpHost)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField("Cổng (587)", text: $smtpPort).keyboardType(.numberPad)
+                    TextField(store.t("Gmail đăng nhập (vd ban@gmail.com)", "Gmail login"), text: $smtpUser)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
+                    SecureField(smtpPassSet ? store.t("Mật khẩu ứng dụng (để trống = giữ nguyên)", "App password (blank = keep)")
+                                            : store.t("Mật khẩu ứng dụng 16 ký tự", "16-char app password"), text: $smtpPass)
+                    TextField(store.t("Email gửi đi (mặc định = Gmail trên)", "From email (default = Gmail above)"), text: $mailFrom)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
+                    TextField(store.t("Email để gửi thử (tuỳ chọn)", "Test email (optional)"), text: $smtpTestTo)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.emailAddress)
+                    Button {
+                        Task { await saveSmtp() }
+                    } label: {
+                        HStack { if smtpSaving { ProgressView().padding(.trailing, 4) }
+                            Text(smtpTestTo.isEmpty ? store.t("Lưu cấu hình", "Save config")
+                                                    : store.t("Lưu & gửi email thử", "Save & send test")).bold() }
+                    }.disabled(smtpSaving)
+                    if let smtpMsg { Text(smtpMsg).font(.caption).foregroundStyle(.secondary) }
+                } header: {
+                    Text(store.t("Cấu hình gửi Gmail (SMTP)", "Gmail sending (SMTP)"))
+                } footer: {
+                    Text(store.t("Cách lấy: Tài khoản Google → Bảo mật → Xác minh 2 bước (bật) → Mật khẩu ứng dụng → tạo cho 'Mail' → dán 16 ký tự vào ô Mật khẩu. Host: smtp.gmail.com · Cổng: 587.",
+                                 "How: Google Account → Security → 2-Step Verification (on) → App passwords → create for 'Mail' → paste the 16 chars. Host: smtp.gmail.com · Port: 587."))
+                        .font(.caption2)
+                }
+
                 // ==================== Danh sách người dùng ====================
                 Section(store.t("Người dùng", "Users") + " (\(users.count))") {
                     ForEach(users) { u in
@@ -170,8 +302,11 @@ struct AdminView: View {
                                         Task { await ban(u, !((u.banned ?? 0) == 1)) }
                                     }
                                     Menu(store.t("Đặt gói", "Set plan")) {
-                                        Button("Free") { Task { await setPlan(u, "free") } }
-                                        Button("Pro") { Task { await setPlan(u, "pro") } }
+                                        Button(store.t("PRO · nửa tháng", "PRO · half month")) { Task { await setPlan(u, "pro", 15) } }
+                                        Button(store.t("PRO · 1 tháng", "PRO · 1 month")) { Task { await setPlan(u, "pro", 30) } }
+                                        Button(store.t("PRO · 1 năm", "PRO · 1 year")) { Task { await setPlan(u, "pro", 365) } }
+                                        Button(store.t("PRO · vĩnh viễn", "PRO · lifetime")) { Task { await setPlan(u, "pro", 0) } }
+                                        Button("Free", role: .destructive) { Task { await setPlan(u, "free", nil) } }
                                     }
                                     if (u.status ?? "active") == "suspended" {
                                         Button(store.t("Mở lại hoạt động", "Re-activate")) { Task { await unsuspend(u) } }
@@ -185,6 +320,12 @@ struct AdminView: View {
                                     }
                                     Button(store.t("Đổi mật khẩu giúp", "Reset password")) { pwUser = u }
                                     Button(store.t("Cộng / Trừ tiền ví", "Adjust wallet")) { walletUser = u }
+                                    if u.isAdmin != true {
+                                        Divider()
+                                        Button(store.t("Xóa tài khoản", "Delete account"), role: .destructive) {
+                                            deleteUser = u
+                                        }
+                                    }
                                 }
                                 .font(.caption)
                             }
@@ -203,6 +344,8 @@ struct AdminView: View {
                 await reload()
                 await loadStats()
                 await loadPendingPayments()
+                await loadSecurityAlert()
+                if let e = try? await store.api.adminGetEmailNotify() { applyEmailStatus(e) }
                 // Tự làm mới danh sách người dùng mỗi 15s để xem "đang dùng" theo thời gian thực
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 15_000_000_000)
@@ -224,7 +367,26 @@ struct AdminView: View {
             .alert("Lỗi", isPresented: .constant(error != nil)) {
                 Button("OK") { error = nil }
             } message: { Text(error ?? "") }
+            .alert(store.t("Xóa tài khoản?", "Delete account?"),
+                   isPresented: Binding(get: { deleteUser != nil }, set: { if !$0 { deleteUser = nil } })) {
+                Button(store.t("Hủy", "Cancel"), role: .cancel) { deleteUser = nil }
+                Button(store.t("Xóa vĩnh viễn", "Delete permanently"), role: .destructive) {
+                    if let u = deleteUser { Task { await deleteAccount(u) } }
+                }
+            } message: {
+                Text(store.t("Xóa VĨNH VIỄN tài khoản đăng nhập \"\(deleteUser?.username ?? "")\" và dữ liệu liên quan (tin nhắn, bạn bè). Không thể hoàn tác.",
+                             "Permanently delete the login account \"\(deleteUser?.username ?? "")\" and related data (messages, friends). This cannot be undone."))
+            }
         }
+    }
+
+    private func deleteAccount(_ u: AdminUser) async {
+        deleteUser = nil; error = nil
+        do {
+            let r = try await store.api.adminDeleteUser(u.id)
+            message = r.message
+            await reload()
+        } catch { self.error = error.localizedDescription }
     }
 
     // Thời gian hoạt động gần nhất (tương đối)
@@ -293,7 +455,16 @@ struct AdminView: View {
 
     private func reload() async {
         do { users = try await store.api.adminUsers() }
-        catch { self.error = error.localizedDescription }
+        catch {
+            // Mạng chập chờn / máy chủ đang khởi động lại: THỬ LẠI 1 lần sau 1,2s
+            // trước khi báo — tránh bung popup "Lỗi" ngay khi vừa mở Quản trị.
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            do { users = try await store.api.adminUsers() }
+            catch {
+                // Đã có danh sách từ trước → giữ nguyên, không làm phiền.
+                if users.isEmpty { self.error = error.localizedDescription }
+            }
+        }
     }
 
     private func loadStats() async {
@@ -303,6 +474,61 @@ struct AdminView: View {
         } catch {
             stats = nil
             statsError = error.localizedDescription
+        }
+    }
+
+    // §9.1 — cảnh báo xâm nhập
+    private func loadSecurityAlert() async {
+        if let c = try? await store.api.getSecurityAlert() {
+            secEnabled = c.enabled ?? false
+            secToken = c.botToken ?? ""
+            secChat = c.chatId ?? ""
+        }
+    }
+
+    private func applyEmailStatus(_ e: EmailNotifyStatus) {
+        emailNotify = e.enabled
+        smtpHost = e.smtpHost ?? ""
+        if let p = e.smtpPort { smtpPort = String(p) }
+        smtpUser = e.smtpUser ?? ""
+        mailFrom = e.mailFrom ?? ""
+        smtpPassSet = e.smtpPassSet ?? false
+    }
+
+    private func saveSmtp() async {
+        smtpSaving = true; smtpMsg = nil
+        defer { smtpSaving = false }
+        do {
+            let s = try await store.api.adminSetEmailConfig(
+                host: smtpHost.trimmingCharacters(in: .whitespaces),
+                port: Int(smtpPort) ?? 587,
+                user: smtpUser.trimmingCharacters(in: .whitespaces),
+                pass: smtpPass,
+                from: mailFrom.trimmingCharacters(in: .whitespaces),
+                testTo: smtpTestTo.trimmingCharacters(in: .whitespaces))
+            applyEmailStatus(s)
+            smtpPass = ""   // đã lưu → xoá khỏi ô nhập
+            if let tr = s.testResult {
+                smtpMsg = (s.testOk == true)
+                    ? store.t("✅ Đã gửi email thử thành công! Kiểm tra hộp thư.", "✅ Test email sent! Check inbox.")
+                    : store.t("⚠️ Gửi thử chưa được (\(tr)). Kiểm tra lại Gmail & mật khẩu ứng dụng.",
+                              "⚠️ Test failed (\(tr)). Check Gmail & app password.")
+                smtpTestTo = ""
+            } else {
+                smtpMsg = store.t("Đã lưu cấu hình ✅", "Config saved ✅")
+            }
+        } catch { smtpMsg = error.localizedDescription }
+    }
+
+    private func saveSecurityAlert(test: Bool) async {
+        do {
+            try await store.api.setSecurityAlert(enabled: secEnabled,
+                                                 botToken: secToken, chatId: secChat, test: test)
+            message = test
+                ? store.t("Đã gửi tin thử — kiểm tra Telegram.", "Test sent — check Telegram.")
+                : store.t("Đã lưu cảnh báo bảo mật.", "Security alert saved.")
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 
@@ -317,8 +543,8 @@ struct AdminView: View {
         catch { self.error = error.localizedDescription }
     }
 
-    private func setPlan(_ u: AdminUser, _ plan: String) async {
-        do { _ = try await store.api.adminSetPlan(u.id, plan: plan); await reload() }
+    private func setPlan(_ u: AdminUser, _ plan: String, _ days: Int?) async {
+        do { _ = try await store.api.adminSetPlan(u.id, plan: plan, days: days); await reload() }
         catch { self.error = error.localizedDescription }
     }
 
@@ -338,306 +564,190 @@ struct AdminView: View {
     }
 }
 
-// ======================== Admin Key Entry ========================
-struct AdminKeyEntryView: View {
+// ============================ §7 Đợt 4 — Admin duyệt rút tiền người bán ============================
+struct AdminWithdrawalsView: View {
     @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    let provider: Provider
-    var onDone: () -> Void
-    @State private var key = ""
-    @State private var message: String?
-    @State private var isError = false
-    @State private var checking = false
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        Circle().fill(providerColor(provider.id)).frame(width: 10, height: 10)
-                        Text(provider.label).bold()
-                    }
-                    SecureField("Dán API key hệ thống tại đây", text: $key)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Key này sẽ được dùng làm fallback cho tất cả người dùng chưa có key riêng.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        HStack {
-                            if checking { ProgressView().padding(.trailing, 4) }
-                            Text(checking ? "Đang lưu..." : "Lưu key hệ thống")
-                        }
-                    }
-                    .disabled(key.isEmpty || checking)
-                    Button("Xóa key", role: .destructive) {
-                        Task { await remove() }
-                    }
-                }
-                if let message {
-                    Text(message).font(.footnote)
-                        .foregroundStyle(isError ? .red : .green)
-                }
-            }
-            .navigationTitle("API Key Hệ Thống")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } }
-            }
-        }
-    }
-
-    private func save() async {
-        checking = true; message = nil
-        do {
-            let r = try await store.api.adminSaveKey(provider: provider.id, apiKey: key)
-            isError = false; message = r.message
-            onDone()
-            try? await Task.sleep(nanoseconds: 800_000_000)
-            dismiss()
-        } catch {
-            isError = true; message = error.localizedDescription
-        }
-        checking = false
-    }
-
-    private func remove() async {
-        do {
-            _ = try await store.api.adminDeleteKey(provider: provider.id)
-            onDone(); dismiss()
-        } catch { message = error.localizedDescription; isError = true }
-    }
-}
-
-// ======================== Đổi mật khẩu (admin) ========================
-struct AdminPasswordSheet: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    let user: AdminUser
-    var onDone: () -> Void
-    @State private var newPassword = ""
-    @State private var error: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section(store.t("Đổi mật khẩu cho", "Reset password for") + " \(user.username)") {
-                    SecureField(store.t("Mật khẩu mới (≥6 ký tự)", "New password (≥6 chars)"), text: $newPassword)
-                    Button(store.t("Xác nhận", "Confirm")) { Task { await save() } }.disabled(newPassword.count < 6)
-                }
-                if let error { Text(error).foregroundStyle(.red).font(.footnote) }
-            }
-            .navigationTitle(store.t("Đổi mật khẩu", "Change password"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(store.t("Đóng", "Close")) { dismiss() } } }
-        }
-    }
-    private func save() async {
-        do {
-            _ = try await store.api.adminSetPassword(user.id, newPassword: newPassword)
-            onDone(); dismiss()
-        } catch { self.error = error.localizedDescription }
-    }
-}
-
-// ======================== Cài đặt ngân hàng (admin) ========================
-struct BankSettingsSheet: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    @State private var s = BankSettings(bankCode: "970416", bankShort: "ACB",
-                                        bankAccount: "23252921", bankName: "TRAN MINH CHIEN",
-                                        bankWebhook: "", bankApikey: "", acbApiToken: "")
-    @State private var message: String?
-    @State private var isError = false
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Ngân hàng nhận tiền (hiện QR cho khách khi nạp)") {
-                    TextField("Mã ngân hàng VietQR (vd ACB = 970416)", text: $s.bankCode)
-                        .keyboardType(.numberPad)
-                    TextField("Tên ngân hàng ngắn (vd ACB)", text: $s.bankShort)
-                        .textInputAutocapitalization(.characters)
-                    TextField("Số tài khoản", text: $s.bankAccount).keyboardType(.numberPad)
-                    TextField("Chủ tài khoản (IN HOA, không dấu)", text: $s.bankName)
-                        .textInputAutocapitalization(.characters)
-                    TextField("Webhook (tuỳ chọn)", text: $s.bankWebhook)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                }
-                Section("Nạp tiền tự động — ACB (thueapibank.vn)") {
-                    TextField("API token ACB (thueapibank.vn)", text: $s.acbApiToken)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Dán API token ACB từ thueapibank.vn. Hệ thống tự đọc lịch sử giao dịch mỗi ~20 giây, khớp nội dung 'KENIOS <mã>' + số tiền để tự cộng PRO / cấp key sản phẩm. Để trống thì admin xác nhận tay.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section("Tự động xác nhận giao dịch (tuỳ chọn khác)") {
-                    TextField("API key giao dịch (Casso / Sepay...)", text: $s.bankApikey)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Text("Dùng webhook của Casso/Sepay nếu muốn. Để trống nếu đã dùng token ACB ở trên.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section { Button("Lưu") { Task { await save() } } }
-                if let message {
-                    Text(message).font(.footnote).foregroundStyle(isError ? .red : .green)
-                }
-                Section {
-                    Text("Mã VietQR (Napas): ACB 970416 · Vietcombank 970436 · Techcombank 970407 · MB 970422 · BIDV 970418 · VPBank 970432.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Thông tin ngân hàng")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
-            .task { await load() }
-        }
-    }
-    private func load() async {
-        if let r = try? await store.api.adminGetBank() { s = r }
-    }
-    private func save() async {
-        message = nil
-        do { let r = try await store.api.adminSetBank(s); isError = false; message = r.message }
-        catch { isError = true; message = error.localizedDescription }
-    }
-}
-
-// ======================== Giá gói nâng cấp PRO (admin) ========================
-struct ProPriceSheet: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    @State private var priceText = ""
-    @State private var label = "Nâng cấp PRO"
-    @State private var message: String?
-    @State private var isError = false
-    @State private var loading = false
-
-    private var priceValue: Int? { Int(priceText.filter { $0.isNumber }) }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Giá nâng cấp PRO (VND)") {
-                    HStack {
-                        TextField("Ví dụ: 199000", text: $priceText)
-                            .keyboardType(.numberPad)
-                        Text("đ").foregroundStyle(.secondary)
-                    }
-                    TextField("Tên gói (ví dụ: Nâng cấp PRO)", text: $label)
-                    if let p = priceValue {
-                        Text("Khách sẽ thấy: \(label) — \(formatVND(p))đ")
-                            .font(.caption).foregroundStyle(Theme.accent)
-                    }
-                }
-                Section {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        HStack {
-                            if loading { ProgressView().padding(.trailing, 4) }
-                            Text(loading ? "Đang lưu..." : "Lưu giá")
-                        }
-                    }
-                    .disabled(priceValue == nil || loading)
-                }
-                if let message {
-                    Text(message).font(.footnote).foregroundStyle(isError ? .red : .green)
-                }
-                Section {
-                    Text("Chỉ còn 1 gói nâng cấp PRO duy nhất. Khách chuyển khoản đúng số tiền này, admin xác nhận (hoặc webhook tự động) là tài khoản được nâng lên PRO. Không dùng credits.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Giá gói PRO")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
-            .task { await load() }
-        }
-    }
-
-    private func formatVND(_ amount: Int) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.groupingSeparator = "."
-        return f.string(from: NSNumber(value: amount)) ?? "\(amount)"
-    }
-    private func load() async {
-        if let r = try? await store.api.adminGetPro() {
-            priceText = "\(r.price)"
-            label = r.label
-        }
-    }
-    private func save() async {
-        guard let p = priceValue else { return }
-        loading = true; message = nil
-        do {
-            let r = try await store.api.adminSetPro(price: p, label: label.trimmingCharacters(in: .whitespaces))
-            isError = false
-            message = "Đã lưu. Giá hiện tại: \(formatVND(r.price))đ"
-            priceText = "\(r.price)"; label = r.label
-        } catch {
-            isError = true; message = error.localizedDescription
-        }
-        loading = false
-    }
-}
-
-// ======================== Log lỗi hệ thống (admin) ========================
-struct ErrorLogView: View {
-    @EnvironmentObject var store: AppStore
-    @Environment(\.dismiss) var dismiss
-    @State private var logs: [ErrorLog] = []
-    @State private var error: String?
+    @State private var items: [AdminWithdrawal] = []
     @State private var loading = true
+    @State private var busy = false
 
     var body: some View {
-        NavigationStack {
-            List {
-                if loading {
-                    HStack { Spacer(); ProgressView(); Spacer() }
-                } else if logs.isEmpty {
-                    Text("Chưa có lỗi nào được ghi.").foregroundStyle(.secondary)
-                } else {
-                    ForEach(logs) { e in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(e.context ?? "-").font(.caption.bold())
-                            Text(e.detail ?? "").font(.caption2).foregroundStyle(.red)
-                            HStack {
-                                if let u = e.username { Text(u).font(.caption2).foregroundStyle(.secondary) }
-                                Spacer()
-                                Text(timeText(e.createdAt)).font(.caption2).foregroundStyle(.secondary)
+        List {
+            if loading {
+                ProgressView()
+            } else if items.isEmpty {
+                Text(store.t("Chưa có yêu cầu rút tiền.", "No withdrawal requests."))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(items) { w in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(w.seller).font(.subheadline.bold())
+                            Spacer()
+                            Text(kFormatVND(w.amount)).font(.subheadline.bold()).foregroundStyle(Theme.accent)
+                        }
+                        Text(w.bankInfo).font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Text(statusLabel(w.status)).font(.caption.bold()).foregroundStyle(statusColor(w.status))
+                            Spacer()
+                            if w.status == "pending" {
+                                Button(store.t("Đã chi", "Paid")) { Task { await act(w.id, "paid") } }
+                                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(busy)
+                                Button(store.t("Từ chối", "Reject")) { Task { await act(w.id, "reject") } }
+                                    .buttonStyle(.bordered).controlSize(.small).tint(.red).disabled(busy)
                             }
-                        }.padding(.vertical, 2)
-                    }
+                        }
+                    }.padding(.vertical, 2)
                 }
             }
-            .navigationTitle("Log lỗi hệ thống")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Xóa hết", role: .destructive) { Task { await clear() } }
-                        .disabled(logs.isEmpty)
-                }
-                ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } }
-            }
-            .task { await reload() }
-            .refreshable { await reload() }
-            .alert("Lỗi", isPresented: .constant(error != nil)) {
-                Button("OK") { error = nil }
-            } message: { Text(error ?? "") }
         }
+        .navigationTitle(store.t("Duyệt rút tiền", "Withdrawals"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await reload() }
+    }
+
+    private func statusLabel(_ s: String) -> String {
+        switch s {
+        case "paid": return store.t("Đã chi", "Paid")
+        case "rejected": return store.t("Từ chối", "Rejected")
+        default: return store.t("Chờ duyệt", "Pending")
+        }
+    }
+    private func statusColor(_ s: String) -> Color {
+        switch s { case "paid": return .green; case "rejected": return .red; default: return .orange }
     }
     private func reload() async {
-        do { logs = try await store.api.adminErrors() }
-        catch { self.error = error.localizedDescription }
-        loading = false
+        loading = true; defer { loading = false }
+        items = (try? await store.api.adminUStoreWithdrawals()) ?? []
     }
-    private func clear() async {
-        do { _ = try await store.api.adminClearErrors(); await reload() }
-        catch { self.error = error.localizedDescription }
+    private func act(_ wid: Int, _ action: String) async {
+        busy = true; defer { busy = false }
+        try? await store.api.adminUStoreWithdrawAction(wid, action: action)
+        await reload()
     }
-    private func timeText(_ ts: Int?) -> String {
-        guard let ts else { return "" }
-        let f = DateFormatter(); f.dateFormat = "dd/MM HH:mm"
-        return f.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
+}
+
+// "Giọng chào toàn cục" (GlobalWelcomeEditor) đã được GỘP vào
+// SettingsView → WelcomeGreetingView (mục "Lời chào khi mở app", chỉ admin thấy).
+
+// ============ Thông báo cập nhật phiên bản + Lời chào toàn cục (Quản trị app) ============
+struct AppNoticesEditor: View {
+    @EnvironmentObject var store: AppStore
+    // §1.2 — Thông báo cập nhật phiên bản
+    @State private var latestVersion = ""
+    @State private var updateUrl = ""
+    @State private var updateMessage = ""
+    // §1.3 — Lời chào toàn cục (popup)
+    @State private var welcomePopupEnabled = false
+    @State private var welcomePopupTitle = ""
+    @State private var welcomePopupText = ""
+    // Truyền lại các trường bắt buộc để không ghi đè rỗng
+    @State private var logoName = ""
+    @State private var logoUrl = ""
+    @State private var bannerType = "image"
+    @State private var bannerUrl = ""
+    @State private var loaded = false
+    @State private var loadError = false
+    @State private var saving = false
+    @State private var message: String?
+    @State private var isError = false
+
+    var body: some View {
+        Form {
+            if !loaded {
+                Section {
+                    if loadError {
+                        Label(store.t("Không tải được cấu hình từ máy chủ.",
+                                      "Couldn't load config from server."), systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                        Button(store.t("Thử lại", "Retry")) { Task { await load() } }.font(.caption.bold())
+                    } else {
+                        HStack { ProgressView(); Text(store.t("Đang tải...", "Loading...")).font(.caption) }
+                    }
+                } footer: {
+                    Text(store.t("Cần máy chủ bật (đã chạy capnhat-vps.sh). Chưa tải được thì chưa Lưu để tránh ghi đè cấu hình.",
+                                 "Requires the server up (capnhat-vps.sh run). Until loaded, saving is disabled to avoid overwriting config."))
+                        .font(.caption2)
+                }
+            }
+            Section {
+                TextField(store.t("Phiên bản mới nhất (vd 3.1)", "Latest version (e.g. 3.1)"), text: $latestVersion)
+                    .keyboardType(.decimalPad)
+                TextField(store.t("Link tải/cập nhật (https://...)", "Update link (https://...)"), text: $updateUrl)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                TextField(store.t("Lời nhắn cập nhật (tuỳ chọn)", "Update message (optional)"),
+                          text: $updateMessage, axis: .vertical).lineLimit(1...3)
+            } header: {
+                Text(store.t("Thông báo cập nhật phiên bản", "Version update notice"))
+            } footer: {
+                Text(store.t("Khi bản mới > phiên bản đang cài, mọi user thấy popup 'Cập nhật ngay' mở link. Để trống Phiên bản để tắt.",
+                             "When newer than the installed version, all users see an 'Update now' popup opening the link. Leave version empty to disable."))
+                    .font(.caption2)
+            }
+
+            Section {
+                Toggle(store.t("Bật lời chào toàn cục", "Enable global welcome popup"), isOn: $welcomePopupEnabled)
+                if welcomePopupEnabled {
+                    TextField(store.t("Tiêu đề (vd: Chào mừng!)", "Title (e.g. Welcome!)"), text: $welcomePopupTitle)
+                    TextField(store.t("Nội dung lời chào cho mọi khách", "Welcome text for all users"),
+                              text: $welcomePopupText, axis: .vertical).lineLimit(2...5)
+                }
+            } header: {
+                Text(store.t("Lời chào toàn cục (popup)", "Global welcome popup"))
+            } footer: {
+                Text(store.t("Popup hiện 1 lần khi MỌI người dùng mở app (không chỉ admin).",
+                             "Shown once when ANY user opens the app (not only admin)."))
+            }
+
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    HStack {
+                        if saving { ProgressView().padding(.trailing, 4) }
+                        Text(store.t("Lưu", "Save")).bold()
+                    }
+                }.disabled(saving || !loaded)
+                if let message {
+                    Text(message).font(.caption).foregroundStyle(isError ? .red : .green)
+                }
+            }
+        }
+        .navigationTitle(store.t("Thông báo & Lời chào", "Notices & Welcome"))
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    private func load() async {
+        loadError = false
+        guard let c = try? await store.api.storeConfig() else { loadError = true; return }
+        latestVersion = c.latestVersion ?? ""
+        updateUrl = c.updateUrl ?? ""
+        updateMessage = c.updateMessage ?? ""
+        welcomePopupEnabled = c.welcomePopupEnabled ?? false
+        welcomePopupTitle = c.welcomePopupTitle ?? ""
+        welcomePopupText = c.welcomePopupText ?? ""
+        logoName = c.logoName; logoUrl = c.logoUrl
+        bannerType = c.bannerType; bannerUrl = c.bannerUrl
+        loaded = true
+    }
+
+    private func save() async {
+        guard loaded else { return }
+        saving = true; message = nil
+        defer { saving = false }
+        do {
+            let r = try await store.api.adminStoreSetConfig(
+                logoName: logoName, logoUrl: logoUrl,
+                bannerType: bannerType, bannerUrl: bannerUrl,
+                welcomePopupEnabled: welcomePopupEnabled,
+                welcomePopupTitle: welcomePopupTitle,
+                welcomePopupText: welcomePopupText,
+                latestVersion: latestVersion, updateUrl: updateUrl,
+                updateMessage: updateMessage)
+            isError = false; message = r.message
+        } catch {
+            isError = true; message = error.localizedDescription
+        }
     }
 }

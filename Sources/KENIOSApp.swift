@@ -12,6 +12,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Gắn nút "ẩn bàn phím" lên mọi ô nhập trong toàn app
+        KeyboardDismissBar.installGlobally()
+
+        // Ghi chuông thông báo vào Library/Sounds/ để TẮT APP vẫn kêu chuông.
+        NotifSoundFile.ensureInstalled()
+
         // Đặt delegate thông báo
         UNUserNotificationCenter.current().delegate = self
 
@@ -99,10 +105,54 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 }
             } else { ok = false }
 
+            // --- Tin nhắn mới từ bạn bè (miễn phí, không cần APNs) ---
+            if token != nil {
+                let lastDM = ud.integer(forKey: "bgLastDMId")
+                if let dms = try? await api.recentIncomingMessages(afterId: lastDM), !dms.isEmpty {
+                    // dms sắp xếp id giảm dần; báo tối đa 5 tin mới nhất chưa đọc.
+                    for m in dms.prefix(5) where (m.isRead ?? 0) == 0 {
+                        AppDelegate.postBgNotification(
+                            title: "💬 \(m.senderName ?? "Tin nhắn mới")",
+                            body: AppDelegate.bgMessagePreview(m.content),
+                            category: "KENIOS_DM")
+                    }
+                    if let maxId = dms.map(\.id).max() { ud.set(maxId, forKey: "bgLastDMId") }
+                }
+
+                // --- Thông báo phát mới (sản phẩm/tin tức) ---
+                if let notifs = try? await api.getNotifications(limit: 5), let newest = notifs.first {
+                    let lastN = ud.integer(forKey: "bgLastNotifId")
+                    if newest.id > lastN {
+                        if lastN > 0 {
+                            AppDelegate.postBgNotification(
+                                title: newest.title.isEmpty ? "🔔 KENIOS" : newest.title,
+                                body: newest.body, category: "KENIOS_PRODUCT")
+                        }
+                        ud.set(newest.id, forKey: "bgLastNotifId")
+                    }
+                }
+            }
+
             // Lên lịch lần kiểm tra tiếp theo
             AppDelegate.scheduleNextRefresh()
             task.setTaskCompleted(success: ok)
         }
+    }
+
+    /// Rút gọn nội dung tin nhắn cho thông báo (tin media → nhãn thân thiện).
+    static func bgMessagePreview(_ content: String) -> String {
+        let marker = "\u{2063}KMEDIA\u{2063}"
+        if content.hasPrefix(marker) {
+            let parts = content.components(separatedBy: marker)
+            let kind = parts.count > 1 ? parts[1] : ""
+            switch kind {
+            case "img": return "📷 Hình ảnh"
+            case "video": return "🎬 Video"
+            case "audio": return "🎤 Tin nhắn thoại"
+            default: return "📎 Tệp đính kèm"
+            }
+        }
+        return content.count <= 120 ? content : String(content.prefix(117)) + "..."
     }
 
     /// Gửi local notification từ background task
@@ -110,7 +160,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        content.sound = NotifSoundFile.sound   // chuông tuỳ chỉnh — kêu cả khi tắt app
         content.categoryIdentifier = category
         let req = UNNotificationRequest(identifier: "\(category)-\(UUID().uuidString)",
                                         content: content, trigger: nil)
@@ -119,20 +169,43 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // MARK: - UNUserNotificationCenterDelegate
 
+    // Chống thông báo TRÙNG: 1 sản phẩm mới thường tới 2 kênh cùng lúc
+    // (đẩy APNs từ máy chủ + local notification khi app tự dò /notifications).
+    // Cả 2 đều vào willPresent → nếu không lọc sẽ đọc giọng nói 2 lần.
+    nonisolated(unsafe) private static var lastNotifBody = ""
+    nonisolated(unsafe) private static var lastNotifAt: TimeInterval = 0
+
+    private static func isDuplicateNotification(_ body: String) -> Bool {
+        let now = Date().timeIntervalSince1970
+        // Cùng nội dung trong vòng 20 giây → coi là trùng, bỏ qua.
+        if body == lastNotifBody && (now - lastNotifAt) < 20 { return true }
+        lastNotifBody = body
+        lastNotifAt = now
+        return false
+    }
+
     /// Hiển thị banner + âm thanh ngay cả khi app đang mở ở foreground
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler handler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        handler([.banner, .badge, .sound])
-
-        // Đọc thông báo bằng giọng nói khi app đang chạy (chỉ product/maintenance)
         let cat = notification.request.content.categoryIdentifier
+        let text = notification.request.content.body
+
+        // Với thông báo sản phẩm/bảo trì: lọc trùng để KHÔNG hiện banner/đọc giọng 2 lần.
         if cat == "KENIOS_PRODUCT" || cat == "KENIOS_MAINTENANCE" {
-            let text = notification.request.content.body
+            if AppDelegate.isDuplicateNotification(text) {
+                handler([])   // nuốt bản trùng: không banner, không tiếng, không đọc lại
+                return
+            }
+            handler([.banner, .badge, .sound])
+            // Đọc thông báo bằng giọng nói khi app đang chạy (chỉ đọc 1 lần).
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 WelcomeVoice.shared.testSpeak(text: text, voiceId: "", rate: 0.48)
             }
+            return
         }
+
+        handler([.banner, .badge, .sound])
     }
 
     /// Xử lý khi người dùng bấm vào thông báo
@@ -158,21 +231,36 @@ struct KENIOSApp: App {
                              diskPath: "kenios_img_cache")
         URLCache.shared = cache
 
-        // ===== Giao diện navy cao cấp: nền xanh đen sâu, thẻ navy, chữ trắng =====
-        let bg      = Theme.bgNavyUI
-        let card    = Theme.cardNavyUI
+        // ===== Giao diện THÍCH ỨNG sáng/tối (§2.1): tối = navy sâu + chữ trắng;
+        // sáng = nền hệ thống + chữ đậm — hết lem màu khi chuyển Light Mode. =====
+        // Nền thanh (nav/tab/toolbar): tối→navy, sáng→trắng hệ thống.
+        let barBg = UIColor { tc in
+            tc.userInterfaceStyle == .dark ? Theme.bgNavyUI : UIColor.systemBackground
+        }
+        // Nền bảng/list: tối→navy, sáng→nền nhóm hệ thống.
+        let tableBg = UIColor { tc in
+            tc.userInterfaceStyle == .dark ? Theme.bgNavyUI : UIColor.systemGroupedBackground
+        }
+        // Nền ô/thẻ: tối→navy thẻ, sáng→nền phụ hệ thống.
+        let cardBg = UIColor { tc in
+            tc.userInterfaceStyle == .dark ? Theme.cardNavyUI : UIColor.secondarySystemGroupedBackground
+        }
+        // Chữ tiêu đề: tối→trắng, sáng→đen (label).
+        let titleCol = UIColor { tc in
+            tc.userInterfaceStyle == .dark ? .white : .label
+        }
         let tintCol = UIColor(red: 0.0, green: 0.58, blue: 0.96, alpha: 1)
 
         let tab = UITabBarAppearance()
         tab.configureWithOpaqueBackground()
-        tab.backgroundColor = bg
-        tab.shadowColor = UIColor.white.withAlphaComponent(0.06)
+        tab.backgroundColor = barBg
+        tab.shadowColor = UIColor.separator
         let selected = tab.stackedLayoutAppearance.selected
         let normal   = tab.stackedLayoutAppearance.normal
         selected.iconColor = tintCol
         selected.titleTextAttributes = [.foregroundColor: tintCol]
-        normal.iconColor = UIColor(white: 0.62, alpha: 1)
-        normal.titleTextAttributes = [.foregroundColor: UIColor(white: 0.62, alpha: 1)]
+        normal.iconColor = UIColor.secondaryLabel
+        normal.titleTextAttributes = [.foregroundColor: UIColor.secondaryLabel]
         UITabBar.appearance().standardAppearance = tab
         if #available(iOS 15.0, *) {
             UITabBar.appearance().scrollEdgeAppearance = tab
@@ -180,21 +268,21 @@ struct KENIOSApp: App {
 
         let nav = UINavigationBarAppearance()
         nav.configureWithOpaqueBackground()
-        nav.backgroundColor = bg
+        nav.backgroundColor = barBg
         nav.shadowColor = .clear
-        nav.titleTextAttributes = [.foregroundColor: UIColor.white]
-        nav.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        nav.titleTextAttributes = [.foregroundColor: titleCol]
+        nav.largeTitleTextAttributes = [.foregroundColor: titleCol]
         UINavigationBar.appearance().standardAppearance = nav
         UINavigationBar.appearance().scrollEdgeAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
 
-        UITableView.appearance().backgroundColor = bg
-        UITableViewCell.appearance().backgroundColor = card
-        UICollectionView.appearance().backgroundColor = bg
+        UITableView.appearance().backgroundColor = tableBg
+        UITableViewCell.appearance().backgroundColor = cardBg
+        UICollectionView.appearance().backgroundColor = tableBg
 
         let bar = UIToolbarAppearance()
         bar.configureWithOpaqueBackground()
-        bar.backgroundColor = bg
+        bar.backgroundColor = barBg
         UIToolbar.appearance().standardAppearance = bar
     }
 

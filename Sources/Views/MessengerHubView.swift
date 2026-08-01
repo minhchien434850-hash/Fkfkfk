@@ -93,6 +93,44 @@ private enum AutoWebPlatform: String, CaseIterable {
         }
     }
     var supportsAutoNav: Bool { self == .telegram || self == .whatsapp }
+
+    // Hướng dẫn chi tiết từng bước — hiện ngay trong app
+    var guideSteps: [String] {
+        switch self {
+        case .telegram:
+            return [
+                "Bấm \"Mở Telegram Web\" → mở Telegram trên điện thoại → Cài đặt → Thiết bị → Liên kết thiết bị → quét QR.",
+                "Nhập người nhận: @username hoặc số điện thoại (ô Người nhận ở trên).",
+                "Bấm \"← Quay lại\" để về app, rồi bấm \"Bắt đầu\". App tự gõ + gửi từng tin và kiểm tra tin đã đi thật."
+            ]
+        case .whatsapp:
+            return [
+                "Bấm \"Mở WhatsApp Web\" → WhatsApp trên điện thoại → Cài đặt → Thiết bị đã liên kết → quét QR.",
+                "Nhập người nhận là SĐT quốc tế, ví dụ +84901234567 (bắt buộc có mã nước).",
+                "Quay lại app → \"Bắt đầu\". Chỉ nhắn người đã lưu/đã từng nhắn để tránh bị chặn."
+            ]
+        case .zalo:
+            return [
+                "Bấm \"Mở Zalo Web\" → quét QR bằng app Zalo.",
+                "TỰ TAY bấm vào đúng người/nhóm để mở khung chat (Zalo web không nhảy bằng link được).",
+                "Bấm \"Tải danh sách\" chọn đúng người, hoặc để nguyên khung chat đang mở.",
+                "Quay lại app → \"Bắt đầu\". Đừng chuyển chat khác trong lúc đang gửi."
+            ]
+        case .messenger:
+            return [
+                "Bấm \"Mở Messenger Web\" → đăng nhập Facebook.",
+                "TỰ TAY bấm vào đúng người/nhóm để mở khung chat, hoặc bấm \"Tải danh sách\" rồi chọn tên.",
+                "Quay lại app → \"Bắt đầu\". Gửi chậm (15–30s) để tránh Facebook khoá."
+            ]
+        case .instagram:
+            return [
+                "Bấm \"Mở Instagram Web\" → đăng nhập Instagram → vào Tin nhắn (Direct).",
+                "TỰ TAY bấm vào đúng người để mở khung chat.",
+                "Quay lại app → \"Bắt đầu\". Instagram siết spam mạnh — gửi ít và chậm thôi."
+            ]
+        }
+    }
+
     var loginHint: String {
         switch self {
         case .telegram:  return "Quét QR bằng Telegram app"
@@ -170,104 +208,98 @@ private enum AutoWebPlatform: String, CaseIterable {
         """
     }
 
-    func sendJS(_ message: String) -> String {
-        let esc = message
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "")
+    // Selector các ô soạn tin (thử lần lượt tới khi thấy)
+    var composerSelectorsJS: String {
         switch self {
         case .telegram:
-            return """
-            (function(){
-              var el=document.querySelector('.input-message-input[contenteditable]');
-              if(!el)return 'not_found';
-              el.focus();
-              document.execCommand('selectAll',false,null);
-              document.execCommand('insertText',false,'\(esc)');
-              setTimeout(function(){
-                var b=document.querySelector('.btn-send,.btn-icon.btn-send-message');
-                if(b){b.click();return;}
-                el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));
-              },400);return 'ok';
-            })();
-            """
+            return "['.input-message-input[contenteditable=\"true\"]','div.input-message-input']"
         case .whatsapp:
-            return """
-            (function(){
-              var el=document.querySelector('div[contenteditable="true"][data-tab]')
-                   ||document.querySelector('[data-testid="conversation-compose-box-input"]');
-              if(!el)return 'not_found';
-              el.focus();
-              document.execCommand('selectAll',false,null);
-              document.execCommand('insertText',false,'\(esc)');
-              setTimeout(function(){
-                var b=document.querySelector('[data-testid="send"]')
-                     ||document.querySelector('button[aria-label="Send"]')
-                     ||document.querySelector('span[data-icon="send"]');
-                if(b){b.click();return;}
-                el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));
-              },500);return 'ok';
-            })();
-            """
+            return "['div[contenteditable=\"true\"][data-tab=\"10\"]','div[contenteditable=\"true\"][data-tab]','footer div[contenteditable=\"true\"]']"
         case .zalo:
-            return """
-            (function(){
-              var el=document.querySelector('div[contenteditable="true"][placeholder]')
-                   ||document.querySelector('div[contenteditable="true"].input-chat')
-                   ||document.querySelector('div[contenteditable="true"]');
-              if(!el)return 'not_found';
-              el.focus();
-              document.execCommand('selectAll',false,null);
-              document.execCommand('insertText',false,'\(esc)');
-              setTimeout(function(){
-                var b=document.querySelector('button[type="submit"],.send-btn,[aria-label="Gửi"],[aria-label="Send"]');
-                if(b){b.click();return;}
-                el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));
-              },400);return 'ok';
-            })();
-            """
+            return "['#input_line div[contenteditable=\"true\"]','div[contenteditable=\"true\"][id*=\"input\"]','div.input-chat[contenteditable=\"true\"]','div[contenteditable=\"true\"]']"
         case .messenger:
-            return """
-            (function(){
-              var el=document.querySelector('div[aria-label="Message"]')
-                   ||document.querySelector('div[role="textbox"][aria-multiline="true"]')
-                   ||document.querySelector('div[contenteditable="true"][class*="notranslate"]');
-              if(!el)return 'not_found';
-              el.focus();
-              document.execCommand('selectAll',false,null);
-              document.execCommand('insertText',false,'\(esc)');
-              setTimeout(function(){
-                el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true,returnValue:true}));
-              },400);return 'ok';
-            })();
-            """
+            return "['div[aria-label=\"Message\"][contenteditable=\"true\"]','div[role=\"textbox\"][contenteditable=\"true\"]','div[contenteditable=\"true\"][aria-label]']"
         case .instagram:
-            return """
-            (function(){
-              var el=document.querySelector('div[role="textbox"][aria-label]')
-                   ||document.querySelector('textarea[placeholder]');
-              if(!el)return 'not_found';
-              el.focus();
-              if(el.tagName==='TEXTAREA'){
-                var s=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;
-                s.call(el,'\(esc)');
-                el.dispatchEvent(new Event('input',{bubbles:true}));
-              } else {
-                document.execCommand('selectAll',false,null);
-                document.execCommand('insertText',false,'\(esc)');
-              }
-              setTimeout(function(){
-                var bs=document.querySelectorAll('button,[role="button"]');
-                for(var b of bs){
-                  var lbl=(b.getAttribute('aria-label')||'').toLowerCase();
-                  var txt=(b.textContent||'').trim().toLowerCase();
-                  if(lbl.includes('send')||txt==='send'||txt==='gửi'){b.click();return;}
-                }
-              },500);return 'ok';
-            })();
-            """
+            return "['div[role=\"textbox\"][contenteditable=\"true\"]','textarea[placeholder]','div[aria-label][contenteditable=\"true\"]']"
         }
+    }
+
+    // Selector nút Gửi
+    var sendSelectorsJS: String {
+        switch self {
+        case .telegram:
+            return "['button.btn-send','.btn-icon.btn-send-message','button[aria-label=\"Send\"]']"
+        case .whatsapp:
+            return "['button[aria-label=\"Send\"]','span[data-icon=\"send\"]','[data-testid=\"send\"]','button[aria-label=\"Gửi\"]']"
+        case .zalo:
+            return "['.send-btn','button[title*=\"Gửi\"]','button[title*=\"Send\"]','[aria-label=\"Gửi\"]','[aria-label=\"Send\"]']"
+        case .messenger:
+            return "['div[aria-label=\"Press enter to send\"]','div[aria-label=\"Send\"][role=\"button\"]','[aria-label=\"Gửi\"]']"
+        case .instagram:
+            return "['div[role=\"button\"][tabindex]']"
+        }
+    }
+
+    // Bước 1 — chèn chữ theo kiểu web React nhận được (execCommand cho contenteditable,
+    // native setter cho textarea/input) rồi phát input event.
+    func insertJS(_ message: String) -> String {
+        let esc = message
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "`", with: "\\`")
+            .replacingOccurrences(of: "$", with: "\\$")
+        return """
+        (function(){
+          var sels=\(composerSelectorsJS); var el=null;
+          for(var i=0;i<sels.length;i++){ el=document.querySelector(sels[i]); if(el) break; }
+          if(!el) return 'no_composer';
+          el.scrollIntoView(); el.focus();
+          var tag=el.tagName;
+          if(tag==='TEXTAREA'||tag==='INPUT'){
+            var proto=tag==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;
+            var setter=Object.getOwnPropertyDescriptor(proto,'value').set;
+            setter.call(el,''); el.dispatchEvent(new Event('input',{bubbles:true}));
+            setter.call(el,`\(esc)`); el.dispatchEvent(new Event('input',{bubbles:true}));
+          } else {
+            try{ document.execCommand('selectAll',false,null); document.execCommand('delete',false,null); }catch(e){}
+            try{ document.execCommand('insertText',false,`\(esc)`); }catch(e){ el.textContent=`\(esc)`; }
+            el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:`\(esc)`}));
+          }
+          return 'inserted';
+        })();
+        """
+    }
+
+    // Bước 2 — bấm nút Gửi; nếu không có nút thì phát phím Enter
+    var clickSendJS: String {
+        return """
+        (function(){
+          var ss=\(sendSelectorsJS);
+          for(var i=0;i<ss.length;i++){ var b=document.querySelector(ss[i]); if(b){ b.click(); return 'clicked'; } }
+          var cs=\(composerSelectorsJS); var el=null;
+          for(var j=0;j<cs.length;j++){ el=document.querySelector(cs[j]); if(el) break; }
+          if(el){
+            el.focus();
+            ['keydown','keypress','keyup'].forEach(function(t){
+              el.dispatchEvent(new KeyboardEvent(t,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));
+            });
+            return 'enter';
+          }
+          return 'no_send';
+        })();
+        """
+    }
+
+    // Bước 3 — ô soạn trống lại = đã gửi thật
+    var verifyEmptyJS: String {
+        return """
+        (function(){
+          var cs=\(composerSelectorsJS); var el=null;
+          for(var j=0;j<cs.length;j++){ el=document.querySelector(cs[j]); if(el) break; }
+          if(!el) return 'gone';
+          var t=(el.innerText||el.value||el.textContent||'').replace(/\\u200B/g,'').trim();
+          return t.length===0 ? 'sent' : 'stuck';
+        })();
+        """
     }
 }
 
@@ -355,6 +387,7 @@ struct MessengerHubView: View {
     @State private var autoStatuses: [HubSendState] = []
     @State private var autoTask: Task<Void, Never>?
     @State private var showWebLogin = false
+    @State private var showApiSender = false   // gửi THẬT qua API (Telegram Bot/Webhook…)
     // Trạng thái kết nối web + danh sách bạn bè/cuộc trò chuyện đọc từ phiên web
     @State private var autoConnected = false
     @State private var autoFriends: [String] = []
@@ -648,6 +681,30 @@ struct MessengerHubView: View {
 
                 // ─────────────────── TAB: Tự động ───────────────────
                 if activeTab == 1 {
+                    // GỬI THẬT 100% qua API (không cần mở app, không kẹt sandbox)
+                    Section {
+                        Button { showApiSender = true } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "bolt.badge.automatic.fill")
+                                    .font(.title3).foregroundStyle(.white)
+                                    .frame(width: 38, height: 38)
+                                    .background(LinearGradient(colors: [.blue, .purple],
+                                                               startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .clipShape(RoundedRectangle(cornerRadius: 9))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Gửi THẬT qua API (khuyên dùng)").font(.subheadline.bold())
+                                    Text("Telegram Bot · WhatsApp · Zalo OA · Webhook — gửi thẳng, KHÔNG cần mở app")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.buttonStyle(.plain)
+                    } footer: {
+                        Text("Cách Web bên dưới chỉ chạy khi bạn đăng nhập web & giữ app mở. Muốn gửi tự động ổn định 100% → dùng “Gửi THẬT qua API”.")
+                            .font(.caption2)
+                    }
+
                     Section("Ứng dụng") {
                         Picker("Nền tảng", selection: $autoPlatformRaw) {
                             ForEach(AutoWebPlatform.allCases, id: \.rawValue) { p in
@@ -704,7 +761,7 @@ struct MessengerHubView: View {
                             Slider(value: $autoDelaySec, in: 0.1...5.0, step: 0.1) { _ in
                                 speedPresetRaw = ""
                             }
-                            Text("Càng nhỏ gửi càng nhanh (0.1 = rất nhanh, 5.0 = chậm).")
+                            Text("Kéo về 0.1–1.0 = chế độ NHANH (gửi liền tay, không chờ kiểm tra). Trên 1.0 = chậm & an toàn hơn, tránh khoá nick.")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
@@ -732,6 +789,20 @@ struct MessengerHubView: View {
                     } footer: {
                         Text("Session lưu lại — chỉ quét QR 1 lần. Sau khi vào màn hình chat, bấm \"← Quay lại\" rồi Bắt đầu.")
                             .font(.caption2)
+                    }
+
+                    // Hướng dẫn chi tiết theo từng app
+                    Section("📖 Hướng dẫn dùng \(autoPlatform.label)") {
+                        ForEach(Array(autoPlatform.guideSteps.enumerated()), id: \.offset) { i, step in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text("\(i + 1)")
+                                    .font(.caption.bold()).foregroundStyle(.white)
+                                    .frame(width: 22, height: 22)
+                                    .background(autoPlatform.color).clipShape(Circle())
+                                Text(step).font(.caption).fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(.vertical, 2)
+                        }
                     }
 
                     // Trạng thái kết nối + danh sách bạn bè
@@ -899,6 +970,9 @@ struct MessengerHubView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Đóng") { dismiss() } } }
             .onAppear { activeTab = initialTab }
             .onDisappear { stopManual(); stopAuto(); stopBlast(); stopTool() }
+            .sheet(isPresented: $showApiSender) {
+                AutoMessengerView().environmentObject(store)
+            }
             .sheet(isPresented: $showWebLogin, onDismiss: {
                 Task {
                     if activeTab == 2 { await loadToolFriends() }
@@ -936,6 +1010,38 @@ struct MessengerHubView: View {
         return (r as? String) ?? ""
     }
     @MainActor private func evalAuto(_ js: String) async -> String { await evalOn(autoPlatform, js) }
+
+    /// Gửi 1 tin THẬT: chèn chữ → bấm nút gửi → kiểm tra ô soạn trống lại.
+    /// Mỗi bước là 1 lệnh do Swift điều khiển (không dùng setTimeout trong trang)
+    /// nên chạy được cả khi WKWebView đang ẩn. Trả true nếu tin đã đi thật.
+    @MainActor private func hubSend(_ p: AutoWebPlatform, _ text: String) async -> Bool {
+        let wv = HubWebViews.shared.view(for: p)
+        let ins = (try? await wv.evaluateJavaScript(p.insertJS(text))) as? String
+        if ins == "no_composer" { return false }
+
+        // Tốc độ càng cao (thanh kéo về sát 0.1) thì chờ nội bộ càng ngắn.
+        let fast = autoDelaySec <= 1.0
+        // Đợi web bật nút Gửi sau khi chèn chữ
+        try? await Task.sleep(nanoseconds: fast ? 180_000_000 : 400_000_000)
+        _ = try? await wv.evaluateJavaScript(p.clickSendJS)
+
+        if fast {
+            // Chế độ nhanh: nút gửi đã được bấm ở lệnh riêng phía trên (chạy thật kể
+            // cả khi webview ẩn) → không chờ kiểm tra để gửi liền tay.
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            return true
+        }
+        // Chế độ chậm: chờ tin bay đi rồi kiểm tra ô soạn trống lại (báo trạng thái chính xác).
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        let v = (try? await wv.evaluateJavaScript(p.verifyEmptyJS)) as? String
+        return v != "stuck"   // sent / gone / không rõ → coi như đã gửi; chỉ "stuck" là lỗi thật
+    }
+
+    /// Chỉ bấm nút gửi (dùng sau khi đính ảnh).
+    @MainActor private func hubClickSend(_ p: AutoWebPlatform) async {
+        let wv = HubWebViews.shared.view(for: p)
+        _ = try? await wv.evaluateJavaScript(p.clickSendJS)
+    }
     private func checkConnected() async {
         guard autoPlatform.supportsAutoNav || autoPlatform == .zalo || autoPlatform == .messenger || autoPlatform == .instagram else {
             autoConnected = false; return
@@ -1073,7 +1179,7 @@ struct MessengerHubView: View {
                 try? await Task.sleep(nanoseconds: 2_500_000_000) // chờ mở khung chat
                 for msg in messages {
                     guard blasting, !Task.isCancelled else { break }
-                    _ = await evalAuto(AutoWebPlatform.zalo.sendJS(msg))
+                    _ = await hubSend(.zalo, msg)
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }
                 blastDone = i + 1
@@ -1223,13 +1329,13 @@ struct MessengerHubView: View {
                 try? await Task.sleep(nanoseconds: 2_200_000_000)
                 for msg in msgs {
                     guard toolRunning, !Task.isCancelled else { break }
-                    _ = await evalOn(p, p.sendJS(msg))
+                    _ = await hubSend(p, msg)
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }
                 if let imgURL {
                     _ = await evalOn(p, attachImageJS(imgURL))
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    _ = await evalOn(p, p.sendJS(""))             // bấm gửi ảnh
+                    await hubClickSend(p)                          // bấm gửi ảnh
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }
                 toolDone = i + 1
@@ -1339,14 +1445,8 @@ struct MessengerHubView: View {
             guard autoRunning, !Task.isCancelled else { return }
             let idx = autoIdx
             autoStatuses[idx] = .sending
-            let wv = HubWebViews.shared.view(for: autoPlatform)
-            let js = autoPlatform.sendJS(messages[idx])
-            do {
-                let r = try await wv.evaluateJavaScript(js)
-                autoStatuses[idx] = (r as? String) == "ok" ? .ok : .fail
-            } catch {
-                autoStatuses[idx] = .fail
-            }
+            let ok = await hubSend(autoPlatform, messages[idx])
+            autoStatuses[idx] = ok ? .ok : .fail
             autoIdx += 1
             guard autoIdx < messages.count else { break }
             // Chờ theo tốc độ tinh chỉnh 0.1–5.0 giây (chia nhỏ để vẫn dừng được giữa chừng)

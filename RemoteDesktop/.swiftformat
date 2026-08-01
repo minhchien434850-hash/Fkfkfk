@@ -1,0 +1,9 @@
+# SwiftFormat configuration
+--swiftversion 5.9
+--indent 4
+--maxwidth 140
+--wraparguments before-first
+--wrapcollections before-first
+--commas inline
+--self remove
+--exclude Tests,RemoteDesktop.docc

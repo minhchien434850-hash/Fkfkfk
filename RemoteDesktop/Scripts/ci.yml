@@ -1,0 +1,26 @@
+# CI template for RemoteDesktop (copy to .github/workflows/ to activate).
+# Kept here (not auto-activated) so it never interferes with the KENIOS app CI.
+name: RemoteDesktop CI
+on:
+  push:
+    paths: [ "RemoteDesktop/**" ]
+  workflow_dispatch:
+jobs:
+  build-test:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: RemoteDesktop
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen
+      - name: Build & Test
+        run: |
+          xcodebuild \
+            -project RemoteDesktop.xcodeproj \
+            -scheme RemoteDesktop \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            clean build test | xcpretty || true

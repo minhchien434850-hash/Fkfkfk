@@ -11,23 +11,49 @@ struct APIClient {
     let baseURL: String
     var token: String?
 
-    private var root: String {
+    // Địa chỉ VPS TRỰC TIẾP (IPv4) — dùng để TỰ ĐỘNG né khi domain/proxy hỏng (502/không kết nối).
+    static let fallbackBase = "http://160.25.168.234"
+
+    var root: String {
         var s = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if !s.lowercased().hasPrefix("http") { s = "http://" + s }
         while s.hasSuffix("/") { s.removeLast() }
         return s
     }
 
-    private func makeURL(_ path: String) throws -> URL {
+    func makeURL(_ path: String) throws -> URL {
         guard let u = URL(string: root + path) else {
             throw APIError.message("URL máy chủ không hợp lệ.")
         }
         return u
     }
 
-    private func send(_ path: String, method: String = "GET",
+    // Gợi ý thử lại: shouldFallback=true khi lỗi có thể do domain/proxy (nên gọi thẳng IP VPS).
+    private struct RetryHint: Error { let shouldFallback: Bool; let underlying: APIError }
+
+    func send(_ path: String, method: String = "GET",
                       json: [String: Any]? = nil, auth: Bool = true) async throws -> Data {
-        var req = URLRequest(url: try makeURL(path))
+        do {
+            return try await sendTo(root, path, method: method, json: json, auth: auth)
+        } catch let hint as RetryHint {
+            // Domain/proxy hỏng (502/503/504 hoặc không kết nối) → gọi THẲNG IP VPS 1 lần.
+            if hint.shouldFallback && root.lowercased() != Self.fallbackBase {
+                do {
+                    return try await sendTo(Self.fallbackBase, path, method: method, json: json, auth: auth)
+                } catch let h2 as RetryHint {
+                    throw h2.underlying   // IP cũng hỏng → báo lỗi gốc
+                }
+            }
+            throw hint.underlying
+        }
+    }
+
+    private func sendTo(_ base: String, _ path: String, method: String,
+                        json: [String: Any]?, auth: Bool) async throws -> Data {
+        guard let url = URL(string: base + path) else {
+            throw APIError.message("URL máy chủ không hợp lệ.")
+        }
+        var req = URLRequest(url: url)
         req.httpMethod = method
         req.timeoutInterval = 120
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -38,7 +64,8 @@ struct APIClient {
         do {
             (data, resp) = try await URLSession.shared.data(for: req)
         } catch {
-            throw APIError.message("Không kết nối được máy chủ. Kiểm tra IP/URL & mạng.")
+            throw RetryHint(shouldFallback: true,
+                            underlying: APIError.message("Không kết nối được máy chủ. Kiểm tra IP/URL & mạng."))
         }
         guard let http = resp as? HTTPURLResponse else {
             throw APIError.message("Phản hồi không hợp lệ.")
@@ -47,12 +74,14 @@ struct APIClient {
             var detail = "Lỗi máy chủ (\(http.statusCode))."
             if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let d = obj["detail"] as? String { detail = d }
-            throw APIError.message(detail)
+            // 502/503/504 = cổng/proxy hỏng → cho phép né sang IP trực tiếp.
+            let gateway = [502, 503, 504].contains(http.statusCode)
+            throw RetryHint(shouldFallback: gateway, underlying: APIError.message(detail))
         }
         return data
     }
 
-    private func decode<T: Decodable>(_ data: Data) throws -> T {
+    func decode<T: Decodable>(_ data: Data) throws -> T {
         let dec = JSONDecoder()
         dec.keyDecodingStrategy = .convertFromSnakeCase
         return try dec.decode(T.self, from: data)
@@ -62,17 +91,22 @@ struct APIClient {
     func getConfig() async throws -> ServerConfig {
         try decode(try await send("/config", auth: false))
     }
+    // Bản KENIOS đã ký đang phát hành để cài OTA 1 chạm (không cần ESign)
+    func appOTAUpdate() async throws -> AppOTAUpdate {
+        try decode(try await send("/app/ota", auth: false))
+    }
     func getProviders() async throws -> [Provider] {
         try decode(try await send("/providers", auth: false))
     }
 
     // ---- Tài khoản ----
     func register(_ username: String, _ password: String, email: String?, phone: String?,
-                  code: String? = nil) async throws -> AuthResponse {
+                  code: String? = nil, deviceId: String? = nil) async throws -> AuthResponse {
         var body: [String: Any] = ["username": username, "password": password]
         if let email, !email.isEmpty { body["email"] = email }
         if let phone, !phone.isEmpty { body["phone"] = phone }
         if let code, !code.isEmpty { body["code"] = code }
+        if let deviceId, !deviceId.isEmpty { body["device_id"] = deviceId }
         return try decode(try await send("/auth/register", method: "POST", json: body, auth: false))
     }
     // ---- Chat streaming (trả lời hiện dần) ----
@@ -109,14 +143,51 @@ struct APIClient {
         return convId
     }
 
-    // Gửi mã xác nhận (OTP) qua email
-    func sendOtp(email: String, purpose: String = "register") async throws -> OtpSendResponse {
-        try decode(try await send("/auth/send-otp", method: "POST",
-                                  json: ["email": email, "purpose": purpose], auth: false))
+    // Gửi mã xác nhận (OTP) qua email hoặc số điện thoại (SMS)
+    func sendOtp(email: String = "", phone: String = "", purpose: String = "register") async throws -> OtpSendResponse {
+        var json: [String: Any] = ["purpose": purpose]
+        if !email.isEmpty { json["email"] = email }
+        if !phone.isEmpty { json["phone"] = phone }
+        return try decode(try await send("/auth/send-otp", method: "POST", json: json, auth: false))
     }
     func login(_ username: String, _ password: String) async throws -> AuthResponse {
         try decode(try await send("/auth/login", method: "POST",
                                   json: ["username": username, "password": password], auth: false))
+    }
+    /// Đăng nhập KHÔNG MẬT KHẨU bằng mã OTP gửi Gmail/SĐT (có tài khoản → vào; chưa có → tự tạo).
+    func loginOtp(email: String = "", phone: String = "", code: String,
+                  deviceId: String? = nil) async throws -> AuthResponse {
+        var json: [String: Any] = ["code": code]
+        if !email.isEmpty { json["email"] = email }
+        if !phone.isEmpty { json["phone"] = phone }
+        if let deviceId, !deviceId.isEmpty { json["device_id"] = deviceId }
+        return try decode(try await send("/auth/login-otp", method: "POST", json: json, auth: false))
+    }
+    /// Đăng nhập bằng tài khoản Google: gửi id_token (Google OAuth) cho server xác thực.
+    func googleLogin(idToken: String, deviceId: String? = nil) async throws -> AuthResponse {
+        var json: [String: Any] = ["id_token": idToken]
+        if let deviceId, !deviceId.isEmpty { json["device_id"] = deviceId }
+        return try decode(try await send("/auth/google", method: "POST", json: json, auth: false))
+    }
+    /// Lưu âm thanh thông báo DÙNG CHUNG (toàn cục) lên máy chủ — mọi người đều thấy.
+    func saveNotifSounds(_ sounds: [String: Any]) async throws {
+        _ = try await send("/notif-sounds", method: "POST", json: ["sounds": sounds])
+    }
+    /// Đọc âm thanh thông báo dùng chung (toàn cục) — trả về chuỗi JSON ("" nếu chưa đặt).
+    func getNotifSounds() async throws -> String {
+        struct R: Decodable { let json: String }
+        let r: R = try decode(try await send("/notif-sounds", auth: true))
+        return r.json
+    }
+    /// Lưu thiết lập TTS THEO TÀI KHOẢN lên máy chủ (đổi máy / xoá app cài lại vẫn còn).
+    func saveTTSSettings(_ json: String) async throws {
+        _ = try await send("/tts/settings", method: "POST", json: ["json": json])
+    }
+    /// Lấy thiết lập TTS đã lưu của tài khoản — trả về chuỗi JSON ("" nếu chưa từng đồng bộ).
+    func getTTSSettings() async throws -> String {
+        struct R: Decodable { let json: String }
+        let r: R = try decode(try await send("/tts/settings", auth: true))
+        return r.json
     }
     func forgot(_ username: String) async throws -> ForgotResponse {
         try decode(try await send("/auth/forgot-password", method: "POST",
@@ -196,14 +267,52 @@ struct APIClient {
         try decode(try await send("/admin/users/\(uid)/password", method: "POST",
                                   json: ["new_password": newPassword]))
     }
-    func adminSetPlan(_ uid: Int, plan: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/users/\(uid)/plan", method: "POST", json: ["plan": plan]))
+    func adminSetPlan(_ uid: Int, plan: String, days: Int? = nil) async throws -> MessageResponse {
+        var body: [String: Any] = ["plan": plan]
+        if let days { body["days"] = days }
+        return try decode(try await send("/admin/users/\(uid)/plan", method: "POST", json: body))
     }
     func adminSuspend(_ uid: Int, minutes: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/users/\(uid)/suspend", method: "POST", json: ["minutes": minutes]))
     }
     func adminUnsuspend(_ uid: Int) async throws -> MessageResponse {
         try decode(try await send("/admin/users/\(uid)/unsuspend", method: "POST"))
+    }
+    func adminGetEmailNotify() async throws -> EmailNotifyStatus {
+        try decode(try await send("/admin/email-notify"))
+    }
+    func adminSetEmailNotify(_ enabled: Bool) async throws {
+        _ = try await send("/admin/email-notify", method: "POST", json: ["enabled": enabled])
+    }
+    // ---- Bot Telegram hỗ trợ (admin) ----
+    func adminGetTelegramBot() async throws -> TelegramBotStatus {
+        try decode(try await send("/admin/telegram-bot"))
+    }
+    func adminSetTelegramBot(token: String, enabled: Bool, adminChat: String,
+                             welcome: String, about: String) async throws -> TelegramBotStatus {
+        var b: [String: Any] = ["enabled": enabled, "admin_chat": adminChat,
+                                "welcome": welcome, "about": about]
+        if !token.isEmpty { b["token"] = token }
+        return try decode(try await send("/admin/telegram-bot", method: "POST", json: b))
+    }
+    /// Lưu toàn bộ cấu hình bot (kèm quản lý nhóm) — truyền dict tự do.
+    func adminSaveTelegramBot(_ body: [String: Any]) async throws -> TelegramBotStatus {
+        try decode(try await send("/admin/telegram-bot", method: "POST", json: body))
+    }
+    func adminTestTelegramBot() async throws {
+        _ = try await send("/admin/telegram-bot/test", method: "POST")
+    }
+    /// Lưu cấu hình SMTP (Gmail) + tuỳ chọn gửi email kiểm tra. Trả về trạng thái mới.
+    func adminSetEmailConfig(host: String, port: Int, user: String, pass: String,
+                             from: String, testTo: String = "") async throws -> EmailNotifyStatus {
+        var body: [String: Any] = ["smtp_host": host, "smtp_port": port,
+                                    "smtp_user": user, "mail_from": from]
+        if !pass.isEmpty { body["smtp_pass"] = pass }
+        if !testTo.isEmpty { body["test_to"] = testTo }
+        return try decode(try await send("/admin/email-notify", method: "POST", json: body))
+    }
+    func adminDeleteUser(_ uid: Int) async throws -> MessageResponse {
+        try decode(try await send("/admin/users/\(uid)", method: "DELETE"))
     }
     func adminSetMaintenance(on: Bool, message: String) async throws -> MessageResponse {
         try decode(try await send("/admin/maintenance", method: "POST",
@@ -228,6 +337,18 @@ struct APIClient {
     }
     func getFeed() async throws -> [PostItem] {
         try decode(try await send("/feed"))
+    }
+    // Bảng tin mạng xã hội (ảnh + tin chữ, không gồm video)
+    func getSocialFeed() async throws -> [PostItem] {
+        try decode(try await send("/social/feed"))
+    }
+    // Lưu / bỏ lưu bài (bookmark)
+    @discardableResult
+    func savePost(_ pid: Int) async throws -> SaveResponse {
+        try decode(try await send("/posts/\(pid)/save", method: "POST"))
+    }
+    func getSavedPosts() async throws -> [PostItem] {
+        try decode(try await send("/me/saved"))
     }
     func getMyPosts() async throws -> [PostItem] {
         try decode(try await send("/me/posts"))
@@ -255,6 +376,10 @@ struct APIClient {
     }
     func myProfile() async throws -> UserProfile {
         try decode(try await send("/me/profile"))
+    }
+    // §1.1 — Danh sách thông báo phát cho mọi người (app poll để hiện trong app)
+    func getNotifications(limit: Int = 20) async throws -> [AppNotification] {
+        try decode(try await send("/notifications?limit=\(limit)"))
     }
     func updateProfile(publicId: String?, avatarUrl: String?, bio: String?) async throws -> MessageResponse {
         var body: [String: Any] = [:]
@@ -342,9 +467,9 @@ struct APIClient {
     func adminGetPro() async throws -> ProPriceSettings {
         try decode(try await send("/admin/payment/pro"))
     }
-    func adminSetPro(price: Int, label: String) async throws -> ProPriceSettings {
+    func adminSetPro(package: String, price: Int) async throws -> ProPriceSettings {
         try decode(try await send("/admin/payment/pro", method: "POST",
-                                  json: ["price": price, "label": label]))
+                                  json: ["package": package, "price": price]))
     }
 
     // ============================ APP BÁN HÀNG (STORE) ============================
@@ -432,6 +557,7 @@ struct APIClient {
 
     // -- Admin: giao diện store --
     func adminStoreSetConfig(logoName: String, logoUrl: String,
+                             logoType: String? = nil,
                              bannerType: String, bannerUrl: String,
                              logoEffect: String? = nil, logoFont: String? = nil,
                              logoAnim: String? = nil, bgType: String? = nil,
@@ -444,18 +570,28 @@ struct APIClient {
                              flashTitle: String? = nil,
                              heroTitle: String? = nil, heroSubtitle: String? = nil,
                              heroEffect: String? = nil, heroFont: String? = nil,
-                             heroAnim: String? = nil,
+                             heroAnim: String? = nil, heroColor: String? = nil,
+                             heroSubEffect: String? = nil, heroSubFont: String? = nil,
+                             heroSubAnim: String? = nil, heroSubColor: String? = nil,
                              sloganEffect: String? = nil,
-                             sloganAnim: String? = nil,
+                             sloganAnim: String? = nil, sloganColor: String? = nil,
                              promoImageUrl: String? = nil,
                              promoProductId: Int? = nil,
                              statUsersBase: Int? = nil, statSoldBase: Int? = nil,
                              statReviewsBase: Int? = nil,
                              announceEnabled: Bool? = nil, announceText: String? = nil,
-                             announceColor: String? = nil, gamecatLimit: Int? = nil) async throws -> MessageResponse {
+                             announceColor: String? = nil, gamecatLimit: Int? = nil,
+                             welcomePopupEnabled: Bool? = nil, welcomePopupTitle: String? = nil,
+                             welcomePopupText: String? = nil,
+                             welcomeVoiceEnabled: Bool? = nil, welcomeVoiceText: String? = nil,
+                             welcomeVoiceRate: Float? = nil, welcomeVoiceId: String? = nil,
+                             notifVoiceEnabled: Bool? = nil,
+                             latestVersion: String? = nil, updateUrl: String? = nil,
+                             updateMessage: String? = nil) async throws -> MessageResponse {
         var body: [String: Any] = [
             "logo_name": logoName, "logo_url": logoUrl,
             "banner_type": bannerType, "banner_url": bannerUrl]
+        if let logoType { body["logo_type"] = logoType }
         if let flashEnabled { body["flash_enabled"] = flashEnabled }
         if let flashProductId { body["flash_product_id"] = flashProductId }
         if let flashEnd { body["flash_end"] = flashEnd }
@@ -477,8 +613,14 @@ struct APIClient {
         if let heroEffect { body["hero_effect"] = heroEffect }
         if let heroFont { body["hero_font"] = heroFont }
         if let heroAnim { body["hero_anim"] = heroAnim }
+        if let heroColor { body["hero_color"] = heroColor }
+        body["hero_sub_effect"] = heroSubEffect ?? ""
+        if let heroSubFont { body["hero_sub_font"] = heroSubFont }
+        if let heroSubAnim { body["hero_sub_anim"] = heroSubAnim }
+        if let heroSubColor { body["hero_sub_color"] = heroSubColor }
         if let sloganEffect { body["slogan_effect"] = sloganEffect }
         if let sloganAnim { body["slogan_anim"] = sloganAnim }
+        if let sloganColor { body["slogan_color"] = sloganColor }
         body["promo_image_url"] = promoImageUrl ?? ""
         if let promoProductId { body["promo_product_id"] = promoProductId }
         if let statUsersBase { body["stat_users_base"] = statUsersBase }
@@ -488,517 +630,413 @@ struct APIClient {
         if let announceText { body["announce_text"] = announceText }
         if let announceColor { body["announce_color"] = announceColor }
         if let gamecatLimit { body["gamecat_limit"] = gamecatLimit }
+        if let welcomePopupEnabled { body["welcome_popup_enabled"] = welcomePopupEnabled }
+        if let welcomePopupTitle { body["welcome_popup_title"] = welcomePopupTitle }
+        if let welcomePopupText { body["welcome_popup_text"] = welcomePopupText }
+        if let welcomeVoiceEnabled { body["welcome_voice_enabled"] = welcomeVoiceEnabled }
+        if let welcomeVoiceText { body["welcome_voice_text"] = welcomeVoiceText }
+        if let welcomeVoiceRate { body["welcome_voice_rate"] = welcomeVoiceRate }
+        if let welcomeVoiceId { body["welcome_voice_id"] = welcomeVoiceId }
+        if let notifVoiceEnabled { body["notif_voice_enabled"] = notifVoiceEnabled }
+        if let latestVersion { body["latest_version"] = latestVersion }
+        if let updateUrl { body["update_url"] = updateUrl }
+        if let updateMessage { body["update_message"] = updateMessage }
         return try decode(try await send("/admin/store/config", method: "POST", json: body))
     }
+    // §7 — Đa người bán: cửa hàng cá nhân
+    func getMyStore() async throws -> MyStoreResponse {
+        try decode(try await send("/my-store"))
+    }
+    func saveMyStore(name: String, description: String?, logoUrl: String?,
+                     bannerUrl: String? = nil, slogan: String? = nil,
+                     nameEffect: String? = nil, sloganEffect: String? = nil,
+                     nameColor: String? = nil, sloganColor: String? = nil,
+                     nameFont: String? = nil, sloganFont: String? = nil,
+                     nameAnim: String? = nil, sloganAnim: String? = nil) async throws -> MyStore {
+        var body: [String: Any] = ["name": name]
+        if let description { body["description"] = description }
+        if let logoUrl { body["logo_url"] = logoUrl }
+        if let bannerUrl { body["banner_url"] = bannerUrl }
+        if let slogan { body["slogan"] = slogan }
+        if let nameEffect { body["name_effect"] = nameEffect }
+        if let sloganEffect { body["slogan_effect"] = sloganEffect }
+        if let nameColor { body["name_color"] = nameColor }
+        if let sloganColor { body["slogan_color"] = sloganColor }
+        if let nameFont { body["name_font"] = nameFont }
+        if let sloganFont { body["slogan_font"] = sloganFont }
+        if let nameAnim { body["name_anim"] = nameAnim }
+        if let sloganAnim { body["slogan_anim"] = sloganAnim }
+        struct R: Decodable { let store: MyStore }
+        let r: R = try decode(try await send("/my-store", method: "POST", json: body))
+        return r.store
+    }
+    func saveMyProduct(id: Int?, name: String, description: String?, price: Int,
+                       media: [[String: String]], downloadUrl: String?, categoryId: Int? = nil,
+                       kind: String? = nil) async throws {
+        var body: [String: Any] = ["name": name, "price": price, "media": media]
+        if let id { body["id"] = id }
+        if let description { body["description"] = description }
+        if let downloadUrl { body["download_url"] = downloadUrl }
+        if let categoryId { body["category_id"] = categoryId }
+        if let kind { body["kind"] = kind }
+        _ = try await send("/my-store/products", method: "POST", json: body)
+    }
+    func deleteMyProduct(_ pid: Int) async throws {
+        _ = try await send("/my-store/products/\(pid)", method: "DELETE")
+    }
+    // §7 Đợt 2 — Danh mục cửa hàng cá nhân
+    func addMyCategory(name: String) async throws {
+        _ = try await send("/my-store/categories", method: "POST", json: ["name": name])
+    }
+    func deleteMyCategory(_ cid: Int) async throws {
+        _ = try await send("/my-store/categories/\(cid)", method: "DELETE")
+    }
+    // §7 Đợt 2B — Bảng giá nhiều mốc
+    func setMyProductPrices(_ pid: Int, prices: [(label: String, amount: Int)]) async throws {
+        let arr = prices.map { ["label": $0.label, "amount": $0.amount] as [String: Any] }
+        _ = try await send("/my-store/products/\(pid)/prices", method: "POST", json: ["prices": arr])
+    }
+    // §7 Đợt 2B — Kho KEY
+    func listMyProductKeys(_ pid: Int) async throws -> MyStoreKeysResponse {
+        try decode(try await send("/my-store/products/\(pid)/keys"))
+    }
+    func addMyProductKeys(_ pid: Int, text: String, priceId: Int?) async throws {
+        var body: [String: Any] = ["text": text]
+        if let priceId { body["price_id"] = priceId }
+        _ = try await send("/my-store/products/\(pid)/keys", method: "POST", json: body)
+    }
+    func deleteMyKey(_ kid: Int) async throws {
+        _ = try await send("/my-store/keys/\(kid)", method: "DELETE")
+    }
+    func deleteMyAvailableKeys(_ pid: Int) async throws {
+        _ = try await send("/my-store/products/\(pid)/keys", method: "DELETE")
+    }
+    func getUserStore(_ sid: Int) async throws -> MyStoreResponse {
+        try decode(try await send("/u-store/\(sid)"))
+    }
+    // §7 Đợt 3 — mua hàng + đơn + thống kê
+    func buyUserStore(sid: Int, productId: Int, priceId: Int?, promoCode: String? = nil) async throws -> UStoreBuyResult {
+        var body: [String: Any] = ["product_id": productId]
+        if let priceId { body["price_id"] = priceId }
+        if let promoCode, !promoCode.isEmpty { body["promo_code"] = promoCode }
+        return try decode(try await send("/u-store/\(sid)/buy", method: "POST", json: body))
+    }
+    func myStoreOrders() async throws -> [MyStoreOrder] {
+        try decode(try await send("/my-store/orders"))
+    }
+    func myStoreStats() async throws -> MyStoreStats {
+        try decode(try await send("/my-store/stats"))
+    }
+    func myUserStoreOrders() async throws -> [UStoreMyOrder] {
+        try decode(try await send("/my-orders/u-store"))
+    }
+    // §7 Đợt 4 — mã giảm giá người bán
+    func myStorePromos() async throws -> [MyStorePromo] {
+        try decode(try await send("/my-store/promos"))
+    }
+    func createMyPromo(code: String, discountType: String, discountValue: Int,
+                       minAmount: Int, maxUses: Int, expiresAt: Int) async throws {
+        _ = try await send("/my-store/promos", method: "POST", json: [
+            "code": code, "discount_type": discountType, "discount_value": discountValue,
+            "min_amount": minAmount, "max_uses": maxUses, "expires_at": expiresAt])
+    }
+    func toggleMyPromo(_ pid: Int) async throws {
+        _ = try await send("/my-store/promos/\(pid)/toggle", method: "POST")
+    }
+    func deleteMyPromo(_ pid: Int) async throws {
+        _ = try await send("/my-store/promos/\(pid)", method: "DELETE")
+    }
+    func validateUStorePromo(sid: Int, code: String, amount: Int) async throws -> UStorePromoResult {
+        try decode(try await send("/u-store/\(sid)/promo/validate", method: "POST",
+                                  json: ["code": code, "amount": amount]))
+    }
+    // §7 Đợt 4 — ví người bán + rút tiền
+    func myStoreWallet() async throws -> MyStoreWallet {
+        try decode(try await send("/my-store/wallet"))
+    }
+    func requestWithdraw(amount: Int, bankInfo: String) async throws {
+        _ = try await send("/my-store/withdraw", method: "POST",
+                           json: ["amount": amount, "bank_info": bankInfo])
+    }
+    // §7 Đợt 4 — Cài đặt thanh toán riêng của cửa hàng (giống admin)
+    func getMyStorePayment() async throws -> BankSettings {
+        try decode(try await send("/my-store/payment"))
+    }
+    func saveMyStorePayment(_ s: BankSettings) async throws {
+        _ = try await send("/my-store/payment", method: "POST", json: [
+            "bank_code": s.bankCode, "bank_short": s.bankShort,
+            "bank_account": s.bankAccount, "bank_name": s.bankName,
+            "bank_webhook": s.bankWebhook, "bank_apikey": s.bankApikey,
+            "acb_api_token": s.acbApiToken])
+    }
+    func userStorePaymentInfo(sid: Int, amount: Int = 0, note: String = "KENIOS") async throws -> StorePaymentInfo {
+        try decode(try await send("/u-store/\(sid)/payment-info?amount=\(amount)&note=\(note)"))
+    }
+    // §7 Đợt 5 — cài đặt hiển thị cửa hàng + đánh giá
+    func getMyStoreSettings() async throws -> MyStoreSettings {
+        try decode(try await send("/my-store/settings"))
+    }
+    func saveMyStoreSettings(announceEnabled: Bool, announceText: String,
+                             flashEnabled: Bool, flashProductId: Int, flashEnd: Int,
+                             flashDiscount: Int, flashTitle: String,
+                             contacts: [StoreContactLink]) async throws {
+        let links = contacts.map { ["label": $0.label, "url": $0.url, "enabled": $0.enabled] as [String: Any] }
+        _ = try await send("/my-store/settings", method: "POST", json: [
+            "announce_enabled": announceEnabled, "announce_text": announceText,
+            "flash_enabled": flashEnabled, "flash_product_id": flashProductId, "flash_end": flashEnd,
+            "flash_discount": flashDiscount, "flash_title": flashTitle, "contacts": links])
+    }
+    func userStoreReviews(sid: Int, pid: Int) async throws -> MyStoreReviewsResponse {
+        try decode(try await send("/u-store/\(sid)/products/\(pid)/reviews"))
+    }
+    func postUserStoreReview(sid: Int, pid: Int, rating: Int, comment: String) async throws {
+        _ = try await send("/u-store/\(sid)/products/\(pid)/review", method: "POST",
+                           json: ["rating": rating, "comment": comment])
+    }
+    // §11 — Điều khiển PC từ xa (relay qua KENIOS)
+    func pcMine() async throws -> [PCAgent] {
+        try decode(try await send("/pc/mine"))
+    }
+    func pcSend(agentId: String, cmd: [String: Any]) async throws {
+        _ = try await send("/pc/send", method: "POST", json: ["agent_id": agentId, "cmd": cmd])
+    }
+    func pcScreen(agentId: String) async throws -> PCScreen {
+        try decode(try await send("/pc/screen/\(agentId)"))
+    }
+    func pcDelete(agentId: String) async throws {
+        _ = try await send("/pc/\(agentId)", method: "DELETE")
+    }
+    // §11b — Cầu nối RDP tại máy chủ: kết nối máy thuê chỉ bằng IP + user + pass
+    func rdpStart(host: String, username: String, password: String,
+                  width: Int = 1280, height: Int = 720) async throws -> RDPStartResult {
+        try decode(try await send("/rdp/start", method: "POST",
+                                  json: ["host": host, "username": username, "password": password,
+                                         "width": width, "height": height]))
+    }
+    func rdpScreen(_ rid: String) async throws -> RDPScreen {
+        try decode(try await send("/rdp/screen/\(rid)"))
+    }
+    func rdpInput(_ rid: String, cmd: [String: Any]) async throws {
+        _ = try await send("/rdp/input", method: "POST", json: ["rdp_id": rid, "cmd": cmd])
+    }
+    func rdpStop(_ rid: String) async throws {
+        _ = try await send("/rdp/stop", method: "POST", json: ["rdp_id": rid])
+    }
+    // Admin — duyệt rút tiền
+    func adminUStoreWithdrawals() async throws -> [AdminWithdrawal] {
+        try decode(try await send("/admin/u-store/withdrawals"))
+    }
+    func adminUStoreWithdrawAction(_ wid: Int, action: String) async throws {
+        _ = try await send("/admin/u-store/withdrawals/\(wid)/\(action)", method: "POST")
+    }
+
+    // §9.1 — Cảnh báo xâm nhập qua Telegram (admin)
+    func getSecurityAlert() async throws -> SecurityAlertConfig {
+        try decode(try await send("/admin/security-alert"))
+    }
+    func setSecurityAlert(enabled: Bool? = nil, botToken: String? = nil,
+                          chatId: String? = nil, test: Bool? = nil) async throws {
+        var body: [String: Any] = [:]
+        if let enabled { body["enabled"] = enabled }
+        if let botToken { body["bot_token"] = botToken }
+        if let chatId { body["chat_id"] = chatId }
+        if let test { body["test"] = test }
+        _ = try await send("/admin/security-alert", method: "POST", json: body)
+    }
+
     // Lưu ảnh từ máy → trả về link URL tuyệt đối (dùng dán vào logo/banner/media)
     func mediaUpload(dataBase64: String, mime: String, name: String) async throws -> String {
         let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",
             json: ["data_base64": dataBase64, "mime": mime, "name": name]))
         return root + r.path
     }
-    // -- Admin: danh mục / thư mục / sản phẩm --
-    func adminStoreSaveCategory(id: Int?, name: String, media: [[String: String]]) async throws -> IdResponse {
-        var body: [String: Any] = ["name": name, "media": media]
-        if let id { body["id"] = id }
-        return try decode(try await send("/admin/store/categories", method: "POST", json: body))
-    }
-    func adminStoreDeleteCategory(_ id: Int) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/categories/\(id)", method: "DELETE"))
-    }
-    func adminStoreSaveFolder(id: Int?, categoryId: Int, name: String,
-                              media: [[String: String]]) async throws -> IdResponse {
-        var body: [String: Any] = ["category_id": categoryId, "name": name, "media": media]
-        if let id { body["id"] = id }
-        return try decode(try await send("/admin/store/folders", method: "POST", json: body))
-    }
-    func adminStoreDeleteFolder(_ id: Int) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/folders/\(id)", method: "DELETE"))
-    }
-    func adminStoreSaveProduct(id: Int?, folderId: Int, name: String, description: String,
-                               media: [[String: String]], downloadUrl: String,
-                               downloadFileId: Int?, kind: String) async throws -> IdResponse {
-        var body: [String: Any] = ["folder_id": folderId, "name": name,
-                                    "description": description, "media": media,
-                                    "download_url": downloadUrl, "kind": kind]
-        if let id { body["id"] = id }
-        if let downloadFileId { body["download_file_id"] = downloadFileId }
-        return try decode(try await send("/admin/store/products", method: "POST", json: body))
-    }
-    func adminStoreDeleteProduct(_ id: Int) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/products/\(id)", method: "DELETE"))
-    }
-    // -- Admin: giá theo thời hạn --
-    func adminStoreSetPrices(productId: Int, prices: [[String: Any]]) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/products/\(productId)/prices",
-                                  method: "POST", json: ["prices": prices]))
-    }
-    // -- Admin: kho key --
-    func adminStoreListKeys(productId: Int) async throws -> StoreKeysInfo {
-        try decode(try await send("/admin/store/products/\(productId)/keys"))
-    }
-    func adminStoreAddKeys(productId: Int, text: String, priceId: Int? = nil) async throws -> MessageResponse {
-        var body: [String: Any] = ["text": text]
-        if let priceId { body["price_id"] = priceId }
-        return try decode(try await send("/admin/store/products/\(productId)/keys",
-                                  method: "POST", json: body))
-    }
-    func adminStoreDeleteKey(_ keyId: Int) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/keys/\(keyId)", method: "DELETE"))
-    }
-    func adminStoreDeleteAvailableKeys(productId: Int) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/products/\(productId)/keys", method: "DELETE"))
-    }
-    func adminStoreOrders() async throws -> [StoreAdminOrder] {
-        try decode(try await send("/admin/store/orders"))
-    }
-    func adminStoreInventory() async throws -> StoreInventory {
-        try decode(try await send("/admin/store/inventory"))
-    }
-
-    // Nạp/trừ ví cửa hàng thủ công cho người dùng (theo publicId hoặc username)
-    func adminAdjustStoreWallet(userIdentifier: String, delta: Int, note: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/wallet/adjust", method: "POST", json: [
-            "user": userIdentifier,
-            "delta": delta,
-            "note": note.isEmpty ? (delta >= 0 ? "Admin nạp ví" : "Admin trừ ví") : note
-        ]))
-    }
-
-    // Lấy danh sách người dùng của cửa hàng để admin điều chỉnh ví
-    func adminStoreUsers() async throws -> [AdminUser] {
-        try decode(try await send("/admin/users"))
-    }
-
-    // ---- Admin API keys (server-side) ----
-    func adminSaveKey(provider: String, apiKey: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/keys", method: "POST",
-                                  json: ["provider": provider, "api_key": apiKey]))
-    }
-    func adminListKeys() async throws -> [AdminKeyInfo] {
-        try decode(try await send("/admin/keys"))
-    }
-    func adminDeleteKey(provider: String) async throws -> MessageResponse {
-        try decode(try await send("/admin/keys/\(provider)", method: "DELETE"))
-    }
-
-    // ---- Admin thống kê ----
-    func adminStats() async throws -> AdminStats {
-        try decode(try await send("/admin/stats"))
-    }
-
-    // ---- Mã khuyến mãi ----
-    func storeValidatePromo(code: String, amount: Int) async throws -> PromoValidateResult {
-        try decode(try await send("/store/promo/validate", method: "POST",
-                                  json: ["code": code, "amount": amount]))
-    }
-    func adminListPromoCodes() async throws -> [PromoCode] {
-        try decode(try await send("/admin/store/promo-codes"))
-    }
-    func adminCreatePromoCode(code: String, discountType: String, discountValue: Int,
-                              minAmount: Int, maxUses: Int, expiresAt: Int) async throws -> IdResponse {
-        try decode(try await send("/admin/store/promo-codes", method: "POST", json: [
-            "code": code, "discount_type": discountType, "discount_value": discountValue,
-            "min_amount": minAmount, "max_uses": maxUses, "expires_at": expiresAt
-        ]))
-    }
-    func adminDeletePromoCode(_ id: Int) async throws -> MessageResponse {
-        try decode(try await send("/admin/store/promo-codes/\(id)", method: "DELETE"))
-    }
-
-    // ---- Push Notification ----
-    func registerDeviceToken(_ token: String) async throws -> MessageResponse {
-        try decode(try await send("/device-token", method: "POST",
-                                  json: ["token": token, "platform": "ios"]))
-    }
-    func unregisterDeviceToken(_ token: String) async throws -> MessageResponse {
-        try decode(try await send("/device-token", method: "DELETE", json: ["token": token]))
-    }
-    func adminSendPushNotification(title: String, body: String, target: String = "all") async throws -> PushSendResult {
-        try decode(try await send("/admin/push-notification", method: "POST",
-                                  json: ["title": title, "body": body, "target": target]))
-    }
-    func adminPushDeviceStats() async throws -> PushDeviceStats {
-        try decode(try await send("/admin/push-notification/devices"))
-    }
-
-    // ---- File ----
-    func listFiles(category: String?) async throws -> [FileItem] {
-        var path = "/files"
-        if let category, category != "all" { path += "?category=\(category)" }
-        return try decode(try await send(path))
-    }
-    func uploadFile(name: String, category: String, dataBase64: String) async throws -> UploadResponse {
-        try decode(try await send("/files", method: "POST",
-                                  json: ["name": name, "category": category, "data_base64": dataBase64]))
-    }
-    func uploadFileRaw(name: String, category: String, fileURL: URL) async throws -> UploadResponse {
-        var path = "/files/upload?name=\(name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name)"
-        if !category.isEmpty {
-            path += "&category=\(category.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? category)"
-        }
-        var req = URLRequest(url: try makeURL(path))
+    // Tải media (âm thanh/ảnh/video) STREAM thẳng từ file trên máy → nhanh, ít RAM,
+    // hợp để tải NHIỀU file song song. Trả về URL công khai tuyệt đối (/media/{id}).
+    func mediaUploadRaw(name: String, mime: String, fileURL: URL) async throws -> String {
+        let nm = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let mm = mime.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? mime
+        var req = URLRequest(url: try makeURL("/media/upload-raw?name=\(nm)&mime=\(mm)"))
         req.httpMethod = "POST"
-        req.timeoutInterval = 600
-        let ext = fileURL.pathExtension.lowercased()
-        let mime = mimeType(for: ext)
+        req.timeoutInterval = 300
         req.setValue(mime, forHTTPHeaderField: "Content-Type")
         if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        
         let (data, resp) = try await URLSession.shared.upload(for: req, fromFile: fileURL)
-        guard let http = resp as? HTTPURLResponse else {
-            throw APIError.message("Phản hồi không hợp lệ.")
-        }
+        guard let http = resp as? HTTPURLResponse else { throw APIError.message("Phản hồi không hợp lệ.") }
         if !(200..<300).contains(http.statusCode) {
-            var detail = "Lỗi tải lên (\(http.statusCode))."
+            var detail = "Tải lên lỗi (\(http.statusCode))."
             if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let d = obj["detail"] as? String { detail = d }
             throw APIError.message(detail)
         }
-        return try decode(data)
+        let r: MediaUploadResponse = try decode(data)
+        return root + r.path
     }
-    func downloadFile(_ id: Int) async throws -> FileDetail {
-        try decode(try await send("/files/\(id)"))
+    // Tải ảnh/video lên (công khai /media/{id}) → trả về FILE ID để đăng bài
+    func mediaUploadId(dataBase64: String, mime: String, name: String) async throws -> Int {
+        let r: MediaUploadResponse = try decode(try await send("/media/upload", method: "POST",
+            json: ["data_base64": dataBase64, "mime": mime, "name": name]))
+        return r.id
     }
-    func downloadFileRaw(_ id: Int) async throws -> (URL, String) {
-        var req = URLRequest(url: try makeURL("/files/\(id)/download"))
-        req.httpMethod = "GET"
-        req.timeoutInterval = 600
-        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        
-        let (tempURL, resp) = try await URLSession.shared.download(for: req)
-        guard let http = resp as? HTTPURLResponse else {
-            throw APIError.message("Phản hồi không hợp lệ.")
-        }
-        if !(200..<300).contains(http.statusCode) {
-            throw APIError.message("Lỗi tải xuống (\(http.statusCode)).")
-        }
-        
-        var filename = "file"
-        if let disp = http.value(forHTTPHeaderField: "Content-Disposition") {
-            if let range = disp.range(of: "filename=\"") {
-                let start = range.upperBound
-                if let endRange = disp.range(of: "\"", range: start..<disp.endIndex) {
-                    filename = String(disp[start..<endRange.lowerBound])
-                }
-            } else if let range = disp.range(of: "filename=") {
-                let start = range.upperBound
-                filename = String(disp[start...])
-            }
-        }
-        return (tempURL, filename)
-    }
-    func deleteFile(_ id: Int) async throws -> MessageResponse {
-        try decode(try await send("/files/\(id)", method: "DELETE"))
-    }
-    private func mimeType(for ext: String) -> String {
-        switch ext {
-        case "png": return "image/png"
-        case "jpg", "jpeg": return "image/jpeg"
-        case "gif": return "image/gif"
-        case "webp": return "image/webp"
-        case "pdf": return "application/pdf"
-        case "zip": return "application/zip"
-        case "txt": return "text/plain"
-        case "html": return "text/html"
-        case "css": return "text/css"
-        case "js": return "application/javascript"
-        case "json": return "application/json"
-        default: return "application/octet-stream"
-        }
-    }
+    /// URL công khai của 1 file media theo id (ảnh/video bài đăng) — tải bằng AsyncImage được.
+    func mediaURL(fileId: Int) -> URL? { URL(string: "\(root)/media/\(fileId)") }
 
-    // ---- Giọng nói ----
-    func transcribe(provider: String, audioBase64: String, mime: String) async throws -> VoiceResponse {
-        try decode(try await send("/voice/transcribe", method: "POST",
-                                  json: ["provider": provider, "audio_base64": audioBase64, "mime": mime]))
+    // ============ Khoá AI dùng chung (admin) — cho "AI xem video", trợ lý AI… ============
+    struct AIKeyStatus: Decodable {
+        let set: Bool; let masked: String; let provider: String
+        let model: String; let backends: Int
     }
-    
-    // ---- Giọng nói nâng cao (TTS) ----
-    func synthesizeSpeech(text: String, provider: String) async throws -> String {
-        let body: [String: Any] = ["text": text, "provider": provider]
-        let data = try await send("/voice/synthesize", method: "POST", json: body)
-        struct TTSResponse: Decodable { let audioBase64: String }
-        let res: TTSResponse = try decode(data)
-        return res.audioBase64
+    struct AIKeySaveResp: Decodable {
+        let ok: Bool; let set: Bool; let provider: String; let model: String
+        let testOk: Bool?; let testMsg: String?; let visionReady: Bool?
     }
-
-    // ---- Sinh ảnh AI ----
-    struct ImageGenResponse: Decodable {
-        let id: Int
-        let name: String
-        let dataBase64: String
-        let mime: String
+    /// ADMIN: xem trạng thái khoá AI trên máy chủ.
+    func aiKeyStatus() async throws -> AIKeyStatus {
+        try decode(try await send("/admin/ai-key"))
     }
-    func generateImage(prompt: String, provider: String) async throws -> ImageGenResponse {
-        let body: [String: Any] = ["prompt": prompt, "provider": provider]
-        return try decode(try await send("/image/generate", method: "POST", json: body))
-    }
-
-    // ---- Chạy code / Sandbox ----
-    func runPython(code: String, stdin: String? = nil) async throws -> CodeRunResult {
-        var body: [String: Any] = ["code": code]
-        if let stdin { body["stdin"] = stdin }
-        return try decode(try await send("/run/python", method: "POST", json: body))
-    }
-    func runCode(language: String, code: String, stdin: String? = nil) async throws -> CodeRunResult {
-        var body: [String: Any] = ["code": code, "language": language]
-        if let stdin { body["stdin"] = stdin }
-        return try decode(try await send("/run/code", method: "POST", json: body))
-    }
-    func runTestFile(fileId: Int, args: String? = nil) async throws -> FileRunResult {
-        var body: [String: Any] = ["file_id": fileId]
-        if let args { body["args"] = args }
-        return try decode(try await send("/run/test", method: "POST", json: body))
-    }
-
-    // ---- AI lập trình (review/debug/explain/convert/test/optimize/document/security) ----
-    func codeAI(provider: String, code: String, language: String?, task: String,
-                targetLang: String? = nil, model: String? = nil) async throws -> CodeAIResult {
-        var body: [String: Any] = ["provider": provider, "code": code, "task": task]
-        if let language { body["language"] = language }
-        if let targetLang { body["target_lang"] = targetLang }
+    /// ADMIN: lưu (rỗng = xoá) khoá AI dùng chung; `test` để thử gọi AI ngay.
+    func setAIServerKey(_ key: String, model: String? = nil, test: Bool = true) async throws -> AIKeySaveResp {
+        var body: [String: Any] = ["key": key, "test": test]
         if let model { body["model"] = model }
-        return try decode(try await send("/code/ai", method: "POST", json: body))
+        return try decode(try await send("/admin/ai-key", method: "POST", json: body))
     }
 
-    // ---- Credits & Thanh toán ----
-    func myCredits() async throws -> CreditsResponse {
-        try decode(try await send("/me/credits"))
+    // ====== NHIỀU khoá AI (chuỗi dự phòng): hết lượt khoá này → tự nhảy khoá kế ======
+    struct AIKeyItem: Decodable, Identifiable, Hashable {
+        let index: Int
+        let main: Bool
+        let provider: String
+        let model: String
+        let masked: String
+        var id: Int { index }
     }
-    func paymentPackages() async throws -> [PaymentPackage] {
-        try decode(try await send("/payment/packages", auth: false))
+    private struct AIKeysResp: Decodable { let items: [AIKeyItem]; let total: Int }
+    /// ADMIN: liệt kê toàn bộ khoá AI trong chuỗi dự phòng (theo đúng thứ tự sẽ dùng).
+    func aiKeys() async throws -> [AIKeyItem] {
+        let r: AIKeysResp = try decode(try await send("/admin/ai-keys"))
+        return r.items
     }
-    func createPayment(package: String, amount: Int) async throws -> PaymentCreateResponse {
-        try decode(try await send("/payment/create", method: "POST",
-                                  json: ["package": package, "amount": amount]))
+    /// ADMIN: thêm 1 khoá AI vào cuối chuỗi dự phòng.
+    func addAIKey(_ key: String, provider: String? = nil, model: String? = nil) async throws {
+        var body: [String: Any] = ["key": key]
+        if let provider, !provider.isEmpty { body["provider"] = provider }
+        if let model, !model.isEmpty { body["model"] = model }
+        _ = try await send("/admin/ai-keys", method: "POST", json: body)
     }
-    func paymentHistory() async throws -> [PaymentRecord] {
-        try decode(try await send("/payment/history"))
-    }
-    func cancelPayment(id: Int) async throws -> MessageResponse {
-        try decode(try await send("/payment/cancel", method: "POST", json: ["id": id]))
-    }
-
-    // ---- Prompt mẫu ----
-    func listPrompts() async throws -> [PromptTemplate] {
-        try decode(try await send("/prompts"))
-    }
-    func createPrompt(title: String, content: String, category: String?, isPublic: Bool) async throws -> MessageResponse {
-        var body: [String: Any] = ["title": title, "content": content, "is_public": isPublic]
-        if let category { body["category"] = category }
-        return try decode(try await send("/prompts", method: "POST", json: body))
-    }
-    func deletePrompt(_ id: Int) async throws -> MessageResponse {
-        try decode(try await send("/prompts/\(id)", method: "DELETE"))
+    /// ADMIN: xoá 1 khoá theo vị trí (-1 = khoá chính).
+    func deleteAIKey(index: Int) async throws {
+        _ = try await send("/admin/ai-keys/\(index)", method: "DELETE")
     }
 
-    // ---- Chia sẻ hội thoại ----
-    func shareConversation(_ id: Int) async throws -> ShareResponse {
-        try decode(try await send("/conversations/\(id)/share", method: "POST"))
+    // ============ Danh sách ĐẦY ĐỦ giọng ElevenLabs (dùng key máy chủ của admin) ============
+    struct ElevenVoice: Decodable, Identifiable, Hashable {
+        let voiceId: String
+        let name: String
+        let desc: String
+        let category: String
+        let preview: String
+        var id: String { voiceId }
+    }
+    private struct ElevenVoicesResp: Decodable { let voices: [ElevenVoice] }
+    /// Lấy toàn bộ giọng ElevenLabs để người dùng CHỌN THEO TÊN (không cần chép Voice ID).
+    func elevenVoices() async throws -> [ElevenVoice] {
+        let r: ElevenVoicesResp = try decode(try await send("/tts/eleven/voices"))
+        return r.voices
     }
 
-    // ---- Xuất hội thoại (raw data) ----
-    func exportConversation(_ id: Int, format: String) async throws -> Data {
-        try await send("/conversations/\(id)/export?format=\(format)")
+    // ====== LỒNG TIẾNG TOÀN BỘ VIDEO (khớp thời gian) + làm nét → xuất file tải về máy ======
+    struct NarrateStartResp: Decodable { let jobId: String; let status: String }
+    struct NarrateStatus: Decodable {
+        let status: String            // queued | running | done | error
+        let step: String?
+        let progress: Int?
+        let error: String?
+        let fileId: Int?
+        let filename: String?
+        let size: Int?
+        let duration: Double?
+        let segments: Int?
+        let script: String?
+        let voiceUsed: String?    // giọng THỰC SỰ đã dùng khi ghép video
+        let voiceNote: String?    // lý do nếu phải đổi giọng/model
     }
-
-    // ---- Tìm kiếm tin nhắn ----
-    func searchMessages(query: String) async throws -> [SearchResult] {
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        return try decode(try await send("/search?q=\(encoded)"))
-    }
-
-    // ---- Tin nhắn yêu thích ----
-    func listFavorites() async throws -> [FavoriteMessage] {
-        try decode(try await send("/favorites"))
-    }
-    func addFavorite(content: String, conversationId: Int?, provider: String?) async throws -> MessageResponse {
-        var body: [String: Any] = ["content": content]
-        if let conversationId { body["conversation_id"] = conversationId }
-        if let provider { body["provider"] = provider }
-        return try decode(try await send("/favorites", method: "POST", json: body))
-    }
-    func removeFavorite(_ id: Int) async throws -> MessageResponse {
-        try decode(try await send("/favorites/\(id)", method: "DELETE"))
-    }
-
-    // ---- Ghim hội thoại ----
-    func pinConversation(_ id: Int) async throws -> MessageResponse {
-        try decode(try await send("/conversations/\(id)/pin", method: "POST"))
-    }
-
-    // ---- Zip code ----
-    func zipCode(text: String) async throws -> ZipResponse {
-        try decode(try await send("/code/zip", method: "POST", json: ["text": text]))
-    }
-
-    // ---- Phân hệ mạng xã hội ----
-    func socialGenerate(topic: String, platform: String, tone: String, mode: String, provider: String) async throws -> SocialGenResponse {
-        let body: [String: Any] = [
-            "topic": topic,
-            "platform": platform,
-            "tone": tone,
-            "mode": mode,
-            "provider": provider
+    /// Bắt đầu lồng tiếng cả video (chạy nền trên máy chủ). Trả job_id để hỏi tiến độ.
+    func startVideoNarrate(url: String? = nil, fileId: Int? = nil, style: String? = nil,
+                           height: Int = 1080, sharpen: Double = 0.8, denoise: Bool = false,
+                           keepOriginal: Bool = true, origVolume: Double = 0.18,
+                           voiceVolume: Double = 1.6, script: String? = nil,
+                           engine: String? = nil, elevenVoiceId: String? = nil,
+                           elevenModel: String? = nil, elevenSpeed: Double = 1.0,
+                           stability: Double = 0.5, similarity: Double = 0.85,
+                           styleV: Double = 0.25, speakerBoost: Bool = true) async throws -> NarrateStartResp {
+        var body: [String: Any] = [
+            "height": height, "sharpen": sharpen, "denoise": denoise,
+            "keep_original": keepOriginal, "orig_volume": origVolume, "voice_volume": voiceVolume,
         ]
-        return try decode(try await send("/social/generator", method: "POST", json: body))
-    }
-
-    func socialDownload(url: String, quality: String = "1080") async throws -> SocialDownloadResponse {
-        let body: [String: Any] = ["url": url, "quality": quality]
-        return try decode(try await send("/social/download", method: "POST", json: body))
-    }
-
-    func getFacebookStreamKey(accessToken: String) async throws -> StreamKeyResponse {
-        let body: [String: Any] = ["access_token": accessToken]
-        return try decode(try await send("/social/stream/facebook", method: "POST", json: body))
-    }
-
-    func getTikTokStreamKey(cookies: String) async throws -> StreamKeyResponse {
-        let body: [String: Any] = ["cookies": cookies]
-        return try decode(try await send("/social/stream/tiktok", method: "POST", json: body))
-    }
-
-    // ---- TikTok Live: đọc bình luận tự động (như TikFinity) ----
-    func tiktokLiveConnect(username: String) async throws -> TikTokLiveStatus {
-        try decode(try await send("/social/tiktok/live/connect", method: "POST",
-                                  json: ["username": username]))
-    }
-    func tiktokLiveEvents(username: String, after: Int) async throws -> TikTokLiveEventsResponse {
-        let q = username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username
-        return try decode(try await send("/social/tiktok/live/events?username=\(q)&after=\(after)"))
-    }
-    func tiktokLiveDisconnect(username: String) async throws {
-        _ = try await send("/social/tiktok/live/disconnect", method: "POST",
-                           json: ["username": username])
-    }
-
-    // ---- Dịch sang tiếng Việt (cho TTS đa ngôn ngữ) ----
-    func translate(text: String, target: String = "vi", source: String = "auto") async throws -> TranslateResponse {
-        try decode(try await send("/translate", method: "POST",
-                                  json: ["text": text, "target": target, "source": source]))
-    }
-
-    // ---- KENIOS AI: cấp API key cho người khác ----
-    func apiTokenCreate(name: String) async throws -> ApiTokenCreateResponse {
-        try decode(try await send("/apitokens/create", method: "POST", json: ["name": name]))
-    }
-    func apiTokenList() async throws -> ApiTokenListResponse {
-        try decode(try await send("/apitokens"))
-    }
-    func apiTokenDelete(token: String) async throws {
-        _ = try await send("/apitokens/\(token)", method: "DELETE")
-    }
-
-    // ---- Thiết bị đăng ký (UDID) ----
-    func listDevices() async throws -> DevicesResponse {
-        try decode(try await send("/devices"))
-    }
-
-    func encryptCode(code: String, language: String, level: String) async throws -> EncryptResponse {
-        let body: [String: Any] = ["code": code, "language": language, "level": level]
-        return try decode(try await send("/code/encrypt", method: "POST", json: body))
-    }
-
-    func analyzeBinary(fileURL: URL) async throws -> BinaryAnalysisResponse {
-        var req = URLRequest(url: try makeURL("/code/analyze"))
-        req.httpMethod = "POST"
-        req.timeoutInterval = 120
-        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        
-        let boundary = "Boundary-\(UUID().uuidString)"
-        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        
-        var body = Data()
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        let filename = fileURL.lastPathComponent
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
-        body.append(try Data(contentsOf: fileURL))
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        req.httpBody = body
-        
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse else {
-            throw APIError.message("Phản hồi không hợp lệ.")
+        if let url, !url.isEmpty { body["url"] = url }
+        if let fileId { body["file_id"] = fileId }
+        if let style, !style.isEmpty { body["style"] = style }
+        // Gửi kèm KỊCH BẢN đang hiển thị (dự phòng khi AI không viết được theo mốc giờ).
+        if let script, !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["script"] = script
         }
-        if !(200..<300).contains(http.statusCode) {
-            throw APIError.message("Lỗi phân tích (\(http.statusCode)).")
-        }
-        return try decode(data)
+        // GIỌNG đang chọn → máy chủ lồng tiếng bằng ĐÚNG giọng đó (vd ElevenLabs).
+        if let engine, !engine.isEmpty { body["engine"] = engine }
+        if let elevenVoiceId, !elevenVoiceId.isEmpty { body["eleven_voice_id"] = elevenVoiceId }
+        if let elevenModel, !elevenModel.isEmpty { body["eleven_model"] = elevenModel }
+        body["eleven_speed"] = elevenSpeed
+        body["stability"] = stability
+        body["similarity"] = similarity
+        body["style_v"] = styleV
+        body["speaker_boost"] = speakerBoost
+        return try decode(try await send("/social/video-narrate", method: "POST", json: body))
+    }
+    /// Hỏi tiến độ / kết quả job lồng tiếng.
+    func videoNarrateStatus(_ jobId: String) async throws -> NarrateStatus {
+        try decode(try await send("/social/video-narrate/\(jobId)"))
     }
 
-    func translateAsm(input: String, mode: String, arch: String, provider: String) async throws -> AsmResponse {
-        let body: [String: Any] = [
-            "input": input,
-            "mode": mode,
-            "arch": arch,
-            "provider": provider
-        ]
-        return try decode(try await send("/code/asm", method: "POST", json: body))
+    // ============ AI xem video → viết kịch bản thuyết minh (để đọc bằng TTS) ============
+    struct VideoScriptResp: Decodable { let script: String; let frames: Int }
+    /// AI xem video (qua link HOẶC file_id đã tải lên) rồi viết kịch bản tiếng Việt để đọc.
+    func videoScript(url: String? = nil, fileId: Int? = nil, style: String? = nil) async throws -> VideoScriptResp {
+        var body: [String: Any] = [:]
+        if let url, !url.isEmpty { body["url"] = url }
+        if let fileId { body["file_id"] = fileId }
+        if let style, !style.isEmpty { body["style"] = style }
+        return try decode(try await send("/social/video-script", method: "POST", json: body))
     }
 
-    // ---- DevOps & DevOps Tools ----
-    func runSSH(host: String, user: String, pass: String, cmd: String) async throws -> SSHResultResponse {
-        let body: [String: Any] = [
-            "host": host,
-            "username": user,
-            "password": pass,
-            "command": cmd
-        ]
-        return try decode(try await send("/run/ssh", method: "POST", json: body))
+    // ============ Trình đọc trên trình duyệt (TikTok Studio / OBS) ============
+    struct ReaderSaveResp: Decodable { let url: String; let token: String }
+    /// Lưu & ĐỒNG BỘ thiết lập giọng lên máy chủ, trả về ĐƯỜNG DẪN trang đọc.
+    func saveReaderConfig(username: String, engine: String, voiceId: String, model: String,
+                          speed: Double, readTypes: [String], translate: Bool,
+                          tpl: [String: String]) async throws -> String {
+        let r: ReaderSaveResp = try decode(try await send("/live-reader/save", method: "POST", json: [
+            "username": username, "engine": engine, "voice_id": voiceId, "model": model,
+            "speed": speed, "read_types": readTypes, "translate": translate, "tpl": tpl,
+        ]))
+        return r.url
     }
 
-    func runHTTP(url: String, method: String, headers: [String: String], body: String) async throws -> HTTPTestResponse {
-        let body: [String: Any] = [
-            "url": url,
-            "method": method,
-            "headers": headers,
-            "body": body
-        ]
-        return try decode(try await send("/run/http", method: "POST", json: body))
+    // ==================== ElevenLabs dùng chung (admin đặt key · khách dùng) ====================
+    struct ElevenKeyStatus: Decodable { let set: Bool; let masked: String }
+    /// ADMIN: xem trạng thái key máy chủ (đã đặt chưa · che bớt).
+    func elevenKeyStatus() async throws -> ElevenKeyStatus {
+        try decode(try await send("/admin/eleven-key"))
     }
-
-    func runSQL(query: String) async throws -> SQLResultResponse {
-        let body: [String: Any] = [
-            "query": query
-        ]
-        return try decode(try await send("/run/sql", method: "POST", json: body))
+    /// ADMIN: lưu (hoặc xoá nếu rỗng) API key ElevenLabs dùng chung.
+    func setElevenServerKey(_ key: String) async throws {
+        _ = try await send("/admin/eleven-key", method: "POST", json: ["key": key])
     }
-
-    func cleanupDatabase(days: Int) async throws -> CleanupResponse {
-        let body: [String: Any] = ["days": days]
-        return try decode(try await send("/db/cleanup", method: "POST", json: body))
+    /// Đọc 1 đoạn qua MÁY CHỦ (dùng key admin) → trả về audio mp3. Khách không cần key.
+    func elevenTTS(text: String, voiceId: String, modelId: String,
+                   stability: Double, similarityBoost: Double,
+                   style: Double, speakerBoost: Bool, speed: Double = 1.0) async throws -> Data {
+        try await send("/tts/eleven", method: "POST", json: [
+            "text": text, "voice_id": voiceId, "model_id": modelId,
+            "stability": stability, "similarity_boost": similarityBoost,
+            "style": style, "use_speaker_boost": speakerBoost, "speed": speed,
+        ])
     }
-
-    // ---- Bạn bè & Tin nhắn trực tiếp (User-to-User) ----
-    func searchUsers(query: String) async throws -> [UserSearchResult] {
-        try decode(try await send("/users/search?q=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"))
-    }
-
-    func sendFriendRequest(friendId: Int) async throws -> MessageResponse {
-        try decode(try await send("/friends/request", method: "POST", json: ["friend_id": friendId]))
-    }
-
-    func listFriendRequests() async throws -> [FriendRequestItem] {
-        try decode(try await send("/friends/requests"))
-    }
-
-    func respondToFriendRequest(requestId: Int, action: String) async throws -> MessageResponse {
-        try decode(try await send("/friends/respond", method: "POST", json: ["request_id": requestId, "action": action]))
-    }
-
-    func listFriends() async throws -> [FriendItem] {
-        try decode(try await send("/friends"))
-    }
-
-    func getDirectMessages(friendId: Int) async throws -> [DirectMessageItem] {
-        try decode(try await send("/direct_messages/\(friendId)"))
-    }
-
-    func sendDirectMessage(receiverId: Int, content: String) async throws -> MessageResponse {
-        try decode(try await send("/direct_messages", method: "POST", json: ["receiver_id": receiverId, "content": content]))
-    }
-
 }
-

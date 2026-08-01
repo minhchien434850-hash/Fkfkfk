@@ -26,7 +26,8 @@ struct SettingsView: View {
                     KHeroHeader(icon: "gearshape.fill",
                                 title: store.t("Cài đặt", "Settings"),
                                 subtitle: store.t("Tài khoản · giao diện · dọn dẹp · cache",
-                                                  "Account · appearance · cleanup · cache"))
+                                                  "Account · appearance · cleanup · cache"),
+                                useLogo: true)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                 }
@@ -54,7 +55,7 @@ struct SettingsView: View {
                     HStack {
                         Text(store.t("ID của bạn", "Your ID"))
                         Spacer()
-                        Text(store.publicId.isEmpty ? "—" : store.publicId)
+                        Text(store.publicId.isEmpty ? "—" : store.displayPublicId)
                             .foregroundStyle(Theme.accent)
                             .textSelection(.enabled)
                     }
@@ -64,12 +65,21 @@ struct SettingsView: View {
                         Text(store.isPro ? "PRO" : "Free")
                             .foregroundStyle(store.isPro ? .green : .secondary)
                     }
-                    HStack {
-                        Text("Credits")
-                        Spacer()
-                        Text("\(store.credits)").foregroundStyle(Theme.accent)
+                    if store.isPro, let exp = store.planExpiryText {
+                        HStack {
+                            Text(store.t("Hết hạn", "Expires"))
+                            Spacer()
+                            Text(exp).foregroundStyle(.secondary)
+                        }
+                    } else if store.isPro && !store.isAdmin {
+                        HStack {
+                            Text(store.t("Hạn dùng", "Validity"))
+                            Spacer()
+                            Text(store.t("Vĩnh viễn", "Lifetime")).foregroundStyle(.secondary)
+                        }
                     }
-                    Button(store.t("Nạp credits", "Buy credits")) { showPayment = true }
+                    Button(store.isPro ? store.t("Gia hạn / Đổi gói", "Renew / Change plan")
+                                       : store.t("Nâng cấp gói", "Upgrade plan")) { showPayment = true }
                     TextField("Gmail", text: $email)
                         .textInputAutocapitalization(.never).keyboardType(.emailAddress)
                     TextField(store.t("Số điện thoại", "Phone number"), text: $phone).keyboardType(.phonePad)
@@ -88,7 +98,6 @@ struct SettingsView: View {
                     Picker(store.t("Mở app vào tab", "Open app on tab"), selection: $defaultLaunchTab) {
                         Text(store.t("Mạng xã hội", "Social")).tag(2)
                         Text(store.t("Video", "Video")).tag(14)
-                        Text(store.t("Cửa hàng", "Store")).tag(15)
                         Text(store.t("Bạn bè", "Friends")).tag(4)
                         Text(store.t("Khám phá", "Explore")).tag(16)
                     }
@@ -178,26 +187,30 @@ struct SettingsView: View {
                 }
                 } // hết phần tuỳ biến thương hiệu (chỉ admin)
 
-                // ===== Thông báo =====
-                Section(store.t("Thông báo", "Notifications")) {
-                    Button {
-                        store.requestNotificationPermission()
-                        message = store.t("Đã mở yêu cầu cấp quyền thông báo iOS.", "Opened iOS notification permission request.")
-                    } label: {
-                        Label(store.t("Bật thông báo (sản phẩm mới, cập nhật)", "Enable notifications (new products, updates)"),
-                              systemImage: "bell.badge")
-                    }
-                    Button {
-                        if let url = URL(string: UIApplication.openSettingsURLString) {
-                            UIApplication.shared.open(url)
+                // ===== Thông báo (CHỈ admin thấy) =====
+                // Khách hàng KHÔNG thấy mục này; app đã tự xin quyền thông báo lúc
+                // khởi động (AppDelegate) nên với khách mặc định là BẬT.
+                if store.isAdmin {
+                    Section(store.t("Thông báo", "Notifications")) {
+                        Button {
+                            store.requestNotificationPermission()
+                            message = store.t("Đã mở yêu cầu cấp quyền thông báo iOS.", "Opened iOS notification permission request.")
+                        } label: {
+                            Label(store.t("Bật thông báo (sản phẩm mới, cập nhật)", "Enable notifications (new products, updates)"),
+                                  systemImage: "bell.badge")
                         }
-                    } label: {
-                        Label(store.t("Mở Cài đặt iOS để quản lý thông báo", "Open iOS Settings to manage notifications"),
-                              systemImage: "gear")
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Label(store.t("Mở Cài đặt iOS để quản lý thông báo", "Open iOS Settings to manage notifications"),
+                                  systemImage: "gear")
+                        }
+                        Text(store.t("Thông báo xuất hiện khi admin thêm sản phẩm mới hoặc có cập nhật bảo trì.",
+                                     "Notifications appear when an admin adds new products or posts a maintenance update."))
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
-                    Text(store.t("Thông báo xuất hiện khi admin thêm sản phẩm mới hoặc có cập nhật bảo trì.",
-                                 "Notifications appear when an admin adds new products or posts a maintenance update."))
-                        .font(.caption2).foregroundStyle(.secondary)
                 }
 
                 Section(store.t("Dung lượng & Dọn dẹp", "Storage & Cleanup")) {
@@ -237,6 +250,15 @@ struct SettingsView: View {
                         LegalView()
                     } label: {
                         Label(store.t("Điều khoản & Chính sách bảo mật", "Terms & Privacy Policy"), systemImage: "doc.text.magnifyingglass")
+                    }
+                }
+
+                // §5 — Thông tin ứng dụng (công khai, tách khỏi trang quản trị)
+                Section(store.t("Thông tin ứng dụng", "App Information")) {
+                    NavigationLink {
+                        AppInfoView()
+                    } label: {
+                        Label(store.t("Thông tin ứng dụng", "App Information"), systemImage: "info.circle")
                     }
                 }
 
@@ -318,6 +340,28 @@ struct WelcomeGreetingView: View {
     @State private var voices: [AVSpeechSynthesisVoice] = []
     @State private var rateBinding: Double = 0.5
 
+    // ===== Giọng chào TOÀN CỤC (admin đặt cho MỌI người) — gộp từ mục Quản trị =====
+    @State private var gEnabled = true
+    @State private var gText = "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!"
+    @State private var gRate: Double = 0.5
+    @State private var gLogoName = ""
+    @State private var gLogoUrl = ""
+    @State private var gBannerType = "image"
+    @State private var gBannerUrl = ""
+    @State private var gLoaded = false
+    @State private var gSaving = false
+    @State private var gMessage: String?
+    @State private var gIsError = false
+    // ===== Gộp thêm: Lời chào POPUP (chữ) + Thông báo cập nhật phiên bản (admin) =====
+    @State private var gPopupEnabled = false
+    @State private var gPopupTitle = ""
+    @State private var gPopupText = ""
+    @State private var gVersion = ""
+    @State private var gUpdateUrl = ""
+    @State private var gUpdateMsg = ""
+    // Đọc to thông báo sản phẩm mới bằng giọng đồng bộ (mặc định BẬT)
+    @State private var gNotifVoice = true
+
     private let templates = [
         "Chào mừng bạn đã đến với KENIOS. Chúc bạn một ngày tốt lành!",
         "Xin chào! Rất vui được gặp lại bạn tại KENIOS hôm nay.",
@@ -329,12 +373,23 @@ struct WelcomeGreetingView: View {
 
     var body: some View {
         Form {
+            // 1 công tắc DUY NHẤT: admin = áp cho MỌI người; người thường = lời chào cá nhân.
             Section {
-                Toggle(store.t("Bật lời chào tự động khi mở app", "Auto-greeting on app open"), isOn: Binding(
+                Toggle(store.isAdmin
+                       ? store.t("Bật lời chào khi mở app (áp cho MỌI người)",
+                                 "Greeting on app open (ALL users)")
+                       : store.t("Bật lời chào tự động khi mở app", "Auto-greeting on app open"),
+                       isOn: Binding(
                     get: { store.welcomeEnabled },
-                    set: { store.setWelcomeEnabled($0) }))
-                Text(store.t("Khi bật, app sẽ đọc lời chào bằng giọng nói mỗi khi bạn mở app lên.",
-                             "When on, the app reads a spoken greeting each time you open it."))
+                    set: { on in
+                        store.setWelcomeEnabled(on)
+                        if store.isAdmin { gEnabled = on }
+                    }))
+                Text(store.isAdmin
+                     ? store.t("Khi bật, MỌI người dùng đều nghe lời chào này mỗi khi mở app. Nhớ bấm Lưu ở cuối để áp dụng cho mọi người.",
+                               "When on, EVERY user hears this greeting on app open. Tap Save below to apply to everyone.")
+                     : store.t("Khi bật, app sẽ đọc lời chào bằng giọng nói mỗi khi bạn mở app lên.",
+                               "When on, the app reads a spoken greeting each time you open it."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -342,7 +397,10 @@ struct WelcomeGreetingView: View {
                 Section(store.t("Nội dung lời chào", "Greeting text")) {
                     TextEditor(text: Binding(
                         get: { store.welcomeText },
-                        set: { store.setWelcomeText($0) }))
+                        set: { s in
+                            store.setWelcomeText(s)
+                            if store.isAdmin { gText = s }
+                        }))
                         .frame(minHeight: 72)
                 }
 
@@ -350,6 +408,7 @@ struct WelcomeGreetingView: View {
                     ForEach(templates, id: \.self) { t in
                         Button {
                             store.setWelcomeText(t)
+                            if store.isAdmin { gText = t }
                         } label: {
                             Text(t).font(.caption).foregroundStyle(.primary)
                                 .multilineTextAlignment(.leading)
@@ -370,8 +429,11 @@ struct WelcomeGreetingView: View {
                         }
                     }
                     .pickerStyle(.navigationLink)
-                    Text(store.t("Giọng ✦ là giọng Enhanced (rõ, tự nhiên hơn). Cài thêm giọng trong iOS Settings > Accessibility > Spoken Content > Voices.",
-                                 "✦ voices are Enhanced (clearer, more natural). Add more in iOS Settings > Accessibility > Spoken Content > Voices."))
+                    Text(store.isAdmin
+                         ? store.t("Bạn là ADMIN: giọng chọn ở đây sẽ ĐỒNG BỘ cho MỌI người dùng khi bấm Lưu ở cuối (mặc định: Chị Google). Giọng ✦ là Enhanced.",
+                                   "You are ADMIN: this voice SYNCS to ALL users after Save (default: Google voice). ✦ = Enhanced.")
+                         : store.t("Giọng ✦ là giọng Enhanced (rõ, tự nhiên hơn). Cài thêm giọng trong iOS Settings > Accessibility > Spoken Content > Voices.",
+                                   "✦ voices are Enhanced (clearer, more natural). Add more in iOS Settings > Accessibility > Spoken Content > Voices."))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
 
@@ -379,7 +441,10 @@ struct WelcomeGreetingView: View {
                     HStack(spacing: 10) {
                         Text("🐢").font(.caption)
                         Slider(value: $rateBinding, in: 0.3...0.65, step: 0.025)
-                            .onChange(of: rateBinding) { store.setWelcomeRate(Float($0)) }
+                            .onChange(of: rateBinding) {
+                                store.setWelcomeRate(Float($0))
+                                if store.isAdmin { gRate = $0 }
+                            }
                         Text("🐇").font(.caption)
                     }
                     Text(store.t("Tốc độ", "Speed") + ": \(Int(rateBinding * 100))%  ·  " + store.t("(mặc định 50%)", "(default 50%)"))
@@ -403,12 +468,136 @@ struct WelcomeGreetingView: View {
                     }
                 }
             }
+
+            // ===== Khu vực Admin (giọng chào toàn cục đã GỘP vào công tắc ở trên) =====
+            if store.isAdmin {
+                // ===== Lời chào POPUP (chữ) toàn cục =====
+                Section {
+                    Toggle(store.t("Bật lời chào popup (chữ)", "Enable welcome popup (text)"), isOn: $gPopupEnabled)
+                    if gPopupEnabled {
+                        TextField(store.t("Tiêu đề (vd: Chào mừng!)", "Title (e.g. Welcome!)"), text: $gPopupTitle)
+                        TextField(store.t("Nội dung popup cho mọi khách", "Popup text for all users"),
+                                  text: $gPopupText, axis: .vertical).lineLimit(2...5)
+                    }
+                } header: {
+                    Text(store.t("💬 Lời chào popup — Admin", "💬 Welcome popup — Admin"))
+                } footer: {
+                    Text(store.t("Popup chữ hiện 1 lần khi MỌI người mở app (khác giọng nói ở trên).",
+                                 "Text popup shown once when EVERY user opens the app (separate from the voice above)."))
+                        .font(.caption2)
+                }
+
+                // ===== Đọc to THÔNG BÁO SẢN PHẨM MỚI =====
+                Section {
+                    Toggle(store.t("Đọc to thông báo sản phẩm mới", "Read new-product notices aloud"),
+                           isOn: $gNotifVoice)
+                } header: {
+                    Text(store.t("📣 Thông báo sản phẩm mới — Admin", "📣 New-product notice — Admin"))
+                } footer: {
+                    Text(store.t("Khi admin đăng sản phẩm mới, app của MỌI người hiện thông báo VÀ đọc to bằng giọng đồng bộ ở trên (chị Google / giọng admin chọn).",
+                                 "When a new product is posted, every user's app shows the notice AND reads it aloud with the synced voice above."))
+                        .font(.caption2)
+                }
+
+                // ===== Thông báo cập nhật phiên bản =====
+                Section {
+                    TextField(store.t("Phiên bản mới nhất (vd 3.1)", "Latest version (e.g. 3.1)"), text: $gVersion)
+                        .keyboardType(.decimalPad)
+                    TextField(store.t("Link tải/cập nhật (https://...)", "Update link (https://...)"), text: $gUpdateUrl)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField(store.t("Lời nhắn cập nhật (tuỳ chọn)", "Update message (optional)"),
+                              text: $gUpdateMsg, axis: .vertical).lineLimit(1...3)
+                } header: {
+                    Text(store.t("🆕 Thông báo cập nhật phiên bản — Admin", "🆕 Version update notice — Admin"))
+                } footer: {
+                    Text(store.t("Bản mới > phiên bản đang cài → mọi user thấy popup 'Cập nhật ngay' mở link. Để trống Phiên bản để tắt.",
+                                 "When newer than installed → all users see an 'Update now' popup. Leave version empty to disable."))
+                        .font(.caption2)
+                }
+
+                Section {
+                    Button {
+                        Task { await saveGlobal() }
+                    } label: {
+                        HStack {
+                            if gSaving { ProgressView().padding(.trailing, 4) }
+                            Text(store.t("Lưu — áp dụng cho MỌI người", "Save — apply to ALL users")).bold()
+                        }
+                    }
+                    .disabled(!gLoaded || gSaving)
+                    if !gLoaded {
+                        Text(store.t("Đang tải cấu hình toàn cục...", "Loading global config..."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let gMessage {
+                        Text(gMessage).font(.footnote).foregroundStyle(gIsError ? .red : .green)
+                    }
+                } footer: {
+                    Text(store.t("Bạn là admin: lời chào, tốc độ và công tắc ở trên là CHUNG cho mọi người dùng. Bấm Lưu để phát cho tất cả khi họ mở app.",
+                                 "You are admin: the greeting, speed and toggle above are GLOBAL. Tap Save to apply for everyone."))
+                        .font(.caption2)
+                }
+            }
         }
         .navigationTitle(store.t("Lời chào khi mở app", "Welcome greeting"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             voices = WelcomeVoice.availableVoices
             rateBinding = Double(store.welcomeRate)
+            if store.isAdmin { await loadGlobal() }
+        }
+    }
+
+    // MARK: - Giọng chào toàn cục (admin) — đồng bộ vào giao diện CHUNG ở trên
+    private func loadGlobal() async {
+        guard let c = try? await store.api.storeConfig() else { return }
+        gEnabled = c.welcomeVoiceEnabled ?? true
+        if let vt = c.welcomeVoiceText, !vt.isEmpty { gText = vt }
+        gRate = Double(c.welcomeVoiceRate ?? 0.5)
+        gLogoName = c.logoName; gLogoUrl = c.logoUrl
+        gBannerType = c.bannerType; gBannerUrl = c.bannerUrl
+        // Giọng toàn cục admin đã đặt → hiện đúng trên picker
+        if let vid = c.welcomeVoiceId, !vid.isEmpty { store.setWelcomeVoiceId(vid) }
+        gPopupEnabled = c.welcomePopupEnabled ?? false
+        gPopupTitle = c.welcomePopupTitle ?? ""
+        gPopupText = c.welcomePopupText ?? ""
+        gVersion = c.latestVersion ?? ""
+        gUpdateUrl = c.updateUrl ?? ""
+        gUpdateMsg = c.updateMessage ?? ""
+        gNotifVoice = c.notifVoiceEnabled ?? true
+        // Admin chỉ có 1 lời chào duy nhất → hiển thị giá trị toàn cục lên giao diện chung.
+        store.setWelcomeEnabled(gEnabled)
+        if !gText.isEmpty { store.setWelcomeText(gText) }
+        store.setWelcomeRate(Float(gRate))
+        rateBinding = gRate
+        gLoaded = true
+    }
+
+    private func saveGlobal() async {
+        guard gLoaded else { return }
+        gSaving = true; gMessage = nil
+        defer { gSaving = false }
+        // Lấy đúng giá trị đang hiển thị trên giao diện chung.
+        gEnabled = store.welcomeEnabled
+        gText = store.welcomeText
+        gRate = rateBinding
+        do {
+            let r = try await store.api.adminStoreSetConfig(
+                logoName: gLogoName, logoUrl: gLogoUrl,
+                bannerType: gBannerType, bannerUrl: gBannerUrl,
+                welcomePopupEnabled: gPopupEnabled,
+                welcomePopupTitle: gPopupTitle,
+                welcomePopupText: gPopupText,
+                welcomeVoiceEnabled: gEnabled,
+                welcomeVoiceText: gText,
+                welcomeVoiceRate: Float(gRate),
+                welcomeVoiceId: store.welcomeVoiceId,
+                notifVoiceEnabled: gNotifVoice,
+                latestVersion: gVersion, updateUrl: gUpdateUrl,
+                updateMessage: gUpdateMsg)
+            gIsError = false; gMessage = r.message
+        } catch {
+            gIsError = true; gMessage = error.localizedDescription
         }
     }
 }

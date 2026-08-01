@@ -162,7 +162,7 @@ struct FilesPane: View {
         }
         .task { await reload() }
         .sheet(isPresented: $showImporter) {
-            DocumentPicker(allowsMultipleSelection: true) { urls in
+            DocumentPicker(allowsMultipleSelection: true, asCopy: true) { urls in
                 handleImport(.success(urls))
             }
             .ignoresSafeArea()

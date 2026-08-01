@@ -6,11 +6,18 @@ enum Theme {
     static let gold   = Color(red: 1.0, green: 0.84, blue: 0.0)
     static let neon   = Color(red: 0.0, green: 1.0, blue: 0.85)
 
-    // ===== Bảng màu navy cao cấp (dùng cho nền toàn app) =====
+    // ===== Bảng màu navy cao cấp =====
+    // Nền sâu bgNavy GIỮ tối (dùng cho màn bảo trì/splash có chữ trắng).
     static let bgNavy   = Color(red: 0.043, green: 0.059, blue: 0.102)   // #0B0F1A nền sâu
-    static let cardNavy = Color(red: 0.086, green: 0.102, blue: 0.169)   // #161A2B thẻ/ô
-    static let bgNavyUI   = UIColor(red: 0.043, green: 0.059, blue: 0.102, alpha: 1)
-    static let cardNavyUI = UIColor(red: 0.086, green: 0.102, blue: 0.169, alpha: 1)
+    static let bgNavyUI = UIColor(red: 0.043, green: 0.059, blue: 0.102, alpha: 1)
+    // Thẻ/ô TỰ THÍCH ỨNG Sáng/Tối (§2.1): Sáng → thẻ trắng, Tối → navy như cũ.
+    // Dynamic UIColor → hệ thống tự đổi màu MƯỢT khi chuyển Sáng/Tối (không giật/lag).
+    static let cardNavyUI = UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.086, green: 0.102, blue: 0.169, alpha: 1)   // #161A2B thẻ tối
+            : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1)         // thẻ trắng (Sáng)
+    }
+    static let cardNavy = Color(cardNavyUI)
 
     // Gradient cho nền card
     static let cardGradient = LinearGradient(

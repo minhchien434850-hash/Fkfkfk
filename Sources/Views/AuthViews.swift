@@ -10,29 +10,36 @@ struct LoginView: View {
     @State private var showConnections = false
     @State private var remember = false
     @State private var didAutoTry = false
+    @State private var googleClientId = ""   // lấy từ máy chủ; rỗng = ẩn nút Google
+    @State private var googleLoading = false
+    // Hiệu ứng logo APP (đặt ở Cài đặt) → màn đăng nhập đổi theo cho khớp.
+    @AppStorage("appLogoEffect") private var appLogoEffect = "rainbow"
+    @AppStorage("appLogoFont") private var appLogoFont = "rounded"
+    @AppStorage("appLogoAnim") private var appLogoAnim = "shimmer"
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 30, style: .continuous)
-                            .fill(Theme.heroGradient)
-                            .frame(width: 116, height: 116)
-                            .shadow(color: Theme.purple.opacity(0.55), radius: 26, y: 12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 30, style: .continuous)
-                                    .stroke(LinearGradient(colors: [.white.opacity(0.5), .clear],
-                                                           startPoint: .topLeading, endPoint: .bottomTrailing),
-                                            lineWidth: 1.5)
-                            )
-                        Text("🦊")
-                            .font(.system(size: 66))
-                            .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
-                    }
-                    .padding(.top, 52)
+                    // Logo + tên của CHÍNH APP (icon app), KHÔNG dùng logo cửa hàng.
+                    Image("AppLogo")
+                        .resizable().scaledToFill()
+                        .frame(width: 116, height: 116)
+                        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                                .stroke(LinearGradient(colors: [.white.opacity(0.5), .clear],
+                                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                                        lineWidth: 1.5)
+                        )
+                        .shadow(color: Theme.purple.opacity(0.55), radius: 26, y: 12)
+                        .padding(.top, 52)
+                        // 🔒 Ẩn: NHẤN GIỮ logo ~1 giây → mở cấu hình máy chủ (chỉ admin/kỹ thuật biết,
+                        // khách bình thường không chạm tới nên không đổi bậy URL được).
+                        .onLongPressGesture(minimumDuration: 1.0) { showConnections = true }
 
-                    RainbowText(text: "KENIOS", size: 40)
+                    AnimatedStoreLogo(text: "KENIOS", effect: appLogoEffect,
+                                      fontStyle: appLogoFont, anim: appLogoAnim, size: 40)
                     Text(store.t("Mạng xã hội · Video · Giải trí · Công cụ", "Social · Video · Entertainment · Tools"))
                         .font(.subheadline).foregroundStyle(.secondary)
 
@@ -78,42 +85,91 @@ struct LoginView: View {
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(.secondary.opacity(0.4)))
                     }.padding(.horizontal)
 
-                    NavigationLink { LegalView() } label: {
-                        Text(store.t("Điều khoản & Chính sách bảo mật", "Terms & Privacy Policy"))
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }.padding(.top, 4)
+                    // Đăng nhập KHÔNG MẬT KHẨU bằng mã gửi Gmail/SĐT (dùng OTP sẵn có — không trùng login thường)
+                    NavigationLink { OtpLoginView() } label: {
+                        Label(store.t("Đăng nhập bằng mã Gmail (không mật khẩu)", "Login with Gmail code (passwordless)"),
+                              systemImage: "envelope.badge.fill")
+                            .font(.subheadline).frame(maxWidth: .infinity).padding()
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.accent.opacity(0.5)))
+                    }.padding(.horizontal)
 
-                    // Ẩn hoàn toàn phần liên kết máy chủ khi đã cài sẵn URL mặc định (Config.defaultServerURL)
-                    if Config.defaultServerURL.isEmpty {
-                        if store.baseURL.isEmpty {
-                            NavigationLink { ServerSetupView() } label: {
-                                HStack {
-                                    Image(systemName: "globe").foregroundStyle(.orange)
-                                    Text(store.t("Chưa có máy chủ — bấm để kết nối", "No server — tap to connect")).font(.caption)
-                                }
-                                .padding().frame(maxWidth: .infinity)
-                                .background(Color(.secondarySystemBackground))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            }.padding(.horizontal)
-                        } else {
-                            HStack(spacing: 8) {
-                                Image(systemName: "globe").foregroundStyle(Theme.accent)
-                                VStack(alignment: .leading) {
-                                    Text(store.t("Máy chủ", "Server") + " \(store.serverType)").font(.caption).foregroundStyle(.secondary)
-                                    Text(store.baseURL).font(.caption).foregroundStyle(Theme.accent).lineLimit(1)
-                                }
-                                Spacer()
-                                Button(store.t("Đổi", "Change")) { showConnections = true }.font(.caption)
+                    // Đăng nhập bằng tài khoản Google (ASWebAuthenticationSession, không cần SDK).
+                    // Chỉ hiện khi máy chủ đã cấu hình Google Client ID.
+                    if !googleClientId.isEmpty {
+                        Button { Task { await doGoogleLogin() } } label: {
+                            HStack {
+                                if googleLoading { ProgressView().padding(.trailing, 4) }
+                                Image(systemName: "g.circle.fill")
+                                Text(store.t("Đăng nhập bằng Google", "Sign in with Google")).bold()
                             }
-                            .padding().background(Color(.secondarySystemBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 12)).padding(.horizontal)
+                            .frame(maxWidth: .infinity).padding()
+                            .background(Color(.systemBackground))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.secondary.opacity(0.4)))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                        }
+                        .disabled(googleLoading)
+                        .padding(.horizontal)
+                    }
+
+                    // Pháp lý — hiện rõ 2 mục ngay ở màn đăng nhập (chưa cần đăng nhập vẫn xem được)
+                    HStack(spacing: 10) {
+                        NavigationLink { LegalView.termsDoc(store) } label: {
+                            Label(store.t("Điều khoản sử dụng", "Terms of Use"), systemImage: "doc.text.fill")
+                                .font(.caption.bold()).foregroundStyle(.blue)
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 11).fill(Color.blue.opacity(0.12)))
+                        }
+                        NavigationLink { LegalView.privacyDoc(store) } label: {
+                            Label(store.t("Chính sách bảo mật", "Privacy Policy"), systemImage: "lock.shield.fill")
+                                .font(.caption.bold()).foregroundStyle(Theme.accent)
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(RoundedRectangle(cornerRadius: 11).fill(Theme.accent.opacity(0.12)))
                         }
                     }
+                    .padding(.horizontal).padding(.top, 6)
+
+                    Text(store.t("Bằng việc đăng nhập/đăng ký, bạn đồng ý với Điều khoản & Chính sách bảo mật.",
+                                 "By signing in/up, you agree to the Terms & Privacy Policy."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center).padding(.horizontal).padding(.top, 2)
+
+                    // Không hiển thị cấu hình máy chủ / nút dự phòng cho khách. Khi domain hoặc
+                    // proxy lỗi (502/không kết nối), APIClient TỰ né sang IP VPS trong nền —
+                    // người dùng không cần và không thấy bất kỳ nút "máy chủ dự phòng" nào.
                 }
             }
             .sheet(isPresented: $showConnections) { ConnectionsView() }
             .task { await prepareLogin() }
+            .task { await loadGoogleClientId() }
         }
+    }
+
+    /// Lấy Google Client ID từ máy chủ để quyết định có hiện nút "Đăng nhập bằng Google".
+    /// THỬ LẠI vài lần: nếu mạng chập chờn (vd lúc máy chủ đang khởi động) mà chỉ gọi 1 lần
+    /// thì nút Google sẽ bị ẩn luôn cho tới khi mở lại app. Thử lại giúp nút không bị "mất tiêu".
+    private func loadGoogleClientId() async {
+        for attempt in 0..<4 {
+            if let cfg = try? await store.api.storeConfig() {
+                googleClientId = cfg.googleClientId ?? ""
+                return
+            }
+            // Chờ tăng dần rồi thử lại (0.6s, 1.2s, 1.8s) — bỏ qua lần chờ cuối.
+            if attempt < 3 {
+                try? await Task.sleep(nanoseconds: UInt64(600_000_000 * (attempt + 1)))
+            }
+        }
+    }
+
+    /// Đăng nhập bằng Google: lấy id_token rồi gửi máy chủ xác thực.
+    private func doGoogleLogin() async {
+        googleLoading = true; error = nil
+        do {
+            let idToken = try await GoogleOAuth.shared.signInIdToken(clientID: googleClientId)
+            let resp = try await store.api.googleLogin(idToken: idToken, deviceId: store.deviceId)
+            store.setAuth(resp)
+            await store.loadProviders(); await store.loadKeys()
+        } catch { self.error = error.localizedDescription }
+        googleLoading = false
     }
 
     /// Khi mở màn đăng nhập: điền sẵn tài khoản vừa đăng ký (nếu có) hoặc
@@ -149,7 +205,11 @@ struct LoginView: View {
             else { store.forgetCredentials() }
             store.setAuth(resp)
             await store.loadProviders(); await store.loadKeys()
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            self.error = error.localizedDescription
+            // Không lộ UI máy chủ dự phòng — APIClient đã tự né sang IP VPS trong nền khi
+            // domain/proxy lỗi. Khách chỉ thấy thông báo lỗi gọn, không thấy cấu hình máy chủ.
+        }
         loading = false
     }
 }
@@ -159,34 +219,77 @@ struct RegisterView: View {
     @Environment(\.dismiss) var dismiss
     @State private var username = ""
     @State private var password = ""
+    @State private var method = "email"   // "email" | "phone"
     @State private var email = ""
     @State private var phone = ""
     @State private var loading = false
     @State private var error: String?
     @State private var registered = false
 
-    // OTP — mã xác nhận email
+    // OTP — mã xác nhận (email hoặc SMS)
     @State private var codeSent = false
     @State private var code = ""
     @State private var sendingCode = false
     @State private var otpInfo: String?
 
+    private var isEmail: Bool { method == "email" }
     private var emailValid: Bool { email.contains("@") && email.contains(".") }
+    private var phoneValid: Bool { phone.filter(\.isNumber).count >= 8 }
+    private var identValid: Bool { isEmail ? emailValid : phoneValid }
+    private var canRegister: Bool {
+        username.count >= 3 && password.count >= 6 && identValid && codeSent && code.count >= 4
+    }
 
     var body: some View {
         Form {
-            Section(store.t("Tạo tài khoản", "Create account")) {
+            Section(store.t("Tài khoản", "Account")) {
                 TextField(store.t("Username * (≥3 ký tự)", "Username * (≥3 chars)"), text: $username)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .textContentType(.username)
                 SecureField(store.t("Mật khẩu * (≥6 ký tự)", "Password * (≥6 chars)"), text: $password)
-                    .textContentType(.newPassword)   // iOS gợi ý lưu mật khẩu mới vào Apple ID
-                TextField(store.t("Gmail (tuỳ chọn)", "Gmail (optional)"), text: $email)
-                    .textInputAutocapitalization(.never).keyboardType(.emailAddress)
-                    .autocorrectionDisabled()
-                TextField(store.t("Số điện thoại (tuỳ chọn)", "Phone number (optional)"), text: $phone).keyboardType(.phonePad)
-                Text(store.t("Chỉ cần SĐT hoặc Gmail là được — không cần mã xác nhận.",
-                             "Just a phone or Gmail is enough — no verification code needed."))
+                    .textContentType(.newPassword)
+            }
+
+            Section(store.t("Đăng ký bằng", "Register with")) {
+                Picker("", selection: $method) {
+                    Text("Gmail").tag("email")
+                    Text(store.t("Số điện thoại", "Phone")).tag("phone")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: method) { _ in codeSent = false; code = ""; otpInfo = nil; error = nil }
+
+                if isEmail {
+                    TextField(store.t("Nhập Gmail của bạn", "Enter your Gmail"), text: $email)
+                        .textInputAutocapitalization(.never).keyboardType(.emailAddress)
+                        .autocorrectionDisabled().textContentType(.emailAddress)
+                } else {
+                    TextField(store.t("Nhập số điện thoại", "Enter phone number"), text: $phone)
+                        .keyboardType(.phonePad).textContentType(.telephoneNumber)
+                }
+
+                // Gửi mã + nhập mã
+                Button {
+                    Task { await sendCode() }
+                } label: {
+                    HStack {
+                        if sendingCode { ProgressView().padding(.trailing, 6) }
+                        Image(systemName: "paperplane.fill")
+                        Text(codeSent ? store.t("Gửi lại mã", "Resend code")
+                                      : store.t("Gửi mã xác nhận", "Send verification code"))
+                    }
+                }
+                .disabled(sendingCode || !identValid)
+
+                if codeSent {
+                    TextField(store.t("Nhập mã 6 số", "Enter 6-digit code"), text: $code)
+                        .keyboardType(.numberPad).textContentType(.oneTimeCode)
+                }
+                if let otpInfo {
+                    Text(otpInfo).font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(isEmail
+                     ? store.t("Chọn Gmail thì không cần số điện thoại.", "With Gmail, no phone needed.")
+                     : store.t("Chọn số điện thoại thì không cần Gmail.", "With phone, no Gmail needed."))
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -200,7 +303,7 @@ struct RegisterView: View {
                 Button { Task { await doRegister() } } label: {
                     HStack { if loading { ProgressView().padding(.trailing, 6) }; Text(store.t("Tạo tài khoản", "Create account")) }
                 }
-                .disabled(loading || registered)
+                .disabled(loading || registered || !canRegister)
             }
         }
         .navigationTitle(store.t("Đăng ký", "Register"))
@@ -209,15 +312,22 @@ struct RegisterView: View {
     private func sendCode() async {
         sendingCode = true; error = nil; otpInfo = nil
         do {
-            let r = try await store.api.sendOtp(email: email)
+            let r = isEmail ? try await store.api.sendOtp(email: email)
+                            : try await store.api.sendOtp(phone: phone)
             codeSent = true
+            let dest = isEmail ? email : phone
             switch r.channel {
-            case "external": otpInfo = "Đã gửi mã tới \(email). Kiểm tra hộp thư (cả mục Spam)."
-            case "internal": otpInfo = "Đã gửi mã vào hộp thư \(email)."
+            case "external":
+                otpInfo = isEmail
+                    ? store.t("Đã gửi mã tới \(dest). Kiểm tra hộp thư (cả Spam).", "Code sent to \(dest). Check inbox/Spam.")
+                    : store.t("Đã gửi mã SMS tới \(dest).", "SMS code sent to \(dest).")
+            case "internal":
+                otpInfo = store.t("Đã gửi mã vào hộp thư \(dest).", "Code sent to \(dest).")
             default:
-                otpInfo = r.hint ?? "Chưa gửi được mã. Kiểm tra cấu hình email trên máy chủ."
+                otpInfo = r.hint ?? store.t("Chưa gửi được mã. Kiểm tra cấu hình máy chủ.",
+                                            "Couldn't send code. Check server config.")
             }
-            if let dbg = r.debugCode { otpInfo = "Mã (chế độ thử): \(dbg)" }
+            if let dbg = r.debugCode { otpInfo = store.t("Mã (chế độ thử): \(dbg)", "Code (debug): \(dbg)") }
         } catch { self.error = error.localizedDescription }
         sendingCode = false
     }
@@ -225,15 +335,14 @@ struct RegisterView: View {
     private func doRegister() async {
         loading = true; error = nil
         do {
-            // chỉ gửi mã nếu người dùng thực sự đã nhập (không bắt buộc)
-            let otp = (codeSent && code.count >= 4) ? code : nil
-            // Tạo tài khoản nhưng KHÔNG tự đăng nhập — quay lại màn đăng nhập.
-            _ = try await store.api.register(username, password, email: email, phone: phone, code: otp)
-            // Ghi tên vừa tạo để màn đăng nhập điền sẵn
+            // Gửi đúng phương thức đã chọn + mã xác nhận (bắt buộc)
+            let em = isEmail ? email : ""
+            let ph = isEmail ? "" : phone
+            _ = try await store.api.register(username, password, email: em, phone: ph, code: code, deviceId: store.deviceId)
             UserDefaults.standard.set(username, forKey: "pendingLoginUser")
             registered = true
             try? await Task.sleep(nanoseconds: 900_000_000)
-            dismiss()   // quay về màn đăng nhập để người dùng đăng nhập
+            dismiss()   // quay về màn đăng nhập
         } catch { self.error = error.localizedDescription }
         loading = false
     }
@@ -277,5 +386,115 @@ struct ForgotPasswordView: View {
         error = nil; info = nil
         do { let r = try await store.api.reset(token, newPassword); info = r.message }
         catch { self.error = error.localizedDescription }
+    }
+}
+
+// ===== Đăng nhập KHÔNG MẬT KHẨU bằng mã OTP (Gmail/SĐT) — tái dùng hệ thống OTP có sẵn =====
+struct OtpLoginView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var method = "email"   // "email" | "phone"
+    @State private var email = ""
+    @State private var phone = ""
+    @State private var code = ""
+    @State private var codeSent = false
+    @State private var sendingCode = false
+    @State private var loading = false
+    @State private var otpInfo: String?
+    @State private var error: String?
+
+    private var isEmail: Bool { method == "email" }
+    private var emailValid: Bool { email.contains("@") && email.contains(".") }
+    private var phoneValid: Bool { phone.filter(\.isNumber).count >= 8 }
+    private var identValid: Bool { isEmail ? emailValid : phoneValid }
+    private var canLogin: Bool { identValid && codeSent && code.count >= 4 }
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("", selection: $method) {
+                    Text("Gmail").tag("email")
+                    Text(store.t("Số điện thoại", "Phone")).tag("phone")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: method) { _ in codeSent = false; code = ""; otpInfo = nil; error = nil }
+
+                if isEmail {
+                    TextField(store.t("Nhập Gmail của bạn", "Enter your Gmail"), text: $email)
+                        .textInputAutocapitalization(.never).keyboardType(.emailAddress)
+                        .autocorrectionDisabled().textContentType(.emailAddress)
+                } else {
+                    TextField(store.t("Nhập số điện thoại", "Enter phone number"), text: $phone)
+                        .keyboardType(.phonePad).textContentType(.telephoneNumber)
+                }
+
+                Button {
+                    Task { await sendCode() }
+                } label: {
+                    HStack {
+                        if sendingCode { ProgressView().padding(.trailing, 6) }
+                        Image(systemName: "paperplane.fill")
+                        Text(codeSent ? store.t("Gửi lại mã", "Resend code")
+                                      : store.t("Gửi mã đăng nhập", "Send login code"))
+                    }
+                }
+                .disabled(sendingCode || !identValid)
+
+                if codeSent {
+                    TextField(store.t("Nhập mã 6 số", "Enter 6-digit code"), text: $code)
+                        .keyboardType(.numberPad).textContentType(.oneTimeCode)
+                }
+                if let otpInfo { Text(otpInfo).font(.caption2).foregroundStyle(.secondary) }
+            } header: {
+                Text(store.t("Đăng nhập bằng mã (không cần mật khẩu)", "Login with code (passwordless)"))
+            } footer: {
+                Text(store.t("Nhập Gmail/SĐT → nhận mã → đăng nhập. Chưa có tài khoản sẽ tự tạo.",
+                             "Enter Gmail/phone → get code → log in. A new account is created if none exists."))
+            }
+
+            if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+
+            Section {
+                Button { Task { await doOtpLogin() } } label: {
+                    HStack {
+                        if loading { ProgressView().padding(.trailing, 6) }
+                        Text(store.t("Đăng nhập", "Login")).bold()
+                    }
+                }
+                .disabled(loading || !canLogin)
+            }
+        }
+        .navigationTitle(store.t("Đăng nhập bằng mã", "Login with code"))
+    }
+
+    private func sendCode() async {
+        sendingCode = true; error = nil; otpInfo = nil
+        do {
+            let r = isEmail ? try await store.api.sendOtp(email: email, purpose: "login")
+                            : try await store.api.sendOtp(phone: phone, purpose: "login")
+            codeSent = true
+            let dest = isEmail ? email : phone
+            switch r.channel {
+            case "external":
+                otpInfo = store.t("Đã gửi mã tới \(dest). Kiểm tra hộp thư (cả Spam).", "Code sent to \(dest). Check inbox/Spam.")
+            case "internal":
+                otpInfo = store.t("Đã gửi mã vào hộp thư \(dest).", "Code sent to \(dest).")
+            default:
+                otpInfo = r.hint ?? store.t("Chưa gửi được mã. Kiểm tra cấu hình máy chủ.", "Couldn't send code. Check server config.")
+            }
+            if let dbg = r.debugCode { otpInfo = store.t("Mã (chế độ thử): \(dbg)", "Code (debug): \(dbg)") }
+        } catch { self.error = error.localizedDescription }
+        sendingCode = false
+    }
+
+    private func doOtpLogin() async {
+        loading = true; error = nil
+        do {
+            let em = isEmail ? email : ""
+            let ph = isEmail ? "" : phone
+            let resp = try await store.api.loginOtp(email: em, phone: ph, code: code, deviceId: store.deviceId)
+            store.setAuth(resp)
+            await store.loadProviders(); await store.loadKeys()
+        } catch { self.error = error.localizedDescription }
+        loading = false
     }
 }

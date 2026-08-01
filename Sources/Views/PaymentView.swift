@@ -37,8 +37,10 @@ struct PaymentView: View {
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text(p.label).foregroundStyle(.primary)
-                                    if p.credits > 0 {
-                                        Text("\(p.credits) credits").font(.caption).foregroundStyle(.secondary)
+                                    if let d = p.days, d > 0 {
+                                        Text(store.t("Thời hạn \(d) ngày · mở khoá toàn bộ PRO",
+                                                     "\(d) days · unlock all PRO"))
+                                            .font(.caption).foregroundStyle(.secondary)
                                     } else {
                                         Text(store.t("Mở khoá toàn bộ tính năng PRO", "Unlock all PRO features")).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -48,11 +50,17 @@ struct PaymentView: View {
                                 else { Image(systemName: "chevron.right").foregroundStyle(.secondary) }
                             }
                         }
-                        .disabled(loading || store.isPro)
+                        .disabled(loading)
                     }
                     if store.isPro {
-                        Text(store.t("Tài khoản của bạn đã là PRO.", "Your account is already PRO."))
-                            .font(.caption).foregroundStyle(.secondary)
+                        if let exp = store.planExpiryText {
+                            Text(store.t("Bạn đang là PRO, hết hạn \(exp). Mua thêm để gia hạn.",
+                                         "You're PRO until \(exp). Buy more to extend."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text(store.t("Tài khoản của bạn đã là PRO.", "Your account is already PRO."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
 

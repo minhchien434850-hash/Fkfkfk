@@ -36,6 +36,15 @@ final class WelcomeVoice: NSObject, AVSpeechSynthesizerDelegate {
         googlePlayer?.pause(); googlePlayer = nil
     }
 
+    /// Đọc to một THÔNG BÁO (vd sản phẩm mới) — không giới hạn số lần, ngắt tin đang đọc.
+    func announce(text: String, voiceId: String, rate: Float) {
+        synth.stopSpeaking(at: .immediate)
+        googlePlayer?.pause(); googlePlayer = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.speak(text: text, voiceId: voiceId, rate: rate)
+        }
+    }
+
     /// Phát bằng giọng "chị Google" (online) — giống TTS Live
     private func playGoogle(_ text: String) {
         let chunk = String(text.prefix(190))

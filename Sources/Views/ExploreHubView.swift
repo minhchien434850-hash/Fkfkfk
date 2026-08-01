@@ -1,95 +1,149 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 // ======================== Khám phá — lưới nút đẹp, gom các tính năng phụ ========================
 enum HubDest: String, Identifiable {
-    case library, read, fun, games, tools, github, settings, admin, mediaConverter, messenger
+    case liveNow, fileTools, library, read, videoScript, fun, games, appLauncher, tools, github, settings, admin, mediaConverter, messenger, certImport, ipaLibrary, winApp, remoteDesktop, remoteServer
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .liveNow:        return "Live Now"
+        case .fileTools:      return "Công cụ tệp"
         case .library:        return "Thư viện"
         case .read:           return "Đọc (TTS)"
+        case .videoScript:    return "AI xem video"
         case .fun:            return "Giải trí"
         case .games:          return "Trò chơi"
+        case .appLauncher:    return "App Launcher"
         case .tools:          return "Công cụ"
         case .github:         return "GitHub"
         case .settings:       return "Cài đặt"
         case .admin:          return "Quản trị"
         case .mediaConverter: return "Chuyển đổi"
         case .messenger:      return "Nhắn tin"
+        case .certImport:     return "Chứng chỉ ký"
+        case .ipaLibrary:     return "Kho IPA"
+        case .winApp:         return "Windows App"
+        case .remoteDesktop:  return "Remote Desktop"
+        case .remoteServer:   return "Remote Server"
         }
     }
     var subtitle: String {
         switch self {
+        case .liveNow:        return "Phát trực tiếp · TikTok · FB · YouTube"
+        case .fileTools:      return "PDF · Âm thanh · Quét · Ảnh"
         case .library:        return "Video · file đã tải"
         case .read:           return "Đọc văn bản · giọng mới"
+        case .videoScript:    return "Nhìn video · viết kịch bản · đọc"
         case .fun:            return "Phim · nhạc · web"
         case .games:          return "Chơi game trong app"
+        case .appLauncher:    return "Thêm app của bạn · Mở nhanh"
         case .tools:          return "Ảnh · tin tức · tiện ích"
         case .github:         return "Tải/xoá file lên repo"
         case .settings:       return "Tài khoản · giao diện"
         case .admin:          return "Quản lý người dùng"
         case .mediaConverter: return "Ảnh/Video → GIF · PNG"
         case .messenger:      return "Thủ công · Tự động Web"
+        case .certImport:     return "Nhập .p12 · .mobileprovision"
+        case .ipaLibrary:     return "Gom IPA · Ký & cài qua ESign"
+        case .winApp:         return "Điều khiển PC Windows (RDP)"
+        case .remoteDesktop:  return "Bảng điều khiển · máy thuê IP · agent"
+        case .remoteServer:   return "SSH · SFTP · Chạy script VPS"
         }
     }
-    // Bản tiếng Anh (khoá dịch) — dùng với store.t(title, titleEN)
     var titleEN: String {
         switch self {
+        case .liveNow:        return "Live Now"
+        case .fileTools:      return "File Tools"
         case .library:        return "Library"
         case .read:           return "Read (TTS)"
+        case .videoScript:    return "AI Video Script"
         case .fun:            return "Entertainment"
         case .games:          return "Games"
+        case .appLauncher:    return "App Launcher"
         case .tools:          return "Tools"
         case .github:         return "GitHub"
         case .settings:       return "Settings"
         case .admin:          return "Admin"
         case .mediaConverter: return "Convert"
         case .messenger:      return "Messaging"
+        case .certImport:     return "Signing Cert"
+        case .ipaLibrary:     return "IPA Library"
+        case .winApp:         return "Windows App"
+        case .remoteDesktop:  return "Remote Desktop"
+        case .remoteServer:   return "Remote Server"
         }
     }
     var subtitleEN: String {
         switch self {
+        case .liveNow:        return "Go live · TikTok · FB · YouTube"
+        case .fileTools:      return "PDF · Audio · Scan · Image"
         case .library:        return "Videos · downloaded files"
         case .read:           return "Read text · new voices"
+        case .videoScript:    return "Watch video · write script · read"
         case .fun:            return "Movies · music · web"
         case .games:          return "Play games in app"
+        case .appLauncher:    return "Add your apps · Launch fast"
         case .tools:          return "Images · news · utilities"
         case .github:         return "Upload/delete repo files"
         case .settings:       return "Account · appearance"
         case .admin:          return "Manage users"
         case .mediaConverter: return "Image/Video → GIF · PNG"
         case .messenger:      return "Manual · Auto Web"
+        case .certImport:     return "Import .p12 · .mobileprovision"
+        case .ipaLibrary:     return "Collect IPAs · Sign via ESign"
+        case .winApp:         return "Control a Windows PC (RDP)"
+        case .remoteDesktop:  return "Dashboard · rented IP · agent"
+        case .remoteServer:   return "SSH · SFTP · Run VPS scripts"
         }
     }
     var icon: String {
         switch self {
+        case .liveNow:        return "dot.radiowaves.left.and.right"
+        case .fileTools:      return "doc.badge.gearshape.fill"
         case .library:        return "clock.arrow.circlepath"
         case .read:           return "speaker.wave.2.fill"
+        case .videoScript:    return "film.stack.fill"
         case .fun:            return "play.tv.fill"
         case .games:          return "gamecontroller.fill"
+        case .appLauncher:    return "bolt.heart.fill"
         case .tools:          return "square.grid.2x2.fill"
         case .github:         return "chevron.left.forwardslash.chevron.right"
         case .settings:       return "gearshape.fill"
         case .admin:          return "person.2.badge.gearshape.fill"
         case .mediaConverter: return "wand.and.stars"
         case .messenger:      return "bubble.left.and.bubble.right.fill"
+        case .certImport:     return "checkmark.seal.fill"
+        case .ipaLibrary:     return "shippingbox.fill"
+        case .winApp:         return "pc"
+        case .remoteDesktop:  return "display"
+        case .remoteServer:   return "terminal.fill"
         }
     }
     var colors: [Color] {
         switch self {
+        case .liveNow:        return [Color(red: 0.98, green: 0.2, blue: 0.25), Color(red: 0.8, green: 0.05, blue: 0.2)]
+        case .fileTools:      return [Color(red: 0.0, green: 0.7, blue: 0.65), Color(red: 0.0, green: 0.45, blue: 0.7)]
         case .library:        return [Color(red: 0.0, green: 0.6, blue: 0.95), Color(red: 0.0, green: 0.4, blue: 0.85)]
         case .read:           return [Color(red: 0.0, green: 0.78, blue: 0.7), Color(red: 0.0, green: 0.55, blue: 0.7)]
+        case .videoScript:    return [Color(red: 0.98, green: 0.45, blue: 0.15), Color(red: 0.85, green: 0.2, blue: 0.45)]
         case .fun:            return [Color(red: 0.95, green: 0.3, blue: 0.5), Color(red: 0.75, green: 0.2, blue: 0.55)]
         case .games:          return [Color(red: 0.55, green: 0.4, blue: 0.95), Color(red: 0.35, green: 0.3, blue: 0.9)]
+        case .appLauncher:    return [Color(red: 1.0, green: 0.35, blue: 0.0), Color(red: 0.9, green: 0.15, blue: 0.0)]
         case .tools:          return [Color(red: 0.95, green: 0.6, blue: 0.1), Color(red: 0.9, green: 0.4, blue: 0.1)]
         case .github:         return [Color(red: 0.2, green: 0.22, blue: 0.28), Color(red: 0.1, green: 0.11, blue: 0.15)]
         case .settings:       return [Color(red: 0.4, green: 0.45, blue: 0.55), Color(red: 0.25, green: 0.3, blue: 0.4)]
         case .admin:          return [Color(red: 1.0, green: 0.78, blue: 0.0), Color(red: 0.9, green: 0.55, blue: 0.0)]
         case .mediaConverter: return [Color(red: 0.6, green: 0.1, blue: 0.9), Color(red: 0.9, green: 0.2, blue: 0.6)]
         case .messenger:      return [Color(red: 0.05, green: 0.7, blue: 0.5), Color(red: 0.0, green: 0.5, blue: 0.75)]
+        case .certImport:     return [Color(red: 0.2, green: 0.7, blue: 0.4), Color(red: 0.1, green: 0.5, blue: 0.35)]
+        case .ipaLibrary:     return [Color(red: 0.55, green: 0.45, blue: 0.95), Color(red: 0.35, green: 0.3, blue: 0.85)]
+        case .winApp:         return [Color(red: 0.0, green: 0.47, blue: 0.84), Color(red: 0.0, green: 0.28, blue: 0.6)]
+        case .remoteDesktop:  return [Color(red: 0.0, green: 0.47, blue: 0.84), Color(red: 0.35, green: 0.15, blue: 0.7)]
+        case .remoteServer:   return [Color(red: 0.1, green: 0.5, blue: 0.3), Color(red: 0.05, green: 0.3, blue: 0.5)]
         }
     }
     var gradient: LinearGradient {
@@ -103,7 +157,7 @@ struct ExploreHubView: View {
     @StateObject private var browserModel = BrowserModel()
 
     private var items: [HubDest] {
-        var a: [HubDest] = [.library, .read, .fun, .games, .tools, .github, .mediaConverter, .messenger, .settings]
+        var a: [HubDest] = [.liveNow, .fileTools, .library, .read, .videoScript, .fun, .games, .appLauncher, .tools, .github, .mediaConverter, .messenger, .winApp, .remoteDesktop, .remoteServer, .certImport, .ipaLibrary, .settings]
         if store.isAdmin { a.append(.admin) }
         return a
     }
@@ -156,19 +210,65 @@ struct ExploreHubView: View {
     @ViewBuilder
     private func destView(_ d: HubDest) -> some View {
         switch d {
+        case .liveNow:        LiveNowHubView()
+        case .fileTools:      FileToolsView()
         case .library:        LibraryView()
         case .read:           TTSView()
+        case .videoScript:    VideoScriptView()
         case .fun:            MediaWebView(model: browserModel)
         case .games:          GameZoneView()
+        case .appLauncher:    AppLauncherView()
         case .tools:          CreatorToolsView()
         case .github:         GitHubView()
         case .settings:       SettingsView()
         case .admin:          AdminView()
         case .mediaConverter: MediaConverterView()
         case .messenger:
-            // Nhắn tin (thủ công/tự động/tool nhóm) chỉ dành cho gói PRO
             if store.isPro { MessengerHubView().environmentObject(store) }
             else { ProLockCard(feature: store.t("Nhắn tin", "Messaging")) }
+        case .certImport:
+            CertificateImportView()
+        case .ipaLibrary:
+            IPALibraryView()
+        case .winApp:
+            RemotePCView()
+        case .remoteDesktop:
+            RemoteDesktopHubView()
+        case .remoteServer:
+            RemoteServerRootView(baseURL: store.baseURL, token: store.token ?? "")
+        }
+    }
+}
+
+// ======================== Live Now — gom Phòng Live + Live Tools (TikTok/FB/YouTube) ========================
+struct LiveNowHubView: View {
+    @EnvironmentObject var store: AppStore
+    @State private var seg = 0   // 0: Phòng Live  ·  1: Phát đa nền tảng
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $seg) {
+                Text(store.t("Phòng Live", "Live Rooms")).tag(0)
+                Text(store.t("Phát đa nền tảng", "Go Live")).tag(1)
+                Text(store.t("Lớp phủ", "Overlay")).tag(2)
+                Text(store.t("Máy chủ", "Server Engine")).tag(3)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
+
+            // Mỗi view con tự bọc NavigationStack riêng nên hiển thị đầy đủ tiêu đề/thanh công cụ
+            if seg == 0 {
+                LiveView()
+            } else if seg == 1 {
+                SocialMediaToolsView(initialSegment: 2)   // mở thẳng Live Tools
+            } else if seg == 2 {
+                OverlayDesignerView()
+            } else {
+                // Live Now System Engine — điều khiển FFmpeg/RTMP trên VPS qua SSH
+                LiveNowRootView(baseURL: store.baseURL, token: store.token ?? "")
+            }
         }
     }
 }
@@ -200,6 +300,13 @@ struct MediaConverterView: View {
     @State private var uploading = false
     @AppStorage("mediaLinkHistory") private var historyRaw: String = "[]"
 
+    // Tab: "media" = ảnh/video → link; "audio" = video/âm thanh → mp3 link
+    @State private var mode = "media"
+    @State private var showAudioPicker = false
+    @State private var audioExtracting = false
+    @State private var audioResultLink = ""
+    @State private var audioError: String?
+
     private var history: [MediaLinkRecord] {
         (try? JSONDecoder().decode([MediaLinkRecord].self, from: Data(historyRaw.utf8))) ?? []
     }
@@ -210,10 +317,74 @@ struct MediaConverterView: View {
                 Section {
                     KHeroHeader(icon: "wand.and.stars",
                                 title: store.t("Chuyển đổi Media", "Media Converter"),
-                                subtitle: store.t("Ảnh / Video → GIF · PNG link", "Image / Video → GIF · PNG link"))
+                                subtitle: store.t("Ảnh/Video → link · Trích âm thanh → mp3", "Image/Video → link · Extract audio → mp3"))
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
 
+                // Tab chọn chế độ
+                Section {
+                    Picker("", selection: $mode) {
+                        Text(store.t("Ảnh/Video → Link", "Image/Video → Link")).tag("media")
+                        Text(store.t("Trích âm thanh → mp3", "Extract audio → mp3")).tag("audio")
+                    }.pickerStyle(.segmented)
+                }
+
+                if mode == "audio" { audioExtractSections }
+                else { mediaConvertSections }
+            }
+            .navigationTitle(store.t("Chuyển đổi Media", "Media Converter"))
+            .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: picker) { item in
+                guard let item else { return }
+                Task { await uploadPicked(item) }
+            }
+            .sheet(isPresented: $showAudioPicker) {
+                // Nhận video HOẶC file âm thanh, hiện ô tích (✓) + nút "Mở".
+                DocumentPicker(contentTypes: [.movie, .video, .audio], allowsMultipleSelection: true, asCopy: true) { urls in
+                    if let url = urls.first { Task { await extractAudioToLink(url) } }
+                }.ignoresSafeArea()
+            }
+        }
+    }
+
+    // ===== Tab TRÍCH ÂM THANH: tải video/âm thanh → trích ra mp3 → link =====
+    @ViewBuilder private var audioExtractSections: some View {
+        Section(store.t("Tải video hoặc file âm thanh", "Upload video or audio file")) {
+            Button { showAudioPicker = true } label: {
+                HStack {
+                    if audioExtracting { ProgressView().padding(.trailing, 4) }
+                    Label(audioExtracting ? store.t("Đang trích xuất...", "Extracting...")
+                                          : store.t("Chọn video / file âm thanh", "Choose video / audio file"),
+                          systemImage: "waveform.badge.plus")
+                }
+            }.disabled(audioExtracting)
+            Text(store.t("Chọn 1 video hoặc file âm thanh → app trích phần âm thanh, tạo file .m4a (mp3) rồi trả về link dùng được ngay (đặt làm âm thanh thông báo, v.v.).",
+                         "Pick a video or audio file → the app extracts the audio to an .m4a (mp3) file and returns a ready-to-use link."))
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        if !audioResultLink.isEmpty {
+            Section(store.t("Link âm thanh (mp3)", "Audio link (mp3)")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(audioResultLink).font(.caption).foregroundStyle(store.accentColor).textSelection(.enabled)
+                    Button { UIPasteboard.general.string = audioResultLink } label: {
+                        Label(store.t("Copy link", "Copy link"), systemImage: "doc.on.doc").font(.caption.bold())
+                    }
+                }
+            }
+            Section(store.t("Dùng link này ở đâu", "Where to use this link")) {
+                Text(store.t("Copy link rồi dán vào 'Kho âm tùy chỉnh' trong mục Đọc (TTS) để làm âm thanh thông báo (tặng quà/follow/chia sẻ).",
+                             "Copy and paste into the custom sound library in Read (TTS) to use as a notification sound."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        if let audioError {
+            Section { Text(audioError).foregroundStyle(.red).font(.caption) }
+        }
+    }
+
+    // ===== Tab ẢNH/VIDEO → LINK (giữ nguyên cũ) =====
+    @ViewBuilder private var mediaConvertSections: some View {
+        Group {
                 Section(store.t("Chọn ảnh/video từ máy → tạo link", "Pick image/video → create link")) {
                     PhotosPicker(selection: $picker, matching: .any(of: [.images, .videos])) {
                         HStack {
@@ -320,14 +491,37 @@ struct MediaConverterView: View {
                     }
                     .font(.caption)
                 }
-            }
-            .navigationTitle(store.t("Chuyển đổi Media", "Media Converter"))
-            .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: picker) { item in
-                guard let item else { return }
-                Task { await uploadPicked(item) }
-            }
         }
+    }
+
+    /// Trích âm thanh từ video/file âm thanh → xuất .m4a → tải lên → trả link.
+    private func extractAudioToLink(_ srcURL: URL) async {
+        audioExtracting = true; audioError = nil; audioResultLink = ""
+        let access = srcURL.startAccessingSecurityScopedResource()
+        defer { if access { srcURL.stopAccessingSecurityScopedResource() } }
+        let asset = AVAsset(url: srcURL)
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("audio_\(Int(Date().timeIntervalSince1970)).m4a")
+        try? FileManager.default.removeItem(at: out)
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            audioError = store.t("Không tạo được bộ trích xuất.", "Could not create exporter."); audioExtracting = false; return
+        }
+        export.outputURL = out
+        export.outputFileType = .m4a
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously { cont.resume() }
+        }
+        if export.status == .completed, let data = try? Data(contentsOf: out) {
+            do {
+                let link = try await store.api.mediaUpload(dataBase64: data.base64EncodedString(),
+                                                           mime: "audio/mp4", name: out.lastPathComponent)
+                audioResultLink = link
+            } catch { audioError = error.localizedDescription }
+        } else {
+            audioError = store.t("Trích xuất âm thanh thất bại (file không có âm thanh hoặc lỗi).",
+                                 "Audio extraction failed (no audio track or error).")
+        }
+        audioExtracting = false
     }
 
     @ViewBuilder
@@ -381,11 +575,11 @@ struct MediaConverterView: View {
                 errorMsg = "Không đọc được file đã chọn."; return
             }
             let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
-            // Giới hạn kích thước: ảnh 30MB, video 300MB
-            let maxBytes = isVideo ? 300 * 1024 * 1024 : 30 * 1024 * 1024
+            // Giới hạn kích thước: ảnh 30MB, video 700MB
+            let maxBytes = isVideo ? 700 * 1024 * 1024 : 30 * 1024 * 1024
             if data.count > maxBytes {
                 let mb = data.count / (1024 * 1024)
-                let limit = isVideo ? "300MB" : "30MB"
+                let limit = isVideo ? "700MB" : "30MB"
                 errorMsg = "File quá lớn (\(mb)MB). Giới hạn tối đa \(limit) cho \(isVideo ? "video" : "ảnh")."; return
             }
             let mime = isVideo ? "video/mp4" : "image/jpeg"
