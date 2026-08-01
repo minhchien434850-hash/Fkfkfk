@@ -10698,6 +10698,11 @@ def _tg_handle_update(token: str, admin_chat: str, u: dict) -> None:
         else:
             _tg_send(token, chat_id, "🛡️ Dùng: <code>/quetlink https://link-can-kiem-tra</code> (hoặc reply vào tin có link).")
         return
+    # 📺 /kenhvideo — theo dõi kênh TikTok/YouTube, tự đăng video mới (CHỈ admin, chat riêng)
+    if _tgtxt.startswith("/kenhvideo") or _tgtxt.startswith("/kenhtong"):
+        _pk = _tgtxt.split(None, 1)
+        _tg_watch_command(token, chat_id, msg, _pk[1] if len(_pk) > 1 else "")
+        return
     # 🎊 /kenios — lệnh DUY NHẤT quản lý chào sáng/tối + chúc mọi ngày lễ (chỉ admin)
     if _tgtxt.startswith("/kenios"):
         _uidk = (msg.get("from") or {}).get("id")
@@ -11039,6 +11044,7 @@ def _tg_help_text(name: str = "", admin: bool = False) -> str:
 _TG_MORNING_DEFAULT = "☀️ Chào buổi sáng cả nhà! Chúc mọi người một ngày mới tràn đầy năng lượng, may mắn và thật nhiều niềm vui nhé! 🌸"
 _TG_EVENING_DEFAULT = "🌙 Chào buổi tối cả nhà! Chúc mọi người buổi tối vui vẻ, ấm áp bên gia đình và nghỉ ngơi thật tốt nhé! ✨"
 _tg_sched_thread = None
+_tg_watch_thread = None   # nền: theo dõi kênh TikTok/YouTube
 
 # ===== Lịch âm (thuật toán Hồ Ngọc Đức) để chúc đúng các ngày lễ ÂM LỊCH =====
 def _jd(dd, mm, yy):
@@ -11273,6 +11279,277 @@ def _tg_kenios_cmd(token, chat_id, args) -> None:
         _tg_send(token, chat_id, f"✅ Đã đặt nội dung {label}."); return
     _tg_send(token, chat_id, _status())
 
+# ================= 📺 THEO DÕI KÊNH TikTok/YouTube → TỰ ĐĂNG VÀO TELEGRAM =================
+# Admin thêm nhiều kênh TikTok/YouTube. Cứ ~5 phút bot kiểm tra; có video MỚI thì tự tải và
+# gửi vào MỌI NHÓM có bot + KÊNH TỔNG (nếu đặt). Lệnh CHỈ dùng trong chat riêng với bot và
+# CHỈ admin của bot (tg_admin_chat) mới dùng được.
+def _tg_watch_load() -> list:
+    try:
+        v = json.loads(get_setting("tg_watch_list", "[]") or "[]")
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def _tg_watch_save(lst: list) -> None:
+    set_setting("tg_watch_list", json.dumps(lst[:50], ensure_ascii=False))
+
+
+def _tg_watch_is_owner(chat_id, uid) -> bool:
+    """CHỈ admin của bot: chat_id phải trùng tg_admin_chat (hoặc user id trùng)."""
+    ac = (get_setting("tg_admin_chat", "") or os.getenv("TELEGRAM_ADMIN_CHAT", "")).strip()
+    if not ac:
+        return False
+    return str(chat_id) == ac or str(uid or "") == ac
+
+
+def _tg_watch_kind(url: str) -> str:
+    u = (url or "").lower()
+    if "tiktok.com" in u:
+        return "tiktok"
+    if "youtube.com" in u or "youtu.be" in u:
+        return "youtube"
+    return ""
+
+
+def _tg_watch_norm(url: str) -> str:
+    """Chuẩn hoá link kênh: TikTok → /@user ; YouTube → …/videos để lấy danh sách mới nhất."""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    if not u.lower().startswith("http"):
+        u = ("https://www.tiktok.com/" + u) if u.startswith("@") else ("https://" + u)
+    k = _tg_watch_kind(u)
+    if k == "youtube" and "/videos" not in u and ("/@" in u or "/channel/" in u or "/c/" in u or "/user/" in u):
+        u = u.rstrip("/") + "/videos"
+    return u
+
+
+def _tg_watch_latest(url: str, limit: int = 3) -> list:
+    """Lấy danh sách video MỚI NHẤT của 1 kênh → [{id,title,url}] (mới nhất trước)."""
+    import subprocess as _sp, shutil as _sh
+    if not _sh.which("yt-dlp"):
+        return []
+    try:
+        r = _sp.run(["yt-dlp", "--flat-playlist", "--playlist-end", str(limit),
+                     "-J", "--no-warnings", "--ignore-errors", url],
+                    capture_output=True, text=True, timeout=180)
+        data = json.loads(r.stdout or "{}")
+    except Exception:
+        return []
+    out = []
+    for e in (data.get("entries") or [])[:limit]:
+        if not isinstance(e, dict):
+            continue
+        vid = str(e.get("id") or "")
+        if not vid:
+            continue
+        link = e.get("url") or e.get("webpage_url") or ""
+        if link and not str(link).startswith("http"):
+            link = f"https://www.youtube.com/watch?v={vid}"
+        out.append({"id": vid, "title": (e.get("title") or "")[:200], "url": link or url})
+    return out
+
+
+def _tg_watch_targets() -> list:
+    """Nơi sẽ ĐĂNG: mọi nhóm có bot + KÊNH TỔNG (nếu admin đã đặt)."""
+    ids = list(_tg_greet_chats())
+    main = (get_setting("tg_watch_main", "") or "").strip()
+    if main and main not in ids:
+        ids.append(main)
+    return ids
+
+
+def _tg_watch_broadcast(token: str, item: dict, ch: dict) -> None:
+    """Tải video mới rồi GỬI kèm ĐẦY ĐỦ link tới mọi nhóm + kênh tổng."""
+    import html as _h
+    targets = _tg_watch_targets()
+    if not targets:
+        return
+    src = item.get("url") or ""
+    title = item.get("title") or "Video mới"
+    tag = "TikTok" if ch.get("type") == "tiktok" else "YouTube"
+    path, ytitle, err = _tg_yt_video(src)
+    caption = (f"🆕 <b>{_h.escape(ytitle or title)}</b>\n"
+               f"📺 {tag} · {_h.escape(ch.get('name') or ch.get('key') or '')}\n"
+               f"🔗 {_h.escape(src)}")
+    try:
+        parts = _tg_fit_video(path) if path else []
+        sendable = [p for p in parts if os.path.getsize(p) <= _TG_VIDEO_LIMIT]
+        for cid in targets:
+            try:
+                if sendable:
+                    n = len(sendable)
+                    for i, p in enumerate(sendable, 1):
+                        cap = caption if n == 1 else f"{caption}\n({i}/{n})"
+                        _tg_send_video(token, cid, p, cap)
+                else:
+                    # Không tải/gửi được file → vẫn ĐĂNG LINK để nhóm biết có video mới.
+                    _tg_send(token, cid, caption + ("\n⚠️ Không tải được file video."
+                                                    if not path else ""))
+            except Exception:
+                pass
+            time.sleep(0.2)
+    finally:
+        if path:
+            try: shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+            except Exception: pass
+
+
+def _tg_watch_scan(token: str, notify_chat: str = "") -> int:
+    """Quét tất cả kênh đang theo dõi; có video mới thì đăng. Trả số video đã đăng."""
+    lst = _tg_watch_load()
+    if not lst:
+        return 0
+    posted = 0
+    for ch in lst:
+        try:
+            vids = _tg_watch_latest(ch.get("url") or "", limit=3)
+            if not vids:
+                continue
+            newest = vids[0]
+            last = (ch.get("last") or "").strip()
+            if not last:
+                # Lần đầu: chỉ ghi mốc, KHÔNG đăng lại video cũ.
+                ch["last"] = newest["id"]
+                continue
+            if newest["id"] == last:
+                continue
+            # Có video mới → đăng những cái mới hơn mốc (cũ trước, mới sau cho đúng thứ tự).
+            fresh = []
+            for v in vids:
+                if v["id"] == last:
+                    break
+                fresh.append(v)
+            for v in reversed(fresh):
+                _tg_watch_broadcast(token, v, ch)
+                posted += 1
+            ch["last"] = newest["id"]
+        except Exception as e:
+            log.warning("watch kênh lỗi: %s", e)
+    _tg_watch_save(lst)
+    if notify_chat:
+        _tg_send(token, notify_chat,
+                 f"✅ Quét xong {len(lst)} kênh — đã đăng <b>{posted}</b> video mới."
+                 if posted else f"✅ Quét xong {len(lst)} kênh — chưa có video mới.")
+    return posted
+
+
+def _tg_watch_loop() -> None:
+    """Nền: cứ ~5 phút quét kênh 1 lần (chỉ chạy khi admin bật /kenhvideo on)."""
+    while True:
+        try:
+            token = (get_setting("tg_bot_token", "") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+            if (token and get_setting("tg_bot_enabled", "0") == "1"
+                    and get_setting("tg_watch_on", "0") == "1"):
+                _tg_watch_scan(token)
+        except Exception:
+            pass
+        time.sleep(300)
+
+
+def _tg_watch_command(token: str, chat_id: str, msg: dict, args: str) -> None:
+    """Lệnh /kenhvideo — CHỈ admin, CHỈ trong chat riêng với bot."""
+    import html as _h
+    uid = (msg.get("from") or {}).get("id")
+    ctype = (msg.get("chat") or {}).get("type", "")
+    if ctype != "private":
+        _tg_send(token, chat_id, "🔒 Lệnh này chỉ dùng TRONG CHAT RIÊNG với bot.")
+        return
+    if not _tg_watch_is_owner(chat_id, uid):
+        _tg_send(token, chat_id, "🔒 Chỉ ADMIN của bot mới dùng được lệnh này.")
+        return
+
+    a = (args or "").strip()
+    parts = a.split(None, 1)
+    sub = parts[0].lower() if parts else ""
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    lst = _tg_watch_load()
+
+    def _show():
+        on = get_setting("tg_watch_on", "0") == "1"
+        main = get_setting("tg_watch_main", "") or "(chưa đặt)"
+        rows = "\n".join(
+            f"{i + 1}. [{c.get('type')}] {_h.escape(c.get('name') or c.get('key') or c.get('url'))}"
+            for i, c in enumerate(lst)) or "(chưa có kênh nào)"
+        _tg_send(token, chat_id,
+                 "📺 <b>THEO DÕI KÊNH TikTok / YouTube</b>\n"
+                 f"Tự đăng: <b>{'BẬT' if on else 'TẮT'}</b> · Kênh tổng: <code>{_h.escape(str(main))}</code>\n"
+                 f"Nhóm sẽ nhận: <b>{len(_tg_watch_targets())}</b>\n\n"
+                 f"<b>Kênh đang theo dõi:</b>\n{rows}\n\n"
+                 "<b>Lệnh:</b>\n"
+                 "<code>/kenhvideo them &lt;link kênh&gt;</code> — thêm kênh (TikTok/YouTube)\n"
+                 "<code>/kenhvideo xoa &lt;số&gt;</code> — xoá kênh\n"
+                 "<code>/kenhvideo tong &lt;@kênh hoặc -100…&gt;</code> — đặt kênh tổng\n"
+                 "<code>/kenhvideo on</code> · <code>/kenhvideo off</code> — bật/tắt tự đăng\n"
+                 "<code>/kenhvideo quet</code> — quét & đăng ngay\n"
+                 "<code>/kenhvideo nhom</code> — xem các nhóm sẽ nhận")
+
+    if sub in ("", "list", "ds"):
+        _show(); return
+
+    if sub in ("them", "add"):
+        url = _tg_watch_norm(rest)
+        kind = _tg_watch_kind(url)
+        if not url or not kind:
+            _tg_send(token, chat_id, "❌ Cần link kênh TikTok hoặc YouTube.\n"
+                                     "VD: <code>/kenhvideo them https://www.tiktok.com/@tenkenh</code>")
+            return
+        if any((c.get("url") or "") == url for c in lst):
+            _tg_send(token, chat_id, "⚠️ Kênh này đã có trong danh sách."); return
+        _tg_send(token, chat_id, "⏳ Đang kiểm tra kênh…")
+        vids = _tg_watch_latest(url, limit=1)
+        name = rest.strip().rstrip("/").split("/")[-1] or url
+        lst.append({"type": kind, "url": url, "key": name, "name": name,
+                    "last": (vids[0]["id"] if vids else "")})
+        _tg_watch_save(lst)
+        _tg_send(token, chat_id,
+                 f"✅ Đã thêm kênh <b>{_h.escape(name)}</b> ({kind}).\n"
+                 + ("Từ giờ có video MỚI sẽ tự đăng." if vids else
+                    "⚠️ Chưa đọc được video nào (kênh riêng tư/chặn?) — vẫn sẽ thử lại mỗi 5 phút."))
+        return
+
+    if sub in ("xoa", "del", "remove"):
+        try:
+            i = int(rest) - 1
+        except Exception:
+            i = -1
+        if 0 <= i < len(lst):
+            c = lst.pop(i); _tg_watch_save(lst)
+            _tg_send(token, chat_id, f"🗑 Đã xoá kênh <b>{_h.escape(c.get('name') or '')}</b>.")
+        else:
+            _tg_send(token, chat_id, "❌ Số thứ tự không đúng. Xem lại bằng <code>/kenhvideo</code>.")
+        return
+
+    if sub in ("tong", "main", "kenhtong"):
+        if not rest:
+            _tg_send(token, chat_id, "Dùng: <code>/kenhvideo tong @tenkenh</code> hoặc <code>-1001234567890</code>\n"
+                                     "(Bot phải là ADMIN của kênh đó.)")
+            return
+        set_setting("tg_watch_main", rest.strip())
+        _tg_send(token, chat_id, f"✅ Kênh tổng: <code>{_h.escape(rest.strip())}</code>")
+        return
+
+    if sub == "on":
+        set_setting("tg_watch_on", "1"); _tg_send(token, chat_id, "✅ ĐÃ BẬT tự đăng video mới."); return
+    if sub == "off":
+        set_setting("tg_watch_on", "0"); _tg_send(token, chat_id, "⏸ ĐÃ TẮT tự đăng."); return
+
+    if sub in ("quet", "scan", "now"):
+        _tg_send(token, chat_id, "🔎 Đang quét các kênh…")
+        import threading as _t
+        _t.Thread(target=_tg_watch_scan, args=(token, chat_id), daemon=True).start()
+        return
+
+    if sub in ("nhom", "groups"):
+        ids = _tg_watch_targets()
+        _tg_send(token, chat_id, "📮 <b>Nơi sẽ đăng</b> ({}):\n{}".format(
+            len(ids), "\n".join(f"• <code>{_h.escape(str(i))}</code>" for i in ids) or "(chưa có)"))
+        return
+
+    _show()
+
+
 def _tg_greet_register(chat_id) -> None:
     """Ghi nhớ nhóm để gửi lời chào sáng/tối (lưu bền, sống qua restart)."""
     try:
@@ -11351,6 +11628,11 @@ def start_telegram_bot() -> None:
     if not (_tg_sched_thread and _tg_sched_thread.is_alive()):
         _tg_sched_thread = threading.Thread(target=_tg_scheduler_loop, daemon=True, name="telegram-scheduler")
         _tg_sched_thread.start()
+    # 📺 Nền: theo dõi kênh TikTok/YouTube → tự đăng video mới vào nhóm + kênh tổng.
+    global _tg_watch_thread
+    if not (_tg_watch_thread and _tg_watch_thread.is_alive()):
+        _tg_watch_thread = threading.Thread(target=_tg_watch_loop, daemon=True, name="telegram-watch")
+        _tg_watch_thread.start()
     logging.info("Telegram support bot: thread khởi động (bật khi admin cấu hình token & enable).")
 
 
