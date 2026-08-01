@@ -11184,30 +11184,58 @@ def _tg_watch_kind(url: str) -> str:
 
 
 def _tg_watch_norm(url: str) -> str:
-    """Chuẩn hoá link kênh: TikTok → /@user ; YouTube → …/videos để lấy danh sách mới nhất."""
+    """Chuẩn hoá link kênh: TikTok → /@user ; YouTube → …/videos để lấy danh sách mới nhất.
+    Bỏ query string chia sẻ (?_r=1&_t=... của TikTok, ?si=... của YouTube…) — không cần
+    thiết để nhận diện kênh, để lại dễ lưu trùng kênh dưới nhiều URL khác nhau."""
     u = (url or "").strip()
     if not u:
         return ""
     if not u.lower().startswith("http"):
         u = ("https://www.tiktok.com/" + u) if u.startswith("@") else ("https://" + u)
+    u = u.split("?")[0].split("#")[0]
     k = _tg_watch_kind(u)
     if k == "youtube" and "/videos" not in u and ("/@" in u or "/channel/" in u or "/c/" in u or "/user/" in u):
         u = u.rstrip("/") + "/videos"
     return u
 
 
+def _tg_yt_probe(args: list, timeout: int = 90) -> dict:
+    """Chạy yt-dlp lấy JSON, có HẠ SÁT CẢ NHÓM TIẾN TRÌNH khi hết giờ — subprocess.run(timeout=)
+    thường chỉ giết đúng 1 tiến trình con; nếu yt-dlp sinh ra tiến trình cháu giữ ống dẫn
+    (pipe) mở thì lệnh gọi vẫn TREO VÔ THỜI HẠN dù đã "hết timeout". Dùng start_new_session
+    để có thể os.killpg() diệt sạch cả nhóm, đảm bảo LUÔN trả về (không bao giờ treo mãi)."""
+    import subprocess as _sp, os as _os, signal as _sig, shutil as _sh
+    if not _sh.which("yt-dlp"):
+        return {}
+    try:
+        p = _sp.Popen(["yt-dlp", *args], stdout=_sp.PIPE, stderr=_sp.PIPE,
+                      text=True, start_new_session=True)
+    except Exception:
+        return {}
+    try:
+        out, _err = p.communicate(timeout=timeout)
+    except _sp.TimeoutExpired:
+        try:
+            _os.killpg(_os.getpgid(p.pid), _sig.SIGKILL)
+        except Exception:
+            try: p.kill()
+            except Exception: pass
+        try: p.communicate(timeout=5)
+        except Exception: pass
+        return {}
+    except Exception:
+        return {}
+    try:
+        d = json.loads(out or "{}")
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
 def _tg_watch_latest(url: str, limit: int = 3) -> list:
     """Lấy danh sách video MỚI NHẤT của 1 kênh → [{id,title,url}] (mới nhất trước)."""
-    import subprocess as _sp, shutil as _sh
-    if not _sh.which("yt-dlp"):
-        return []
-    try:
-        r = _sp.run(["yt-dlp", "--flat-playlist", "--playlist-end", str(limit),
-                     "-J", "--no-warnings", "--ignore-errors", url],
-                    capture_output=True, text=True, timeout=180)
-        data = json.loads(r.stdout or "{}")
-    except Exception:
-        return []
+    data = _tg_yt_probe(["--flat-playlist", "--playlist-end", str(limit),
+                        "-J", "--no-warnings", "--ignore-errors", url], timeout=90)
     out = []
     for e in (data.get("entries") or [])[:limit]:
         if not isinstance(e, dict):
@@ -11237,20 +11265,11 @@ def _tg_watch_live_url(ch: dict) -> str:
 def _tg_watch_live_check(ch: dict) -> tuple:
     """Kênh có ĐANG LIVE không? → (đang_live, tiêu_đề, link_live, nội_dung_mô_tả).
     Dùng yt-dlp đọc trang /live: có 'is_live' = true nghĩa là đang phát."""
-    import subprocess as _sp, shutil as _sh
-    if not _sh.which("yt-dlp"):
-        return False, "", "", ""
     lu = _tg_watch_live_url(ch)
     if not lu:
         return False, "", "", ""
-    try:
-        r = _sp.run(["yt-dlp", "-J", "--no-warnings", "--no-playlist",
-                     "--ignore-errors", lu],
-                    capture_output=True, text=True, timeout=90)
-        d = json.loads(r.stdout or "{}")
-    except Exception:
-        return False, "", "", ""
-    if not isinstance(d, dict):
+    d = _tg_yt_probe(["-J", "--no-warnings", "--no-playlist", "--ignore-errors", lu], timeout=90)
+    if not d:
         return False, "", "", ""
     live = bool(d.get("is_live"))
     if not live:
@@ -11272,16 +11291,10 @@ def _tg_watch_targets() -> list:
 def _tg_watch_video_meta(url: str) -> dict:
     """Lấy ĐẦY ĐỦ tiêu đề + NỘI DUNG (mô tả/caption) của 1 video cụ thể — khác với
     _tg_watch_latest (--flat-playlist, chỉ có id/title rút gọn, không có mô tả)."""
-    import subprocess as _sp, shutil as _sh
-    if not _sh.which("yt-dlp") or not url:
+    if not url:
         return {}
-    try:
-        r = _sp.run(["yt-dlp", "-J", "--no-warnings", "--no-playlist", "--ignore-errors", url],
-                    capture_output=True, text=True, timeout=90)
-        d = json.loads(r.stdout or "{}")
-    except Exception:
-        return {}
-    if not isinstance(d, dict):
+    d = _tg_yt_probe(["-J", "--no-warnings", "--no-playlist", "--ignore-errors", url], timeout=90)
+    if not d:
         return {}
     return {"title": (d.get("title") or "")[:200],
             "desc": (d.get("description") or "").strip()[:700],
@@ -11458,6 +11471,27 @@ def _tg_watch_loop() -> None:
         time.sleep(300)
 
 
+def _tg_watch_add_channel(token: str, chat_id: str, url: str, kind: str, rest_raw: str) -> None:
+    """Chạy NỀN: kiểm tra + thêm 1 kênh vào danh sách theo dõi. Tách khỏi luồng xử lý
+    tin nhắn chính để yt-dlp có chậm/hết giờ cũng KHÔNG làm đơ toàn bộ bot."""
+    import html as _h
+    try:
+        vids = _tg_watch_latest(url, limit=1)
+    except Exception:
+        vids = []
+    lst = _tg_watch_load()   # nạp lại MỚI NHẤT — tránh ghi đè nếu có lệnh khác chạy song song
+    if any((c.get("url") or "") == url for c in lst):
+        _tg_send(token, chat_id, "⚠️ Kênh này đã có trong danh sách (có thể vừa được thêm)."); return
+    name = rest_raw.strip().rstrip("/").split("/")[-1].split("?")[0] or url
+    lst.append({"type": kind, "url": url, "key": name, "name": name,
+               "last": (vids[0]["id"] if vids else "")})
+    _tg_watch_save(lst)
+    _tg_send(token, chat_id,
+             f"✅ Đã thêm kênh <b>{_h.escape(name)}</b> ({kind}).\n"
+             + ("Từ giờ có video MỚI sẽ tự đăng." if vids else
+                "⚠️ Chưa đọc được video nào (kênh riêng tư/chặn?) — vẫn sẽ thử lại mỗi 5 phút."))
+
+
 def _tg_watch_command(token: str, chat_id: str, msg: dict, args: str) -> None:
     """Lệnh /kenhvideo — CHỈ admin, CHỈ trong chat riêng với bot."""
     import html as _h
@@ -11512,16 +11546,14 @@ def _tg_watch_command(token: str, chat_id: str, msg: dict, args: str) -> None:
             return
         if any((c.get("url") or "") == url for c in lst):
             _tg_send(token, chat_id, "⚠️ Kênh này đã có trong danh sách."); return
-        _tg_send(token, chat_id, "⏳ Đang kiểm tra kênh…")
-        vids = _tg_watch_latest(url, limit=1)
-        name = rest.strip().rstrip("/").split("/")[-1] or url
-        lst.append({"type": kind, "url": url, "key": name, "name": name,
-                    "last": (vids[0]["id"] if vids else "")})
-        _tg_watch_save(lst)
-        _tg_send(token, chat_id,
-                 f"✅ Đã thêm kênh <b>{_h.escape(name)}</b> ({kind}).\n"
-                 + ("Từ giờ có video MỚI sẽ tự đăng." if vids else
-                    "⚠️ Chưa đọc được video nào (kênh riêng tư/chặn?) — vẫn sẽ thử lại mỗi 5 phút."))
+        _tg_send(token, chat_id, "⏳ Đang kiểm tra kênh (chạy nền — bot vẫn dùng được bình thường)…")
+        # CHẠY NỀN: gọi yt-dlp trực tiếp ở đây (đồng bộ) sẽ CHẶN TOÀN BỘ BOT tới khi xong
+        # (vòng lặp Telegram xử lý update tuần tự, không tách luồng) — mọi nhóm/lệnh khác
+        # bị đơ theo tới khi yt-dlp trả lời hoặc hết giờ. Đưa việc kiểm tra ra luồng riêng
+        # để bot luôn phản hồi được các lệnh/tin nhắn khác trong lúc chờ.
+        import threading as _t
+        _t.Thread(target=_tg_watch_add_channel, args=(token, chat_id, url, kind, rest),
+                 daemon=True).start()
         return
 
     if sub in ("xoa", "del", "remove"):
